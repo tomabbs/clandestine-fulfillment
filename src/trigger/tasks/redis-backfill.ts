@@ -33,7 +33,7 @@ export const redisBackfillTask = schedules.task({
     timezone: "America/New_York",
   },
   maxDuration: 600,
-  run: async (_payload, { ctx }) => {
+  run: async (_payload, { ctx: _ctx }) => {
     const supabase = createServiceRoleClient();
     const backfillStartedAt = new Date().toISOString();
 

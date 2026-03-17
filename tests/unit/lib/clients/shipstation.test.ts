@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock env before importing the module
 vi.mock("@/lib/shared/env", () => ({
@@ -172,7 +172,7 @@ describe("shipstation client", () => {
       expect(result.shipmentId).toBe(12345);
       expect(result.trackingNumber).toBe("1Z999AA10123456784");
       expect(result.shipmentItems).toHaveLength(1);
-      expect(result.shipmentItems![0].sku).toBe("VINYL-001");
+      expect(result.shipmentItems?.[0].sku).toBe("VINYL-001");
       expect(result.storeId).toBe(42);
     });
 

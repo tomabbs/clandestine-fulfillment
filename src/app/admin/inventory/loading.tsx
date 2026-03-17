@@ -1,8 +1,4 @@
-import {
-  PageHeaderSkeleton,
-  StatsRowSkeleton,
-  TableSkeleton,
-} from "@/components/shared/page-skeleton";
+import { PageHeaderSkeleton, TableSkeleton } from "@/components/shared/page-skeleton";
 
 export default function Loading() {
   return (

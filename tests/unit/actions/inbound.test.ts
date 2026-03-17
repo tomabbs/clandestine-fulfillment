@@ -23,7 +23,7 @@ vi.mock("@trigger.dev/sdk", () => ({
 
 // === Helpers ===
 
-function mockChainedQuery(data: unknown, count?: number, error?: { message: string } | null) {
+function _mockChainedQuery(data: unknown, count?: number, error?: { message: string } | null) {
   const terminal = {
     data,
     error: error ?? null,
@@ -148,9 +148,9 @@ describe("check-in validation", () => {
       fromChain[method] = vi.fn().mockReturnValue(fromChain);
     }
 
-    let callCount = 0;
+    let _callCount = 0;
     mockFrom.mockImplementation((table: string) => {
-      callCount++;
+      _callCount++;
       if (table === "warehouse_inbound_shipments") {
         return {
           select: vi.fn().mockReturnValue({
@@ -202,9 +202,9 @@ describe("check-in validation", () => {
   });
 
   it("rejects check-in item when shipment is not checking_in", async () => {
-    let callCount = 0;
+    let _callCount = 0;
     mockFrom.mockImplementation((table: string) => {
-      callCount++;
+      _callCount++;
       if (table === "warehouse_inbound_items") {
         return {
           select: vi.fn().mockReturnValue({

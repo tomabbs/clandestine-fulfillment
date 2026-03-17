@@ -13,6 +13,15 @@ export default defineConfig({
   project: "clandestine-fulfillment",
   dirs: ["src/trigger/tasks"],
   maxDuration: 300,
+  retries: {
+    enabledInDev: false,
+    default: {
+      maxAttempts: 3,
+      minTimeoutInMs: 1000,
+      maxTimeoutInMs: 30000,
+      factor: 2,
+    },
+  },
   onFailure: async ({ ctx, error }) => {
     Sentry.captureException(error, {
       tags: {

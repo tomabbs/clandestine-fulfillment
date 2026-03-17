@@ -29,7 +29,7 @@ export default function ShippingPage() {
   const { data: detail, isLoading: detailLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.shipments.detail(expandedId ?? ""),
-    queryFn: () => getShipmentDetail(expandedId!),
+    queryFn: () => getShipmentDetail(expandedId ?? ""),
     enabled: !!expandedId,
   });
 
@@ -138,7 +138,7 @@ export default function ShippingPage() {
               variant="outline"
               size="sm"
               disabled={filters.page === 1}
-              onClick={() => setFilters((prev) => ({ ...prev, page: prev.page! - 1 }))}
+              onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) - 1 }))}
             >
               Previous
             </Button>

@@ -64,7 +64,7 @@ export const shopifyOrderSyncTask = schedules.task({
   id: "shopify-order-sync",
   cron: "*/30 * * * *",
   maxDuration: 300,
-  run: async (_payload, { ctx }) => {
+  run: async (_payload, { ctx: _ctx }) => {
     const supabase = createServiceRoleClient();
 
     // Load sync cursor

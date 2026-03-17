@@ -55,7 +55,7 @@ export default function InventoryPage() {
 
   const { data: detail, isLoading: detailLoading } = useAppQuery({
     queryKey: queryKeys.inventory.detail(expandedSku ?? ""),
-    queryFn: () => getInventoryDetail(expandedSku!),
+    queryFn: () => getInventoryDetail(expandedSku ?? ""),
     tier: CACHE_TIERS.REALTIME,
     enabled: !!expandedSku,
   });
@@ -142,6 +142,7 @@ export default function InventoryPage() {
                 >
                   <TableCell>
                     {row.imageSrc ? (
+                      // biome-ignore lint/performance/noImgElement: external Shopify CDN URLs — next/image optimization not applicable
                       <img
                         src={row.imageSrc}
                         alt={row.productTitle}

@@ -2,7 +2,7 @@
 // Rule #7: service_role for Trigger tasks
 // Backup poller: runs every 30 min to catch missed webhooks
 
-import { schedules, task } from "@trigger.dev/sdk";
+import { schedules } from "@trigger.dev/sdk";
 import { fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 

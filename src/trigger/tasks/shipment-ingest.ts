@@ -4,7 +4,7 @@
 
 import { task } from "@trigger.dev/sdk";
 import { z } from "zod";
-import { fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
+import type { ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 const payloadSchema = z.object({
