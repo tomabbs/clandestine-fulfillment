@@ -26,9 +26,22 @@ const deleteConnectionSchema = z.object({
 
 async function requireAuth() {
   const supabase = await createServerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-  return { supabase, user: userData.user };
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user) throw new Error("Unauthorized");
+
+  // Fetch the user's record to get org_id and workspace_id
+  const serviceClient = createServiceRoleClient();
+  const { data: userRecord, error: userError } = await serviceClient
+    .from("users")
+    .select("id, org_id, workspace_id")
+    .eq("auth_user_id", authData.user.id)
+    .single();
+
+  if (userError || !userRecord) {
+    throw new Error("User record not found");
+  }
+
+  return { supabase, user: authData.user, userRecord };
 }
 
 // === Connection management ===

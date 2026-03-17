@@ -29,7 +29,7 @@ const serverEnvSchema = z.object({
   // ShipStation
   SHIPSTATION_API_KEY: z.string().min(1),
   SHIPSTATION_API_SECRET: z.string().min(1),
-  SHIPSTATION_WEBHOOK_SECRET: z.string().min(1),
+  SHIPSTATION_WEBHOOK_SECRET: z.string().default(""), // TODO: Add real value once ShipStation webhook is configured
 
   // AfterShip
   AFTERSHIP_API_KEY: z.string().min(1),
