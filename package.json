@@ -54,8 +54,10 @@
     "@faker-js/faker": "^10.3.0",
     "@playwright/test": "^1.58.2",
     "@testing-library/react": "^16.3.2",
+    "@trigger.dev/build": "^4.4.3",
     "@types/bwip-js": "^3.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "dotenv": "^17.3.1",
     "jsdom": "^29.0.0",
     "vitest": "^4.1.0"
   }
