@@ -1,8 +1,371 @@
+"use client";
+
+import { ChevronLeft, ChevronRight, ExternalLink, Minus, Package, Plus } from "lucide-react";
+import { useState } from "react";
+import { adjustInventory, getInventoryDetail, getInventoryLevels } from "@/actions/inventory";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { queryKeys } from "@/lib/shared/query-keys";
+import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+
+const PAGE_SIZES = [10, 25, 50, 100];
+
 export default function InventoryPage() {
+  const [filters, setFilters] = useState({
+    orgId: "",
+    format: "",
+    status: "",
+    search: "",
+    page: 1,
+    pageSize: 25,
+  });
+  const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  const [adjustDialog, setAdjustDialog] = useState<{
+    sku: string;
+    title: string;
+  } | null>(null);
+  const [adjustDelta, setAdjustDelta] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+
+  const queryFilters = {
+    ...(filters.orgId && { orgId: filters.orgId }),
+    ...(filters.format && { format: filters.format }),
+    ...(filters.status && { status: filters.status }),
+    ...(filters.search && { search: filters.search }),
+    page: filters.page,
+    pageSize: filters.pageSize,
+  };
+
+  const { data, isLoading } = useAppQuery({
+    queryKey: queryKeys.inventory.list(queryFilters),
+    queryFn: () => getInventoryLevels(queryFilters),
+    tier: CACHE_TIERS.REALTIME,
+  });
+
+  const { data: detail, isLoading: detailLoading } = useAppQuery({
+    queryKey: queryKeys.inventory.detail(expandedSku ?? ""),
+    queryFn: () => getInventoryDetail(expandedSku!),
+    tier: CACHE_TIERS.REALTIME,
+    enabled: !!expandedSku,
+  });
+
+  const adjustMutation = useAppMutation({
+    mutationFn: async () => {
+      if (!adjustDialog) throw new Error("No SKU selected");
+      return adjustInventory(adjustDialog.sku, Number(adjustDelta), adjustReason);
+    },
+    invalidateKeys: [queryKeys.inventory.all],
+    onSuccess: () => {
+      setAdjustDialog(null);
+      setAdjustDelta("");
+      setAdjustReason("");
+    },
+  });
+
+  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
+
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
-      <p className="text-muted-foreground mt-2">Coming soon.</p>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <Input
+          placeholder="Search SKU or title..."
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
+          className="w-64"
+        />
+        <Input
+          placeholder="Filter by org ID..."
+          value={filters.orgId}
+          onChange={(e) => setFilters((f) => ({ ...f, orgId: e.target.value, page: 1 }))}
+          className="w-48"
+        />
+        <Input
+          placeholder="Filter by format..."
+          value={filters.format}
+          onChange={(e) => setFilters((f) => ({ ...f, format: e.target.value, page: 1 }))}
+          className="w-40"
+        />
+        <select
+          value={filters.status}
+          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
+          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+        >
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="draft">Draft</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={`skel-inv-${i.toString()}`} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12" />
+              <TableHead>Product / SKU</TableHead>
+              <TableHead>Label</TableHead>
+              <TableHead className="text-right">Available</TableHead>
+              <TableHead className="text-right">Committed</TableHead>
+              <TableHead className="text-right">Incoming</TableHead>
+              <TableHead>Format</TableHead>
+              <TableHead className="w-20" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data?.rows.map((row) => (
+              <>
+                <TableRow
+                  key={row.variantId}
+                  className="cursor-pointer"
+                  onClick={() => setExpandedSku((prev) => (prev === row.sku ? null : row.sku))}
+                >
+                  <TableCell>
+                    {row.imageSrc ? (
+                      <img
+                        src={row.imageSrc}
+                        alt={row.productTitle}
+                        className="h-8 w-8 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
+                        <Package className="text-muted-foreground h-4 w-4" />
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-medium">{row.productTitle}</div>
+                    <div className="text-muted-foreground text-xs">{row.sku}</div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {row.orgName ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-mono">{row.available}</TableCell>
+                  <TableCell className="text-right font-mono">{row.committed}</TableCell>
+                  <TableCell className="text-right font-mono">{row.incoming}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {row.formatName ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAdjustDialog({ sku: row.sku, title: row.productTitle });
+                      }}
+                    >
+                      Adjust
+                    </Button>
+                  </TableCell>
+                </TableRow>
+
+                {/* Expanded detail */}
+                {expandedSku === row.sku && (
+                  <TableRow key={`${row.variantId}-detail`}>
+                    <TableCell colSpan={8} className="bg-muted/30 p-4">
+                      {detailLoading ? (
+                        <Skeleton className="h-24 w-full" />
+                      ) : detail ? (
+                        <div className="grid grid-cols-2 gap-6">
+                          {/* Locations */}
+                          <div>
+                            <h4 className="mb-2 text-sm font-semibold">Locations</h4>
+                            {detail.locations.length === 0 ? (
+                              <p className="text-muted-foreground text-sm">No location data</p>
+                            ) : (
+                              <ul className="space-y-1 text-sm">
+                                {detail.locations.map((loc) => (
+                                  <li key={loc.locationId} className="flex justify-between">
+                                    <span>
+                                      {loc.locationName}{" "}
+                                      <span className="text-muted-foreground">
+                                        ({loc.locationType})
+                                      </span>
+                                    </span>
+                                    <span className="font-mono">{loc.quantity}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {detail.bandcampUrl && (
+                              <a
+                                href={detail.bandcampUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Bandcamp
+                              </a>
+                            )}
+                          </div>
+
+                          {/* Recent Activity */}
+                          <div>
+                            <h4 className="mb-2 text-sm font-semibold">Recent Activity</h4>
+                            {detail.recentActivity.length === 0 ? (
+                              <p className="text-muted-foreground text-sm">No activity yet</p>
+                            ) : (
+                              <ul className="space-y-1 text-sm">
+                                {detail.recentActivity.slice(0, 10).map((a) => (
+                                  <li key={a.id} className="flex items-center justify-between">
+                                    <span className="flex items-center gap-1">
+                                      {a.delta > 0 ? (
+                                        <Plus className="h-3 w-3 text-green-600" />
+                                      ) : (
+                                        <Minus className="h-3 w-3 text-red-600" />
+                                      )}
+                                      <span className="font-mono">
+                                        {a.delta > 0 ? `+${a.delta}` : a.delta}
+                                      </span>
+                                      <span className="text-muted-foreground">{a.source}</span>
+                                    </span>
+                                    <span className="text-muted-foreground text-xs">
+                                      {new Date(a.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </>
+            ))}
+            {data?.rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
+                  No inventory found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      )}
+
+      {/* Pagination */}
+      {data && data.total > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <span>Rows per page:</span>
+            <select
+              value={filters.pageSize}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, pageSize: Number(e.target.value), page: 1 }))
+              }
+              className="border-input bg-background rounded border px-2 py-1 text-sm"
+            >
+              {PAGE_SIZES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <span>
+              {(data.page - 1) * data.pageSize + 1}–
+              {Math.min(data.page * data.pageSize, data.total)} of {data.total}
+            </span>
+          </div>
+          <div className="flex gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={filters.page <= 1}
+              onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={filters.page >= totalPages}
+              onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Dialog */}
+      <Dialog
+        open={!!adjustDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAdjustDialog(null);
+            setAdjustDelta("");
+            setAdjustReason("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Adjust Inventory — {adjustDialog?.sku}</DialogTitle>
+          </DialogHeader>
+          <p className="text-muted-foreground text-sm">{adjustDialog?.title}</p>
+          <div className="space-y-3 pt-2">
+            <div>
+              <label htmlFor="adjust-delta" className="text-sm font-medium">
+                Delta (positive to add, negative to remove)
+              </label>
+              <Input
+                id="adjust-delta"
+                type="number"
+                value={adjustDelta}
+                onChange={(e) => setAdjustDelta(e.target.value)}
+                placeholder="e.g. -5 or 10"
+              />
+            </div>
+            <div>
+              <label htmlFor="adjust-reason" className="text-sm font-medium">
+                Reason
+              </label>
+              <Input
+                id="adjust-reason"
+                value={adjustReason}
+                onChange={(e) => setAdjustReason(e.target.value)}
+                placeholder="Reason for adjustment..."
+              />
+            </div>
+            <Button
+              className="w-full"
+              disabled={
+                !adjustDelta ||
+                Number(adjustDelta) === 0 ||
+                !adjustReason ||
+                adjustMutation.isPending
+              }
+              onClick={() => adjustMutation.mutate()}
+            >
+              {adjustMutation.isPending ? "Adjusting..." : "Confirm Adjustment"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
