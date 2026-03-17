@@ -1,5 +1,6 @@
 "use server";
 
+import { z } from "zod/v4";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
@@ -7,10 +8,111 @@ import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/ty
 // Rule #48: No Server Action may call the Bandcamp API directly.
 // Force Sync MUST enqueue via Trigger task through the shared bandcampQueue.
 
-export async function triggerBandcampSync(workspaceId: string): Promise<{ taskRunId: string }> {
+// === Zod schemas (Rule #5) ===
+
+const createConnectionSchema = z.object({
+  workspaceId: z.string().uuid(),
+  orgId: z.string().uuid(),
+  bandId: z.number().int().positive(),
+  bandName: z.string().min(1),
+  bandUrl: z.string().url().nullable().optional(),
+});
+
+const deleteConnectionSchema = z.object({
+  connectionId: z.string().uuid(),
+});
+
+// === Helper ===
+
+async function requireAuth() {
   const supabase = await createServerSupabaseClient();
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) throw new Error("Unauthorized");
+  return { supabase, user: userData.user };
+}
+
+// === Connection management ===
+
+export async function createBandcampConnection(rawData: {
+  workspaceId: string;
+  orgId: string;
+  bandId: number;
+  bandName: string;
+  bandUrl?: string | null;
+}): Promise<BandcampConnection> {
+  await requireAuth();
+  const data = createConnectionSchema.parse(rawData);
+  const serviceClient = createServiceRoleClient();
+
+  // Verify the org exists and belongs to this workspace
+  const { data: org, error: orgError } = await serviceClient
+    .from("organizations")
+    .select("id, workspace_id")
+    .eq("id", data.orgId)
+    .single();
+
+  if (orgError || !org) throw new Error("Organization not found");
+  if (org.workspace_id !== data.workspaceId)
+    throw new Error("Organization does not belong to this workspace");
+
+  const { data: connection, error } = await serviceClient
+    .from("bandcamp_connections")
+    .upsert(
+      {
+        workspace_id: data.workspaceId,
+        org_id: data.orgId,
+        band_id: data.bandId,
+        band_name: data.bandName,
+        band_url: data.bandUrl ?? null,
+        is_active: true,
+      },
+      { onConflict: "workspace_id,band_id" },
+    )
+    .select()
+    .single();
+
+  if (error) throw new Error(`Failed to create Bandcamp connection: ${error.message}`);
+
+  return connection as BandcampConnection;
+}
+
+export async function deleteBandcampConnection(rawData: {
+  connectionId: string;
+}): Promise<{ success: true }> {
+  await requireAuth();
+  const data = deleteConnectionSchema.parse(rawData);
+  const serviceClient = createServiceRoleClient();
+
+  // Soft-delete: mark inactive rather than hard delete
+  const { error } = await serviceClient
+    .from("bandcamp_connections")
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq("id", data.connectionId);
+
+  if (error) throw new Error(`Failed to delete Bandcamp connection: ${error.message}`);
+
+  return { success: true };
+}
+
+export async function getOrganizationsForWorkspace(
+  workspaceId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  await requireAuth();
+  const serviceClient = createServiceRoleClient();
+
+  const { data: orgs, error } = await serviceClient
+    .from("organizations")
+    .select("id, name")
+    .eq("workspace_id", workspaceId)
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(`Failed to fetch organizations: ${error.message}`);
+
+  return (orgs ?? []) as Array<{ id: string; name: string }>;
+}
+
+export async function triggerBandcampSync(workspaceId: string): Promise<{ taskRunId: string }> {
+  await requireAuth();
 
   // Dynamic import to avoid bundling trigger SDK in client
   const { tasks } = await import("@trigger.dev/sdk");
@@ -27,10 +129,7 @@ export async function getBandcampAccounts(workspaceId: string): Promise<
     }
   >
 > {
-  const supabase = await createServerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-
+  await requireAuth();
   const serviceClient = createServiceRoleClient();
 
   const { data: connections, error } = await serviceClient
@@ -66,10 +165,7 @@ export async function getBandcampAccounts(workspaceId: string): Promise<
 export async function getBandcampMappings(
   orgId: string,
 ): Promise<Array<BandcampProductMapping & { variant_sku: string; variant_title: string | null }>> {
-  const supabase = await createServerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-
+  await requireAuth();
   const serviceClient = createServiceRoleClient();
 
   const { data: mappings, error } = await serviceClient

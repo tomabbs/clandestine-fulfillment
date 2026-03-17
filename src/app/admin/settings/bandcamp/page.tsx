@@ -6,15 +6,25 @@ import {
   CheckCircle2,
   Loader2,
   Music,
+  Plus,
   RefreshCw,
+  Trash2,
   Users,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
-import { getBandcampAccounts, triggerBandcampSync } from "@/actions/bandcamp";
+import {
+  createBandcampConnection,
+  deleteBandcampConnection,
+  getBandcampAccounts,
+  getOrganizationsForWorkspace,
+  triggerBandcampSync,
+} from "@/actions/bandcamp";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -64,11 +74,19 @@ function HealthBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
 
 export default function BandcampAccountsPage() {
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newConn, setNewConn] = useState({ orgId: "", bandId: "", bandName: "", bandUrl: "" });
 
   const { data: accounts, isLoading } = useAppQuery({
     queryKey: queryKeys.bandcamp.accounts(WORKSPACE_ID),
     queryFn: () => getBandcampAccounts(WORKSPACE_ID),
     tier: CACHE_TIERS.SESSION,
+  });
+
+  const { data: orgs } = useAppQuery({
+    queryKey: ["organizations", WORKSPACE_ID],
+    queryFn: () => getOrganizationsForWorkspace(WORKSPACE_ID),
+    tier: CACHE_TIERS.STABLE,
   });
 
   const syncMutation = useAppMutation({
@@ -78,21 +96,50 @@ export default function BandcampAccountsPage() {
     onError: () => setSyncingId(null),
   });
 
+  const createMutation = useAppMutation({
+    mutationFn: () =>
+      createBandcampConnection({
+        workspaceId: WORKSPACE_ID,
+        orgId: newConn.orgId,
+        bandId: Number(newConn.bandId),
+        bandName: newConn.bandName,
+        bandUrl: newConn.bandUrl || null,
+      }),
+    invalidateKeys: [queryKeys.bandcamp.all],
+    onSuccess: () => {
+      setShowAddDialog(false);
+      setNewConn({ orgId: "", bandId: "", bandName: "", bandUrl: "" });
+    },
+  });
+
+  const deleteMutation = useAppMutation({
+    mutationFn: (connectionId: string) => deleteBandcampConnection({ connectionId }),
+    invalidateKeys: [queryKeys.bandcamp.all],
+  });
+
+  const canCreate =
+    newConn.orgId && newConn.bandId && Number(newConn.bandId) > 0 && newConn.bandName;
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Bandcamp Accounts</h1>
-        <Button
-          variant="outline"
-          disabled={syncMutation.isPending}
-          onClick={() => {
-            setSyncingId("global");
-            syncMutation.mutate();
-          }}
-        >
-          <RefreshCw className={`h-4 w-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-          Force Sync All
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowAddDialog(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Add Account
+          </Button>
+          <Button
+            variant="outline"
+            disabled={syncMutation.isPending}
+            onClick={() => {
+              setSyncingId("global");
+              syncMutation.mutate();
+            }}
+          >
+            <RefreshCw className={`h-4 w-4 mr-1 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+            Force Sync All
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -103,7 +150,7 @@ export default function BandcampAccountsPage() {
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
             <Music className="h-8 w-8 mx-auto mb-2 opacity-50" />
-            No Bandcamp accounts connected.
+            No Bandcamp accounts connected. Click &ldquo;Add Account&rdquo; to get started.
           </CardContent>
         </Card>
       ) : (
@@ -158,7 +205,7 @@ export default function BandcampAccountsPage() {
                 <TableHead className="text-right">Merch Items</TableHead>
                 <TableHead>Last Synced</TableHead>
                 <TableHead>Health</TableHead>
-                <TableHead className="w-28" />
+                <TableHead className="w-36" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -191,20 +238,30 @@ export default function BandcampAccountsPage() {
                     <HealthBadge lastSyncedAt={account.last_synced_at} />
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={syncMutation.isPending && syncingId === account.id}
-                      onClick={() => {
-                        setSyncingId(account.id);
-                        syncMutation.mutate();
-                      }}
-                    >
-                      <RefreshCw
-                        className={`h-3 w-3 mr-1 ${syncMutation.isPending && syncingId === account.id ? "animate-spin" : ""}`}
-                      />
-                      Sync
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={syncMutation.isPending && syncingId === account.id}
+                        onClick={() => {
+                          setSyncingId(account.id);
+                          syncMutation.mutate();
+                        }}
+                      >
+                        <RefreshCw
+                          className={`h-3 w-3 mr-1 ${syncMutation.isPending && syncingId === account.id ? "animate-spin" : ""}`}
+                        />
+                        Sync
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deleteMutation.isPending}
+                        onClick={() => deleteMutation.mutate(account.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -212,6 +269,77 @@ export default function BandcampAccountsPage() {
           </Table>
         </>
       )}
+
+      {/* Add Account Dialog */}
+      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Bandcamp Account</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div>
+              <label htmlFor="bc-org" className="text-sm font-medium">
+                Organization (Label)
+              </label>
+              <select
+                id="bc-org"
+                value={newConn.orgId}
+                onChange={(e) => setNewConn((c) => ({ ...c, orgId: e.target.value }))}
+                className="border-input bg-background w-full h-9 rounded-md border px-3 text-sm mt-1"
+              >
+                <option value="">Select an organization...</option>
+                {(orgs ?? []).map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="bc-band-id" className="text-sm font-medium">
+                Band ID
+              </label>
+              <Input
+                id="bc-band-id"
+                type="number"
+                placeholder="e.g. 1430196613"
+                value={newConn.bandId}
+                onChange={(e) => setNewConn((c) => ({ ...c, bandId: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label htmlFor="bc-band-name" className="text-sm font-medium">
+                Band Name
+              </label>
+              <Input
+                id="bc-band-name"
+                placeholder="e.g. Across the Horizon"
+                value={newConn.bandName}
+                onChange={(e) => setNewConn((c) => ({ ...c, bandName: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label htmlFor="bc-band-url" className="text-sm font-medium">
+                Band URL (optional)
+              </label>
+              <Input
+                id="bc-band-url"
+                type="url"
+                placeholder="https://bandname.bandcamp.com"
+                value={newConn.bandUrl}
+                onChange={(e) => setNewConn((c) => ({ ...c, bandUrl: e.target.value }))}
+              />
+            </div>
+            <Button
+              className="w-full"
+              disabled={!canCreate || createMutation.isPending}
+              onClick={() => createMutation.mutate()}
+            >
+              {createMutation.isPending ? "Creating..." : "Add Account"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
