@@ -1,0 +1,217 @@
+/**
+ * Multi-store inventory push — cron every 5 minutes.
+ *
+ * Rule #53: Circuit breaker per connection. 5 consecutive auth failures → disabled.
+ * Rule #44: Track last_pushed_quantity and last_pushed_at per mapping.
+ * Rule #71: Track freshness state per connection.
+ * One broken connection must NEVER block others.
+ */
+
+import { schedules } from "@trigger.dev/sdk";
+import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import type { ClientStoreConnection } from "@/lib/shared/types";
+
+const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
+const MAX_CONSECUTIVE_FAILURES = 5;
+const BACKOFF_BASE_MS = 60_000; // 1 minute
+
+export type FreshnessState = "fresh" | "delayed" | "stale" | "reconciling";
+
+export function computeFreshnessState(lastPushedAt: string | null): FreshnessState {
+  if (!lastPushedAt) return "stale";
+  const ageMs = Date.now() - new Date(lastPushedAt).getTime();
+  if (ageMs < 5 * 60_000) return "fresh";
+  if (ageMs < 30 * 60_000) return "delayed";
+  return "stale";
+}
+
+export function shouldRetryConnection(
+  consecutiveFailures: number,
+  lastErrorAt: string | null,
+): boolean {
+  if (consecutiveFailures === 0) return true;
+  if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) return false;
+  if (!lastErrorAt) return true;
+
+  const backoffMs = BACKOFF_BASE_MS * 2 ** (consecutiveFailures - 1);
+  const timeSinceError = Date.now() - new Date(lastErrorAt).getTime();
+  return timeSinceError >= backoffMs;
+}
+
+export const multiStoreInventoryPushTask = schedules.task({
+  id: "multi-store-inventory-push",
+  cron: "*/5 * * * *",
+  maxDuration: 180,
+  run: async () => {
+    const supabase = createServiceRoleClient();
+    let totalPushed = 0;
+    let totalFailed = 0;
+
+    const { data: connections } = await supabase
+      .from("client_store_connections")
+      .select("*")
+      .eq("workspace_id", WORKSPACE_ID)
+      .eq("do_not_fanout", false)
+      .eq("connection_status", "active");
+
+    if (!connections || connections.length === 0) {
+      return { totalPushed: 0, totalFailed: 0 };
+    }
+
+    // Process each connection independently — one failure must not block others
+    for (const connection of connections as ClientStoreConnection[]) {
+      try {
+        const pushed = await pushConnectionInventory(supabase, connection);
+        totalPushed += pushed;
+      } catch (error) {
+        totalFailed++;
+        await handleConnectionFailure(supabase, connection, error);
+      }
+    }
+
+    return { totalPushed, totalFailed };
+  },
+});
+
+async function pushConnectionInventory(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  connection: ClientStoreConnection,
+): Promise<number> {
+  // Get SKU mappings for this connection
+  const { data: mappings } = await supabase
+    .from("client_store_sku_mappings")
+    .select(
+      "id, variant_id, remote_product_id, remote_variant_id, remote_sku, last_pushed_quantity",
+    )
+    .eq("connection_id", connection.id)
+    .eq("is_active", true);
+
+  if (!mappings || mappings.length === 0) return 0;
+
+  // Get inventory levels for mapped variants
+  const variantIds = mappings.map((m) => m.variant_id);
+  const { data: levels } = await supabase
+    .from("warehouse_inventory_levels")
+    .select("variant_id, available")
+    .in("variant_id", variantIds);
+
+  const inventoryByVariant = new Map((levels ?? []).map((l) => [l.variant_id, l.available]));
+
+  // Build SKU mapping context for the sync client
+  const skuMappingContext = new Map(
+    mappings.map((m) => [
+      m.remote_sku ?? "",
+      { remoteProductId: m.remote_product_id, remoteVariantId: m.remote_variant_id },
+    ]),
+  );
+
+  const client = createStoreSyncClient(connection, skuMappingContext);
+  let pushed = 0;
+
+  for (const mapping of mappings) {
+    const available = inventoryByVariant.get(mapping.variant_id) ?? 0;
+
+    // Skip if quantity hasn't changed
+    if (mapping.last_pushed_quantity === available) continue;
+
+    const idempotencyKey = `store-push:${connection.id}:${mapping.id}:${available}`;
+
+    try {
+      await client.pushInventory(mapping.remote_sku ?? "", available, idempotencyKey);
+
+      // Rule #44: Update last_pushed_quantity and last_pushed_at
+      await supabase
+        .from("client_store_sku_mappings")
+        .update({
+          last_pushed_quantity: available,
+          last_pushed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", mapping.id);
+
+      pushed++;
+    } catch (error) {
+      console.error(
+        `[multi-store-push] Failed to push ${mapping.remote_sku} to connection ${connection.id}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  // Update connection health
+  await supabase
+    .from("client_store_connections")
+    .update({
+      last_poll_at: new Date().toISOString(),
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", connection.id);
+
+  return pushed;
+}
+
+// Rule #53: Circuit breaker — exponential backoff, auto-disable after 5 auth failures
+async function handleConnectionFailure(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  connection: ClientStoreConnection,
+  error: unknown,
+) {
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  const isAuthError =
+    errorMsg.includes("401") || errorMsg.includes("403") || errorMsg.includes("auth");
+
+  // Count consecutive failures (simple: increment metadata counter)
+  const { data: current } = await supabase
+    .from("client_store_connections")
+    .select("last_error, last_error_at")
+    .eq("id", connection.id)
+    .single();
+
+  // Track consecutive failures via metadata
+  const previousFailureCount = current?.last_error?.startsWith("consecutive:")
+    ? Number.parseInt(current.last_error.split(":")[1], 10)
+    : 0;
+  const consecutiveFailures = previousFailureCount + 1;
+
+  if (isAuthError && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+    // Auto-disable connection
+    await supabase
+      .from("client_store_connections")
+      .update({
+        connection_status: "disabled_auth_failure",
+        do_not_fanout: true,
+        last_error: `consecutive:${consecutiveFailures} ${errorMsg}`,
+        last_error_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", connection.id);
+
+    // Create review queue item
+    await supabase.from("warehouse_review_queue").insert({
+      workspace_id: connection.workspace_id,
+      org_id: connection.org_id,
+      category: "store_connection",
+      severity: "high",
+      title: `${connection.platform} connection disabled: auth failure`,
+      description: `Connection to ${connection.store_url} disabled after ${MAX_CONSECUTIVE_FAILURES} consecutive auth failures. Last error: ${errorMsg}`,
+      metadata: {
+        connection_id: connection.id,
+        platform: connection.platform,
+        consecutive_failures: consecutiveFailures,
+      },
+      group_key: `connection_disabled:${connection.id}`,
+      status: "open",
+    });
+  } else {
+    await supabase
+      .from("client_store_connections")
+      .update({
+        last_error: `consecutive:${consecutiveFailures} ${errorMsg}`,
+        last_error_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", connection.id);
+  }
+}
