@@ -35,7 +35,8 @@
     {
       "includes": ["src/components/ui/**", "src/hooks/**", "src/lib/utils.ts"],
       "linter": { "enabled": false },
-      "formatter": { "enabled": false }
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
     }
   ]
 }
