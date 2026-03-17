@@ -59,57 +59,61 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, status: "duplicate" });
   }
 
-  // Step 3: Find matching shipment
-  const { data: shipment } = await supabase
-    .from("warehouse_shipments")
-    .select("id, workspace_id")
-    .eq("tracking_number", trackingNumber)
-    .single();
+  // Step 3+: Process — wrapped in try/catch to always return 200 (prevent infinite retries)
+  try {
+    const { data: shipment } = await supabase
+      .from("warehouse_shipments")
+      .select("id, workspace_id")
+      .eq("tracking_number", trackingNumber)
+      .single();
 
-  if (!shipment) {
-    return NextResponse.json({ ok: true, status: "no_matching_shipment" });
-  }
-
-  // Step 4: Process checkpoints → tracking events
-  const checkpoints = (tracking.checkpoints as Array<Record<string, unknown>>) ?? [];
-  const latestCheckpoint = checkpoints[checkpoints.length - 1];
-
-  if (latestCheckpoint) {
-    // Insert latest checkpoint as tracking event
-    await supabase.from("warehouse_tracking_events").insert({
-      shipment_id: shipment.id,
-      workspace_id: shipment.workspace_id,
-      status: (latestCheckpoint.tag as string) ?? "unknown",
-      description: (latestCheckpoint.message as string) ?? null,
-      location: buildLocation(latestCheckpoint),
-      event_time: (latestCheckpoint.checkpoint_time as string) ?? null,
-      source: "aftership",
-    });
-  }
-
-  // Step 5: Update shipment status if delivered
-  const tag = (tracking.tag as string) ?? "";
-  const statusMap: Record<string, string> = {
-    Delivered: "delivered",
-    InTransit: "in_transit",
-    OutForDelivery: "out_for_delivery",
-    Exception: "exception",
-    AttemptFail: "delivery_failed",
-    Expired: "expired",
-  };
-
-  const mappedStatus = statusMap[tag];
-  if (mappedStatus) {
-    const updateData: Record<string, unknown> = {
-      status: mappedStatus,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (tag === "Delivered" && latestCheckpoint?.checkpoint_time) {
-      updateData.delivery_date = (latestCheckpoint.checkpoint_time as string).split("T")[0];
+    if (!shipment) {
+      return NextResponse.json({ ok: true, status: "no_matching_shipment" });
     }
 
-    await supabase.from("warehouse_shipments").update(updateData).eq("id", shipment.id);
+    // Step 4: Process checkpoints → tracking events
+    const checkpoints = (tracking.checkpoints as Array<Record<string, unknown>>) ?? [];
+    const latestCheckpoint = checkpoints[checkpoints.length - 1];
+
+    if (latestCheckpoint) {
+      // Insert latest checkpoint as tracking event
+      await supabase.from("warehouse_tracking_events").insert({
+        shipment_id: shipment.id,
+        workspace_id: shipment.workspace_id,
+        status: (latestCheckpoint.tag as string) ?? "unknown",
+        description: (latestCheckpoint.message as string) ?? null,
+        location: buildLocation(latestCheckpoint),
+        event_time: (latestCheckpoint.checkpoint_time as string) ?? null,
+        source: "aftership",
+      });
+    }
+
+    // Step 5: Update shipment status if delivered
+    const tag = (tracking.tag as string) ?? "";
+    const statusMap: Record<string, string> = {
+      Delivered: "delivered",
+      InTransit: "in_transit",
+      OutForDelivery: "out_for_delivery",
+      Exception: "exception",
+      AttemptFail: "delivery_failed",
+      Expired: "expired",
+    };
+
+    const mappedStatus = statusMap[tag];
+    if (mappedStatus) {
+      const updateData: Record<string, unknown> = {
+        status: mappedStatus,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (tag === "Delivered" && latestCheckpoint?.checkpoint_time) {
+        updateData.delivery_date = (latestCheckpoint.checkpoint_time as string).split("T")[0];
+      }
+
+      await supabase.from("warehouse_shipments").update(updateData).eq("id", shipment.id);
+    }
+  } catch (error) {
+    console.error("[webhook:aftership] Processing error:", error);
   }
 
   return NextResponse.json({ ok: true });

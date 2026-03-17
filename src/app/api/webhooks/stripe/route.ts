@@ -69,51 +69,55 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, status: "duplicate" });
   }
 
-  // Handle events
-  const invoiceData = payload.data?.object;
-  if (!invoiceData) {
-    return NextResponse.json({ ok: true });
-  }
-
-  const stripeInvoiceId = invoiceData.id as string;
-
-  if (eventType === "invoice.paid") {
-    await supabase
-      .from("warehouse_billing_snapshots")
-      .update({ status: "paid" })
-      .eq("stripe_invoice_id", stripeInvoiceId);
-  }
-
-  if (eventType === "invoice.payment_failed") {
-    await supabase
-      .from("warehouse_billing_snapshots")
-      .update({ status: "overdue" })
-      .eq("stripe_invoice_id", stripeInvoiceId);
-
-    // Find the snapshot to get org info for review queue
-    const { data: snapshot } = await supabase
-      .from("warehouse_billing_snapshots")
-      .select("workspace_id, org_id, billing_period")
-      .eq("stripe_invoice_id", stripeInvoiceId)
-      .single();
-
-    if (snapshot) {
-      await supabase.from("warehouse_review_queue").insert({
-        workspace_id: snapshot.workspace_id,
-        org_id: snapshot.org_id,
-        category: "billing_invoice_failed",
-        severity: "high",
-        title: `Invoice payment failed: ${snapshot.billing_period}`,
-        description: `Stripe invoice ${stripeInvoiceId} payment failed for billing period ${snapshot.billing_period}.`,
-        metadata: {
-          stripe_invoice_id: stripeInvoiceId,
-          billing_period: snapshot.billing_period,
-          event_type: eventType,
-        },
-        group_key: `invoice_failed:${stripeInvoiceId}`,
-        status: "open",
-      });
+  // Handle events — wrapped in try/catch to always return 200 (prevent infinite retries)
+  try {
+    const invoiceData = payload.data?.object;
+    if (!invoiceData) {
+      return NextResponse.json({ ok: true });
     }
+
+    const stripeInvoiceId = invoiceData.id as string;
+
+    if (eventType === "invoice.paid") {
+      await supabase
+        .from("warehouse_billing_snapshots")
+        .update({ status: "paid" })
+        .eq("stripe_invoice_id", stripeInvoiceId);
+    }
+
+    if (eventType === "invoice.payment_failed") {
+      await supabase
+        .from("warehouse_billing_snapshots")
+        .update({ status: "overdue" })
+        .eq("stripe_invoice_id", stripeInvoiceId);
+
+      // Find the snapshot to get org info for review queue
+      const { data: snapshot } = await supabase
+        .from("warehouse_billing_snapshots")
+        .select("workspace_id, org_id, billing_period")
+        .eq("stripe_invoice_id", stripeInvoiceId)
+        .single();
+
+      if (snapshot) {
+        await supabase.from("warehouse_review_queue").insert({
+          workspace_id: snapshot.workspace_id,
+          org_id: snapshot.org_id,
+          category: "billing_invoice_failed",
+          severity: "high",
+          title: `Invoice payment failed: ${snapshot.billing_period}`,
+          description: `Stripe invoice ${stripeInvoiceId} payment failed for billing period ${snapshot.billing_period}.`,
+          metadata: {
+            stripe_invoice_id: stripeInvoiceId,
+            billing_period: snapshot.billing_period,
+            event_type: eventType,
+          },
+          group_key: `invoice_failed:${stripeInvoiceId}`,
+          status: "open",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("[webhook:stripe] Processing error:", error);
   }
 
   return NextResponse.json({ ok: true });
