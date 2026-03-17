@@ -1,5 +1,6 @@
 // Task registry — all task names exported from one place (Rule #58)
 
+export { aftershipRegisterTask } from "./aftership-register";
 export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
 export { bandcampSalePollTask } from "./bandcamp-sale-poll";
 export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
@@ -14,5 +15,6 @@ export { processClientStoreWebhookTask } from "./process-client-store-webhook";
 export { shipmentIngestTask } from "./shipment-ingest";
 export { shipstationPollTask } from "./shipstation-poll";
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
+export { shopifyOrderSyncTask } from "./shopify-order-sync";
 export { shopifySyncTask } from "./shopify-sync";
 export { supportEscalationTask } from "./support-escalation";
