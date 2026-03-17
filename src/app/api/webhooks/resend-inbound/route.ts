@@ -1,0 +1,186 @@
+import crypto from "node:crypto";
+import { NextResponse } from "next/server";
+import { parseInboundEmail } from "@/lib/clients/resend-client";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { env } from "@/lib/shared/env";
+
+// Rule #63: Verify Resend Svix signature before any side effects
+function verifySvixSignature(
+  rawBody: string,
+  svixId: string,
+  svixTimestamp: string,
+  svixSignature: string,
+): boolean {
+  const secret = env().RESEND_INBOUND_WEBHOOK_SECRET;
+  // Svix secrets are base64-encoded, prefixed with "whsec_"
+  const secretBytes = Buffer.from(secret.startsWith("whsec_") ? secret.slice(6) : secret, "base64");
+  const toSign = `${svixId}.${svixTimestamp}.${rawBody}`;
+  const expectedSignature = crypto
+    .createHmac("sha256", secretBytes)
+    .update(toSign)
+    .digest("base64");
+
+  // Svix signature header may contain multiple signatures: "v1,<sig1> v1,<sig2>"
+  const signatures = svixSignature.split(" ");
+  for (const sig of signatures) {
+    const sigValue = sig.startsWith("v1,") ? sig.slice(3) : sig;
+    if (crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(sigValue))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
+
+export async function POST(req: Request): Promise<Response> {
+  // Rule #36: Always use req.text() for raw body
+  const rawBody = await req.text();
+
+  const svixId = req.headers.get("svix-id");
+  const svixTimestamp = req.headers.get("svix-timestamp");
+  const svixSignature = req.headers.get("svix-signature");
+
+  if (!svixId || !svixTimestamp || !svixSignature) {
+    return NextResponse.json({ error: "Missing signature headers" }, { status: 401 });
+  }
+
+  // Replay protection: reject webhooks older than 5 minutes
+  const timestampSeconds = Number.parseInt(svixTimestamp, 10);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (Math.abs(nowSeconds - timestampSeconds) > 300) {
+    return NextResponse.json({ error: "Timestamp too old" }, { status: 401 });
+  }
+
+  if (!verifySvixSignature(rawBody, svixId, svixTimestamp, svixSignature)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  const supabase = createServiceRoleClient();
+
+  // Rule #62: Dedup via webhook_events INSERT ON CONFLICT
+  const { data: dedupRow } = await supabase
+    .from("webhook_events")
+    .insert({
+      workspace_id: WORKSPACE_ID,
+      platform: "resend",
+      external_webhook_id: svixId,
+      payload: JSON.parse(rawBody),
+    })
+    .select("id")
+    .single();
+
+  if (!dedupRow) {
+    // Already processed — return 200 OK immediately
+    return NextResponse.json({ ok: true });
+  }
+
+  // Parse the Resend inbound email event
+  const eventData = JSON.parse(rawBody);
+  // Resend wraps inbound email in a `data` field for event payloads
+  const emailPayload = eventData.data ?? eventData;
+  const email = parseInboundEmail(emailPayload);
+
+  // Strategy 1: Match by In-Reply-To header against existing messages
+  if (email.inReplyTo) {
+    const { data: existingMessage } = await supabase
+      .from("support_messages")
+      .select("conversation_id, support_conversations!inner(org_id)")
+      .eq("email_message_id", email.inReplyTo)
+      .single();
+
+    if (existingMessage) {
+      await appendMessageToConversation(supabase, existingMessage.conversation_id, email);
+      return NextResponse.json({ ok: true });
+    }
+  }
+
+  // Strategy 2: Match by sender email address via support_email_mappings
+  const senderAddress = extractEmailAddress(email.from);
+  const { data: emailMapping } = await supabase
+    .from("support_email_mappings")
+    .select("org_id")
+    .eq("email_address", senderAddress)
+    .eq("is_active", true)
+    .single();
+
+  if (emailMapping) {
+    await createConversationFromEmail(supabase, emailMapping.org_id, email);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Strategy 3: Unmatched — create review queue item for staff to manually route
+  await supabase.from("warehouse_review_queue").insert({
+    workspace_id: WORKSPACE_ID,
+    source: "support_email",
+    severity: "medium",
+    group_key: `unmatched_email:${senderAddress}`,
+    title: `Unmatched inbound support email from ${senderAddress}`,
+    description: `Subject: ${email.subject}\n\nBody preview: ${email.body.slice(0, 500)}`,
+    payload: { email },
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+function extractEmailAddress(from: string): string {
+  // Handles "Name <email@example.com>" or plain "email@example.com"
+  const match = from.match(/<([^>]+)>/);
+  return match ? match[1] : from.trim();
+}
+
+async function appendMessageToConversation(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  conversationId: string,
+  email: { body: string; messageId: string },
+): Promise<void> {
+  // Get conversation workspace_id for the message
+  const { data: conversation } = await supabase
+    .from("support_conversations")
+    .select("workspace_id")
+    .eq("id", conversationId)
+    .single();
+
+  if (!conversation) return;
+
+  await supabase.from("support_messages").insert({
+    conversation_id: conversationId,
+    workspace_id: conversation.workspace_id,
+    sender_type: "client",
+    body: email.body,
+    email_message_id: email.messageId,
+  });
+
+  await supabase
+    .from("support_conversations")
+    .update({ status: "waiting_on_staff", updated_at: new Date().toISOString() })
+    .eq("id", conversationId);
+}
+
+async function createConversationFromEmail(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  orgId: string,
+  email: { subject: string; body: string; messageId: string },
+): Promise<void> {
+  const { data: conversation } = await supabase
+    .from("support_conversations")
+    .insert({
+      workspace_id: WORKSPACE_ID,
+      org_id: orgId,
+      subject: email.subject,
+      status: "waiting_on_staff",
+      inbound_email_id: email.messageId,
+    })
+    .select("id")
+    .single();
+
+  if (!conversation) return;
+
+  await supabase.from("support_messages").insert({
+    conversation_id: conversation.id,
+    workspace_id: WORKSPACE_ID,
+    sender_type: "client",
+    body: email.body,
+    email_message_id: email.messageId,
+  });
+}
