@@ -52,4 +52,9 @@ export const queryKeys = {
     all: ["store-connections"] as const,
     list: (orgId?: string) => ["store-connections", "list", orgId] as const,
   },
+  pirateShipImports: {
+    all: ["pirate-ship-imports"] as const,
+    list: (filters?: Record<string, unknown>) => ["pirate-ship-imports", "list", filters] as const,
+    detail: (id: string) => ["pirate-ship-imports", "detail", id] as const,
+  },
 } as const;

@@ -30,4 +30,5 @@ export const invalidationRegistry: Record<string, readonly (readonly string[])[]
   organizations: [queryKeys.clients.all],
   channel_sync_log: [queryKeys.channels.all],
   bandcamp_connections: [queryKeys.channels.all],
+  warehouse_pirate_ship_imports: [queryKeys.pirateShipImports.all],
 };
