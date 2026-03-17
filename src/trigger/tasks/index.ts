@@ -2,3 +2,5 @@
 
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
 export { shopifySyncTask } from "./shopify-sync";
+export { shipmentIngestTask } from "./shipment-ingest";
+export { shipstationPollTask } from "./shipstation-poll";

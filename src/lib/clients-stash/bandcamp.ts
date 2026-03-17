@@ -1,0 +1,240 @@
+import { z } from "zod";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { env } from "@/lib/shared/env";
+
+// === Zod schemas for API responses (Rule #5) ===
+
+const tokenResponseSchema = z.object({
+  access_token: z.string(),
+  refresh_token: z.string(),
+  expires_in: z.number(),
+  token_type: z.string(),
+});
+
+const bandSchema = z.object({
+  band_id: z.number(),
+  name: z.string(),
+  subdomain: z.string().optional(),
+  member_bands: z
+    .array(
+      z.object({
+        band_id: z.number(),
+        name: z.string(),
+      }),
+    )
+    .optional(),
+});
+
+const myBandsResponseSchema = z.object({
+  bands: z.array(bandSchema),
+});
+
+const merchItemSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  album_title: z.string().nullish(),
+  sku: z.string().nullish(),
+  type_name: z.string().nullish(),
+  member_band_id: z.number().nullish(),
+  new_date: z.string().nullish(),
+  quantity_available: z.number().nullish(),
+  quantity_sold: z.number().nullish(),
+  origin_quantity: z.number().nullish(),
+  url: z.string().nullish(),
+});
+
+const merchDetailsResponseSchema = z.object({
+  items: z.array(merchItemSchema),
+});
+
+export type BandcampMerchItem = z.infer<typeof merchItemSchema>;
+export type BandcampBand = z.infer<typeof bandSchema>;
+
+// === Error handling (Rule #24) ===
+
+async function createReviewQueueItem(
+  workspaceId: string,
+  orgId: string | null,
+  title: string,
+  description: string,
+  metadata: Record<string, unknown>,
+  groupKey: string,
+) {
+  const supabase = createServiceRoleClient();
+  await supabase.from("warehouse_review_queue").upsert(
+    {
+      workspace_id: workspaceId,
+      org_id: orgId,
+      category: "bandcamp_sync",
+      severity: "medium" as const,
+      title,
+      description,
+      metadata,
+      status: "open" as const,
+      group_key: groupKey,
+      occurrence_count: 1,
+    },
+    { onConflict: "group_key", ignoreDuplicates: false },
+  );
+}
+
+// === Token refresh (single-writer via bandcampQueue) ===
+
+export async function refreshBandcampToken(workspaceId: string): Promise<string> {
+  const supabase = createServiceRoleClient();
+  const { BANDCAMP_CLIENT_ID, BANDCAMP_CLIENT_SECRET } = env();
+
+  const { data: creds, error: credsError } = await supabase
+    .from("bandcamp_credentials")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .single();
+
+  if (credsError || !creds?.refresh_token) {
+    throw new Error(`No Bandcamp credentials found for workspace ${workspaceId}`);
+  }
+
+  const response = await fetch("https://bandcamp.com/oauth_token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: BANDCAMP_CLIENT_ID,
+      client_secret: BANDCAMP_CLIENT_SECRET,
+      refresh_token: creds.refresh_token,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    await createReviewQueueItem(
+      workspaceId,
+      null,
+      "Bandcamp token refresh failed",
+      `HTTP ${response.status}: ${errorText}`,
+      { status: response.status, error: errorText },
+      `bandcamp_token_refresh_${workspaceId}`,
+    );
+    throw new Error(`Bandcamp token refresh failed: ${response.status}`);
+  }
+
+  const parsed = tokenResponseSchema.parse(await response.json());
+
+  const { error: updateError } = await supabase
+    .from("bandcamp_credentials")
+    .update({
+      access_token: parsed.access_token,
+      refresh_token: parsed.refresh_token,
+      token_expires_at: new Date(Date.now() + parsed.expires_in * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("workspace_id", workspaceId);
+
+  if (updateError) {
+    throw new Error(`Failed to store refreshed Bandcamp token: ${updateError.message}`);
+  }
+
+  return parsed.access_token;
+}
+
+// === API methods ===
+
+export async function getMyBands(accessToken: string): Promise<BandcampBand[]> {
+  const response = await fetch("https://bandcamp.com/api/account/1/my_bands", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!response.ok) {
+    throw new Error(`getMyBands failed: ${response.status}`);
+  }
+
+  const data = myBandsResponseSchema.parse(await response.json());
+  return data.bands;
+}
+
+export async function getMerchDetails(
+  bandId: number,
+  accessToken: string,
+): Promise<BandcampMerchItem[]> {
+  const response = await fetch("https://bandcamp.com/api/merch/1/merch_details", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ band_id: bandId }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`getMerchDetails failed for band ${bandId}: ${response.status}`);
+  }
+
+  const data = merchDetailsResponseSchema.parse(await response.json());
+  return data.items;
+}
+
+export async function updateQuantities(
+  items: Array<{
+    item_id: number;
+    item_type: string;
+    quantity_available: number;
+    quantity_sold: number;
+  }>,
+  accessToken: string,
+): Promise<void> {
+  const response = await fetch("https://bandcamp.com/api/merch/1/update_quantities", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ items }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`updateQuantities failed: ${response.status}`);
+  }
+}
+
+// === Title assembly for Shopify product creation ===
+
+export function assembleBandcampTitle(
+  artistName: string,
+  albumTitle: string | null | undefined,
+  itemTitle: string,
+): string {
+  const parts: string[] = [artistName];
+  if (albumTitle && albumTitle !== itemTitle) {
+    parts.push(albumTitle);
+  }
+  parts.push(itemTitle);
+  return parts.join(" - ");
+}
+
+// === SKU matching ===
+
+export function matchSkuToVariants(
+  merchItems: BandcampMerchItem[],
+  variants: Array<{ id: string; sku: string }>,
+): {
+  matched: Array<{ merchItem: BandcampMerchItem; variantId: string }>;
+  unmatched: BandcampMerchItem[];
+} {
+  const skuMap = new Map(variants.map((v) => [v.sku, v.id]));
+  const matched: Array<{ merchItem: BandcampMerchItem; variantId: string }> = [];
+  const unmatched: BandcampMerchItem[] = [];
+
+  for (const item of merchItems) {
+    if (item.sku) {
+      const variantId = skuMap.get(item.sku);
+      if (variantId) {
+        matched.push({ merchItem: item, variantId });
+      } else {
+        unmatched.push(item);
+      }
+    }
+  }
+
+  return { matched, unmatched };
+}

@@ -1,0 +1,66 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture parse output 1`] = `
+{
+  "metadataIncomplete": false,
+  "packages": [
+    {
+      "newDate": "01 Mar 2026 00:00:00 GMT",
+      "sku": "TA-CD-001",
+      "title": "Test Album CD",
+      "typeName": "Compact Disc (CD)",
+      "url": "https://testartist.bandcamp.com/album/test-album",
+    },
+    {
+      "newDate": "15 Mar 2026 00:00:00 GMT",
+      "sku": "TA-LP-001",
+      "title": "Test Album LP",
+      "typeName": "Vinyl Record",
+      "url": "https://testartist.bandcamp.com/album/test-album",
+    },
+    {
+      "newDate": null,
+      "sku": "TA-CASS-001",
+      "title": "Test Album Cassette",
+      "typeName": "Cassette",
+      "url": "https://testartist.bandcamp.com/album/test-album",
+    },
+  ],
+  "parserVersion": "v1",
+  "raw": {
+    "current": {
+      "release_date": "01 Mar 2026 00:00:00 GMT",
+      "title": "Test Album",
+      "type": "album",
+    },
+    "item_type": "album",
+    "packages": [
+      {
+        "new_date": "01 Mar 2026 00:00:00 GMT",
+        "sku": "TA-CD-001",
+        "title": "Test Album CD",
+        "type_name": "Compact Disc (CD)",
+        "url": "https://testartist.bandcamp.com/album/test-album",
+      },
+      {
+        "new_date": "15 Mar 2026 00:00:00 GMT",
+        "sku": "TA-LP-001",
+        "title": "Test Album LP",
+        "type_name": "Vinyl Record",
+        "url": "https://testartist.bandcamp.com/album/test-album",
+      },
+      {
+        "new_date": null,
+        "sku": "TA-CASS-001",
+        "title": "Test Album Cassette",
+        "type_name": "Cassette",
+        "url": "https://testartist.bandcamp.com/album/test-album",
+      },
+    ],
+    "release_date": "01 Mar 2026 00:00:00 GMT",
+  },
+  "releaseDate": "01 Mar 2026 00:00:00 GMT",
+  "title": "Test Album",
+  "typeName": "album",
+}
+`;
