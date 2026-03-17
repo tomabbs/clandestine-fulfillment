@@ -1,6 +1,6 @@
 // Task registry — all task names exported from one place (Rule #58)
 
-export { bandcampScrapePageTask, bandcampSyncTask, bandcampSyncSchedule } from "./bandcamp-sync";
+export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
 export { inboundCheckinComplete } from "./inbound-checkin-complete";
 export { inboundProductCreate } from "./inbound-product-create";
 export { pirateShipImportTask } from "./pirate-ship-import";
