@@ -58,7 +58,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const { data: profile } = await supabase.from("users").select("role").eq("auth_user_id", user.id).single();
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .single();
 
   const role: UserRole | null = profile?.role ?? null;
 

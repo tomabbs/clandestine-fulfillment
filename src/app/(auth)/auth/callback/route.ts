@@ -44,7 +44,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=no_user`);
   }
 
-  const { data: profile } = await supabase.from("users").select("role").eq("auth_user_id", user.id).single();
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role")
+    .eq("auth_user_id", user.id)
+    .single();
 
   const role: string | null = profile?.role ?? null;
 
