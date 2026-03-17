@@ -4,6 +4,8 @@ export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "
 export { inboundCheckinComplete } from "./inbound-checkin-complete";
 export { inboundProductCreate } from "./inbound-product-create";
 export { pirateShipImportTask } from "./pirate-ship-import";
+export { preorderFulfillmentTask } from "./preorder-fulfillment";
+export { preorderSetupTask } from "./preorder-setup";
 export { shipmentIngestTask } from "./shipment-ingest";
 export { shipstationPollTask } from "./shipstation-poll";
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
