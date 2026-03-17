@@ -30,5 +30,12 @@
   },
   "files": {
     "includes": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "*.ts", "*.json"]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["src/components/ui/**", "src/hooks/**", "src/lib/utils.ts"],
+      "linter": { "enabled": false },
+      "formatter": { "enabled": false }
+    }
+  ]
 }
