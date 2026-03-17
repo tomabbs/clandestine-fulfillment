@@ -57,4 +57,21 @@ export const queryKeys = {
     list: (filters?: Record<string, unknown>) => ["pirate-ship-imports", "list", filters] as const,
     detail: (id: string) => ["pirate-ship-imports", "detail", id] as const,
   },
+  bandcamp: {
+    all: ["bandcamp"] as const,
+    accounts: (workspaceId: string) => ["bandcamp", "accounts", workspaceId] as const,
+    mappings: (orgId: string) => ["bandcamp", "mappings", orgId] as const,
+  },
+  storeMappings: {
+    all: ["store-mappings"] as const,
+    list: (workspaceId: string) => ["store-mappings", "list", workspaceId] as const,
+  },
+  catalog: {
+    all: ["catalog"] as const,
+    list: (filters?: Record<string, unknown>) => ["catalog", "list", filters] as const,
+  },
+  clientReleases: {
+    all: ["client-releases"] as const,
+    list: () => ["client-releases", "list"] as const,
+  },
 } as const;
