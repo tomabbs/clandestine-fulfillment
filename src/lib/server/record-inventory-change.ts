@@ -74,6 +74,15 @@ export async function recordInventoryChange(
     return { success: false, newQuantity: redisResult, alreadyProcessed: false };
   }
 
-  // Step 4: return result (fanout to be handled by callers / Trigger tasks)
+  // Step 4: enqueue fanout (Rule #43) — non-blocking, best-effort
+  try {
+    const { fanoutInventoryChange } = await import("@/lib/server/inventory-fanout");
+    fanoutInventoryChange(workspaceId, sku, redisResult).catch((err) => {
+      console.error(`[recordInventoryChange] Fanout failed for SKU=${sku}:`, err);
+    });
+  } catch {
+    // Fanout is non-critical — cron jobs will pick up changes
+  }
+
   return { success: true, newQuantity: redisResult, alreadyProcessed: false };
 }

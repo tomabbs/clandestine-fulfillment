@@ -7,6 +7,10 @@ export async function getOrders(filters: {
   pageSize?: number;
   status?: string;
   search?: string;
+  orgId?: string;
+  source?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }) {
   const supabase = await createServerSupabaseClient();
   const page = filters.page ?? 1;
@@ -15,12 +19,16 @@ export async function getOrders(filters: {
 
   let query = supabase
     .from("warehouse_orders")
-    .select("*", { count: "exact" })
+    .select("*, organizations(name)", { count: "exact" })
     .order("created_at", { ascending: false })
     .range(offset, offset + pageSize - 1);
 
   if (filters.status) query = query.eq("fulfillment_status", filters.status);
   if (filters.search) query = query.ilike("order_number", `%${filters.search}%`);
+  if (filters.orgId) query = query.eq("org_id", filters.orgId);
+  if (filters.source) query = query.eq("source", filters.source);
+  if (filters.dateFrom) query = query.gte("created_at", filters.dateFrom);
+  if (filters.dateTo) query = query.lte("created_at", filters.dateTo);
 
   const { data, count } = await query;
   return { orders: data ?? [], total: count ?? 0, page, pageSize };
