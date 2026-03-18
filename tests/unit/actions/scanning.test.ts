@@ -37,6 +37,7 @@ vi.mock("@/lib/server/supabase-server", () => ({
 
 // Import after mocks
 let lookupBarcode: (barcode: string) => Promise<Record<string, unknown>>;
+let lookupLocation: (barcode: string) => Promise<Record<string, unknown>>;
 let submitCount: (
   locationId: string,
   counts: Array<{ sku: string; scannedCount: number; expectedCount: number }>,
@@ -50,6 +51,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   const mod = await import("../../../src/actions/scanning");
   lookupBarcode = mod.lookupBarcode;
+  lookupLocation = mod.lookupLocation;
   submitCount = mod.submitCount;
   recordReceivingScan = mod.recordReceivingScan;
 });
@@ -122,6 +124,55 @@ describe("lookupBarcode", () => {
       inventory: mockInventory,
       locations: mockLocations,
     });
+  });
+});
+
+describe("lookupLocation", () => {
+  it("returns error for empty barcode", async () => {
+    const result = await lookupLocation("");
+    expect(result).toEqual({ error: "Invalid barcode" });
+  });
+
+  it("returns error when location not found", async () => {
+    mockFrom.mockImplementation(() => ({
+      select: () => ({
+        or: () => ({
+          eq: () => ({
+            limit: () => ({
+              single: () => Promise.resolve({ data: null, error: { message: "not found" } }),
+            }),
+          }),
+        }),
+      }),
+    }));
+
+    const result = await lookupLocation("UNKNOWN-LOC");
+    expect(result).toEqual({ error: "Location not found" });
+  });
+
+  it("returns location data when found by barcode", async () => {
+    const mockLocation = {
+      id: "loc-1",
+      name: "Shelf A-1",
+      barcode: "LOC-001",
+      location_type: "shelf",
+      is_active: true,
+    };
+
+    mockFrom.mockImplementation(() => ({
+      select: () => ({
+        or: () => ({
+          eq: () => ({
+            limit: () => ({
+              single: () => Promise.resolve({ data: mockLocation, error: null }),
+            }),
+          }),
+        }),
+      }),
+    }));
+
+    const result = await lookupLocation("LOC-001");
+    expect(result).toEqual({ location: mockLocation });
   });
 });
 

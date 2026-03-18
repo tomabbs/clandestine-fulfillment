@@ -25,6 +25,29 @@ const recordReceivingSchema = z.object({
 
 // === Actions ===
 
+export async function lookupLocation(barcode: string) {
+  const parsed = barcodeSchema.safeParse(barcode);
+  if (!parsed.success) {
+    return { error: "Invalid barcode" };
+  }
+
+  const supabase = await createServerSupabaseClient();
+
+  const { data: location, error: locationError } = await supabase
+    .from("warehouse_locations")
+    .select("id, name, barcode, location_type, is_active")
+    .or(`barcode.eq.${parsed.data},name.eq.${parsed.data}`)
+    .eq("is_active", true)
+    .limit(1)
+    .single();
+
+  if (locationError || !location) {
+    return { error: "Location not found" };
+  }
+
+  return { location };
+}
+
 export async function lookupBarcode(barcode: string) {
   const parsed = barcodeSchema.safeParse(barcode);
   if (!parsed.success) {

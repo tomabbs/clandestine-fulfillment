@@ -99,12 +99,40 @@ async function ingestSingleShipment(
     orgId = store?.org_id ?? null;
   }
 
+  // If org couldn't be matched, skip insert and create a review queue item
+  if (!orgId) {
+    await supabase.from("warehouse_review_queue").upsert(
+      {
+        category: "shipment_org_match",
+        severity: "medium" as const,
+        title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
+        description: `ShipStation shipment ${shipstationShipmentId} from store ${shipment.storeId ?? "unknown"} could not be matched to an organization. Shipment data stored in metadata for replay after org mapping is configured.`,
+        metadata: {
+          shipstation_shipment_id: shipstationShipmentId,
+          store_id: shipment.storeId,
+          tracking_number: shipment.trackingNumber,
+          carrier: shipment.carrierCode,
+          service: shipment.serviceCode,
+          ship_date: shipment.shipDate,
+          shipping_cost: shipment.shipmentCost,
+          voided: shipment.voided,
+          item_count: shipment.shipmentItems?.length ?? 0,
+        },
+        status: "open" as const,
+        group_key: `shipment_org_match:${shipstationShipmentId}`,
+        occurrence_count: 1,
+      },
+      { onConflict: "group_key", ignoreDuplicates: false },
+    );
+    return;
+  }
+
   // Insert shipment
   const { data: inserted, error: insertError } = await supabase
     .from("warehouse_shipments")
     .insert({
       shipstation_shipment_id: shipstationShipmentId,
-      org_id: orgId ?? "00000000-0000-0000-0000-000000000000", // placeholder for unmatched
+      org_id: orgId,
       tracking_number: shipment.trackingNumber ?? null,
       carrier: shipment.carrierCode ?? null,
       service: shipment.serviceCode ?? null,
@@ -140,26 +168,5 @@ async function ingestSingleShipment(
     if (itemsError) {
       throw new Error(`Failed to insert shipment items: ${itemsError.message}`);
     }
-  }
-
-  // If org couldn't be matched, create a review queue item
-  if (!orgId) {
-    await supabase.from("warehouse_review_queue").upsert(
-      {
-        category: "shipment_org_match",
-        severity: "medium" as const,
-        title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
-        description: `ShipStation shipment ${shipstationShipmentId} from store ${shipment.storeId ?? "unknown"} could not be matched to an organization.`,
-        metadata: {
-          shipstation_shipment_id: shipstationShipmentId,
-          store_id: shipment.storeId,
-          tracking_number: shipment.trackingNumber,
-        },
-        status: "open" as const,
-        group_key: `shipment_org_match:store:${shipment.storeId ?? "unknown"}`,
-        occurrence_count: 1,
-      },
-      { onConflict: "group_key", ignoreDuplicates: false },
-    );
   }
 }

@@ -1,12 +1,31 @@
 "use server";
 
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import type {
   WarehouseBillingAdjustment,
   WarehouseBillingRule,
   WarehouseBillingSnapshot,
   WarehouseFormatCost,
 } from "@/lib/shared/types";
+
+export async function getAuthWorkspaceId(): Promise<string> {
+  const supabase = await createServerSupabaseClient();
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user) throw new Error("Unauthorized");
+
+  const serviceClient = createServiceRoleClient();
+  const { data: userRecord, error: userError } = await serviceClient
+    .from("users")
+    .select("workspace_id")
+    .eq("auth_user_id", authData.user.id)
+    .single();
+
+  if (userError || !userRecord) {
+    throw new Error("User record not found");
+  }
+
+  return userRecord.workspace_id;
+}
 
 // === Billing Rules ===
 

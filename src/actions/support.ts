@@ -2,28 +2,18 @@
 
 import { z } from "zod";
 import { sendSupportEmail } from "@/lib/clients/resend-client";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireAuth } from "@/lib/server/auth-context";
 import { STAFF_ROLES } from "@/lib/shared/constants";
 import type { ConversationStatus, SupportConversation, SupportMessage } from "@/lib/shared/types";
 
 async function getAuthContext() {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
-
-  const { data: dbUser } = await supabase
-    .from("users")
-    .select("id, role, org_id, full_name, email")
-    .eq("auth_id", user.id)
-    .single();
-
-  if (!dbUser) throw new Error("User not found");
-
-  const isStaff = (STAFF_ROLES as readonly string[]).includes(dbUser.role);
-
-  return { supabase, user: dbUser, isStaff };
+  const { supabase, userRecord, isStaff } = await requireAuth();
+  return {
+    supabase,
+    user: userRecord,
+    isStaff,
+    workspaceId: userRecord.workspace_id,
+  };
 }
 
 const getConversationsSchema = z.object({
@@ -147,7 +137,7 @@ export async function createConversation(
   input: z.input<typeof createConversationSchema>,
 ): Promise<{ conversationId: string }> {
   const { subject, body, orgId } = createConversationSchema.parse(input);
-  const { supabase, user, isStaff } = await getAuthContext();
+  const { supabase, user, isStaff, workspaceId } = await getAuthContext();
 
   // Staff can specify orgId; clients use their own org
   const targetOrgId = isStaff ? orgId : user.org_id;
@@ -156,7 +146,7 @@ export async function createConversation(
   const { data: conversation, error: convError } = await supabase
     .from("support_conversations")
     .insert({
-      workspace_id: "00000000-0000-0000-0000-000000000001",
+      workspace_id: workspaceId,
       org_id: targetOrgId,
       subject,
       status: isStaff ? "waiting_on_client" : "waiting_on_staff",
@@ -170,7 +160,7 @@ export async function createConversation(
 
   await supabase.from("support_messages").insert({
     conversation_id: conversation.id,
-    workspace_id: "00000000-0000-0000-0000-000000000001",
+    workspace_id: workspaceId,
     sender_id: user.id,
     sender_type: isStaff ? "staff" : "client",
     body,
@@ -204,7 +194,7 @@ export async function sendMessage(
   input: z.input<typeof sendMessageSchema>,
 ): Promise<{ messageId: string }> {
   const { conversationId, body } = sendMessageSchema.parse(input);
-  const { supabase, user, isStaff } = await getAuthContext();
+  const { supabase, user, isStaff, workspaceId } = await getAuthContext();
 
   // Verify conversation access (RLS will enforce, but get details for email)
   const { data: conversation, error: convError } = await supabase
@@ -222,7 +212,7 @@ export async function sendMessage(
     .from("support_messages")
     .insert({
       conversation_id: conversationId,
-      workspace_id: "00000000-0000-0000-0000-000000000001",
+      workspace_id: workspaceId,
       sender_id: user.id,
       sender_type: senderType,
       body,

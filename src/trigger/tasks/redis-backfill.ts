@@ -10,9 +10,8 @@
 
 import { schedules } from "@trigger.dev/sdk";
 import { setInventory } from "@/lib/clients/redis-inventory";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
 
 export interface BackfillResult {
   totalSkus: number;
@@ -35,71 +34,85 @@ export const redisBackfillTask = schedules.task({
   maxDuration: 600,
   run: async (_payload, { ctx: _ctx }) => {
     const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
     const backfillStartedAt = new Date().toISOString();
 
-    // Fetch ALL inventory levels from Postgres
-    const { data: levels } = await supabase
-      .from("warehouse_inventory_levels")
-      .select("sku, available, committed, incoming, last_redis_write_at")
-      .eq("workspace_id", WORKSPACE_ID);
+    const allResults: Array<{ workspaceId: string } & BackfillResult> = [];
 
-    if (!levels || levels.length === 0) {
-      return { totalSkus: 0, updated: 0, skippedLiveWrites: 0, mismatches: 0 };
-    }
+    for (const workspaceId of workspaceIds) {
+      // Fetch ALL inventory levels from Postgres
+      const { data: levels } = await supabase
+        .from("warehouse_inventory_levels")
+        .select("sku, available, committed, incoming, last_redis_write_at")
+        .eq("workspace_id", workspaceId);
 
-    let updated = 0;
-    let skippedLiveWrites = 0;
-
-    for (const level of levels) {
-      // Race condition protection (Rule #27):
-      // If a live write happened after our backfill started, skip it
-      if (shouldSkipSku(level.last_redis_write_at, backfillStartedAt)) {
-        skippedLiveWrites++;
+      if (!levels || levels.length === 0) {
+        allResults.push({
+          workspaceId,
+          totalSkus: 0,
+          updated: 0,
+          skippedLiveWrites: 0,
+          mismatches: 0,
+        });
         continue;
       }
 
-      await setInventory(level.sku, {
-        available: level.available,
-        committed: level.committed,
-        incoming: level.incoming,
+      let updated = 0;
+      let skippedLiveWrites = 0;
+
+      for (const level of levels) {
+        // Race condition protection (Rule #27):
+        // If a live write happened after our backfill started, skip it
+        if (shouldSkipSku(level.last_redis_write_at, backfillStartedAt)) {
+          skippedLiveWrites++;
+          continue;
+        }
+
+        await setInventory(level.sku, {
+          available: level.available,
+          committed: level.committed,
+          incoming: level.incoming,
+        });
+
+        updated++;
+      }
+
+      // Log reconciliation stats
+      const result: BackfillResult = {
+        totalSkus: levels.length,
+        updated,
+        skippedLiveWrites,
+        mismatches: 0, // Future: compare Redis values before overwrite
+      };
+
+      await supabase.from("channel_sync_log").insert({
+        workspace_id: workspaceId,
+        channel: "redis",
+        sync_type: "backfill",
+        status: "completed",
+        items_processed: updated,
+        items_failed: 0,
+        started_at: backfillStartedAt,
+        completed_at: new Date().toISOString(),
       });
 
-      updated++;
+      // Create review queue item if drift detected
+      if (result.mismatches > 0) {
+        await supabase.from("warehouse_review_queue").insert({
+          workspace_id: workspaceId,
+          category: "inventory_drift",
+          severity: "medium",
+          title: `Redis/Postgres drift: ${result.mismatches} mismatches`,
+          description: `Weekly backfill found ${result.mismatches} SKUs where Redis and Postgres values diverged. ${result.updated} SKUs updated, ${result.skippedLiveWrites} skipped due to live writes.`,
+          metadata: result,
+          group_key: `redis_drift:${backfillStartedAt.split("T")[0]}`,
+          status: "open",
+        });
+      }
+
+      allResults.push({ workspaceId, ...result });
     }
 
-    // Log reconciliation stats
-    const result: BackfillResult = {
-      totalSkus: levels.length,
-      updated,
-      skippedLiveWrites,
-      mismatches: 0, // Future: compare Redis values before overwrite
-    };
-
-    await supabase.from("channel_sync_log").insert({
-      workspace_id: WORKSPACE_ID,
-      channel: "redis",
-      sync_type: "backfill",
-      status: "completed",
-      items_processed: updated,
-      items_failed: 0,
-      started_at: backfillStartedAt,
-      completed_at: new Date().toISOString(),
-    });
-
-    // Create review queue item if drift detected
-    if (result.mismatches > 0) {
-      await supabase.from("warehouse_review_queue").insert({
-        workspace_id: WORKSPACE_ID,
-        category: "inventory_drift",
-        severity: "medium",
-        title: `Redis/Postgres drift: ${result.mismatches} mismatches`,
-        description: `Weekly backfill found ${result.mismatches} SKUs where Redis and Postgres values diverged. ${result.updated} SKUs updated, ${result.skippedLiveWrites} skipped due to live writes.`,
-        metadata: result,
-        group_key: `redis_drift:${backfillStartedAt.split("T")[0]}`,
-        status: "open",
-      });
-    }
-
-    return result;
+    return allResults;
   },
 });

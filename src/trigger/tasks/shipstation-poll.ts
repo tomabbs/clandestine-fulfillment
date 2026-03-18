@@ -103,11 +103,40 @@ async function ingestFromPoll(
     orgId = store?.org_id ?? null;
   }
 
+  // If org couldn't be matched, skip insert and create a review queue item
+  if (!orgId) {
+    await supabase.from("warehouse_review_queue").upsert(
+      {
+        category: "shipment_org_match",
+        severity: "medium" as const,
+        title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
+        description: `ShipStation shipment ${shipstationShipmentId} from store ${shipment.storeId ?? "unknown"} could not be matched to an organization. Shipment data stored in metadata for replay after org mapping is configured. (Detected by poller)`,
+        metadata: {
+          shipstation_shipment_id: shipstationShipmentId,
+          store_id: shipment.storeId,
+          tracking_number: shipment.trackingNumber,
+          carrier: shipment.carrierCode,
+          service: shipment.serviceCode,
+          ship_date: shipment.shipDate,
+          shipping_cost: shipment.shipmentCost,
+          voided: shipment.voided,
+          item_count: shipment.shipmentItems?.length ?? 0,
+          source: "poller",
+        },
+        status: "open" as const,
+        group_key: `shipment_org_match:${shipstationShipmentId}`,
+        occurrence_count: 1,
+      },
+      { onConflict: "group_key", ignoreDuplicates: false },
+    );
+    return;
+  }
+
   const { data: inserted, error } = await supabase
     .from("warehouse_shipments")
     .insert({
       shipstation_shipment_id: shipstationShipmentId,
-      org_id: orgId ?? "00000000-0000-0000-0000-000000000000",
+      org_id: orgId,
       tracking_number: shipment.trackingNumber ?? null,
       carrier: shipment.carrierCode ?? null,
       service: shipment.serviceCode ?? null,
@@ -136,28 +165,6 @@ async function ingestFromPoll(
         product_title: item.name ?? null,
         variant_title: null,
       })),
-    );
-  }
-
-  // Review queue for unmatched org
-  if (!orgId) {
-    await supabase.from("warehouse_review_queue").upsert(
-      {
-        category: "shipment_org_match",
-        severity: "medium" as const,
-        title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
-        description: `ShipStation shipment ${shipstationShipmentId} from store ${shipment.storeId ?? "unknown"} could not be matched to an organization. (Detected by poller)`,
-        metadata: {
-          shipstation_shipment_id: shipstationShipmentId,
-          store_id: shipment.storeId,
-          tracking_number: shipment.trackingNumber,
-          source: "poller",
-        },
-        status: "open" as const,
-        group_key: `shipment_org_match:store:${shipment.storeId ?? "unknown"}`,
-        occurrence_count: 1,
-      },
-      { onConflict: "group_key", ignoreDuplicates: false },
     );
   }
 }

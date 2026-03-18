@@ -13,9 +13,9 @@
 import { schedules } from "@trigger.dev/sdk";
 import type { ShopifyLineItem, ShopifyOrder } from "@/lib/clients/shopify-client";
 import { fetchOrders } from "@/lib/clients/shopify-client";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
 const OVERLAP_MINUTES = 2;
 const PAGE_SIZE = 50;
 
@@ -66,87 +66,94 @@ export const shopifyOrderSyncTask = schedules.task({
   maxDuration: 300,
   run: async (_payload, { ctx: _ctx }) => {
     const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
 
-    // Load sync cursor
-    const { data: syncState } = await supabase
-      .from("warehouse_sync_state")
-      .select("*")
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("sync_type", "shopify_orders")
-      .single();
+    const results: Array<{ workspaceId: string; orders: number }> = [];
 
-    let updatedAtMin: string | null = null;
-    if (syncState?.last_sync_cursor) {
-      const cursor = new Date(syncState.last_sync_cursor);
-      cursor.setMinutes(cursor.getMinutes() - OVERLAP_MINUTES);
-      updatedAtMin = cursor.toISOString();
-    }
+    for (const workspaceId of workspaceIds) {
+      // Load sync cursor
+      const { data: syncState } = await supabase
+        .from("warehouse_sync_state")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("sync_type", "shopify_orders")
+        .single();
 
-    const syncStartedAt = new Date().toISOString();
-    let totalOrders = 0;
-    let latestUpdatedAt = syncState?.last_sync_cursor ?? null;
-    let cursor: string | null = null;
-    let hasNextPage = true;
-
-    try {
-      while (hasNextPage) {
-        const { orders, pageInfo } = await fetchOrders({
-          first: PAGE_SIZE,
-          after: cursor,
-          updatedAtMin,
-        });
-
-        if (orders.length === 0) break;
-
-        for (const order of orders) {
-          const count = await upsertOrder(supabase, order, WORKSPACE_ID);
-          totalOrders += count;
-
-          if (order.updatedAt && (!latestUpdatedAt || order.updatedAt > latestUpdatedAt)) {
-            latestUpdatedAt = order.updatedAt;
-          }
-        }
-
-        cursor = pageInfo.endCursor;
-        hasNextPage = pageInfo.hasNextPage;
+      let updatedAtMin: string | null = null;
+      if (syncState?.last_sync_cursor) {
+        const cursor = new Date(syncState.last_sync_cursor);
+        cursor.setMinutes(cursor.getMinutes() - OVERLAP_MINUTES);
+        updatedAtMin = cursor.toISOString();
       }
 
-      // Update sync cursor
-      await supabase.from("warehouse_sync_state").upsert(
-        {
-          workspace_id: WORKSPACE_ID,
-          sync_type: "shopify_orders",
-          last_sync_cursor: latestUpdatedAt ?? syncStartedAt,
-          last_sync_wall_clock: syncStartedAt,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "workspace_id,sync_type" },
-      );
+      const syncStartedAt = new Date().toISOString();
+      let totalOrders = 0;
+      let latestUpdatedAt = syncState?.last_sync_cursor ?? null;
+      let cursor: string | null = null;
+      let hasNextPage = true;
 
-      await supabase.from("channel_sync_log").insert({
-        workspace_id: WORKSPACE_ID,
-        channel: "shopify",
-        sync_type: "order_sync",
-        status: "completed",
-        items_processed: totalOrders,
-        started_at: syncStartedAt,
-        completed_at: new Date().toISOString(),
-      });
+      try {
+        while (hasNextPage) {
+          const { orders, pageInfo } = await fetchOrders({
+            first: PAGE_SIZE,
+            after: cursor,
+            updatedAtMin,
+          });
 
-      return { orders: totalOrders };
-    } catch (error) {
-      await supabase.from("channel_sync_log").insert({
-        workspace_id: WORKSPACE_ID,
-        channel: "shopify",
-        sync_type: "order_sync",
-        status: "failed",
-        items_processed: totalOrders,
-        error_message: error instanceof Error ? error.message : String(error),
-        started_at: syncStartedAt,
-        completed_at: new Date().toISOString(),
-      });
-      throw error;
+          if (orders.length === 0) break;
+
+          for (const order of orders) {
+            const count = await upsertOrder(supabase, order, workspaceId);
+            totalOrders += count;
+
+            if (order.updatedAt && (!latestUpdatedAt || order.updatedAt > latestUpdatedAt)) {
+              latestUpdatedAt = order.updatedAt;
+            }
+          }
+
+          cursor = pageInfo.endCursor;
+          hasNextPage = pageInfo.hasNextPage;
+        }
+
+        // Update sync cursor
+        await supabase.from("warehouse_sync_state").upsert(
+          {
+            workspace_id: workspaceId,
+            sync_type: "shopify_orders",
+            last_sync_cursor: latestUpdatedAt ?? syncStartedAt,
+            last_sync_wall_clock: syncStartedAt,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "workspace_id,sync_type" },
+        );
+
+        await supabase.from("channel_sync_log").insert({
+          workspace_id: workspaceId,
+          channel: "shopify",
+          sync_type: "order_sync",
+          status: "completed",
+          items_processed: totalOrders,
+          started_at: syncStartedAt,
+          completed_at: new Date().toISOString(),
+        });
+
+        results.push({ workspaceId, orders: totalOrders });
+      } catch (error) {
+        await supabase.from("channel_sync_log").insert({
+          workspace_id: workspaceId,
+          channel: "shopify",
+          sync_type: "order_sync",
+          status: "failed",
+          items_processed: totalOrders,
+          error_message: error instanceof Error ? error.message : String(error),
+          started_at: syncStartedAt,
+          completed_at: new Date().toISOString(),
+        });
+        throw error;
+      }
     }
+
+    return results;
   },
 });
 

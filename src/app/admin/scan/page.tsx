@@ -2,7 +2,12 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
-import { lookupBarcode, recordReceivingScan, submitCount } from "@/actions/scanning";
+import {
+  lookupBarcode,
+  lookupLocation,
+  recordReceivingScan,
+  submitCount,
+} from "@/actions/scanning";
 import { CountSession } from "@/components/admin/count-session";
 import { ScannerInput } from "@/components/admin/scanner-input";
 import { Button } from "@/components/ui/button";
@@ -157,10 +162,15 @@ function CountTab() {
   // Step 1: Scan location barcode
   const handleLocationScan = useCallback(
     async (barcode: string) => {
-      await lookupBarcode(barcode);
-      // Location barcodes won't match products — we need to look up location directly
-      // For now, set a placeholder location. Real implementation queries warehouse_locations.
-      setLocation({ id: barcode, name: barcode, barcode });
+      const res = await lookupLocation(barcode);
+      if ("error" in res) {
+        return;
+      }
+      setLocation({
+        id: res.location.id,
+        name: res.location.name,
+        barcode: res.location.barcode ?? barcode,
+      });
     },
     [setLocation],
   );

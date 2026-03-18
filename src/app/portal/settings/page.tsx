@@ -3,7 +3,7 @@
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { submitClientStoreCredentials } from "@/actions/client-store-credentials";
-import { getPortalSettings } from "@/actions/portal-settings";
+import { getPortalSettings, updateNotificationPreferences } from "@/actions/portal-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,14 +69,51 @@ export default function PortalSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Notification preferences placeholder */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Notifications</CardTitle>
-          <CardDescription>Email notification preferences coming soon.</CardDescription>
-        </CardHeader>
-      </Card>
+      {/* Notification preferences */}
+      <NotificationPreferences emailEnabled={data.notificationPreferences.email_enabled} />
     </div>
+  );
+}
+
+function NotificationPreferences({ emailEnabled }: { emailEnabled: boolean }) {
+  const toggleMut = useAppMutation({
+    mutationFn: (enabled: boolean) => updateNotificationPreferences({ email_enabled: enabled }),
+    invalidateKeys: [["portal", "settings"]],
+  });
+
+  const isEnabled = toggleMut.variables !== undefined ? toggleMut.variables : emailEnabled;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Notifications</CardTitle>
+        <CardDescription>Manage your email notification preferences</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">Email Notifications</p>
+            <p className="text-sm text-muted-foreground">
+              Receive email updates about shipments, billing, and inventory
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={toggleMut.isPending}
+            onClick={() => toggleMut.mutate(!isEnabled)}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+              isEnabled ? "bg-primary" : "bg-input"
+            }`}
+          >
+            <span
+              className={`pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                isEnabled ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

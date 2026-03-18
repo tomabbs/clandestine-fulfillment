@@ -12,9 +12,7 @@
  */
 
 import { tasks } from "@trigger.dev/sdk";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
-
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
+import { requireAuth } from "@/lib/server/auth-context";
 
 export async function triggerShopifySync() {
   const handle = await tasks.trigger("shopify-sync", {});
@@ -22,26 +20,28 @@ export async function triggerShopifySync() {
 }
 
 export async function triggerFullBackfill() {
+  const { userRecord } = await requireAuth();
   const handle = await tasks.trigger("shopify-full-backfill", {
-    workspace_id: WORKSPACE_ID,
+    workspace_id: userRecord.workspace_id,
   });
   return { runId: handle.id };
 }
 
 export async function getShopifySyncStatus() {
-  const supabase = await createServerSupabaseClient();
+  const { supabase, userRecord } = await requireAuth();
+  const workspaceId = userRecord.workspace_id;
 
   const { data: syncState } = await supabase
     .from("warehouse_sync_state")
     .select("*")
-    .eq("workspace_id", WORKSPACE_ID)
+    .eq("workspace_id", workspaceId)
     .eq("sync_type", "shopify_delta")
     .single();
 
   const { data: recentLogs } = await supabase
     .from("channel_sync_log")
     .select("*")
-    .eq("workspace_id", WORKSPACE_ID)
+    .eq("workspace_id", workspaceId)
     .eq("channel", "shopify")
     .order("created_at", { ascending: false })
     .limit(10);

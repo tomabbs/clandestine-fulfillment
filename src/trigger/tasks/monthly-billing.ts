@@ -12,9 +12,8 @@
 import { schedules } from "@trigger.dev/sdk";
 import { calculateBillingForOrg } from "@/lib/clients/billing-calculator";
 import { createInvoice } from "@/lib/clients/stripe-client";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
 
 export interface MonthlyBillingResult {
   orgsProcessed: number;
@@ -43,6 +42,7 @@ export const monthlyBillingTask = schedules.task({
   maxDuration: 600,
   run: async (_payload, { ctx }) => {
     const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
     const period = getPreviousMonthPeriod(new Date());
     const startedAt = new Date().toISOString();
 
@@ -50,115 +50,115 @@ export const monthlyBillingTask = schedules.task({
     let orgsFailed = 0;
     let totalRevenue = 0;
 
-    // Get all orgs in workspace
-    const { data: orgs } = await supabase
-      .from("organizations")
-      .select("id, name, billing_email")
-      .eq("workspace_id", WORKSPACE_ID);
+    for (const workspaceId of workspaceIds) {
+      // Get all orgs in workspace
+      const { data: orgs } = await supabase
+        .from("organizations")
+        .select("id, name, billing_email")
+        .eq("workspace_id", workspaceId);
 
-    if (!orgs || orgs.length === 0) {
-      return { orgsProcessed: 0, orgsFailed: 0, totalRevenue: 0 };
-    }
+      if (!orgs || orgs.length === 0) continue;
 
-    for (const org of orgs) {
-      try {
-        // Calculate billing snapshot
-        const snapshot = await calculateBillingForOrg(supabase, WORKSPACE_ID, org.id, period);
+      for (const org of orgs) {
+        try {
+          // Calculate billing snapshot
+          const snapshot = await calculateBillingForOrg(supabase, workspaceId, org.id, period);
 
-        // Persist via RPC (Rule #22)
-        const { data: snapshotId, error: rpcError } = await supabase.rpc(
-          "persist_billing_snapshot",
-          {
-            p_workspace_id: WORKSPACE_ID,
-            p_org_id: org.id,
-            p_billing_period: period.label,
-            p_snapshot_data: snapshot,
-            p_grand_total: snapshot.totals.grand_total,
-            p_total_shipping: snapshot.totals.total_shipping,
-            p_total_pick_pack: snapshot.totals.total_pick_pack,
-            p_total_materials: snapshot.totals.total_materials,
-            p_total_storage: snapshot.totals.total_storage,
-            p_total_adjustments: snapshot.totals.total_adjustments,
-          },
-        );
+          // Persist via RPC (Rule #22)
+          const { data: snapshotId, error: rpcError } = await supabase.rpc(
+            "persist_billing_snapshot",
+            {
+              p_workspace_id: workspaceId,
+              p_org_id: org.id,
+              p_billing_period: period.label,
+              p_snapshot_data: snapshot,
+              p_grand_total: snapshot.totals.grand_total,
+              p_total_shipping: snapshot.totals.total_shipping,
+              p_total_pick_pack: snapshot.totals.total_pick_pack,
+              p_total_materials: snapshot.totals.total_materials,
+              p_total_storage: snapshot.totals.total_storage,
+              p_total_adjustments: snapshot.totals.total_adjustments,
+            },
+          );
 
-        if (rpcError) {
-          throw new Error(`persist_billing_snapshot RPC failed: ${rpcError.message}`);
-        }
-
-        // Mark included shipments as billed
-        const includedIds = snapshot.included_shipments.map((s) => s.shipment_id);
-        if (includedIds.length > 0) {
-          await supabase
-            .from("warehouse_shipments")
-            .update({ billed: true, updated_at: new Date().toISOString() })
-            .in("id", includedIds);
-        }
-
-        // Create Stripe invoice if org has billing_email (proxy for Stripe customer)
-        if (org.billing_email && snapshot.totals.grand_total > 0) {
-          try {
-            const stripeItems = buildStripeLineItems(snapshot);
-            const invoice = await createInvoice(
-              org.billing_email, // In production, this would be a Stripe customer ID
-              stripeItems,
-              {
-                org_id: org.id,
-                billing_period: period.label,
-                snapshot_id: String(snapshotId),
-              },
-            );
-
-            // Update snapshot with Stripe invoice ID
-            await supabase
-              .from("warehouse_billing_snapshots")
-              .update({ stripe_invoice_id: invoice.id })
-              .eq("id", snapshotId);
-          } catch (stripeError) {
-            // Stripe failure shouldn't block the billing snapshot
-            console.error(
-              `[monthly-billing] Stripe invoice failed for org ${org.id}:`,
-              stripeError instanceof Error ? stripeError.message : stripeError,
-            );
+          if (rpcError) {
+            throw new Error(`persist_billing_snapshot RPC failed: ${rpcError.message}`);
           }
-        }
 
-        totalRevenue += snapshot.totals.grand_total;
-        orgsProcessed++;
-      } catch (error) {
-        orgsFailed++;
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error(`[monthly-billing] Failed for org ${org.id}: ${errorMsg}`);
+          // Mark included shipments as billed
+          const includedIds = snapshot.included_shipments.map((s) => s.shipment_id);
+          if (includedIds.length > 0) {
+            await supabase
+              .from("warehouse_shipments")
+              .update({ billed: true, updated_at: new Date().toISOString() })
+              .in("id", includedIds);
+          }
 
-        await supabase.from("warehouse_review_queue").insert({
-          workspace_id: WORKSPACE_ID,
-          org_id: org.id,
-          category: "billing",
-          severity: "high",
-          title: `Monthly billing failed: ${org.name}`,
-          description: `Billing for period ${period.label} failed. Error: ${errorMsg}`,
-          metadata: {
+          // Create Stripe invoice if org has billing_email (proxy for Stripe customer)
+          if (org.billing_email && snapshot.totals.grand_total > 0) {
+            try {
+              const stripeItems = buildStripeLineItems(snapshot);
+              const invoice = await createInvoice(
+                org.billing_email, // In production, this would be a Stripe customer ID
+                stripeItems,
+                {
+                  org_id: org.id,
+                  billing_period: period.label,
+                  snapshot_id: String(snapshotId),
+                },
+              );
+
+              // Update snapshot with Stripe invoice ID
+              await supabase
+                .from("warehouse_billing_snapshots")
+                .update({ stripe_invoice_id: invoice.id })
+                .eq("id", snapshotId);
+            } catch (stripeError) {
+              // Stripe failure shouldn't block the billing snapshot
+              console.error(
+                `[monthly-billing] Stripe invoice failed for org ${org.id}:`,
+                stripeError instanceof Error ? stripeError.message : stripeError,
+              );
+            }
+          }
+
+          totalRevenue += snapshot.totals.grand_total;
+          orgsProcessed++;
+        } catch (error) {
+          orgsFailed++;
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(`[monthly-billing] Failed for org ${org.id}: ${errorMsg}`);
+
+          await supabase.from("warehouse_review_queue").insert({
+            workspace_id: workspaceId,
             org_id: org.id,
-            billing_period: period.label,
-            error: errorMsg,
-            run_id: ctx.run.id,
-          },
-          group_key: `billing_failed:${org.id}:${period.label}`,
-          status: "open",
-        });
+            category: "billing",
+            severity: "high",
+            title: `Monthly billing failed: ${org.name}`,
+            description: `Billing for period ${period.label} failed. Error: ${errorMsg}`,
+            metadata: {
+              org_id: org.id,
+              billing_period: period.label,
+              error: errorMsg,
+              run_id: ctx.run.id,
+            },
+            group_key: `billing_failed:${org.id}:${period.label}`,
+            status: "open",
+          });
+        }
       }
-    }
 
-    await supabase.from("channel_sync_log").insert({
-      workspace_id: WORKSPACE_ID,
-      channel: "billing",
-      sync_type: "monthly_billing",
-      status: orgsFailed > 0 ? "partial" : "completed",
-      items_processed: orgsProcessed,
-      items_failed: orgsFailed,
-      started_at: startedAt,
-      completed_at: new Date().toISOString(),
-    });
+      await supabase.from("channel_sync_log").insert({
+        workspace_id: workspaceId,
+        channel: "billing",
+        sync_type: "monthly_billing",
+        status: orgsFailed > 0 ? "partial" : "completed",
+        items_processed: orgsProcessed,
+        items_failed: orgsFailed,
+        started_at: startedAt,
+        completed_at: new Date().toISOString(),
+      });
+    }
 
     return { orgsProcessed, orgsFailed, totalRevenue };
   },

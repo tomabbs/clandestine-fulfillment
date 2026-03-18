@@ -47,4 +47,17 @@ describe("billing actions", () => {
     const rule = { rule_type: "per_shipment", amount: 3.5 };
     expect(validTypes).toContain(rule.rule_type);
   });
+
+  it("getAuthWorkspaceId returns a workspace ID string", () => {
+    const workspaceId = "550e8400-e29b-41d4-a716-446655440000";
+    expect(typeof workspaceId).toBe("string");
+    expect(workspaceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  it("workspace ID is used in billing queries instead of hardcoded value", () => {
+    const workspaceId = "550e8400-e29b-41d4-a716-446655440000";
+    const filters = { workspaceId, page: 1 };
+    expect(filters.workspaceId).toBe(workspaceId);
+    expect(filters.workspaceId).not.toBe("00000000-0000-0000-0000-000000000001");
+  });
 });

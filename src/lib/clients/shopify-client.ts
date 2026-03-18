@@ -36,9 +36,12 @@ export interface ShopifyVariant {
   price: string;
   compareAtPrice: string | null;
   barcode: string | null;
-  weight: number | null;
-  weightUnit: string | null;
-  inventoryItem: { id: string } | null;
+  inventoryItem: {
+    id: string;
+    measurement?: {
+      weight?: { value: number; unit: string } | null;
+    } | null;
+  } | null;
   selectedOptions: Array<{ name: string; value: string }>;
 }
 
@@ -163,16 +166,19 @@ export function makeIdempotencyKey(taskRunId: string, sku: string): string {
 // ---------------------------------------------------------------------------
 
 const PRODUCTS_QUERY = `
-  query FetchProducts($first: Int!, $after: String, $updatedAtMin: DateTime) {
-    products(first: $first, after: $after, query: $updatedAtMin, sortKey: UPDATED_AT) {
+  query FetchProducts($first: Int!, $after: String, $query: String) {
+    products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
       edges {
         node {
           id title handle vendor productType status tags updatedAt
           variants(first: 100) {
             edges {
               node {
-                id sku title price compareAtPrice barcode weight weightUnit
-                inventoryItem { id }
+                id sku title price compareAtPrice barcode
+                inventoryItem {
+                  id
+                  measurement { weight { value unit } }
+                }
                 selectedOptions { name value }
               }
             }
@@ -205,7 +211,7 @@ export async function fetchProducts(options: {
   }>(PRODUCTS_QUERY, {
     first: options.first ?? 50,
     after: options.after ?? null,
-    updatedAtMin: queryFilter,
+    query: queryFilter,
   });
 
   return {

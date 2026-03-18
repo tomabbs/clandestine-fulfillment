@@ -7,10 +7,9 @@
 
 import { schedules } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
-
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
 
 export function isEchoOrder(
   lineItems: Array<{ sku: string; quantity: number }>,
@@ -29,101 +28,105 @@ export const clientStoreOrderDetectTask = schedules.task({
   maxDuration: 180,
   run: async () => {
     const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
     let ordersCreated = 0;
     let echoesCancelled = 0;
     let errors = 0;
 
-    const { data: connections } = await supabase
-      .from("client_store_connections")
-      .select("*")
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("connection_status", "active");
+    for (const workspaceId of workspaceIds) {
+      const { data: connections } = await supabase
+        .from("client_store_connections")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("connection_status", "active");
 
-    if (!connections || connections.length === 0) {
-      return { ordersCreated: 0, echoesCancelled: 0, errors: 0 };
-    }
+      if (!connections || connections.length === 0) continue;
 
-    for (const connection of connections as ClientStoreConnection[]) {
-      try {
-        const since =
-          connection.last_poll_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const client = createStoreSyncClient(connection);
-        const remoteOrders = await client.getOrders(since);
+      for (const connection of connections as ClientStoreConnection[]) {
+        try {
+          const since =
+            connection.last_poll_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          const client = createStoreSyncClient(connection);
+          const remoteOrders = await client.getOrders(since);
 
-        // Get last_pushed_quantity for echo detection (Rule #65)
-        const { data: skuMappings } = await supabase
-          .from("client_store_sku_mappings")
-          .select("remote_sku, last_pushed_quantity")
-          .eq("connection_id", connection.id);
+          // Get last_pushed_quantity for echo detection (Rule #65)
+          const { data: skuMappings } = await supabase
+            .from("client_store_sku_mappings")
+            .select("remote_sku, last_pushed_quantity")
+            .eq("connection_id", connection.id);
 
-        const lastPushedMap = new Map(
-          (skuMappings ?? [])
-            .filter((m) => m.remote_sku && m.last_pushed_quantity !== null)
-            .map((m) => [m.remote_sku as string, m.last_pushed_quantity as number]),
-        );
+          const lastPushedMap = new Map(
+            (skuMappings ?? [])
+              .filter((m) => m.remote_sku && m.last_pushed_quantity !== null)
+              .map((m) => [m.remote_sku as string, m.last_pushed_quantity as number]),
+          );
 
-        for (const order of remoteOrders) {
-          // Check for duplicate
-          const { data: existing } = await supabase
-            .from("warehouse_orders")
-            .select("id")
-            .eq("workspace_id", WORKSPACE_ID)
-            .eq("shopify_order_id", order.remoteOrderId)
-            .eq("source", connection.platform)
-            .single();
+          for (const order of remoteOrders) {
+            // Check for duplicate
+            const { data: existing } = await supabase
+              .from("warehouse_orders")
+              .select("id")
+              .eq("workspace_id", workspaceId)
+              .eq("shopify_order_id", order.remoteOrderId)
+              .eq("source", connection.platform)
+              .single();
 
-          if (existing) continue;
+            if (existing) continue;
 
-          // Rule #65: Echo cancellation
-          if (isEchoOrder(order.lineItems, lastPushedMap)) {
-            echoesCancelled++;
-            continue;
-          }
-
-          // Create order + items
-          const { data: newOrder } = await supabase
-            .from("warehouse_orders")
-            .insert({
-              workspace_id: WORKSPACE_ID,
-              org_id: connection.org_id,
-              shopify_order_id: order.remoteOrderId,
-              order_number: order.orderNumber,
-              source: connection.platform,
-              line_items: order.lineItems,
-              created_at: order.createdAt,
-              updated_at: new Date().toISOString(),
-            })
-            .select("id")
-            .single();
-
-          if (newOrder) {
-            const orderItems = order.lineItems.map((li) => ({
-              order_id: newOrder.id,
-              workspace_id: WORKSPACE_ID,
-              sku: li.sku,
-              quantity: li.quantity,
-              shopify_line_item_id: li.remoteVariantId,
-            }));
-
-            if (orderItems.length > 0) {
-              await supabase.from("warehouse_order_items").insert(orderItems);
+            // Rule #65: Echo cancellation
+            if (isEchoOrder(order.lineItems, lastPushedMap)) {
+              echoesCancelled++;
+              continue;
             }
 
-            ordersCreated++;
-          }
-        }
+            // Create order + items
+            const { data: newOrder } = await supabase
+              .from("warehouse_orders")
+              .insert({
+                workspace_id: workspaceId,
+                org_id: connection.org_id,
+                shopify_order_id: order.remoteOrderId,
+                order_number: order.orderNumber,
+                source: connection.platform,
+                line_items: order.lineItems,
+                created_at: order.createdAt,
+                updated_at: new Date().toISOString(),
+              })
+              .select("id")
+              .single();
 
-        // Update last_poll_at
-        await supabase
-          .from("client_store_connections")
-          .update({ last_poll_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq("id", connection.id);
-      } catch (error) {
-        errors++;
-        console.error(
-          `[client-store-order-detect] Failed for connection ${connection.id}:`,
-          error instanceof Error ? error.message : error,
-        );
+            if (newOrder) {
+              const orderItems = order.lineItems.map((li) => ({
+                order_id: newOrder.id,
+                workspace_id: workspaceId,
+                sku: li.sku,
+                quantity: li.quantity,
+                shopify_line_item_id: li.remoteVariantId,
+              }));
+
+              if (orderItems.length > 0) {
+                await supabase.from("warehouse_order_items").insert(orderItems);
+              }
+
+              ordersCreated++;
+            }
+          }
+
+          // Update last_poll_at
+          await supabase
+            .from("client_store_connections")
+            .update({
+              last_poll_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", connection.id);
+        } catch (error) {
+          errors++;
+          console.error(
+            `[client-store-order-detect] Failed for connection ${connection.id}:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
       }
     }
 

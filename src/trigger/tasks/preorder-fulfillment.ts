@@ -11,10 +11,9 @@
 
 import { schedules } from "@trigger.dev/sdk";
 import { tagsRemove } from "@/lib/clients/shopify-client";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { allocatePreorders } from "@/trigger/lib/preorder-allocation";
-
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
 
 export const preorderFulfillmentTask = schedules.task({
   id: "preorder-fulfillment",
@@ -25,42 +24,43 @@ export const preorderFulfillmentTask = schedules.task({
   maxDuration: 300,
   run: async (_payload, { ctx }) => {
     const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
     const today = new Date().toISOString().split("T")[0];
 
     let variantsReleased = 0;
     let ordersAllocated = 0;
     let shortShipments = 0;
 
-    // Find all pre-order variants past their street date
-    const { data: variants } = await supabase
-      .from("warehouse_product_variants")
-      .select("id, sku, product_id, street_date")
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("is_preorder", true)
-      .lte("street_date", today);
+    for (const workspaceId of workspaceIds) {
+      // Find all pre-order variants past their street date
+      const { data: variants } = await supabase
+        .from("warehouse_product_variants")
+        .select("id, sku, product_id, street_date")
+        .eq("workspace_id", workspaceId)
+        .eq("is_preorder", true)
+        .lte("street_date", today);
 
-    if (!variants || variants.length === 0) {
-      return { variantsReleased: 0, ordersAllocated: 0, shortShipments: 0 };
+      if (!variants || variants.length === 0) continue;
+
+      for (const variant of variants) {
+        const result = await releaseVariant(supabase, variant, workspaceId, ctx.run.id);
+        variantsReleased++;
+        ordersAllocated += result.ordersAllocated;
+        if (result.isShortShipment) shortShipments++;
+      }
+
+      // Log to channel_sync_log
+      await supabase.from("channel_sync_log").insert({
+        workspace_id: workspaceId,
+        channel: "preorder",
+        sync_type: "fulfillment",
+        status: shortShipments > 0 ? "partial" : "completed",
+        items_processed: variantsReleased,
+        items_failed: shortShipments,
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      });
     }
-
-    for (const variant of variants) {
-      const result = await releaseVariant(supabase, variant, WORKSPACE_ID, ctx.run.id);
-      variantsReleased++;
-      ordersAllocated += result.ordersAllocated;
-      if (result.isShortShipment) shortShipments++;
-    }
-
-    // Log to channel_sync_log
-    await supabase.from("channel_sync_log").insert({
-      workspace_id: WORKSPACE_ID,
-      channel: "preorder",
-      sync_type: "fulfillment",
-      status: shortShipments > 0 ? "partial" : "completed",
-      items_processed: variantsReleased,
-      items_failed: shortShipments,
-      started_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-    });
 
     return { variantsReleased, ordersAllocated, shortShipments };
   },

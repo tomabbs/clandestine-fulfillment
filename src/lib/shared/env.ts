@@ -25,6 +25,7 @@ const serverEnvSchema = z.object({
   SHOPIFY_STORE_URL: z.string().url(),
   SHOPIFY_ADMIN_API_TOKEN: z.string().min(1),
   SHOPIFY_API_VERSION: z.string().min(1),
+  SHOPIFY_WEBHOOK_SECRET: z.string().default(""),
 
   // ShipStation
   SHIPSTATION_API_KEY: z.string().min(1),

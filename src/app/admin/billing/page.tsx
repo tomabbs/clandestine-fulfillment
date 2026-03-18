@@ -1,10 +1,12 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import {
   createBillingAdjustment,
   createBillingRule,
   createFormatCost,
+  getAuthWorkspaceId,
   getBillingRules,
   getBillingSnapshotDetail,
   getBillingSnapshots,
@@ -20,11 +22,22 @@ import type { WarehouseBillingRule, WarehouseFormatCost } from "@/lib/shared/typ
 
 type Tab = "snapshots" | "rules" | "formats" | "adjustments";
 
-// Stub workspace ID — in production this comes from auth context
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-
 export default function BillingPage() {
   const [activeTab, setActiveTab] = useState<Tab>("snapshots");
+
+  const { data: workspaceId, isLoading: wsLoading } = useAppQuery({
+    queryKey: ["auth", "workspace-id"],
+    queryFn: () => getAuthWorkspaceId(),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  if (wsLoading || !workspaceId) {
+    return (
+      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading billing...
+      </div>
+    );
+  }
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "snapshots", label: "Snapshots" },
@@ -54,10 +67,10 @@ export default function BillingPage() {
         ))}
       </div>
 
-      {activeTab === "snapshots" && <SnapshotsTab />}
-      {activeTab === "rules" && <RulesTab />}
-      {activeTab === "formats" && <FormatCostsTab />}
-      {activeTab === "adjustments" && <AdjustmentsTab />}
+      {activeTab === "snapshots" && <SnapshotsTab workspaceId={workspaceId} />}
+      {activeTab === "rules" && <RulesTab workspaceId={workspaceId} />}
+      {activeTab === "formats" && <FormatCostsTab workspaceId={workspaceId} />}
+      {activeTab === "adjustments" && <AdjustmentsTab workspaceId={workspaceId} />}
     </div>
   );
 }
@@ -86,14 +99,14 @@ function StatusBadge({ status }: { status: string }) {
 
 // === Snapshots Tab ===
 
-function SnapshotsTab() {
+function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.billing.snapshots({ page }),
-    queryFn: () => getBillingSnapshots({ workspaceId: WORKSPACE_ID, page }),
+    queryFn: () => getBillingSnapshots({ workspaceId, page }),
   });
 
   if (selectedId) {
@@ -378,7 +391,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
 
 // === Rules Tab ===
 
-function RulesTab() {
+function RulesTab({ workspaceId }: { workspaceId: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<WarehouseBillingRule>>({});
   const [showNew, setShowNew] = useState(false);
@@ -394,7 +407,7 @@ function RulesTab() {
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.billing.rules(),
-    queryFn: () => getBillingRules(WORKSPACE_ID),
+    queryFn: () => getBillingRules(workspaceId),
   });
 
   const updateMutation = useAppMutation({
@@ -477,7 +490,7 @@ function RulesTab() {
             size="sm"
             onClick={() =>
               createMutation.mutate(
-                { ...newRule, workspace_id: WORKSPACE_ID },
+                { ...newRule, workspace_id: workspaceId },
                 { onSuccess: () => setShowNew(false) },
               )
             }
@@ -595,7 +608,7 @@ function RulesTab() {
 
 // === Format Costs Tab ===
 
-function FormatCostsTab() {
+function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<WarehouseFormatCost>>({});
   const [showNew, setShowNew] = useState(false);
@@ -608,7 +621,7 @@ function FormatCostsTab() {
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.billing.rules(),
-    queryFn: () => getBillingRules(WORKSPACE_ID),
+    queryFn: () => getBillingRules(workspaceId),
   });
 
   const updateMutation = useAppMutation({
@@ -674,7 +687,7 @@ function FormatCostsTab() {
             size="sm"
             onClick={() =>
               createMutation.mutate(
-                { ...newFormat, workspace_id: WORKSPACE_ID },
+                { ...newFormat, workspace_id: workspaceId },
                 { onSuccess: () => setShowNew(false) },
               )
             }
@@ -782,7 +795,7 @@ function FormatCostsTab() {
 
 // === Adjustments Tab ===
 
-function AdjustmentsTab() {
+function AdjustmentsTab({ workspaceId }: { workspaceId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     org_id: "",
@@ -794,7 +807,7 @@ function AdjustmentsTab() {
   const { isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.billing.snapshots({ adjustments: true }),
-    queryFn: () => getBillingSnapshots({ workspaceId: WORKSPACE_ID, pageSize: 100 }),
+    queryFn: () => getBillingSnapshots({ workspaceId: workspaceId, pageSize: 100 }),
   });
 
   const createMutation = useAppMutation({
@@ -847,7 +860,7 @@ function AdjustmentsTab() {
             disabled={!form.org_id || !form.billing_period || !form.reason}
             onClick={() =>
               createMutation.mutate(
-                { ...form, workspace_id: WORKSPACE_ID },
+                { ...form, workspace_id: workspaceId },
                 {
                   onSuccess: () => {
                     setShowForm(false);

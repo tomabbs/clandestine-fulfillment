@@ -9,10 +9,10 @@
 
 import { schedules } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
 const MAX_CONSECUTIVE_FAILURES = 5;
 const BACKOFF_BASE_MS = 60_000; // 1 minute
 
@@ -45,28 +45,29 @@ export const multiStoreInventoryPushTask = schedules.task({
   maxDuration: 180,
   run: async () => {
     const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
     let totalPushed = 0;
     let totalFailed = 0;
 
-    const { data: connections } = await supabase
-      .from("client_store_connections")
-      .select("*")
-      .eq("workspace_id", WORKSPACE_ID)
-      .eq("do_not_fanout", false)
-      .eq("connection_status", "active");
+    for (const workspaceId of workspaceIds) {
+      const { data: connections } = await supabase
+        .from("client_store_connections")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("do_not_fanout", false)
+        .eq("connection_status", "active");
 
-    if (!connections || connections.length === 0) {
-      return { totalPushed: 0, totalFailed: 0 };
-    }
+      if (!connections || connections.length === 0) continue;
 
-    // Process each connection independently — one failure must not block others
-    for (const connection of connections as ClientStoreConnection[]) {
-      try {
-        const pushed = await pushConnectionInventory(supabase, connection);
-        totalPushed += pushed;
-      } catch (error) {
-        totalFailed++;
-        await handleConnectionFailure(supabase, connection, error);
+      // Process each connection independently — one failure must not block others
+      for (const connection of connections as ClientStoreConnection[]) {
+        try {
+          const pushed = await pushConnectionInventory(supabase, connection);
+          totalPushed += pushed;
+        } catch (error) {
+          totalFailed++;
+          await handleConnectionFailure(supabase, connection, error);
+        }
       }
     }
 

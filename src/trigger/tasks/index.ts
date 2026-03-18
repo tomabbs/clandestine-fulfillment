@@ -13,6 +13,7 @@ export { pirateShipImportTask } from "./pirate-ship-import";
 export { preorderFulfillmentTask } from "./preorder-fulfillment";
 export { preorderSetupTask } from "./preorder-setup";
 export { processClientStoreWebhookTask } from "./process-client-store-webhook";
+export { processShopifyWebhookTask } from "./process-shopify-webhook";
 export { redisBackfillTask } from "./redis-backfill";
 export { sensorCheckTask } from "./sensor-check";
 export { shipmentIngestTask } from "./shipment-ingest";

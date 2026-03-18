@@ -183,8 +183,8 @@ async function upsertProductsBackfill(
             ? Number.parseFloat(variant.compareAtPrice)
             : null,
           barcode: variant.barcode,
-          weight: variant.weight,
-          weight_unit: variant.weightUnit ?? "lb",
+          weight: variant.inventoryItem?.measurement?.weight?.value ?? null,
+          weight_unit: variant.inventoryItem?.measurement?.weight?.unit?.toLowerCase() ?? "lb",
           option1_name: variant.selectedOptions[0]?.name ?? null,
           option1_value: variant.selectedOptions[0]?.value ?? null,
           updated_at: new Date().toISOString(),
