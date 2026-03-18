@@ -4,7 +4,17 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Layers, Package, Search } fro
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { getCatalogStats, getProducts } from "@/actions/catalog";
+import {
+  getCatalogStats,
+  getProducts,
+  updateProductField,
+  updateVariantField,
+} from "@/actions/catalog";
+import {
+  EditableNumberCell,
+  EditableSelectCell,
+  EditableTextCell,
+} from "@/components/shared/editable-cell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,13 +34,19 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 const PAGE_SIZES = [25, 50, 100] as const;
 
-const STATUS_COLORS: Record<string, string> = {
+const _STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-800 border-green-200",
   draft: "bg-yellow-100 text-yellow-800 border-yellow-200",
   archived: "bg-gray-100 text-gray-600 border-gray-200",
 };
 
-function formatCurrency(val: number | null): string {
+const STATUS_OPTIONS = [
+  { value: "active", label: "Active", className: "text-green-700 dark:text-green-400" },
+  { value: "draft", label: "Draft", className: "text-yellow-700 dark:text-yellow-400" },
+  { value: "archived", label: "Archived", className: "text-muted-foreground" },
+];
+
+function _formatCurrency(val: number | null): string {
   if (val == null) return "—";
   return `$${val.toFixed(2)}`;
 }
@@ -233,6 +249,8 @@ export default function CatalogPage() {
               const imagesJson = product.images as Array<{ src: string }> | null;
               const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
 
+              const firstVarId = product.firstVariantId as string | null;
+
               return (
                 <TableRow
                   key={product.id}
@@ -260,23 +278,34 @@ export default function CatalogPage() {
                       {org?.name ?? product.vendor ?? ""}
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {product.vendor ?? "—"}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {product.firstVariantSku ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right text-sm">—</TableCell>
-                  <TableCell className="text-right text-sm">
-                    {formatCurrency(product.firstVariantPrice)}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[product.status] ?? "bg-gray-100 text-gray-600"}`}
-                    >
-                      {product.status}
-                    </span>
-                  </TableCell>
+                  <EditableTextCell
+                    value={product.vendor}
+                    onSave={async (v) => {
+                      await updateProductField(product.id, "vendor", v);
+                    }}
+                    className="text-sm"
+                  />
+                  <EditableTextCell
+                    value={product.firstVariantSku}
+                    onSave={async (v) => {
+                      if (firstVarId) await updateVariantField(firstVarId, "sku", v);
+                    }}
+                    className="font-mono text-xs"
+                  />
+                  <TableCell className="text-right text-sm text-muted-foreground">—</TableCell>
+                  <EditableNumberCell
+                    value={product.firstVariantPrice}
+                    onSave={async (v) => {
+                      if (firstVarId) await updateVariantField(firstVarId, "price", v);
+                    }}
+                  />
+                  <EditableSelectCell
+                    value={product.status}
+                    options={STATUS_OPTIONS}
+                    onSave={async (v) => {
+                      await updateProductField(product.id, "status", v);
+                    }}
+                  />
                   <TableCell className="text-muted-foreground text-sm">
                     {product.product_type ?? "—"}
                   </TableCell>

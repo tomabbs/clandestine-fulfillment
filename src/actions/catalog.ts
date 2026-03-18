@@ -50,6 +50,54 @@ async function requireAuth() {
   return { supabase, user: userData.user };
 }
 
+// === Inline single-field updates (for editable table cells) ===
+
+const PRODUCT_EDITABLE_FIELDS = ["vendor", "product_type", "status"] as const;
+type ProductEditableField = (typeof PRODUCT_EDITABLE_FIELDS)[number];
+
+const VARIANT_EDITABLE_FIELDS = [
+  "sku",
+  "price",
+  "compare_at_price",
+  "barcode",
+  "format_name",
+] as const;
+type VariantEditableField = (typeof VARIANT_EDITABLE_FIELDS)[number];
+
+export async function updateProductField(
+  productId: string,
+  field: string,
+  value: string | null,
+): Promise<void> {
+  await requireAuth();
+  if (!PRODUCT_EDITABLE_FIELDS.includes(field as ProductEditableField)) {
+    throw new Error(`Field "${field}" is not editable`);
+  }
+  const serviceClient = createServiceRoleClient();
+  const { error } = await serviceClient
+    .from("warehouse_products")
+    .update({ [field]: value, updated_at: new Date().toISOString() })
+    .eq("id", productId);
+  if (error) throw new Error(`Failed to update ${field}: ${error.message}`);
+}
+
+export async function updateVariantField(
+  variantId: string,
+  field: string,
+  value: string | number | null,
+): Promise<void> {
+  await requireAuth();
+  if (!VARIANT_EDITABLE_FIELDS.includes(field as VariantEditableField)) {
+    throw new Error(`Field "${field}" is not editable`);
+  }
+  const serviceClient = createServiceRoleClient();
+  const { error } = await serviceClient
+    .from("warehouse_product_variants")
+    .update({ [field]: value, updated_at: new Date().toISOString() })
+    .eq("id", variantId);
+  if (error) throw new Error(`Failed to update ${field}: ${error.message}`);
+}
+
 // === Server Actions ===
 
 /**
@@ -191,6 +239,7 @@ export async function getProducts(rawFilters: ProductFilters) {
     return {
       ...p,
       bandcampMappings,
+      firstVariantId: first?.id ?? null,
       firstVariantSku: first?.sku ?? null,
       firstVariantPrice: first?.price ?? null,
       inventoryTotal,
