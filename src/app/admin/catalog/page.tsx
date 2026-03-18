@@ -222,109 +222,113 @@ export default function CatalogPage() {
           ))}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12" />
-              <TableHead>Title</TableHead>
-              <TableHead>Vendor</TableHead>
-              <TableHead>SKU</TableHead>
-              <TableHead className="text-right">Cost</TableHead>
-              <TableHead className="text-right">Price</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Format</TableHead>
-              <TableHead className="text-right">Inventory</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.products ?? []).map((product) => {
-              const images = (product.warehouse_product_images ?? []) as Array<{
-                id: string;
-                src: string;
-                alt: string | null;
-                position: number;
-              }>;
-              const org = product.organizations as { id: string; name: string } | null;
-              const primaryImage = images.sort((a, b) => a.position - b.position)[0];
-              const imagesJson = product.images as Array<{ src: string }> | null;
-              const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
+        <div className="overflow-x-auto min-w-0 border rounded-lg">
+          <Table className="min-w-[800px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-10" />
+                <TableHead className="min-w-[180px] max-w-[300px]">Title</TableHead>
+                <TableHead className="hidden md:table-cell w-[130px]">Vendor</TableHead>
+                <TableHead className="w-28">SKU</TableHead>
+                <TableHead className="hidden lg:table-cell text-right w-20">Cost</TableHead>
+                <TableHead className="text-right w-20">Price</TableHead>
+                <TableHead className="w-24">Status</TableHead>
+                <TableHead className="hidden md:table-cell w-20">Format</TableHead>
+                <TableHead className="text-right w-16">Inv</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.products ?? []).map((product) => {
+                const images = (product.warehouse_product_images ?? []) as Array<{
+                  id: string;
+                  src: string;
+                  alt: string | null;
+                  position: number;
+                }>;
+                const org = product.organizations as { id: string; name: string } | null;
+                const primaryImage = images.sort((a, b) => a.position - b.position)[0];
+                const imagesJson = product.images as Array<{ src: string }> | null;
+                const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
 
-              const firstVarId = product.firstVariantId as string | null;
+                const firstVarId = product.firstVariantId as string | null;
 
-              return (
-                <TableRow
-                  key={product.id}
-                  className="cursor-pointer"
-                  onClick={() => router.push(`/admin/catalog/${product.id}`)}
-                >
-                  <TableCell>
-                    {thumbSrc ? (
-                      <Image
-                        src={thumbSrc}
-                        alt={primaryImage?.alt ?? product.title}
-                        width={40}
-                        height={40}
-                        className="h-10 w-10 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="bg-muted flex h-10 w-10 items-center justify-center rounded">
-                        <Package className="text-muted-foreground h-5 w-5" />
+                return (
+                  <TableRow
+                    key={product.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/admin/catalog/${product.id}`)}
+                  >
+                    <TableCell>
+                      {thumbSrc ? (
+                        <Image
+                          src={thumbSrc}
+                          alt={primaryImage?.alt ?? product.title}
+                          width={40}
+                          height={40}
+                          className="h-10 w-10 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="bg-muted flex h-10 w-10 items-center justify-center rounded">
+                          <Package className="text-muted-foreground h-5 w-5" />
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-[300px]">
+                      <div className="font-medium leading-tight truncate">{product.title}</div>
+                      <div className="text-muted-foreground text-xs truncate">
+                        {org?.name ?? product.vendor ?? ""}
                       </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium leading-tight">{product.title}</div>
-                    <div className="text-muted-foreground text-xs">
-                      {org?.name ?? product.vendor ?? ""}
-                    </div>
-                  </TableCell>
-                  <EditableTextCell
-                    value={product.vendor}
-                    onSave={async (v) => {
-                      await updateProductField(product.id, "vendor", v);
-                    }}
-                    className="text-sm"
-                  />
-                  <EditableTextCell
-                    value={product.firstVariantSku}
-                    onSave={async (v) => {
-                      if (firstVarId) await updateVariantField(firstVarId, "sku", v);
-                    }}
-                    className="font-mono text-xs"
-                  />
-                  <TableCell className="text-right text-sm text-muted-foreground">—</TableCell>
-                  <EditableNumberCell
-                    value={product.firstVariantPrice}
-                    onSave={async (v) => {
-                      if (firstVarId) await updateVariantField(firstVarId, "price", v);
-                    }}
-                  />
-                  <EditableSelectCell
-                    value={product.status}
-                    options={STATUS_OPTIONS}
-                    onSave={async (v) => {
-                      await updateProductField(product.id, "status", v);
-                    }}
-                  />
-                  <TableCell className="text-muted-foreground text-sm">
-                    {product.product_type ?? "—"}
-                  </TableCell>
-                  <TableCell className="text-right text-sm font-medium">
-                    {product.inventoryTotal}
+                    </TableCell>
+                    <EditableTextCell
+                      value={product.vendor}
+                      onSave={async (v) => {
+                        await updateProductField(product.id, "vendor", v);
+                      }}
+                      className="hidden md:table-cell text-sm"
+                    />
+                    <EditableTextCell
+                      value={product.firstVariantSku}
+                      onSave={async (v) => {
+                        if (firstVarId) await updateVariantField(firstVarId, "sku", v);
+                      }}
+                      className="font-mono text-xs"
+                    />
+                    <TableCell className="hidden lg:table-cell text-right text-sm text-muted-foreground">
+                      —
+                    </TableCell>
+                    <EditableNumberCell
+                      value={product.firstVariantPrice}
+                      onSave={async (v) => {
+                        if (firstVarId) await updateVariantField(firstVarId, "price", v);
+                      }}
+                    />
+                    <EditableSelectCell
+                      value={product.status}
+                      options={STATUS_OPTIONS}
+                      onSave={async (v) => {
+                        await updateProductField(product.id, "status", v);
+                      }}
+                    />
+                    <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
+                      {product.product_type ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-right text-sm font-medium">
+                      {product.inventoryTotal}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {(data?.products ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
+                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    No products found.
                   </TableCell>
                 </TableRow>
-              );
-            })}
-            {(data?.products ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  No products found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              )}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {/* Pagination */}
