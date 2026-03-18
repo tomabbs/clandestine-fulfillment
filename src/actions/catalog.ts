@@ -53,7 +53,7 @@ async function requireAuth() {
 
 // === Inline single-field updates (for editable table cells) ===
 
-const PRODUCT_EDITABLE_FIELDS = ["vendor", "product_type", "status"] as const;
+const PRODUCT_EDITABLE_FIELDS = ["title", "vendor", "product_type", "status"] as const;
 type ProductEditableField = (typeof PRODUCT_EDITABLE_FIELDS)[number];
 
 const VARIANT_EDITABLE_FIELDS = [
