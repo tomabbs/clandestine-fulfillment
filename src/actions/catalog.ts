@@ -31,6 +31,7 @@ const updateVariantSchema = z.object({
   shopifyVariantId: z.string().min(1),
   price: z.string().optional(),
   compareAtPrice: z.string().nullable().optional(),
+  cost: z.number().nullable().optional(),
   weight: z.number().optional(),
   weightUnit: z.string().optional(),
   barcode: z.string().nullable().optional(),
@@ -58,6 +59,7 @@ type ProductEditableField = (typeof PRODUCT_EDITABLE_FIELDS)[number];
 const VARIANT_EDITABLE_FIELDS = [
   "sku",
   "price",
+  "cost",
   "compare_at_price",
   "barcode",
   "format_name",
@@ -196,8 +198,12 @@ export async function getProducts(rawFilters: ProductFilters) {
       return variants?.some((v) => v.format_name === filters.format);
     });
   }
-  // missingCost filter — cost column does not exist in current schema, skip for now
-  // TODO: add cost column to warehouse_product_variants if needed
+  if (filters.missingCost) {
+    products = products.filter((p) => {
+      const variants = p.warehouse_product_variants as Array<{ cost: number | null }>;
+      return variants?.some((v) => v.cost == null || v.cost === 0);
+    });
+  }
 
   const allVariantIds = products.flatMap((p) => {
     const vs = p.warehouse_product_variants as Array<{ id: string }>;
@@ -264,11 +270,14 @@ export async function getCatalogStats() {
   const { count: totalVariants } = await sc
     .from("warehouse_product_variants")
     .select("id", { count: "exact", head: true });
-  // cost column does not exist in current schema — report 0 for now
+  const { count: missingCostCount } = await sc
+    .from("warehouse_product_variants")
+    .select("id", { count: "exact", head: true })
+    .or("cost.is.null,cost.eq.0");
   return {
     totalProducts: totalProducts ?? 0,
     totalVariants: totalVariants ?? 0,
-    missingCostCount: 0,
+    missingCostCount: missingCostCount ?? 0,
   };
 }
 
@@ -287,7 +296,7 @@ export async function getProductDetail(productId: string) {
       *,
       organizations (id, name),
       warehouse_product_variants (
-        id, sku, title, price, compare_at_price, barcode, weight, weight_unit,
+        id, sku, title, price, cost, compare_at_price, barcode, weight, weight_unit,
         format_name, street_date, is_preorder, shopify_variant_id, bandcamp_url,
         option1_name, option1_value
       ),
@@ -438,6 +447,7 @@ export async function updateVariants(
       dbUpdate.compare_at_price =
         v.compareAtPrice !== null ? Number.parseFloat(v.compareAtPrice) : null;
     }
+    if (v.cost !== undefined) dbUpdate.cost = v.cost;
     if (v.weight !== undefined) dbUpdate.weight = v.weight;
     if (v.weightUnit !== undefined) dbUpdate.weight_unit = v.weightUnit;
     if (v.barcode !== undefined) dbUpdate.barcode = v.barcode;

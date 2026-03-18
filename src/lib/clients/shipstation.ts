@@ -133,7 +133,7 @@ const shipStationShipmentSchema = z.object({
     })
     .nullable()
     .optional(),
-  shipmentItems: z.array(shipStationItemSchema).nullable().optional(),
+  shipmentItems: z.preprocess((v) => v ?? [], z.array(shipStationItemSchema)),
   storeId: z.number().nullable().optional(),
   advancedOptions: z
     .object({

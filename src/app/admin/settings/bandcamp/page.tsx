@@ -83,12 +83,18 @@ export default function BandcampAccountsPage() {
   });
   const workspaceId = ctx?.workspaceId ?? "";
 
-  const { data: accounts, isLoading } = useAppQuery({
+  const {
+    data: accounts,
+    isLoading: accountsLoading,
+    isFetching: accountsFetching,
+  } = useAppQuery({
     queryKey: queryKeys.bandcamp.accounts(workspaceId),
     queryFn: () => getBandcampAccounts(workspaceId),
     tier: CACHE_TIERS.SESSION,
     enabled: !!workspaceId,
   });
+  // Show loading while workspace context resolves OR accounts are fetching
+  const isLoading = !workspaceId || accountsLoading || accountsFetching;
 
   const { data: orgs } = useAppQuery({
     queryKey: ["organizations", workspaceId],

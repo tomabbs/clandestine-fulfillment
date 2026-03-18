@@ -222,26 +222,44 @@ async function upsertProductsBulk(
       const variant = edge.node;
       if (!variant.sku) continue;
 
-      await supabase.from("warehouse_product_variants").upsert(
-        {
-          product_id: dbProduct.id,
-          workspace_id: workspaceId,
-          sku: variant.sku,
-          shopify_variant_id: variant.id,
-          title: variant.title,
-          price: variant.price ? Number.parseFloat(variant.price) : null,
-          compare_at_price: variant.compareAtPrice
-            ? Number.parseFloat(variant.compareAtPrice)
-            : null,
-          barcode: variant.barcode,
-          weight: variant.inventoryItem?.measurement?.weight?.value ?? null,
-          weight_unit: variant.inventoryItem?.measurement?.weight?.unit?.toLowerCase() ?? "lb",
-          option1_name: variant.selectedOptions[0]?.name ?? null,
-          option1_value: variant.selectedOptions[0]?.value ?? null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "workspace_id,sku", ignoreDuplicates: false },
-      );
+      const parsedPrice = variant.price ? Number.parseFloat(variant.price) : null;
+
+      // Check if variant already exists (to avoid overwriting manually-set cost)
+      const { data: existingVar } = await supabase
+        .from("warehouse_product_variants")
+        .select("id, cost")
+        .eq("workspace_id", workspaceId)
+        .eq("sku", variant.sku)
+        .maybeSingle();
+
+      // Default cost to 50% of price only for new variants or those without cost
+      const costValue =
+        existingVar?.cost != null
+          ? undefined // preserve existing cost
+          : parsedPrice != null
+            ? Math.round(parsedPrice * 0.5 * 100) / 100
+            : null;
+
+      const variantRow: Record<string, unknown> = {
+        product_id: dbProduct.id,
+        workspace_id: workspaceId,
+        sku: variant.sku,
+        shopify_variant_id: variant.id,
+        title: variant.title,
+        price: parsedPrice,
+        compare_at_price: variant.compareAtPrice ? Number.parseFloat(variant.compareAtPrice) : null,
+        barcode: variant.barcode,
+        weight: variant.inventoryItem?.measurement?.weight?.value ?? null,
+        weight_unit: variant.inventoryItem?.measurement?.weight?.unit?.toLowerCase() ?? "lb",
+        option1_name: variant.selectedOptions[0]?.name ?? null,
+        option1_value: variant.selectedOptions[0]?.value ?? null,
+        updated_at: new Date().toISOString(),
+      };
+      if (costValue !== undefined) variantRow.cost = costValue;
+
+      await supabase
+        .from("warehouse_product_variants")
+        .upsert(variantRow, { onConflict: "workspace_id,sku", ignoreDuplicates: false });
 
       if (variant.inventoryItem?.id) {
         inventoryItemIds.push(variant.inventoryItem.id);

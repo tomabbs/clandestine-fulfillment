@@ -290,7 +290,9 @@ export const bandcampSyncTask = task({
             });
           }
 
-          // Create variant
+          // Create variant — save Bandcamp price, default cost to 50% of price
+          const bcPrice = merchItem.price ?? null;
+          const bcCost = bcPrice != null ? Math.round(bcPrice * 0.5 * 100) / 100 : null;
           const { data: newVariant } = await supabase
             .from("warehouse_product_variants")
             .insert({
@@ -298,6 +300,8 @@ export const bandcampSyncTask = task({
               workspace_id: workspaceId,
               sku: merchItem.sku,
               title: merchItem.title,
+              price: bcPrice,
+              cost: bcCost,
               bandcamp_url: merchItem.url,
               street_date: merchItem.new_date,
               is_preorder: tags.includes("Pre-Orders"),

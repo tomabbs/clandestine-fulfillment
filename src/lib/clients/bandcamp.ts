@@ -26,7 +26,7 @@ const bandSchema = z.object({
 });
 
 const myBandsResponseSchema = z.object({
-  bands: z.array(bandSchema),
+  bands: z.preprocess((v) => v ?? [], z.array(bandSchema)),
 });
 
 const merchItemSchema = z.object({
@@ -37,6 +37,8 @@ const merchItemSchema = z.object({
   item_type: z.string().nullish(),
   member_band_id: z.number().nullish(),
   new_date: z.string().nullish(),
+  price: z.number().nullish(),
+  currency: z.string().nullish(),
   quantity_available: z.number().nullish(),
   quantity_sold: z.number().nullish(),
   origin_quantity: z.number().nullish(),
@@ -45,7 +47,7 @@ const merchItemSchema = z.object({
 });
 
 const merchDetailsResponseSchema = z.object({
-  items: z.array(merchItemSchema),
+  items: z.preprocess((v) => v ?? [], z.array(merchItemSchema)),
 });
 
 export type BandcampMerchItem = z.infer<typeof merchItemSchema>;
