@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowLeftIcon, ExternalLinkIcon } from "lucide-react";
+import { ArrowLeftIcon, ExternalLinkIcon, Plus, Save } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getProductDetail, updateProduct, updateVariants } from "@/actions/catalog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,15 +34,36 @@ type VariantLocation = WarehouseVariantLocation & {
   warehouse_locations: { name: string; location_type: string } | null;
 };
 
-const STATUS_VARIANTS: Record<string, "default" | "secondary" | "outline"> = {
+const STATUS_BADGE: Record<string, "default" | "secondary" | "outline"> = {
   active: "default",
   draft: "secondary",
   archived: "outline",
 };
+const PRODUCT_TYPES = ["LP", "CD", "Cassette", "Shirt", "Bundle", "Merch", "Other"];
+const WEIGHT_UNITS = ["lb", "oz", "kg", "g"];
+
+interface VariantRowState {
+  title: string;
+  price: string;
+  compareAt: string;
+  weight: string;
+  weightUnit: string;
+  barcode: string;
+}
+
+function variantToRow(v: WarehouseProductVariant): VariantRowState {
+  return {
+    title: v.title ?? "",
+    price: v.price != null ? String(v.price) : "",
+    compareAt: v.compare_at_price != null ? String(v.compare_at_price) : "",
+    weight: v.weight != null ? String(v.weight) : "",
+    weightUnit: v.weight_unit ?? "lb",
+    barcode: v.barcode ?? "",
+  };
+}
 
 export default function ProductDetailPage() {
-  const params = useParams<{ id: string }>();
-  const productId = params.id;
+  const { id: productId } = useParams<{ id: string }>();
 
   const { data: product, isLoading } = useAppQuery({
     queryKey: queryKeys.products.detail(productId),
@@ -50,95 +71,115 @@ export default function ProductDetailPage() {
     tier: CACHE_TIERS.STABLE,
   });
 
-  // Edit state
+  // Product edit
   const [editMode, setEditMode] = useState(false);
   const [editTitle, setEditTitle] = useState("");
-  const [editProductType, setEditProductType] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editVendor, setEditVendor] = useState("");
+  const [editType, setEditType] = useState("");
   const [editTags, setEditTags] = useState("");
+  const [editStatus, setEditStatus] = useState<"active" | "draft" | "archived">("active");
 
   const startEdit = useCallback(() => {
     if (!product) return;
     setEditTitle(product.title);
-    setEditProductType(product.product_type ?? "");
+    setEditDesc("");
+    setEditVendor(product.vendor ?? "");
+    setEditType(product.product_type ?? "");
     setEditTags((product.tags as string[])?.join(", ") ?? "");
+    setEditStatus(product.status as "active" | "draft" | "archived");
     setEditMode(true);
   }, [product]);
 
-  // Rule #1: productUpdate, NOT productSet
-  const productMutation = useAppMutation({
+  const productMut = useAppMutation({
     mutationFn: () =>
       updateProduct(productId, {
         title: editTitle,
-        productType: editProductType || undefined,
+        ...(editDesc && { descriptionHtml: editDesc }),
+        vendor: editVendor || undefined,
+        productType: editType || undefined,
         tags: editTags
           .split(",")
           .map((t) => t.trim())
           .filter(Boolean),
+        status: editStatus,
       }),
     invalidateKeys: [queryKeys.products.detail(productId), queryKeys.products.all],
     onSuccess: () => setEditMode(false),
   });
 
-  // Variant edit state
-  const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
-  const [variantPrice, setVariantPrice] = useState("");
-  const [variantCompareAt, setVariantCompareAt] = useState("");
-  const [variantWeight, setVariantWeight] = useState("");
+  // Variant inline edit
+  const [vEdits, setVEdits] = useState<Record<string, VariantRowState>>({});
+  const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const variants = (product?.warehouse_product_variants ?? []) as WarehouseProductVariant[];
 
-  const startVariantEdit = useCallback((variant: WarehouseProductVariant) => {
-    setEditingVariantId(variant.id);
-    setVariantPrice(variant.price?.toString() ?? "");
-    setVariantCompareAt(variant.compare_at_price?.toString() ?? "");
-    setVariantWeight(variant.weight?.toString() ?? "");
-  }, []);
+  useEffect(() => {
+    if (variants.length > 0 && Object.keys(vEdits).length === 0) {
+      const init: Record<string, VariantRowState> = {};
+      for (const v of variants) init[v.id] = variantToRow(v);
+      setVEdits(init);
+    }
+  }, [variants, vEdits]);
 
-  // Rule #1: productVariantsBulkUpdate, NOT productSet
-  const variantMutation = useAppMutation({
+  const setField = (id: string, f: keyof VariantRowState, val: string) => {
+    setVEdits((p) => ({ ...p, [id]: { ...p[id], [f]: val } }));
+    setDirty((p) => new Set(p).add(id));
+  };
+
+  const variantMut = useAppMutation({
     mutationFn: () => {
-      const variant = (product?.warehouse_product_variants as WarehouseProductVariant[])?.find(
-        (v) => v.id === editingVariantId,
-      );
-      if (!variant) throw new Error("Variant not found");
-      return updateVariants(productId, [
-        {
-          id: variant.id,
-          shopifyVariantId: variant.shopify_variant_id ?? "",
-          price: variantPrice || undefined,
-          compareAtPrice: variantCompareAt || null,
-          weight: variantWeight ? Number(variantWeight) : undefined,
-        },
-      ]);
+      const ups = Array.from(dirty)
+        .map((id) => {
+          const o = variants.find((v) => v.id === id);
+          const e = vEdits[id];
+          if (!o || !e) return null;
+          return {
+            id: o.id,
+            shopifyVariantId: o.shopify_variant_id ?? "",
+            price: e.price || undefined,
+            compareAtPrice: e.compareAt || null,
+            weight: e.weight ? Number(e.weight) : undefined,
+            weightUnit: e.weightUnit,
+            barcode: e.barcode || null,
+          };
+        })
+        .filter(Boolean) as Array<{
+        id: string;
+        shopifyVariantId: string;
+        price?: string;
+        compareAtPrice?: string | null;
+        weight?: number;
+        weightUnit?: string;
+        barcode?: string | null;
+      }>;
+      return updateVariants(productId, ups);
     },
     invalidateKeys: [queryKeys.products.detail(productId), queryKeys.products.all],
-    onSuccess: () => setEditingVariantId(null),
+    onSuccess: () => setDirty(new Set()),
   });
 
-  if (isLoading) {
+  if (isLoading)
     return (
       <div className="p-6">
         <p className="text-muted-foreground">Loading product...</p>
       </div>
     );
-  }
-
-  if (!product) {
+  if (!product)
     return (
       <div className="p-6">
         <p className="text-muted-foreground">Product not found.</p>
       </div>
     );
-  }
 
-  const variants = (product.warehouse_product_variants ?? []) as WarehouseProductVariant[];
   const images = (product.warehouse_product_images ?? []) as WarehouseProductImage[];
-  const inventoryLevels = (product.inventoryLevels ?? []) as WarehouseInventoryLevel[];
-  const variantLocations = (product.variantLocations ?? []) as VariantLocation[];
-  const bandcampMappings = (product.bandcampMappings ?? []) as BandcampProductMapping[];
+  const invLevels = (product.inventoryLevels ?? []) as WarehouseInventoryLevel[];
+  const varLocs = (product.variantLocations ?? []) as VariantLocation[];
+  const bcMappings = (product.bandcampMappings ?? []) as BandcampProductMapping[];
   const org = product.organizations as { id: string; name: string } | null;
 
   return (
     <div className="p-6 space-y-6">
-      {/* Back link + header */}
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/admin/catalog">
           <Button variant="ghost" size="icon-sm">
@@ -148,7 +189,7 @@ export default function ProductDetailPage() {
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">{product.title}</h1>
-            <Badge variant={STATUS_VARIANTS[product.status] ?? "outline"}>{product.status}</Badge>
+            <Badge variant={STATUS_BADGE[product.status] ?? "outline"}>{product.status}</Badge>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
             {org?.name ?? product.vendor ?? "Unknown vendor"}
@@ -156,7 +197,7 @@ export default function ProductDetailPage() {
               <>
                 {" · "}
                 <a
-                  href={`https://${product.shopify_handle ? "" : "admin.shopify.com"}/products/${product.shopify_product_id}`}
+                  href={`https://admin.shopify.com/store/kw16ph-t9/products/${product.shopify_product_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-blue-600 hover:underline"
@@ -178,45 +219,97 @@ export default function ProductDetailPage() {
       {editMode && (
         <Card>
           <CardHeader>
-            <CardTitle>Edit Product</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Edit Product</CardTitle>
+              <p className="text-xs text-muted-foreground">Changes sync to Shopify automatically</p>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div>
-              <label className="text-sm font-medium" htmlFor="edit-title">
-                Title
-              </label>
-              <Input
-                id="edit-title"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.currentTarget.value)}
-              />
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="text-sm font-medium" htmlFor="ed-title">
+                  Title
+                </label>
+                <Input
+                  id="ed-title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.currentTarget.value)}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="text-sm font-medium" htmlFor="ed-desc">
+                  Description (HTML)
+                </label>
+                <textarea
+                  id="ed-desc"
+                  rows={5}
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="HTML description — syncs to Shopify descriptionHtml"
+                  className="border-input bg-background w-full rounded-md border px-3 py-2 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium" htmlFor="ed-vendor">
+                  Vendor
+                </label>
+                <Input
+                  id="ed-vendor"
+                  value={editVendor}
+                  onChange={(e) => setEditVendor(e.currentTarget.value)}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium" htmlFor="ed-type">
+                  Product Type
+                </label>
+                <select
+                  id="ed-type"
+                  value={editType}
+                  onChange={(e) => setEditType(e.target.value)}
+                  className="border-input bg-background w-full h-9 rounded-md border px-3 text-sm"
+                >
+                  <option value="">Select type...</option>
+                  {PRODUCT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  {editType && !PRODUCT_TYPES.includes(editType) && (
+                    <option value={editType}>{editType}</option>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium" htmlFor="ed-tags">
+                  Tags (comma-separated)
+                </label>
+                <Input
+                  id="ed-tags"
+                  value={editTags}
+                  onChange={(e) => setEditTags(e.currentTarget.value)}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium" htmlFor="ed-status">
+                  Status
+                </label>
+                <select
+                  id="ed-status"
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as typeof editStatus)}
+                  className="border-input bg-background w-full h-9 rounded-md border px-3 text-sm"
+                >
+                  <option value="active">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="text-sm font-medium" htmlFor="edit-type">
-                Product Type
-              </label>
-              <Input
-                id="edit-type"
-                value={editProductType}
-                onChange={(e) => setEditProductType(e.currentTarget.value)}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium" htmlFor="edit-tags">
-                Tags (comma-separated)
-              </label>
-              <Input
-                id="edit-tags"
-                value={editTags}
-                onChange={(e) => setEditTags(e.currentTarget.value)}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => productMutation.mutate(undefined)}
-                disabled={productMutation.isPending}
-              >
-                {productMutation.isPending ? "Saving..." : "Save"}
+            <div className="flex gap-2 pt-2">
+              <Button onClick={() => productMut.mutate(undefined)} disabled={productMut.isPending}>
+                <Save className="h-4 w-4 mr-1" />
+                {productMut.isPending ? "Saving..." : "Save Product"}
               </Button>
               <Button variant="outline" onClick={() => setEditMode(false)}>
                 Cancel
@@ -228,120 +321,126 @@ export default function ProductDetailPage() {
 
       <Tabs defaultValue="variants">
         <TabsList>
-          <TabsTrigger value="variants">Variants</TabsTrigger>
-          <TabsTrigger value="images">Images</TabsTrigger>
+          <TabsTrigger value="variants">Variants ({variants.length})</TabsTrigger>
+          <TabsTrigger value="images">Images ({images.length})</TabsTrigger>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
           <TabsTrigger value="bandcamp">Bandcamp</TabsTrigger>
         </TabsList>
 
-        {/* Variants Tab */}
+        {/* Variants — inline editable */}
         <TabsContent value="variants">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Compare At</TableHead>
-                <TableHead>Barcode</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Format</TableHead>
-                <TableHead>Pre-Order</TableHead>
-                <TableHead>Street Date</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {variants.map((variant) => (
-                <TableRow key={variant.id}>
-                  {editingVariantId === variant.id ? (
-                    <>
-                      <TableCell className="font-mono text-xs">{variant.sku}</TableCell>
-                      <TableCell>{variant.title ?? "—"}</TableCell>
-                      <TableCell>
-                        <Input
-                          className="w-24"
-                          value={variantPrice}
-                          onChange={(e) => setVariantPrice(e.currentTarget.value)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          className="w-24"
-                          value={variantCompareAt}
-                          onChange={(e) => setVariantCompareAt(e.currentTarget.value)}
-                        />
-                      </TableCell>
-                      <TableCell>{variant.barcode ?? "—"}</TableCell>
-                      <TableCell>
-                        <Input
-                          className="w-20"
-                          value={variantWeight}
-                          onChange={(e) => setVariantWeight(e.currentTarget.value)}
-                        />
-                      </TableCell>
-                      <TableCell>{variant.format_name ?? "—"}</TableCell>
-                      <TableCell>{variant.is_preorder ? "Yes" : "No"}</TableCell>
-                      <TableCell>{variant.street_date ?? "—"}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            size="xs"
-                            onClick={() => variantMutation.mutate(undefined)}
-                            disabled={variantMutation.isPending}
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            onClick={() => setEditingVariantId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </>
-                  ) : (
-                    <>
-                      <TableCell className="font-mono text-xs">{variant.sku}</TableCell>
-                      <TableCell>{variant.title ?? "—"}</TableCell>
-                      <TableCell>
-                        {variant.price != null ? `$${Number(variant.price).toFixed(2)}` : "—"}
-                      </TableCell>
-                      <TableCell>
-                        {variant.compare_at_price != null
-                          ? `$${Number(variant.compare_at_price).toFixed(2)}`
-                          : "—"}
-                      </TableCell>
-                      <TableCell>{variant.barcode ?? "—"}</TableCell>
-                      <TableCell>
-                        {variant.weight != null ? `${variant.weight} ${variant.weight_unit}` : "—"}
-                      </TableCell>
-                      <TableCell>{variant.format_name ?? "—"}</TableCell>
-                      <TableCell>{variant.is_preorder ? "Yes" : "No"}</TableCell>
-                      <TableCell>{variant.street_date ?? "—"}</TableCell>
-                      <TableCell>
-                        <Button size="xs" variant="ghost" onClick={() => startVariantEdit(variant)}>
-                          Edit
-                        </Button>
-                      </TableCell>
-                    </>
-                  )}
-                </TableRow>
-              ))}
-              {variants.length === 0 && (
+          <div className="space-y-3">
+            {dirty.size > 0 && (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => variantMut.mutate(undefined)}
+                  disabled={variantMut.isPending}
+                >
+                  <Save className="h-3 w-3 mr-1" />
+                  {variantMut.isPending
+                    ? "Saving..."
+                    : `Save ${dirty.size} variant${dirty.size > 1 ? "s" : ""}`}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {dirty.size} unsaved change{dirty.size > 1 ? "s" : ""}
+                </span>
+              </div>
+            )}
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-4 text-muted-foreground">
-                    No variants.
-                  </TableCell>
+                  <TableHead>Option Title</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead className="w-24">Price</TableHead>
+                  <TableHead className="w-24">Compare At</TableHead>
+                  <TableHead className="w-20">Weight</TableHead>
+                  <TableHead className="w-16">Unit</TableHead>
+                  <TableHead>Barcode</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {variants.map((v) => {
+                  const e = vEdits[v.id];
+                  if (!e) return null;
+                  return (
+                    <TableRow key={v.id} className={dirty.has(v.id) ? "bg-amber-50/50" : ""}>
+                      <TableCell>
+                        <Input
+                          className="h-8 text-sm"
+                          value={e.title}
+                          onChange={(ev) => setField(v.id, "title", ev.currentTarget.value)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-xs text-muted-foreground">{v.sku}</span>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          className="h-8 text-sm w-24"
+                          type="number"
+                          step="0.01"
+                          value={e.price}
+                          onChange={(ev) => setField(v.id, "price", ev.currentTarget.value)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          className="h-8 text-sm w-24"
+                          type="number"
+                          step="0.01"
+                          value={e.compareAt}
+                          onChange={(ev) => setField(v.id, "compareAt", ev.currentTarget.value)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          className="h-8 text-sm w-20"
+                          type="number"
+                          step="0.01"
+                          value={e.weight}
+                          onChange={(ev) => setField(v.id, "weight", ev.currentTarget.value)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <select
+                          className="border-input bg-background h-8 rounded-md border px-2 text-xs"
+                          value={e.weightUnit}
+                          onChange={(ev) => setField(v.id, "weightUnit", ev.target.value)}
+                        >
+                          {WEIGHT_UNITS.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                        </select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          className="h-8 text-sm"
+                          value={e.barcode}
+                          onChange={(ev) => setField(v.id, "barcode", ev.currentTarget.value)}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {variants.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
+                      No variants.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            <Button variant="outline" size="sm" disabled>
+              <Plus className="h-3 w-3 mr-1" /> Add Variant
+            </Button>
+          </div>
         </TabsContent>
 
-        {/* Images Tab */}
+        {/* Images */}
         <TabsContent value="images">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {images
@@ -366,18 +465,17 @@ export default function ProductDetailPage() {
           </div>
         </TabsContent>
 
-        {/* Inventory Tab */}
+        {/* Inventory */}
         <TabsContent value="inventory">
           <div className="space-y-4">
-            {variants.map((variant) => {
-              const inv = inventoryLevels.find((l) => l.variant_id === variant.id);
-              const locations = variantLocations.filter((vl) => vl.variant_id === variant.id);
-
+            {variants.map((v) => {
+              const inv = invLevels.find((l) => l.variant_id === v.id);
+              const locs = varLocs.filter((vl) => vl.variant_id === v.id);
               return (
-                <Card key={variant.id} size="sm">
-                  <CardHeader>
-                    <CardTitle>
-                      {variant.sku} — {variant.title ?? "Default"}
+                <Card key={v.id}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">
+                      {v.sku} — {v.title ?? "Default"}
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -399,8 +497,7 @@ export default function ProductDetailPage() {
                     ) : (
                       <p className="text-sm text-muted-foreground mb-3">No inventory data.</p>
                     )}
-
-                    {locations.length > 0 && (
+                    {locs.length > 0 && (
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -410,7 +507,7 @@ export default function ProductDetailPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {locations.map((loc) => (
+                          {locs.map((loc) => (
                             <TableRow key={loc.id}>
                               <TableCell>{loc.warehouse_locations?.name ?? "Unknown"}</TableCell>
                               <TableCell>{loc.warehouse_locations?.location_type ?? "—"}</TableCell>
@@ -430,9 +527,9 @@ export default function ProductDetailPage() {
           </div>
         </TabsContent>
 
-        {/* Bandcamp Tab */}
+        {/* Bandcamp */}
         <TabsContent value="bandcamp">
-          {bandcampMappings.length > 0 ? (
+          {bcMappings.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -444,31 +541,28 @@ export default function ProductDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {bandcampMappings.map((mapping) => {
-                  const variant = variants.find((v) => v.id === mapping.variant_id);
+                {bcMappings.map((m) => {
+                  const v = variants.find((x) => x.id === m.variant_id);
                   return (
-                    <TableRow key={mapping.id}>
-                      <TableCell className="font-mono text-xs">
-                        {variant?.sku ?? mapping.variant_id}
-                      </TableCell>
+                    <TableRow key={m.id}>
+                      <TableCell className="font-mono text-xs">{v?.sku ?? m.variant_id}</TableCell>
                       <TableCell>
-                        {mapping.bandcamp_url ? (
+                        {m.bandcamp_url ? (
                           <a
-                            href={mapping.bandcamp_url}
+                            href={m.bandcamp_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-blue-600 hover:underline"
                           >
-                            {mapping.bandcamp_url}
-                            <ExternalLinkIcon className="size-3" />
+                            {m.bandcamp_url} <ExternalLinkIcon className="size-3" />
                           </a>
                         ) : (
                           "—"
                         )}
                       </TableCell>
-                      <TableCell>{mapping.bandcamp_type_name ?? "—"}</TableCell>
-                      <TableCell>{mapping.bandcamp_new_date ?? "—"}</TableCell>
-                      <TableCell>{mapping.last_quantity_sold ?? "—"}</TableCell>
+                      <TableCell>{m.bandcamp_type_name ?? "—"}</TableCell>
+                      <TableCell>{m.bandcamp_new_date ?? "—"}</TableCell>
+                      <TableCell>{m.last_quantity_sold ?? "—"}</TableCell>
                     </TableRow>
                   );
                 })}

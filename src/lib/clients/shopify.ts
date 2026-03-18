@@ -44,8 +44,11 @@ async function shopifyAdmin<T>(query: string, variables?: Record<string, unknown
 export async function productUpdate(input: {
   id: string;
   title?: string;
+  descriptionHtml?: string;
+  vendor?: string;
   productType?: string;
   tags?: string[];
+  status?: "ACTIVE" | "DRAFT" | "ARCHIVED";
 }) {
   const mutation = `
     mutation productUpdate($input: ProductInput!) {
@@ -53,8 +56,11 @@ export async function productUpdate(input: {
         product {
           id
           title
+          descriptionHtml
+          vendor
           productType
           tags
+          status
           updatedAt
         }
         userErrors {
@@ -95,6 +101,7 @@ export async function productVariantsBulkUpdate(
     price?: string;
     compareAtPrice?: string | null;
     weight?: number;
+    barcode?: string | null;
   }>,
 ) {
   const mutation = `

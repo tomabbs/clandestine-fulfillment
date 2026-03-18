@@ -10,6 +10,7 @@ const productFiltersSchema = z.object({
   format: z.string().optional(),
   status: z.enum(["active", "draft", "archived"]).optional(),
   search: z.string().optional(),
+  missingCost: z.boolean().optional(),
   page: z.number().int().min(1).default(1),
   pageSize: z.union([z.literal(25), z.literal(50), z.literal(100)]).default(25),
 });
@@ -18,8 +19,11 @@ export type ProductFilters = z.infer<typeof productFiltersSchema>;
 
 const updateProductSchema = z.object({
   title: z.string().min(1).optional(),
+  descriptionHtml: z.string().optional(),
+  vendor: z.string().optional(),
   productType: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  status: z.enum(["active", "draft", "archived"]).optional(),
 });
 
 const updateVariantSchema = z.object({
@@ -28,6 +32,8 @@ const updateVariantSchema = z.object({
   price: z.string().optional(),
   compareAtPrice: z.string().nullable().optional(),
   weight: z.number().optional(),
+  weightUnit: z.string().optional(),
+  barcode: z.string().nullable().optional(),
 });
 
 const clientReleasesFiltersSchema = z.object({
@@ -53,13 +59,13 @@ export async function getProducts(rawFilters: ProductFilters) {
 
   const offset = (filters.page - 1) * filters.pageSize;
 
-  // Base query with variant + image + bandcamp mapping joins
+  // Base query with variant + image + inventory joins
   let query = serviceClient
     .from("warehouse_products")
     .select(
       `
       *,
-      warehouse_product_variants (id, sku, title, price, format_name, is_preorder, street_date, bandcamp_url),
+      warehouse_product_variants (id, sku, title, price, cost, format_name, is_preorder, street_date, bandcamp_url),
       warehouse_product_images (id, src, alt, position),
       organizations!inner (id, name)
     `,
@@ -87,7 +93,6 @@ export async function getProducts(rawFilters: ProductFilters) {
 
   if (error) throw new Error(`Failed to fetch products: ${error.message}`);
 
-  // Post-filter by format if specified (format lives on variants)
   let products = data ?? [];
   if (filters.format) {
     products = products.filter((p) => {
@@ -95,20 +100,35 @@ export async function getProducts(rawFilters: ProductFilters) {
       return variants?.some((v) => v.format_name === filters.format);
     });
   }
+  if (filters.missingCost) {
+    products = products.filter((p) => {
+      const variants = p.warehouse_product_variants as Array<{ cost: number | null }>;
+      return variants?.some((v) => v.cost == null || v.cost === 0);
+    });
+  }
 
-  // Also fetch bandcamp mappings for these products' variants
-  const variantIds = products.flatMap((p) => {
-    const variants = p.warehouse_product_variants as Array<{ id: string }>;
-    return variants?.map((v) => v.id) ?? [];
+  const allVariantIds = products.flatMap((p) => {
+    const vs = p.warehouse_product_variants as Array<{ id: string }>;
+    return vs?.map((v) => v.id) ?? [];
   });
 
+  let inventoryByVariant: Record<string, number> = {};
+  if (allVariantIds.length > 0) {
+    const { data: levels } = await serviceClient
+      .from("warehouse_inventory_levels")
+      .select("variant_id, available")
+      .in("variant_id", allVariantIds);
+    if (levels) {
+      inventoryByVariant = Object.fromEntries(levels.map((l) => [l.variant_id, l.available ?? 0]));
+    }
+  }
+
   let bandcampMappings: Record<string, { bandcamp_url: string | null }> = {};
-  if (variantIds.length > 0) {
+  if (allVariantIds.length > 0) {
     const { data: mappings } = await serviceClient
       .from("bandcamp_product_mappings")
       .select("variant_id, bandcamp_url")
-      .in("variant_id", variantIds);
-
+      .in("variant_id", allVariantIds);
     if (mappings) {
       bandcampMappings = Object.fromEntries(
         mappings.map((m) => [m.variant_id, { bandcamp_url: m.bandcamp_url }]),
@@ -116,14 +136,51 @@ export async function getProducts(rawFilters: ProductFilters) {
     }
   }
 
-  return {
-    products: products.map((p) => ({
+  const enrichedProducts = products.map((p) => {
+    const vs = (p.warehouse_product_variants ?? []) as Array<{
+      id: string;
+      sku: string;
+      price: number | null;
+      cost: number | null;
+    }>;
+    const first = vs[0] ?? null;
+    const inventoryTotal = vs.reduce((sum, v) => sum + (inventoryByVariant[v.id] ?? 0), 0);
+    return {
       ...p,
       bandcampMappings,
-    })),
+      firstVariantSku: first?.sku ?? null,
+      firstVariantPrice: first?.price ?? null,
+      firstVariantCost: first?.cost ?? null,
+      inventoryTotal,
+    };
+  });
+
+  return {
+    products: enrichedProducts,
     total: count ?? 0,
     page: filters.page,
     pageSize: filters.pageSize,
+  };
+}
+
+/** Summary stats for catalog page header cards. */
+export async function getCatalogStats() {
+  await requireAuth();
+  const sc = createServiceRoleClient();
+  const { count: totalProducts } = await sc
+    .from("warehouse_products")
+    .select("id", { count: "exact", head: true });
+  const { count: totalVariants } = await sc
+    .from("warehouse_product_variants")
+    .select("id", { count: "exact", head: true });
+  const { count: missingCostCount } = await sc
+    .from("warehouse_product_variants")
+    .select("id", { count: "exact", head: true })
+    .or("cost.is.null,cost.eq.0");
+  return {
+    totalProducts: totalProducts ?? 0,
+    totalVariants: totalVariants ?? 0,
+    missingCostCount: missingCostCount ?? 0,
   };
 }
 
@@ -186,7 +243,14 @@ export async function getProductDetail(productId: string) {
 // Rule #1: Use productUpdate (NOT productSet) for edits
 export async function updateProduct(
   productId: string,
-  rawData: { title?: string; productType?: string; tags?: string[] },
+  rawData: {
+    title?: string;
+    descriptionHtml?: string;
+    vendor?: string;
+    productType?: string;
+    tags?: string[];
+    status?: "active" | "draft" | "archived";
+  },
 ) {
   await requireAuth();
 
@@ -196,7 +260,7 @@ export async function updateProduct(
   // Fetch the product to get its Shopify ID
   const { data: product, error: fetchError } = await serviceClient
     .from("warehouse_products")
-    .select("shopify_product_id, title, product_type, tags")
+    .select("shopify_product_id")
     .eq("id", productId)
     .single();
 
@@ -208,16 +272,23 @@ export async function updateProduct(
     await shopifyUpdate({
       id: product.shopify_product_id,
       ...(data.title !== undefined && { title: data.title }),
+      ...(data.descriptionHtml !== undefined && { descriptionHtml: data.descriptionHtml }),
+      ...(data.vendor !== undefined && { vendor: data.vendor }),
       ...(data.productType !== undefined && { productType: data.productType }),
       ...(data.tags !== undefined && { tags: data.tags }),
+      ...(data.status !== undefined && {
+        status: data.status.toUpperCase() as "ACTIVE" | "DRAFT" | "ARCHIVED",
+      }),
     });
   }
 
   // Update local DB
   const dbUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (data.title !== undefined) dbUpdate.title = data.title;
+  if (data.vendor !== undefined) dbUpdate.vendor = data.vendor;
   if (data.productType !== undefined) dbUpdate.product_type = data.productType;
   if (data.tags !== undefined) dbUpdate.tags = data.tags;
+  if (data.status !== undefined) dbUpdate.status = data.status;
 
   const { error: updateError } = await serviceClient
     .from("warehouse_products")
@@ -238,6 +309,8 @@ export async function updateVariants(
     price?: string;
     compareAtPrice?: string | null;
     weight?: number;
+    weightUnit?: string;
+    barcode?: string | null;
   }>,
 ) {
   await requireAuth();
@@ -254,7 +327,7 @@ export async function updateVariants(
 
   if (fetchError || !product) throw new Error("Product not found");
 
-  // Update Shopify if connected
+  // Update Shopify if connected (barcode syncs; weightUnit is local-only)
   if (product.shopify_product_id) {
     const { productVariantsBulkUpdate: shopifyBulkUpdate } = await import("@/lib/clients/shopify");
     await shopifyBulkUpdate(
@@ -264,6 +337,7 @@ export async function updateVariants(
         ...(v.price !== undefined && { price: v.price }),
         ...(v.compareAtPrice !== undefined && { compareAtPrice: v.compareAtPrice }),
         ...(v.weight !== undefined && { weight: v.weight }),
+        ...(v.barcode !== undefined && { barcode: v.barcode }),
       })),
     );
   }
@@ -277,6 +351,8 @@ export async function updateVariants(
         v.compareAtPrice !== null ? Number.parseFloat(v.compareAtPrice) : null;
     }
     if (v.weight !== undefined) dbUpdate.weight = v.weight;
+    if (v.weightUnit !== undefined) dbUpdate.weight_unit = v.weightUnit;
+    if (v.barcode !== undefined) dbUpdate.barcode = v.barcode;
 
     await serviceClient.from("warehouse_product_variants").update(dbUpdate).eq("id", v.id);
   }

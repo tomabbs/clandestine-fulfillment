@@ -1,12 +1,13 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Package, Search } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Layers, Package, Search } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { getProducts } from "@/actions/catalog";
+import { getCatalogStats, getProducts } from "@/actions/catalog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -23,11 +24,16 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 const PAGE_SIZES = [25, 50, 100] as const;
 
-const STATUS_VARIANTS: Record<string, "default" | "secondary" | "outline"> = {
-  active: "default",
-  draft: "secondary",
-  archived: "outline",
+const STATUS_COLORS: Record<string, string> = {
+  active: "bg-green-100 text-green-800 border-green-200",
+  draft: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  archived: "bg-gray-100 text-gray-600 border-gray-200",
 };
+
+function formatCurrency(val: number | null): string {
+  if (val == null) return "—";
+  return `$${val.toFixed(2)}`;
+}
 
 export default function CatalogPage() {
   const router = useRouter();
@@ -36,6 +42,7 @@ export default function CatalogPage() {
     format: "",
     status: "" as "" | "active" | "draft" | "archived",
     search: "",
+    missingCost: false,
     page: 1,
     pageSize: 25 as 25 | 50 | 100,
   });
@@ -45,6 +52,7 @@ export default function CatalogPage() {
     ...(filters.format && { format: filters.format }),
     ...(filters.status && { status: filters.status }),
     ...(filters.search && { search: filters.search }),
+    ...(filters.missingCost && { missingCost: true }),
     page: filters.page,
     pageSize: filters.pageSize,
   };
@@ -55,11 +63,90 @@ export default function CatalogPage() {
     tier: CACHE_TIERS.SESSION,
   });
 
+  const { data: stats } = useAppQuery({
+    queryKey: ["catalog-stats"],
+    queryFn: () => getCatalogStats(),
+    tier: CACHE_TIERS.SESSION,
+  });
+
   const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
 
   return (
     <div className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
+
+      {/* Stat Cards */}
+      {stats && (
+        <div className="grid grid-cols-3 gap-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total Products
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2">
+                <Package className="h-4 w-4 text-muted-foreground" />
+                <span className="text-2xl font-semibold">
+                  {stats.totalProducts.toLocaleString()}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total Variants
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-muted-foreground" />
+                <span className="text-2xl font-semibold">
+                  {stats.totalVariants.toLocaleString()}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card
+            className={
+              stats.missingCostCount > 0
+                ? "border-red-200 cursor-pointer hover:border-red-300 transition-colors"
+                : ""
+            }
+            onClick={
+              stats.missingCostCount > 0
+                ? () => setFilters((f) => ({ ...f, missingCost: !f.missingCost, page: 1 }))
+                : undefined
+            }
+          >
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Missing Cost
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-2">
+                {stats.missingCostCount > 0 ? (
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span
+                  className={`text-2xl font-semibold ${stats.missingCostCount > 0 ? "text-red-600" : ""}`}
+                >
+                  {stats.missingCostCount.toLocaleString()}
+                </span>
+                {filters.missingCost && (
+                  <Badge variant="outline" className="ml-2 text-xs">
+                    filtered
+                  </Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
@@ -100,6 +187,15 @@ export default function CatalogPage() {
           <option value="draft">Draft</option>
           <option value="archived">Archived</option>
         </select>
+        {filters.missingCost && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setFilters((f) => ({ ...f, missingCost: false, page: 1 }))}
+          >
+            Clear Missing Cost Filter
+          </Button>
+        )}
       </div>
 
       {/* Table */}
@@ -115,22 +211,17 @@ export default function CatalogPage() {
             <TableRow>
               <TableHead className="w-12" />
               <TableHead>Title</TableHead>
-              <TableHead>Label</TableHead>
-              <TableHead>Variants</TableHead>
-              <TableHead>Format</TableHead>
+              <TableHead>Vendor</TableHead>
+              <TableHead>SKU</TableHead>
+              <TableHead className="text-right">Cost</TableHead>
+              <TableHead className="text-right">Price</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Updated</TableHead>
+              <TableHead>Format</TableHead>
+              <TableHead className="text-right">Inventory</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {(data?.products ?? []).map((product) => {
-              const variants = (product.warehouse_product_variants ?? []) as Array<{
-                id: string;
-                sku: string;
-                title: string | null;
-                format_name: string | null;
-                is_preorder: boolean;
-              }>;
               const images = (product.warehouse_product_images ?? []) as Array<{
                 id: string;
                 src: string;
@@ -139,9 +230,7 @@ export default function CatalogPage() {
               }>;
               const org = product.organizations as { id: string; name: string } | null;
               const primaryImage = images.sort((a, b) => a.position - b.position)[0];
-              const formats = Array.from(
-                new Set(variants.map((v) => v.format_name).filter(Boolean)),
-              );
+              const thumbSrc = primaryImage?.src ?? product.image_url;
 
               return (
                 <TableRow
@@ -150,47 +239,59 @@ export default function CatalogPage() {
                   onClick={() => router.push(`/admin/catalog/${product.id}`)}
                 >
                   <TableCell>
-                    {primaryImage ? (
+                    {thumbSrc ? (
                       <Image
-                        src={primaryImage.src}
-                        alt={primaryImage.alt ?? product.title}
-                        width={32}
-                        height={32}
-                        className="h-8 w-8 rounded object-cover"
+                        src={thumbSrc}
+                        alt={primaryImage?.alt ?? product.title}
+                        width={40}
+                        height={40}
+                        className="h-10 w-10 rounded object-cover"
                       />
                     ) : (
-                      <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
-                        <Package className="text-muted-foreground h-4 w-4" />
+                      <div className="bg-muted flex h-10 w-10 items-center justify-center rounded">
+                        <Package className="text-muted-foreground h-5 w-5" />
                       </div>
                     )}
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium">{product.title}</div>
-                    {variants.length === 1 && (
-                      <div className="text-muted-foreground text-xs">{variants[0].sku}</div>
-                    )}
+                    <div className="font-medium leading-tight">{product.title}</div>
+                    <div className="text-muted-foreground text-xs">
+                      {org?.name ?? product.vendor ?? ""}
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {org?.name ?? product.vendor ?? "—"}
+                    {product.vendor ?? "—"}
                   </TableCell>
-                  <TableCell className="text-sm">{variants.length}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {formats.join(", ") || "—"}
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {product.firstVariantSku ?? "—"}
+                  </TableCell>
+                  <TableCell
+                    className={`text-right text-sm ${product.firstVariantCost == null || product.firstVariantCost === 0 ? "text-red-500" : ""}`}
+                  >
+                    {formatCurrency(product.firstVariantCost)}
+                  </TableCell>
+                  <TableCell className="text-right text-sm">
+                    {formatCurrency(product.firstVariantPrice)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANTS[product.status] ?? "outline"}>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[product.status] ?? "bg-gray-100 text-gray-600"}`}
+                    >
                       {product.status}
-                    </Badge>
+                    </span>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {product.updated_at ? new Date(product.updated_at).toLocaleDateString() : "—"}
+                  <TableCell className="text-muted-foreground text-sm">
+                    {product.product_type ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-right text-sm font-medium">
+                    {product.inventoryTotal}
                   </TableCell>
                 </TableRow>
               );
             })}
             {(data?.products ?? []).length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                   <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
                   No products found.
                 </TableCell>

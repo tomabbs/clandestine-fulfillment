@@ -18,6 +18,7 @@ export const queryKeys = {
     all: ["shipments"] as const,
     list: (filters?: Record<string, unknown>) => ["shipments", "list", filters] as const,
     detail: (id: string) => ["shipments", "detail", id] as const,
+    summary: (filters?: Record<string, unknown>) => ["shipments", "summary", filters] as const,
   },
   inbound: {
     all: ["inbound"] as const,
@@ -27,6 +28,7 @@ export const queryKeys = {
   billing: {
     all: ["billing"] as const,
     rules: () => ["billing", "rules"] as const,
+    overrides: () => ["billing", "overrides"] as const,
     snapshots: (filters?: Record<string, unknown>) => ["billing", "snapshots", filters] as const,
   },
   support: {
@@ -47,6 +49,14 @@ export const queryKeys = {
     all: ["clients"] as const,
     list: () => ["clients", "list"] as const,
     detail: (id: string) => ["clients", "detail", id] as const,
+    products: (id: string, filters?: Record<string, unknown>) =>
+      ["clients", "products", id, filters] as const,
+    shipments: (id: string, filters?: Record<string, unknown>) =>
+      ["clients", "shipments", id, filters] as const,
+    sales: (id: string) => ["clients", "sales", id] as const,
+    billing: (id: string) => ["clients", "billing", id] as const,
+    stores: (id: string) => ["clients", "stores", id] as const,
+    settings: (id: string) => ["clients", "settings", id] as const,
   },
   storeConnections: {
     all: ["store-connections"] as const,
