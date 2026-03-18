@@ -1,9 +1,76 @@
+/**
+ * Store-to-organization matching logic.
+ *
+ * Ported from release-manager warehouse-admin-api.js tokenizeStoreName + matchScore.
+ * Strips marketplace suffixes before matching, uses token scoring.
+ */
+
 export interface AutoMatchSuggestion {
   storeId: string;
   storeName: string;
   suggestedOrgId: string;
   suggestedOrgName: string;
   confidence: number;
+}
+
+/** Marketplace platform suffixes stripped before matching */
+const MARKETPLACE_SUFFIXES = new Set([
+  "bandcamp",
+  "shopify",
+  "squarespace",
+  "woocommerce",
+  "bigcartel",
+  "etsy",
+  "amazon",
+  "ebay",
+  "store",
+  "manual",
+  "api",
+  "ratebrowser",
+  "shipstation",
+  "orders",
+]);
+
+/**
+ * Tokenize a store name for matching:
+ * 1. Lowercase
+ * 2. Split on spaces, hyphens, underscores
+ * 3. Strip marketplace suffixes
+ */
+function tokenize(name: string): string[] {
+  const raw = name
+    .toLowerCase()
+    .split(/[\s\-_]+/)
+    .filter(Boolean);
+  return raw.filter((t) => !MARKETPLACE_SUFFIXES.has(t));
+}
+
+/**
+ * Score a match between store name tokens and an organization.
+ * Higher = better match. 0 = no match.
+ *
+ * Scoring (from old app):
+ *   - Token in org name: +2
+ *   - Prefix match (token starts with org token or vice versa): +1
+ */
+function matchScore(tokens: string[], orgName: string): number {
+  if (tokens.length === 0) return 0;
+
+  const orgLower = orgName.toLowerCase();
+  const orgTokens = orgLower.split(/[\s\-_]+/).filter(Boolean);
+  let score = 0;
+
+  for (const token of tokens) {
+    if (orgLower.includes(token)) {
+      score += 2;
+      continue;
+    }
+    if (orgTokens.some((ot) => ot.startsWith(token) || token.startsWith(ot))) {
+      score += 1;
+    }
+  }
+
+  return score;
 }
 
 export function computeMatchSuggestions(
@@ -15,48 +82,31 @@ export function computeMatchSuggestions(
   for (const store of unmappedStores) {
     if (!store.store_name) continue;
 
-    const storeLower = store.store_name.toLowerCase();
-    let bestMatch: { orgId: string; orgName: string; confidence: number } | null = null;
+    const tokens = tokenize(store.store_name);
+    if (tokens.length === 0) continue;
+
+    let bestMatch: { orgId: string; orgName: string; score: number } | null = null;
 
     for (const org of orgs) {
-      const orgLower = org.name.toLowerCase();
-      let confidence = 0;
-
-      if (storeLower === orgLower) {
-        confidence = 1.0;
-      } else if (storeLower.includes(orgLower) || orgLower.includes(storeLower)) {
-        // Partial/contains match — scale by how much of the strings overlap
-        const overlapLen = Math.min(storeLower.length, orgLower.length);
-        const maxLen = Math.max(storeLower.length, orgLower.length);
-        confidence = 0.5 + 0.3 * (overlapLen / maxLen);
-      } else {
-        // Token-based similarity: check if any words overlap
-        const storeTokens = storeLower.split(/[\s\-_]+/).filter(Boolean);
-        const orgTokens = orgLower.split(/[\s\-_]+/).filter(Boolean);
-        const matchingTokens = storeTokens.filter((t) =>
-          orgTokens.some((ot) => ot.includes(t) || t.includes(ot)),
-        );
-        if (matchingTokens.length > 0) {
-          confidence =
-            0.3 * (matchingTokens.length / Math.max(storeTokens.length, orgTokens.length));
-        }
-      }
-
-      if (confidence > 0 && (!bestMatch || confidence > bestMatch.confidence)) {
-        bestMatch = { orgId: org.id, orgName: org.name, confidence };
+      const score = matchScore(tokens, org.name);
+      if (score > 0 && (!bestMatch || score > bestMatch.score)) {
+        bestMatch = { orgId: org.id, orgName: org.name, score };
       }
     }
 
-    if (bestMatch && bestMatch.confidence >= 0.3) {
+    if (bestMatch && bestMatch.score >= 2) {
+      const maxPossible = tokens.length * 2;
+      const confidence = Math.round((bestMatch.score / maxPossible) * 100) / 100;
+
       suggestions.push({
         storeId: store.id,
         storeName: store.store_name,
         suggestedOrgId: bestMatch.orgId,
         suggestedOrgName: bestMatch.orgName,
-        confidence: Math.round(bestMatch.confidence * 100) / 100,
+        confidence: Math.min(confidence, 1),
       });
     }
   }
 
-  return suggestions;
+  return suggestions.sort((a, b) => b.confidence - a.confidence);
 }

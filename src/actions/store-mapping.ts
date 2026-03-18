@@ -120,3 +120,72 @@ export async function unmapStore(storeId: string): Promise<void> {
 
   if (error) throw new Error(`Failed to unmap store: ${error.message}`);
 }
+
+/**
+ * Re-process shipments that have no org_id by re-running org matching.
+ * Uses the same match-shipment-org logic as the ingest pipeline.
+ */
+export async function reprocessUnmatchedShipments(
+  workspaceId: string,
+): Promise<{ total: number; matched: number }> {
+  await requireAuth();
+  const serviceClient = createServiceRoleClient();
+
+  const { data: unmatched } = await serviceClient
+    .from("warehouse_shipments")
+    .select("id, shipstation_shipment_id")
+    .eq("workspace_id", workspaceId)
+    .is("org_id", null)
+    .limit(200);
+
+  if (!unmatched || unmatched.length === 0) return { total: 0, matched: 0 };
+
+  let matched = 0;
+
+  for (const shipment of unmatched) {
+    // Look up the ShipStation store_id from label_data or try to match by items
+    const { data: items } = await serviceClient
+      .from("warehouse_shipment_items")
+      .select("sku")
+      .eq("shipment_id", shipment.id);
+
+    const skus = (items ?? []).map((i) => i.sku).filter(Boolean);
+
+    // Try SKU-based matching: find variant → product → org_id
+    if (skus.length > 0) {
+      const { data: variants } = await serviceClient
+        .from("warehouse_product_variants")
+        .select("sku, warehouse_products!inner(org_id)")
+        .in("sku", skus);
+
+      if (variants && variants.length > 0) {
+        const orgCounts: Record<string, number> = {};
+        for (const v of variants) {
+          const product = v.warehouse_products as unknown as { org_id: string } | null;
+          if (product?.org_id) {
+            orgCounts[product.org_id] = (orgCounts[product.org_id] ?? 0) + 1;
+          }
+        }
+
+        let bestOrgId: string | null = null;
+        let bestCount = 0;
+        for (const [orgId, count] of Object.entries(orgCounts)) {
+          if (count > bestCount) {
+            bestOrgId = orgId;
+            bestCount = count;
+          }
+        }
+
+        if (bestOrgId) {
+          await serviceClient
+            .from("warehouse_shipments")
+            .update({ org_id: bestOrgId, updated_at: new Date().toISOString() })
+            .eq("id", shipment.id);
+          matched++;
+        }
+      }
+    }
+  }
+
+  return { total: unmatched.length, matched };
+}

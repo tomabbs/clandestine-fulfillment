@@ -51,15 +51,16 @@ describe("computeMatchSuggestions", () => {
     expect(result[0].confidence).toBe(1.0);
   });
 
-  it("returns medium confidence for partial/contains match", () => {
+  it("strips marketplace suffixes and matches with high confidence", () => {
+    // "Bandcamp" and "Store" are stripped → tokens = ["acme", "records"]
+    // Both match org name → score = 4/4 = 1.0
     const stores = [{ id: "s1", store_name: "Acme Records Bandcamp Store" }];
     const orgs = [{ id: "o1", name: "Acme Records" }];
 
     const result = computeMatchSuggestions(stores, orgs);
 
     expect(result).toHaveLength(1);
-    expect(result[0].confidence).toBeGreaterThan(0.5);
-    expect(result[0].confidence).toBeLessThan(1.0);
+    expect(result[0].confidence).toBe(1);
   });
 
   it("returns empty suggestions when no match found", () => {
