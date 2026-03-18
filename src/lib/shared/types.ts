@@ -114,6 +114,7 @@ export interface WarehouseProductVariant {
   shopify_variant_id: string | null;
   title: string | null;
   price: number | null;
+  cost: number | null;
   compare_at_price: number | null;
   barcode: string | null;
   weight: number | null;

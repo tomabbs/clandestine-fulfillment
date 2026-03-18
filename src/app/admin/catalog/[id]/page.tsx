@@ -51,6 +51,7 @@ interface VariantRowState {
   sku: string;
   title: string;
   price: string;
+  cost: string;
   compareAt: string;
   weight: string;
   weightUnit: string;
@@ -62,6 +63,7 @@ function variantToRow(v: WarehouseProductVariant): VariantRowState {
     sku: v.sku,
     title: v.title ?? "",
     price: v.price != null ? String(v.price) : "",
+    cost: v.cost != null ? String(v.cost) : "",
     compareAt: v.compare_at_price != null ? String(v.compare_at_price) : "",
     weight: v.weight != null ? String(v.weight) : "",
     weightUnit: v.weight_unit ?? "lb",
@@ -162,6 +164,7 @@ export default function ProductDetailPage() {
             id: o.id,
             shopifyVariantId: o.shopify_variant_id ?? "",
             price: e.price || undefined,
+            cost: e.cost ? Number(e.cost) : undefined,
             compareAtPrice: e.compareAt || null,
             weight: e.weight ? Number(e.weight) : undefined,
             weightUnit: e.weightUnit,
@@ -172,6 +175,7 @@ export default function ProductDetailPage() {
         id: string;
         shopifyVariantId: string;
         price?: string;
+        cost?: number;
         compareAtPrice?: string | null;
         weight?: number;
         weightUnit?: string;
@@ -397,6 +401,7 @@ export default function ProductDetailPage() {
                     <TableHead>Option Title</TableHead>
                     <TableHead>SKU</TableHead>
                     <TableHead className="w-24">Price</TableHead>
+                    <TableHead className="w-24">Cost</TableHead>
                     <TableHead className="w-24">Compare At</TableHead>
                     <TableHead className="w-20">Weight</TableHead>
                     <TableHead className="w-16">Unit</TableHead>
@@ -431,6 +436,15 @@ export default function ProductDetailPage() {
                             step="0.01"
                             value={e.price}
                             onChange={(ev) => setField(v.id, "price", ev.currentTarget.value)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            className="h-8 text-sm w-24"
+                            type="number"
+                            step="0.01"
+                            value={e.cost}
+                            onChange={(ev) => setField(v.id, "cost", ev.currentTarget.value)}
                           />
                         </TableCell>
                         <TableCell>
@@ -485,7 +499,7 @@ export default function ProductDetailPage() {
                   })}
                   {variants.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">
+                      <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
                         No variants.
                       </TableCell>
                     </TableRow>
