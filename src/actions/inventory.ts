@@ -278,3 +278,26 @@ export async function getInventoryDetail(sku: string): Promise<InventoryDetailRe
     bandcampUrl: variantData?.bandcamp_url ?? null,
   };
 }
+
+/**
+ * Update a variant's format_name. This is product metadata, not an inventory
+ * mutation, so it goes through a direct DB update (not recordInventoryChange).
+ */
+export async function updateVariantFormat(
+  variantId: string,
+  formatName: string,
+): Promise<{ success: boolean }> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { error } = await supabase
+    .from("warehouse_product_variants")
+    .update({ format_name: formatName })
+    .eq("id", variantId);
+
+  if (error) throw new Error(`Failed to update variant format: ${error.message}`);
+  return { success: true };
+}
