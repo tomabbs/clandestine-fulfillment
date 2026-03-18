@@ -25,7 +25,7 @@ const PAGE_SIZE = 50;
 export const shopifySyncTask = schedules.task({
   id: "shopify-sync",
   cron: "*/15 * * * *",
-  maxDuration: 300,
+  maxDuration: 840, // 14 min — finishes before next 15-min tick
   run: async (_payload, { ctx }) => {
     const supabase = createServiceRoleClient();
     const { UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN } = env();

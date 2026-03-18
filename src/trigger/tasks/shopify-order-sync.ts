@@ -63,7 +63,7 @@ export function groupLineItemsByOrg(
 export const shopifyOrderSyncTask = schedules.task({
   id: "shopify-order-sync",
   cron: "*/30 * * * *",
-  maxDuration: 300,
+  maxDuration: 840, // 14 min — large order volumes possible
   run: async (_payload, { ctx: _ctx }) => {
     const supabase = createServiceRoleClient();
     const workspaceIds = await getAllWorkspaceIds(supabase);

@@ -9,7 +9,7 @@ import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
 
 export const shipstationPollTask = schedules.task({
   id: "shipstation-poll",
-  maxDuration: 300,
+  maxDuration: 600, // 10 min — 30-day rolling window can have 400+ shipments
   cron: "*/30 * * * *",
   run: async () => {
     const supabase = createServiceRoleClient();

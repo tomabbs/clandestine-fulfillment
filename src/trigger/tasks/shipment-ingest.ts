@@ -2,7 +2,7 @@
 // Rule #7: service_role for Trigger tasks
 // Rule #12: Payload is IDs only — task fetches data from Postgres
 
-import { logger, task } from "@trigger.dev/sdk";
+import { logger, task, tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
 import type { ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -225,4 +225,10 @@ async function ingestSingleShipment(
       matchedBy: formatDetection.matchedBy,
     },
   );
+
+  // Register tracking with AfterShip (fire-and-forget child task)
+  if (shipment.trackingNumber) {
+    await tasks.trigger("aftership-register", { shipment_id: inserted.id });
+    logger.info(`Triggered AfterShip registration for ${shipment.trackingNumber}`);
+  }
 }

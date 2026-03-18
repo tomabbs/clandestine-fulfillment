@@ -58,7 +58,7 @@ export const storageCalcTask = schedules.task({
     pattern: "0 1 1 * *",
     timezone: "America/New_York",
   },
-  maxDuration: 300,
+  maxDuration: 600, // 10 min — iterates all inventory per org
   run: async () => {
     const supabase = createServiceRoleClient();
     const workspaceIds = await getAllWorkspaceIds(supabase);

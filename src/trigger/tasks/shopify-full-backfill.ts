@@ -19,7 +19,7 @@ const PAGE_SIZE = 50;
 
 export const shopifyFullBackfillTask = task({
   id: "shopify-full-backfill",
-  maxDuration: 600,
+  maxDuration: 3600, // 1 hour — full catalog (1800+ products) with images + inventory
   run: async (payload: { workspace_id: string }, { ctx }) => {
     const workspaceId = payload.workspace_id;
     const supabase = createServiceRoleClient();
