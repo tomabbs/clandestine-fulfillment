@@ -250,6 +250,22 @@ async function upsertProductsBulk(
       variantCount++;
     }
 
+    // Upsert images — uses unique index on shopify_image_id
+    const firstImageUrl = await upsertImagesBulk(
+      supabase,
+      product.images.edges,
+      dbProduct.id,
+      workspaceId,
+    );
+
+    // Set primary image URL on product
+    if (firstImageUrl) {
+      await supabase
+        .from("warehouse_products")
+        .update({ images: [{ src: firstImageUrl }] })
+        .eq("id", dbProduct.id);
+    }
+
     if (product.updatedAt && (!latestUpdate || product.updatedAt > latestUpdate)) {
       latestUpdate = product.updatedAt;
     }
@@ -308,4 +324,37 @@ async function upsertInventoryBulk(
       incoming: level.incoming,
     });
   }
+}
+
+/**
+ * Upsert product images into warehouse_product_images.
+ * Uses the unique index on shopify_image_id for ON CONFLICT.
+ * Returns the URL of the first (primary) image, or null.
+ */
+async function upsertImagesBulk(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  imageEdges: ShopifyProduct["images"]["edges"],
+  productId: string,
+  workspaceId: string,
+): Promise<string | null> {
+  if (imageEdges.length === 0) return null;
+
+  for (let i = 0; i < imageEdges.length; i++) {
+    const img = imageEdges[i].node;
+    const shopifyImageId = img.id.replace(/gid:\/\/shopify\/(ImageSource|ProductImage)\//, "");
+
+    await supabase.from("warehouse_product_images").upsert(
+      {
+        product_id: productId,
+        workspace_id: workspaceId,
+        shopify_image_id: shopifyImageId,
+        src: img.url,
+        alt: img.altText,
+        position: i,
+      },
+      { onConflict: "shopify_image_id", ignoreDuplicates: false },
+    );
+  }
+
+  return imageEdges[0].node.url;
 }
