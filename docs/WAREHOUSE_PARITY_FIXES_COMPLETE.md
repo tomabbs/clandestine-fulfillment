@@ -7,7 +7,7 @@ Reference: /Users/Shared/WorkShared/Projects/release-manager (old app)
 
 | Gate | Result |
 |------|--------|
-| `pnpm test` | **63 files, 615 tests, all passing** |
+| `pnpm test` | **63 files, 615 tests, all passing** (final run) |
 | `pnpm typecheck` | **PASS** (tsc --noEmit clean) |
 | `pnpm check` | **PASS** (249 files, 0 errors, Biome) |
 | `pnpm build` | **PASS** (43 static + 8 dynamic pages) |
@@ -48,6 +48,16 @@ Reference: /Users/Shared/WorkShared/Projects/release-manager (old app)
 - [x] **Manual entry mode** — SKU, title, format dropdown, quantity with amber no-SKU warning
 - [x] **Per-item mode toggle** — switch between catalog and manual per line item
 - [x] **searchProductVariants server action** — searches variants with inventory join
+
+### E2 — Inline Editing on Product List
+- [x] **EditableTextCell** — click-to-edit text with Enter/blur save, Escape cancel, pencil on hover, green/red flash
+- [x] **EditableNumberCell** — same for numbers with $-prefix formatting
+- [x] **EditableSelectCell** — click-to-dropdown for status changes
+- [x] **Vendor inline edit** — click vendor cell to edit, saves to warehouse_products
+- [x] **SKU inline edit** — click SKU cell to edit first variant's SKU
+- [x] **Price inline edit** — click price cell to edit first variant's price ($-formatted)
+- [x] **Status inline edit** — click status to show Active/Draft/Archived dropdown
+- [x] **updateProductField / updateVariantField** — lightweight single-field server actions with field whitelist
 
 ### E1 — Warehouse Theme Layer
 - [x] **Amber accent CSS variables** — `--wh-accent`, `--wh-success`, `--wh-warning`, `--wh-error` (light + dark)
