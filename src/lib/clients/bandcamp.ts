@@ -30,11 +30,11 @@ const myBandsResponseSchema = z.object({
 });
 
 const merchItemSchema = z.object({
-  id: z.number(),
+  package_id: z.number(),
   title: z.string(),
   album_title: z.string().nullish(),
   sku: z.string().nullish(),
-  type_name: z.string().nullish(),
+  item_type: z.string().nullish(),
   member_band_id: z.number().nullish(),
   new_date: z.string().nullish(),
   quantity_available: z.number().nullish(),
@@ -140,16 +140,28 @@ export async function refreshBandcampToken(workspaceId: string): Promise<string>
 // === API methods ===
 
 export async function getMyBands(accessToken: string): Promise<BandcampBand[]> {
+  // Bandcamp API requires POST for all endpoints
   const response = await fetch("https://bandcamp.com/api/account/1/my_bands", {
-    method: "GET",
-    headers: { Authorization: `Bearer ${accessToken}` },
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
   });
 
   if (!response.ok) {
     throw new Error(`getMyBands failed: ${response.status}`);
   }
 
-  const data = myBandsResponseSchema.parse(await response.json());
+  const json = await response.json();
+
+  // Bandcamp returns { error: true, error_message: "..." } on failures even with HTTP 200
+  if (json.error) {
+    throw new Error(`getMyBands API error: ${json.error_message ?? "unknown"}`);
+  }
+
+  const data = myBandsResponseSchema.parse(json);
   return data.bands;
 }
 
@@ -157,20 +169,27 @@ export async function getMerchDetails(
   bandId: number,
   accessToken: string,
 ): Promise<BandcampMerchItem[]> {
-  const response = await fetch("https://bandcamp.com/api/merch/1/merch_details", {
+  const response = await fetch("https://bandcamp.com/api/merchorders/1/get_merch_details", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ band_id: bandId }),
+    body: JSON.stringify({ band_id: bandId, start_time: "2000-01-01 00:00:00" }),
   });
 
   if (!response.ok) {
     throw new Error(`getMerchDetails failed for band ${bandId}: ${response.status}`);
   }
 
-  const data = merchDetailsResponseSchema.parse(await response.json());
+  const json = await response.json();
+  if (json.error) {
+    throw new Error(
+      `getMerchDetails API error for band ${bandId}: ${json.error_message ?? "unknown"}`,
+    );
+  }
+
+  const data = merchDetailsResponseSchema.parse(json);
   return data.items;
 }
 
@@ -183,7 +202,7 @@ export async function updateQuantities(
   }>,
   accessToken: string,
 ): Promise<void> {
-  const response = await fetch("https://bandcamp.com/api/merch/1/update_quantities", {
+  const response = await fetch("https://bandcamp.com/api/merchorders/1/update_quantities", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,

@@ -89,12 +89,14 @@ async function ingestSingleShipment(
   if (existing) return;
 
   // Match org via warehouse_shipstation_stores
+  // storeId lives inside advancedOptions in the ShipStation API response
+  const storeId = shipment.advancedOptions?.storeId ?? shipment.storeId;
   let orgId: string | null = null;
-  if (shipment.storeId) {
+  if (storeId) {
     const { data: store } = await supabase
       .from("warehouse_shipstation_stores")
       .select("org_id")
-      .eq("store_id", shipment.storeId)
+      .eq("store_id", storeId)
       .maybeSingle();
     orgId = store?.org_id ?? null;
   }
@@ -106,10 +108,10 @@ async function ingestSingleShipment(
         category: "shipment_org_match",
         severity: "medium" as const,
         title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
-        description: `ShipStation shipment ${shipstationShipmentId} from store ${shipment.storeId ?? "unknown"} could not be matched to an organization. Shipment data stored in metadata for replay after org mapping is configured.`,
+        description: `ShipStation shipment ${shipstationShipmentId} from store ${storeId ?? "unknown"} could not be matched to an organization. Shipment data stored in metadata for replay after org mapping is configured.`,
         metadata: {
           shipstation_shipment_id: shipstationShipmentId,
-          store_id: shipment.storeId,
+          store_id: storeId,
           tracking_number: shipment.trackingNumber,
           carrier: shipment.carrierCode,
           service: shipment.serviceCode,

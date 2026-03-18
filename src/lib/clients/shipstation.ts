@@ -133,8 +133,14 @@ const shipStationShipmentSchema = z.object({
     })
     .nullable()
     .optional(),
-  shipmentItems: z.array(shipStationItemSchema).optional(),
+  shipmentItems: z.array(shipStationItemSchema).nullable().optional(),
   storeId: z.number().nullable().optional(),
+  advancedOptions: z
+    .object({
+      storeId: z.number().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
   createDate: z.string().nullable().optional(),
 });
 
