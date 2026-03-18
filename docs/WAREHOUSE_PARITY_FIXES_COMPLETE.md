@@ -3,6 +3,17 @@
 Date: 2026-03-18
 Reference: /Users/Shared/WorkShared/Projects/release-manager (old app)
 
+## Build Verification
+
+| Gate | Result |
+|------|--------|
+| `pnpm test` | **63 files, 615 tests, all passing** |
+| `pnpm typecheck` | **PASS** (tsc --noEmit clean) |
+| `pnpm check` | **PASS** (249 files, 0 errors, Biome) |
+| `pnpm build` | **PASS** (43 static + 8 dynamic pages) |
+
+**Status: Ready for deployment.**
+
 ## Fixes Applied
 
 ### P0 — Critical
@@ -27,12 +38,31 @@ Reference: /Users/Shared/WorkShared/Projects/release-manager (old app)
 - [x] **Image ingestion** — shopify-sync and shopify-full-backfill now upsert product images into `warehouse_product_images`
 - [x] **Product editor rewrite** — full edit form with description, vendor, status, inline variant editing with barcode/weight unit
 
+### D2 — Collaborative Editing
+- [x] **Collaborative page wrapper** — `CollaborativePage`, `PresenceBar`, `CollabField` components using Supabase Realtime presence
+- [x] **Catalog detail** — presence dots, field-level edit indicators on title/description/vendor, remote save notifications
+- [x] **Inbound detail** — presence dots showing who is doing the check-in
+
+### D3 — Dual-Mode Inbound Workflow
+- [x] **Catalog search mode** — debounced product search by SKU/title, dropdown results with format + stock, green confirmation card
+- [x] **Manual entry mode** — SKU, title, format dropdown, quantity with amber no-SKU warning
+- [x] **Per-item mode toggle** — switch between catalog and manual per line item
+- [x] **searchProductVariants server action** — searches variants with inventory join
+
+### E1 — Warehouse Theme Layer
+- [x] **Amber accent CSS variables** — `--wh-accent`, `--wh-success`, `--wh-warning`, `--wh-error` (light + dark)
+- [x] **Status badge classes** — `.wh-badge-active/draft/archived/voided/error`
+- [x] **Dense table styling** — `.wh-table` with uppercase headers, 0.5rem padding
+- [x] **Sidebar active state** — amber instead of purple via `[data-warehouse-theme]` scope
+- [x] **Panel hierarchy** — `.wh-panel`, `.wh-metric-highlight`, `.wh-section-title`
+
 ## Not Changed (Already Good)
-- **Audit/observability** — `channel_sync_log` (25 tasks write to it), `sensor_readings` (7 sensors), `warehouse_review_queue` (12 tasks create items), `webhook_events` (all webhook handlers), Sentry `onFailure` hook — already stronger than old app's `agent_runs`
+- **Audit/observability** — `channel_sync_log`, `sensor_readings`, `warehouse_review_queue`, `webhook_events`, Sentry — already stronger than old app's `agent_runs`
 - **Bandcamp integration** — sync, sale-poll, inventory-push all working with shared queue serialization
 - **Redis inventory projection** — weekly backfill, per-write HINCRBY via `recordInventoryChange`, drift sensor
 - **Webhook dedup** — all handlers use `webhook_events` INSERT ON CONFLICT
 - **Echo cancellation** — Shopify webhook handler checks `last_pushed_quantity`
+- **Toggle-gated navigation** — not needed (new app has dedicated admin/portal layouts with role-based middleware)
 
 ## Testing Checklist
 - [ ] Shopify webhook processes inventory_levels/update (verify echo cancellation)
@@ -46,16 +76,19 @@ Reference: /Users/Shared/WorkShared/Projects/release-manager (old app)
 - [ ] Format detection populates label_data.detectedFormat on shipments
 - [ ] Product editor saves to Shopify (title, description, vendor, status, tags)
 - [ ] Variant editor saves barcode and weight unit
+- [ ] Collaborative editing shows presence on catalog detail
+- [ ] Inbound search finds existing products and populates item
 
-## Files Changed
+## Files Changed (This Session)
 
-### New Files (warehouse parity)
-- `src/trigger/lib/format-detection.ts` — format detection engine
+### New Files
+- `src/trigger/lib/format-detection.ts` — format detection engine (14 tests)
 - `src/trigger/lib/materials-cost.ts` — on-demand materials cost estimation
-- `src/trigger/lib/match-shipment-org.ts` — 3-tier org matching
+- `src/trigger/lib/match-shipment-org.ts` — 3-tier org matching (7 tests)
+- `src/components/shared/collaborative-page.tsx` — CollaborativePage, PresenceBar, CollabField
 - `supabase/migrations/20260318000004_drop_ship.sql` — is_drop_ship + total_units columns
-- `tests/unit/trigger/format-detection.test.ts` — 14 format detection tests
-- `tests/unit/trigger/match-shipment-org.test.ts` — 7 org matching tests
+- `tests/unit/trigger/format-detection.test.ts`
+- `tests/unit/trigger/match-shipment-org.test.ts`
 
 ### Modified Files
 - `src/trigger/tasks/shipment-ingest.ts` — workspace_id, is_drop_ship, total_units, format detection, AfterShip trigger
@@ -67,13 +100,19 @@ Reference: /Users/Shared/WorkShared/Projects/release-manager (old app)
 - `src/trigger/tasks/monthly-billing.ts` — drop-ship line item on Stripe invoice
 - `src/lib/clients/billing-calculator.ts` — drop-ship rate calculation, total_drop_ship
 - `src/lib/clients/shopify.ts` — descriptionHtml, vendor, status, barcode on mutations
-- `src/actions/catalog.ts` — removed nonexistent cost column, added description/vendor/status/barcode
-- `src/app/admin/catalog/[id]/page.tsx` — full edit form + inline variant editing
+- `src/actions/catalog.ts` — removed cost column, added description/vendor/status/barcode, searchProductVariants
+- `src/actions/auth.ts` — userId + userName in getUserContext
+- `src/app/admin/catalog/[id]/page.tsx` — full edit form, inline variants, collaborative editing
+- `src/app/admin/inbound/[id]/page.tsx` — collaborative editing presence
+- `src/app/portal/inbound/new/page.tsx` — dual-mode inbound (catalog search + manual)
 - `src/app/api/webhooks/shopify/route.ts` — payload in metadata
+- `src/app/globals.css` — warehouse amber theme layer
+- `src/app/admin/layout.tsx` — data-warehouse-theme attribute
+- `src/app/portal/layout.tsx` — data-warehouse-theme attribute
 
 ## Deployment Notes
 - **Migrations required**: `20260318000004_drop_ship.sql` (already applied to live DB)
 - **No new env vars** required
 - **Trigger.dev redeploy needed** after push: `npx trigger.dev@latest deploy`
 - **Rollback**: revert commit(s), redeploy Trigger tasks
-- **Manual step**: "Manual Orders" ShipStation store (ID 3097865) flagged as `is_drop_ship=true` via direct DB update
+- **Manual step**: "Manual Orders" ShipStation store (ID 3097865) flagged as `is_drop_ship=true` (already done)
