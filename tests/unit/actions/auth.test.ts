@@ -35,6 +35,8 @@ describe("auth Server Actions", () => {
         workspaceId: "ws-1",
         orgId: null,
         isStaff: true,
+        userId: "user-1",
+        userName: "Admin User",
       });
     });
 
@@ -59,6 +61,8 @@ describe("auth Server Actions", () => {
         workspaceId: "ws-1",
         orgId: "org-123",
         isStaff: false,
+        userId: "user-2",
+        userName: "Client User",
       });
     });
 

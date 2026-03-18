@@ -10,11 +10,15 @@ export async function getUserContext(): Promise<{
   workspaceId: string;
   orgId: string | null;
   isStaff: boolean;
+  userId: string;
+  userName: string;
 }> {
   const { userRecord, isStaff } = await requireAuth();
   return {
     workspaceId: userRecord.workspace_id,
     orgId: userRecord.org_id,
     isStaff,
+    userId: userRecord.id,
+    userName: userRecord.full_name ?? userRecord.email ?? "Unknown",
   };
 }

@@ -11,6 +11,7 @@ import {
   type InboundDetailResult,
   markArrived,
 } from "@/actions/inbound";
+import { CollaborativePage, PresenceBar } from "@/components/shared/collaborative-page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -216,110 +217,118 @@ export default function InboundDetailPage() {
   const allCheckedIn = detail.items.every((item) => item.received_quantity !== null);
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Back nav */}
-      <button
-        type="button"
-        onClick={() => router.push("/admin/inbound")}
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to Inbound
-      </button>
+    <CollaborativePage resourceType="inbound" resourceId={params.id}>
+      <div className="p-6 space-y-6">
+        {/* Back nav */}
+        <button
+          type="button"
+          onClick={() => router.push("/admin/inbound")}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Inbound
+        </button>
 
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Package className="h-6 w-6" />
-            {detail.tracking_number || "No Tracking Number"}
-          </h1>
-          <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
-            <span>Carrier: {detail.carrier || "—"}</span>
-            <span>Org: {detail.org_name || "—"}</span>
-            <span>
-              Expected:{" "}
-              {detail.expected_date ? new Date(detail.expected_date).toLocaleDateString() : "—"}
-            </span>
-            {detail.actual_arrival_date && (
-              <span>Arrived: {new Date(detail.actual_arrival_date).toLocaleDateString()}</span>
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+              <Package className="h-6 w-6" />
+              {detail.tracking_number || "No Tracking Number"}
+              <PresenceBar />
+            </h1>
+            <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
+              <span>Carrier: {detail.carrier || "—"}</span>
+              <span>Org: {detail.org_name || "—"}</span>
+              <span>
+                Expected:{" "}
+                {detail.expected_date ? new Date(detail.expected_date).toLocaleDateString() : "—"}
+              </span>
+              {detail.actual_arrival_date && (
+                <span>Arrived: {new Date(detail.actual_arrival_date).toLocaleDateString()}</span>
+              )}
+            </div>
+            {detail.notes && <p className="mt-2 text-sm bg-muted/50 rounded p-2">{detail.notes}</p>}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            {detail.status === "expected" && (
+              <Button
+                onClick={() => markArrivedMutation.mutate()}
+                disabled={markArrivedMutation.isPending}
+              >
+                <Truck className="h-4 w-4 mr-2" />
+                Mark Arrived
+              </Button>
+            )}
+            {detail.status === "arrived" && (
+              <Button
+                onClick={() => beginCheckInMutation.mutate()}
+                disabled={beginCheckInMutation.isPending}
+              >
+                <CircleDot className="h-4 w-4 mr-2" />
+                Begin Check-in
+              </Button>
+            )}
+            {detail.status === "checking_in" && allCheckedIn && (
+              <Button
+                onClick={() => completeCheckInMutation.mutate()}
+                disabled={completeCheckInMutation.isPending}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-2" />
+                Complete Check-in
+              </Button>
             )}
           </div>
-          {detail.notes && <p className="mt-2 text-sm bg-muted/50 rounded p-2">{detail.notes}</p>}
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2">
-          {detail.status === "expected" && (
-            <Button
-              onClick={() => markArrivedMutation.mutate()}
-              disabled={markArrivedMutation.isPending}
-            >
-              <Truck className="h-4 w-4 mr-2" />
-              Mark Arrived
-            </Button>
-          )}
-          {detail.status === "arrived" && (
-            <Button
-              onClick={() => beginCheckInMutation.mutate()}
-              disabled={beginCheckInMutation.isPending}
-            >
-              <CircleDot className="h-4 w-4 mr-2" />
-              Begin Check-in
-            </Button>
-          )}
-          {detail.status === "checking_in" && allCheckedIn && (
-            <Button
-              onClick={() => completeCheckInMutation.mutate()}
-              disabled={completeCheckInMutation.isPending}
-            >
-              <CheckCircle2 className="h-4 w-4 mr-2" />
-              Complete Check-in
-            </Button>
-          )}
-        </div>
-      </div>
+        {/* Status Progression */}
+        <StatusProgressBar currentStatus={detail.status} />
 
-      {/* Status Progression */}
-      <StatusProgressBar currentStatus={detail.status} />
-
-      {/* Items Table */}
-      <div>
-        <h2 className="text-lg font-medium mb-3">Items ({detail.items.length})</h2>
-        <div className="border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="text-left p-3 font-medium">SKU</th>
-                <th className="text-left p-3 font-medium">Expected Qty</th>
-                <th className="text-left p-3 font-medium">Received Qty</th>
-                <th className="text-left p-3 font-medium">Condition Notes</th>
-                <th className="text-left p-3 font-medium">Location</th>
-                <th className="text-left p-3 font-medium">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.items.map((item) => (
-                <ItemCheckInRow
-                  key={item.id}
-                  item={item}
-                  isCheckingIn={detail.status === "checking_in"}
-                  onCheckIn={(itemId, receivedQty, conditionNotes, locationId) =>
-                    checkInItemMutation.mutate({ itemId, receivedQty, conditionNotes, locationId })
-                  }
-                />
-              ))}
-              {detail.items.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-8 text-center text-muted-foreground">
-                    No items in this shipment.
-                  </td>
+        {/* Items Table */}
+        <div>
+          <h2 className="text-lg font-medium mb-3">Items ({detail.items.length})</h2>
+          <div className="border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="text-left p-3 font-medium">SKU</th>
+                  <th className="text-left p-3 font-medium">Expected Qty</th>
+                  <th className="text-left p-3 font-medium">Received Qty</th>
+                  <th className="text-left p-3 font-medium">Condition Notes</th>
+                  <th className="text-left p-3 font-medium">Location</th>
+                  <th className="text-left p-3 font-medium">Action</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {detail.items.map((item) => (
+                  <ItemCheckInRow
+                    key={item.id}
+                    item={item}
+                    isCheckingIn={detail.status === "checking_in"}
+                    onCheckIn={(itemId, receivedQty, conditionNotes, locationId) =>
+                      checkInItemMutation.mutate({
+                        itemId,
+                        receivedQty,
+                        conditionNotes,
+                        locationId,
+                      })
+                    }
+                  />
+                ))}
+                {detail.items.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      No items in this shipment.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-    </div>
+    </CollaborativePage>
   );
 }
