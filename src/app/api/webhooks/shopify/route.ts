@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       external_webhook_id: shopifyWebhookId,
       topic,
       status: "pending",
-      metadata: { topic },
+      metadata: { topic, payload },
     })
     .select("id")
     .single();

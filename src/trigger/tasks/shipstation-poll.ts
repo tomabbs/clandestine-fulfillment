@@ -5,6 +5,7 @@
 import { logger, schedules } from "@trigger.dev/sdk";
 import { fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
 
 export const shipstationPollTask = schedules.task({
   id: "shipstation-poll",
@@ -25,9 +26,11 @@ export const shipstationPollTask = schedules.task({
       .eq("sync_type", "shipstation_poll")
       .maybeSingle();
 
-    // Default to 2 hours ago if no cursor exists
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-    const shipDateStart = syncState?.last_sync_cursor ?? twoHoursAgo;
+    // Rolling 30-day window ensures we catch shipments even after webhook outages
+    // and allows detecting changes to existing shipments (voided, cost updates).
+    // Dedup via shipstation_shipment_id handles the overlap.
+    const LOOKBACK_DAYS = 30;
+    const shipDateStart = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
     let page = 1;
     let totalProcessed = 0;
@@ -108,28 +111,22 @@ async function ingestFromPoll(
 ) {
   const shipstationShipmentId = String(shipment.shipmentId);
 
-  // Match org via warehouse_shipstation_stores
-  // storeId lives inside advancedOptions in the ShipStation API response
+  // Match org via 3-tier fallback chain (shared with shipment-ingest)
   const storeId = shipment.advancedOptions?.storeId ?? shipment.storeId;
-  let orgId: string | null = null;
-  if (storeId) {
-    const { data: store } = await supabase
-      .from("warehouse_shipstation_stores")
-      .select("org_id")
-      .eq("store_id", storeId)
-      .maybeSingle();
-    orgId = store?.org_id ?? null;
-  }
+  const itemSkus = (shipment.shipmentItems ?? []).map((i) => i.sku).filter(Boolean) as string[];
 
-  // If org couldn't be matched, skip insert and create a review queue item
-  if (!orgId) {
+  const orgMatch = await matchShipmentOrg(supabase, storeId, itemSkus);
+
+  // If all tiers fail, create a review queue item with full shipment data for replay.
+  if (!orgMatch) {
+    logger.warn(`Unmatched shipment ${shipstationShipmentId} (poller), creating review queue item`);
     await supabase.from("warehouse_review_queue").upsert(
       {
         workspace_id: workspaceId,
         category: "shipment_org_match",
         severity: "medium" as const,
         title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
-        description: `ShipStation shipment ${shipstationShipmentId} from store ${storeId ?? "unknown"} could not be matched to an organization. Shipment data stored in metadata for replay after org mapping is configured. (Detected by poller)`,
+        description: `ShipStation shipment ${shipstationShipmentId} from store ${storeId ?? "unknown"} could not be matched via store mapping or SKU matching. (Detected by poller)`,
         metadata: {
           shipstation_shipment_id: shipstationShipmentId,
           store_id: storeId,
@@ -139,7 +136,9 @@ async function ingestFromPoll(
           ship_date: shipment.shipDate,
           shipping_cost: shipment.shipmentCost,
           voided: shipment.voided,
+          item_skus: itemSkus,
           item_count: shipment.shipmentItems?.length ?? 0,
+          match_attempts: ["store_mapping", "sku_match"],
           source: "poller",
         },
         status: "open" as const,
@@ -151,12 +150,16 @@ async function ingestFromPoll(
     return;
   }
 
+  logger.info(
+    `Ingesting shipment ${shipstationShipmentId} (poller): org=${orgMatch.orgId} via ${orgMatch.method}`,
+  );
+
   const { data: inserted, error } = await supabase
     .from("warehouse_shipments")
     .insert({
       workspace_id: workspaceId,
       shipstation_shipment_id: shipstationShipmentId,
-      org_id: orgId,
+      org_id: orgMatch.orgId,
       tracking_number: shipment.trackingNumber ?? null,
       carrier: shipment.carrierCode ?? null,
       service: shipment.serviceCode ?? null,

@@ -343,17 +343,27 @@ async function upsertImagesBulk(
     const img = imageEdges[i].node;
     const shopifyImageId = img.id.replace(/gid:\/\/shopify\/(ImageSource|ProductImage)\//, "");
 
-    await supabase.from("warehouse_product_images").upsert(
-      {
+    const { data: existing } = await supabase
+      .from("warehouse_product_images")
+      .select("id")
+      .eq("shopify_image_id", shopifyImageId)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from("warehouse_product_images")
+        .update({ src: img.url, alt: img.altText, position: i })
+        .eq("id", existing.id);
+    } else {
+      await supabase.from("warehouse_product_images").insert({
         product_id: productId,
         workspace_id: workspaceId,
         shopify_image_id: shopifyImageId,
         src: img.url,
         alt: img.altText,
         position: i,
-      },
-      { onConflict: "shopify_image_id", ignoreDuplicates: false },
-    );
+      });
+    }
   }
 
   return imageEdges[0].node.url;

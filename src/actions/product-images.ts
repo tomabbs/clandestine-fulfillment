@@ -119,7 +119,7 @@ export async function uploadProductImage(
   if (position === 0) {
     await serviceClient
       .from("warehouse_products")
-      .update({ image_url: publicUrl, updated_at: new Date().toISOString() })
+      .update({ images: [{ src: publicUrl }], updated_at: new Date().toISOString() })
       .eq("id", data.productId);
   }
 
@@ -155,7 +155,7 @@ export async function reorderProductImages(rawData: {
   if (firstImage) {
     await serviceClient
       .from("warehouse_products")
-      .update({ image_url: firstImage.src, updated_at: new Date().toISOString() })
+      .update({ images: [{ src: firstImage.src }], updated_at: new Date().toISOString() })
       .eq("id", data.productId);
   }
 
@@ -209,7 +209,7 @@ export async function deleteProductImage(rawData: { imageId: string }): Promise<
     await serviceClient
       .from("warehouse_products")
       .update({
-        image_url: nextImage?.src ?? null,
+        images: nextImage ? [{ src: nextImage.src }] : [],
         updated_at: new Date().toISOString(),
       })
       .eq("id", image.product_id);
@@ -255,7 +255,7 @@ export async function setFeaturedImage(rawData: {
   // Update product's featured image URL
   await serviceClient
     .from("warehouse_products")
-    .update({ image_url: targetImage.src, updated_at: new Date().toISOString() })
+    .update({ images: [{ src: targetImage.src }], updated_at: new Date().toISOString() })
     .eq("id", data.productId);
 
   return { success: true };

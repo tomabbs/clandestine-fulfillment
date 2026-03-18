@@ -8,7 +8,7 @@
  * Rule #48: Only triggered via Trigger.dev task — never called directly from Server Actions.
  */
 
-import { task } from "@trigger.dev/sdk";
+import { logger, task } from "@trigger.dev/sdk";
 import { Redis } from "@upstash/redis";
 import type { ShopifyProduct } from "@/lib/clients/shopify-client";
 import { fetchInventoryLevels, fetchProducts } from "@/lib/clients/shopify-client";
@@ -275,17 +275,37 @@ async function upsertImagesBackfill(
     const img = imageEdges[i].node;
     const shopifyImageId = img.id.replace(/gid:\/\/shopify\/(ImageSource|ProductImage)\//, "");
 
-    await supabase.from("warehouse_product_images").upsert(
-      {
+    // Check if this image already exists
+    const { data: existing } = await supabase
+      .from("warehouse_product_images")
+      .select("id")
+      .eq("shopify_image_id", shopifyImageId)
+      .maybeSingle();
+
+    if (existing) {
+      // Update existing
+      await supabase
+        .from("warehouse_product_images")
+        .update({ src: img.url, alt: img.altText, position: i })
+        .eq("id", existing.id);
+    } else {
+      // Insert new
+      const { error: insertErr } = await supabase.from("warehouse_product_images").insert({
         product_id: productId,
         workspace_id: workspaceId,
         shopify_image_id: shopifyImageId,
         src: img.url,
         alt: img.altText,
         position: i,
-      },
-      { onConflict: "shopify_image_id", ignoreDuplicates: false },
-    );
+      });
+      if (insertErr) {
+        logger.warn("Failed to insert image", {
+          productId,
+          shopifyImageId,
+          error: insertErr.message,
+        });
+      }
+    }
   }
 
   return imageEdges[0].node.url;

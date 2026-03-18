@@ -11,6 +11,10 @@ function createMockSupabase(tableData: Record<string, unknown>) {
     from(table: string) {
       const result = tableData[table] ?? [];
       const resolved = { data: result, error: null };
+      const maybeSingleResolved = {
+        data: Array.isArray(result) ? (result.length > 0 ? result[0] : null) : result,
+        error: null,
+      };
 
       const handler: ProxyHandler<object> = {
         get(_target, prop) {
@@ -19,6 +23,9 @@ function createMockSupabase(tableData: Record<string, unknown>) {
           }
           if (prop === "single") {
             return () => Promise.resolve(resolved);
+          }
+          if (prop === "maybeSingle") {
+            return () => Promise.resolve(maybeSingleResolved);
           }
           // All chainable methods return the proxy itself
           return () => new Proxy({}, handler);

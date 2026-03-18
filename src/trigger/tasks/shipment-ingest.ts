@@ -2,10 +2,11 @@
 // Rule #7: service_role for Trigger tasks
 // Rule #12: Payload is IDs only — task fetches data from Postgres
 
-import { task } from "@trigger.dev/sdk";
+import { logger, task } from "@trigger.dev/sdk";
 import { z } from "zod";
 import type { ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
 
 const payloadSchema = z.object({
   webhookEventId: z.string().uuid(),
@@ -14,6 +15,9 @@ const payloadSchema = z.object({
 export const shipmentIngestTask = task({
   id: "shipment-ingest",
   maxDuration: 120,
+  queue: {
+    concurrencyLimit: 5,
+  },
   run: async (payload: z.infer<typeof payloadSchema>) => {
     const { webhookEventId } = payloadSchema.parse(payload);
     const supabase = createServiceRoleClient();
@@ -88,27 +92,22 @@ async function ingestSingleShipment(
 
   if (existing) return;
 
-  // Match org via warehouse_shipstation_stores
-  // storeId lives inside advancedOptions in the ShipStation API response
+  // Match org via 3-tier fallback chain
   const storeId = shipment.advancedOptions?.storeId ?? shipment.storeId;
-  let orgId: string | null = null;
-  if (storeId) {
-    const { data: store } = await supabase
-      .from("warehouse_shipstation_stores")
-      .select("org_id")
-      .eq("store_id", storeId)
-      .maybeSingle();
-    orgId = store?.org_id ?? null;
-  }
+  const itemSkus = (shipment.shipmentItems ?? []).map((i) => i.sku).filter(Boolean) as string[];
 
-  // If org couldn't be matched, skip insert and create a review queue item
-  if (!orgId) {
+  const orgMatch = await matchShipmentOrg(supabase, storeId, itemSkus);
+
+  // If all tiers fail, create a review queue item with full shipment data for replay.
+  // org_id is NOT NULL on warehouse_shipments, so we can't insert without a match.
+  if (!orgMatch) {
+    logger.warn(`Unmatched shipment ${shipstationShipmentId}, creating review queue item`);
     await supabase.from("warehouse_review_queue").upsert(
       {
         category: "shipment_org_match",
         severity: "medium" as const,
         title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
-        description: `ShipStation shipment ${shipstationShipmentId} from store ${storeId ?? "unknown"} could not be matched to an organization. Shipment data stored in metadata for replay after org mapping is configured.`,
+        description: `ShipStation shipment ${shipstationShipmentId} from store ${storeId ?? "unknown"} could not be matched to an organization via store mapping or SKU matching. Full shipment data stored in metadata for replay after org mapping is configured.`,
         metadata: {
           shipstation_shipment_id: shipstationShipmentId,
           store_id: storeId,
@@ -118,7 +117,10 @@ async function ingestSingleShipment(
           ship_date: shipment.shipDate,
           shipping_cost: shipment.shipmentCost,
           voided: shipment.voided,
+          item_skus: itemSkus,
           item_count: shipment.shipmentItems?.length ?? 0,
+          match_attempts: ["store_mapping", "sku_match"],
+          ship_to: shipment.shipTo ?? null,
         },
         status: "open" as const,
         group_key: `shipment_org_match:${shipstationShipmentId}`,
@@ -129,12 +131,16 @@ async function ingestSingleShipment(
     return;
   }
 
+  logger.info(
+    `Ingesting shipment ${shipstationShipmentId}: org=${orgMatch.orgId} via ${orgMatch.method}`,
+  );
+
   // Insert shipment
   const { data: inserted, error: insertError } = await supabase
     .from("warehouse_shipments")
     .insert({
       shipstation_shipment_id: shipstationShipmentId,
-      org_id: orgId,
+      org_id: orgMatch.orgId,
       tracking_number: shipment.trackingNumber ?? null,
       carrier: shipment.carrierCode ?? null,
       service: shipment.serviceCode ?? null,

@@ -230,7 +230,8 @@ export default function CatalogPage() {
               }>;
               const org = product.organizations as { id: string; name: string } | null;
               const primaryImage = images.sort((a, b) => a.position - b.position)[0];
-              const thumbSrc = primaryImage?.src ?? product.image_url;
+              const imagesJson = product.images as Array<{ src: string }> | null;
+              const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
 
               return (
                 <TableRow

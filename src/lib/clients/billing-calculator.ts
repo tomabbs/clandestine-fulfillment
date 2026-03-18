@@ -37,6 +37,19 @@ interface StorageLineItem {
   storage_fee: number;
 }
 
+interface EffectiveRate {
+  amount: number;
+  source: "override" | "default";
+  ruleName: string;
+}
+
+interface AppliedRate {
+  ruleType: string;
+  ruleName: string;
+  amount: number;
+  source: "override" | "default";
+}
+
 export interface BillingSnapshotData {
   billing_period: string;
   org_id: string;
@@ -50,6 +63,7 @@ export interface BillingSnapshotData {
     amount: number;
     reason: string | null;
   }>;
+  applied_rates: AppliedRate[];
   totals: {
     total_shipping: number;
     total_pick_pack: number;
@@ -57,6 +71,64 @@ export interface BillingSnapshotData {
     total_storage: number;
     total_adjustments: number;
     grand_total: number;
+  };
+}
+
+/**
+ * Two-tier rate lookup: org-specific override → workspace default.
+ *
+ * Mirrors the old app's getRateForOrg pattern. Checks
+ * warehouse_billing_rule_overrides for an org-specific amount first,
+ * then falls back to the workspace-default rule from warehouse_billing_rules.
+ *
+ * @param effectiveDate - The billing period start date (YYYY-MM-DD) for
+ *   effective_from comparison.
+ */
+export async function getEffectiveRate(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  orgId: string,
+  ruleType: string,
+  effectiveDate: string,
+): Promise<EffectiveRate | null> {
+  // Find the most recent active default rule for this type
+  const { data: defaultRule } = await supabase
+    .from("warehouse_billing_rules")
+    .select("id, amount, rule_name")
+    .eq("workspace_id", workspaceId)
+    .eq("rule_type", ruleType)
+    .eq("is_active", true)
+    .lte("effective_from", effectiveDate)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!defaultRule) return null;
+
+  // Check for an org-specific override on this rule
+  const { data: override } = await supabase
+    .from("warehouse_billing_rule_overrides")
+    .select("override_amount")
+    .eq("workspace_id", workspaceId)
+    .eq("org_id", orgId)
+    .eq("rule_id", defaultRule.id)
+    .lte("effective_from", effectiveDate)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (override) {
+    return {
+      amount: Number(override.override_amount),
+      source: "override",
+      ruleName: defaultRule.rule_name,
+    };
+  }
+
+  return {
+    amount: Number(defaultRule.amount),
+    source: "default",
+    ruleName: defaultRule.rule_name,
   };
 }
 
@@ -142,7 +214,7 @@ export async function calculateBillingForOrg(
   const allShipmentItems = shipmentItemsResult.data ?? [];
   const formatRules = formatRulesResult.data ?? [];
   const formatCosts = formatCostsResult.data ?? [];
-  const rules = rulesResult.data ?? [];
+  const _rules = rulesResult.data ?? [];
   const adjustments = adjustmentsResult.data ?? [];
   const org = orgResult.data;
   const inventoryLevels = inventoryResult.data ?? [];
@@ -240,11 +312,25 @@ export async function calculateBillingForOrg(
     totalMaterials += s.material_cost;
   }
 
-  // Apply billing rules (per_shipment, per_item types)
-  for (const rule of rules) {
-    if (rule.rule_type === "per_shipment") {
-      totalPickPack += rule.amount * includedShipments.length;
-    }
+  // Apply billing rules with org-specific overrides (two-tier lookup)
+  const effectiveDate = billingPeriod.start;
+  const appliedRates: AppliedRate[] = [];
+
+  const perShipmentRate = await getEffectiveRate(
+    supabase,
+    workspaceId,
+    orgId,
+    "per_shipment",
+    effectiveDate,
+  );
+  if (perShipmentRate) {
+    totalPickPack += perShipmentRate.amount * includedShipments.length;
+    appliedRates.push({
+      ruleType: "per_shipment",
+      ruleName: perShipmentRate.ruleName,
+      amount: perShipmentRate.amount,
+      source: perShipmentRate.source,
+    });
   }
 
   // Storage calculation
@@ -285,9 +371,23 @@ export async function calculateBillingForOrg(
       }
     }
 
-    // Find the storage rule for fee amount
-    const storageRule = rules.find((r) => r.rule_type === "storage");
-    const storageFeePerUnit = storageRule?.amount ?? 0;
+    // Find the storage rule — with org-specific override support
+    const storageRate = await getEffectiveRate(
+      supabase,
+      workspaceId,
+      orgId,
+      "storage",
+      effectiveDate,
+    );
+    const storageFeePerUnit = storageRate?.amount ?? 0;
+    if (storageRate) {
+      appliedRates.push({
+        ruleType: "storage",
+        ruleName: storageRate.ruleName,
+        amount: storageRate.amount,
+        source: storageRate.source,
+      });
+    }
 
     for (const inv of inventoryLevels) {
       if (inv.available <= 0) continue;
@@ -328,6 +428,7 @@ export async function calculateBillingForOrg(
       amount: a.amount,
       reason: a.reason,
     })),
+    applied_rates: appliedRates,
     totals: {
       total_shipping: totalShipping,
       total_pick_pack: totalPickPack,
