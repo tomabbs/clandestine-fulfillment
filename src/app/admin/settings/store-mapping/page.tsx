@@ -2,6 +2,7 @@
 
 import { ArrowRight, CheckCircle2, Loader2, RefreshCw, Unlink } from "lucide-react";
 import { useState } from "react";
+import { getUserContext } from "@/actions/auth";
 import {
   type AutoMatchSuggestion,
   autoMatchStores,
@@ -26,25 +27,31 @@ import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-
 export default function StoreMappingPage() {
   const [suggestions, setSuggestions] = useState<AutoMatchSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  const { data: ctx } = useAppQuery({
+    queryKey: ["user-context"],
+    queryFn: () => getUserContext(),
+    tier: CACHE_TIERS.STABLE,
+  });
+  const workspaceId = ctx?.workspaceId ?? "";
+
   const { data: stores, isLoading } = useAppQuery({
-    queryKey: queryKeys.storeMappings.list(WORKSPACE_ID),
-    queryFn: () => getStoreMappings(WORKSPACE_ID),
+    queryKey: queryKeys.storeMappings.list(workspaceId),
+    queryFn: () => getStoreMappings(workspaceId),
     tier: CACHE_TIERS.SESSION,
+    enabled: !!workspaceId,
   });
 
   const syncMutation = useAppMutation({
-    mutationFn: () => syncStoresFromShipStation(WORKSPACE_ID),
+    mutationFn: () => syncStoresFromShipStation(workspaceId),
     invalidateKeys: [queryKeys.storeMappings.all],
   });
 
   const autoMatchMutation = useAppMutation({
-    mutationFn: () => autoMatchStores(WORKSPACE_ID),
+    mutationFn: () => autoMatchStores(workspaceId),
     invalidateKeys: [],
     onSuccess: (data) => {
       setSuggestions(data);

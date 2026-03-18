@@ -56,8 +56,6 @@ export function computeDelta(webhookQuantity: number, warehouseQuantity: number)
   return webhookQuantity - warehouseQuantity;
 }
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001"; // TODO: multi-workspace
-
 export const processShopifyWebhookTask = task({
   id: "process-shopify-webhook",
   maxDuration: 60,
@@ -100,7 +98,7 @@ export const processShopifyWebhookTask = task({
       .from("warehouse_product_variants")
       .select("sku, id")
       .eq("shopify_inventory_item_id", String(parsed.inventoryItemId))
-      .eq("workspace_id", WORKSPACE_ID)
+      .eq("workspace_id", event.workspace_id)
       .single();
 
     if (!variant) {
@@ -137,7 +135,7 @@ export const processShopifyWebhookTask = task({
     const { data: level } = await supabase
       .from("warehouse_inventory_levels")
       .select("available")
-      .eq("workspace_id", WORKSPACE_ID)
+      .eq("workspace_id", event.workspace_id)
       .eq("sku", variant.sku)
       .single();
 
@@ -156,7 +154,7 @@ export const processShopifyWebhookTask = task({
     // Rule #64: This calls the record_inventory_change_txn RPC internally
     try {
       const result = await recordInventoryChange({
-        workspaceId: WORKSPACE_ID,
+        workspaceId: event.workspace_id,
         sku: variant.sku,
         delta,
         source: "shopify",

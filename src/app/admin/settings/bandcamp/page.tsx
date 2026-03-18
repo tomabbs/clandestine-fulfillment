@@ -13,6 +13,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
+import { getUserContext } from "@/actions/auth";
 import {
   createBandcampConnection,
   deleteBandcampConnection,
@@ -36,8 +37,6 @@ import {
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
-
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
 
 function HealthBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   if (!lastSyncedAt) {
@@ -77,20 +76,29 @@ export default function BandcampAccountsPage() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newConn, setNewConn] = useState({ orgId: "", bandId: "", bandName: "", bandUrl: "" });
 
+  const { data: ctx } = useAppQuery({
+    queryKey: ["user-context"],
+    queryFn: () => getUserContext(),
+    tier: CACHE_TIERS.STABLE,
+  });
+  const workspaceId = ctx?.workspaceId ?? "";
+
   const { data: accounts, isLoading } = useAppQuery({
-    queryKey: queryKeys.bandcamp.accounts(WORKSPACE_ID),
-    queryFn: () => getBandcampAccounts(WORKSPACE_ID),
+    queryKey: queryKeys.bandcamp.accounts(workspaceId),
+    queryFn: () => getBandcampAccounts(workspaceId),
     tier: CACHE_TIERS.SESSION,
+    enabled: !!workspaceId,
   });
 
   const { data: orgs } = useAppQuery({
-    queryKey: ["organizations", WORKSPACE_ID],
-    queryFn: () => getOrganizationsForWorkspace(WORKSPACE_ID),
+    queryKey: ["organizations", workspaceId],
+    queryFn: () => getOrganizationsForWorkspace(workspaceId),
     tier: CACHE_TIERS.STABLE,
+    enabled: !!workspaceId,
   });
 
   const syncMutation = useAppMutation({
-    mutationFn: () => triggerBandcampSync(WORKSPACE_ID),
+    mutationFn: () => triggerBandcampSync(workspaceId),
     invalidateKeys: [queryKeys.bandcamp.all],
     onSuccess: () => setSyncingId(null),
     onError: () => setSyncingId(null),
@@ -99,7 +107,7 @@ export default function BandcampAccountsPage() {
   const createMutation = useAppMutation({
     mutationFn: () =>
       createBandcampConnection({
-        workspaceId: WORKSPACE_ID,
+        workspaceId: workspaceId,
         orgId: newConn.orgId,
         bandId: Number(newConn.bandId),
         bandName: newConn.bandName,

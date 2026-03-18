@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { parseInboundEmail } from "@/lib/clients/resend-client";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
@@ -31,8 +32,6 @@ function verifySvixSignature(
   return false;
 }
 
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-
 export async function POST(req: Request): Promise<Response> {
   // Rule #36: Always use req.text() for raw body
   const rawBody = await req.text();
@@ -58,11 +57,18 @@ export async function POST(req: Request): Promise<Response> {
 
   const supabase = createServiceRoleClient();
 
+  // Resolve workspace from DB (no user auth in webhook context)
+  const workspaceIds = await getAllWorkspaceIds(supabase);
+  const workspaceId = workspaceIds[0];
+  if (!workspaceId) {
+    return NextResponse.json({ error: "No workspace configured" }, { status: 500 });
+  }
+
   // Rule #62: Dedup via webhook_events INSERT ON CONFLICT
   const { data: dedupRow } = await supabase
     .from("webhook_events")
     .insert({
-      workspace_id: WORKSPACE_ID,
+      workspace_id: workspaceId,
       platform: "resend",
       external_webhook_id: svixId,
       payload: JSON.parse(rawBody),
@@ -111,7 +117,7 @@ export async function POST(req: Request): Promise<Response> {
 
   // Strategy 3: Unmatched — create review queue item for staff to manually route
   await supabase.from("warehouse_review_queue").insert({
-    workspace_id: WORKSPACE_ID,
+    workspace_id: workspaceId,
     source: "support_email",
     severity: "medium",
     group_key: `unmatched_email:${senderAddress}`,
@@ -162,10 +168,20 @@ async function createConversationFromEmail(
   orgId: string,
   email: { subject: string; body: string; messageId: string },
 ): Promise<void> {
+  // Resolve workspace from the org
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("workspace_id")
+    .eq("id", orgId)
+    .single();
+
+  const wsId = org?.workspace_id;
+  if (!wsId) return;
+
   const { data: conversation } = await supabase
     .from("support_conversations")
     .insert({
-      workspace_id: WORKSPACE_ID,
+      workspace_id: wsId,
       org_id: orgId,
       subject: email.subject,
       status: "waiting_on_staff",
@@ -178,7 +194,7 @@ async function createConversationFromEmail(
 
   await supabase.from("support_messages").insert({
     conversation_id: conversation.id,
-    workspace_id: WORKSPACE_ID,
+    workspace_id: wsId,
     sender_type: "client",
     body: email.body,
     email_message_id: email.messageId,

@@ -1,15 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { getUserContext } from "@/actions/auth";
 import { getBillingSnapshotDetail, getBillingSnapshots } from "@/actions/billing";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
-
-// In production these come from the auth context (RLS-filtered)
-const WORKSPACE_ID = "00000000-0000-0000-0000-000000000001";
-const ORG_ID = "00000000-0000-0000-0000-000000000002";
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -34,10 +31,19 @@ function StatusBadge({ status }: { status: string }) {
 export default function BillingPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const { data: ctx } = useAppQuery({
+    queryKey: ["user-context"],
+    queryFn: () => getUserContext(),
+    tier: CACHE_TIERS.STABLE,
+  });
+  const workspaceId = ctx?.workspaceId ?? "";
+  const orgId = ctx?.orgId ?? "";
+
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.billing.snapshots({ orgId: ORG_ID }),
-    queryFn: () => getBillingSnapshots({ workspaceId: WORKSPACE_ID, orgId: ORG_ID, pageSize: 50 }),
+    queryKey: queryKeys.billing.snapshots({ orgId }),
+    queryFn: () => getBillingSnapshots({ workspaceId, orgId, pageSize: 50 }),
+    enabled: !!workspaceId && !!orgId,
   });
 
   if (selectedId) {
