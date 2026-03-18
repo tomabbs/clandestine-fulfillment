@@ -1,8 +1,15 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, ExternalLink, Minus, Package, Plus } from "lucide-react";
-import { useState } from "react";
-import { adjustInventory, getInventoryDetail, getInventoryLevels } from "@/actions/inventory";
+import { useCallback, useState } from "react";
+import {
+  adjustInventory,
+  getInventoryDetail,
+  getInventoryLevels,
+  updateVariantFormat,
+} from "@/actions/inventory";
+import { EditableNumberCell, EditableSelectCell } from "@/components/shared/editable-cell";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -19,9 +26,23 @@ import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
+const FORMAT_OPTIONS = [
+  { value: "", label: "—", className: "text-muted-foreground" },
+  { value: "LP", label: "LP" },
+  { value: "2xLP", label: "2xLP" },
+  { value: "CD", label: "CD" },
+  { value: "Cassette", label: "Cassette" },
+  { value: '7"', label: '7"' },
+  { value: '10"', label: '10"' },
+  { value: "Box Set", label: "Box Set" },
+  { value: "Merch", label: "Merch" },
+  { value: "Other", label: "Other" },
+];
+
 const PAGE_SIZES = [10, 25, 50, 100];
 
 export default function InventoryPage() {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState({
     orgId: "",
     format: "",
@@ -59,6 +80,10 @@ export default function InventoryPage() {
     tier: CACHE_TIERS.REALTIME,
     enabled: !!expandedSku,
   });
+
+  const invalidateInventory = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.inventory.all });
+  }, [queryClient]);
 
   const adjustMutation = useAppMutation({
     mutationFn: async () => {
@@ -161,12 +186,30 @@ export default function InventoryPage() {
                   <TableCell className="text-muted-foreground text-sm">
                     {row.orgName ?? "—"}
                   </TableCell>
-                  <TableCell className="text-right font-mono">{row.available}</TableCell>
+                  <EditableNumberCell
+                    value={row.available}
+                    prefix=""
+                    placeholder="0"
+                    className="text-right font-mono"
+                    onSave={async (newValue) => {
+                      const target = newValue ?? 0;
+                      const delta = target - row.available;
+                      if (delta === 0) return;
+                      await adjustInventory(row.sku, delta, "Inline quantity edit");
+                      invalidateInventory();
+                    }}
+                  />
                   <TableCell className="text-right font-mono">{row.committed}</TableCell>
                   <TableCell className="text-right font-mono">{row.incoming}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {row.formatName ?? "—"}
-                  </TableCell>
+                  <EditableSelectCell
+                    value={row.formatName ?? ""}
+                    options={FORMAT_OPTIONS}
+                    className="text-sm"
+                    onSave={async (newValue) => {
+                      await updateVariantFormat(row.variantId, newValue);
+                      invalidateInventory();
+                    }}
+                  />
                   <TableCell>
                     <Button
                       variant="outline"

@@ -245,7 +245,7 @@ export default function CatalogPage() {
                   alt: string | null;
                   position: number;
                 }>;
-                const org = product.organizations as { id: string; name: string } | null;
+                const _org = product.organizations as { id: string; name: string } | null;
                 const primaryImage = images.sort((a, b) => a.position - b.position)[0];
                 const imagesJson = product.images as Array<{ src: string }> | null;
                 const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
@@ -273,12 +273,13 @@ export default function CatalogPage() {
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-[300px]">
-                      <div className="font-medium leading-tight truncate">{product.title}</div>
-                      <div className="text-muted-foreground text-xs truncate">
-                        {org?.name ?? product.vendor ?? ""}
-                      </div>
-                    </TableCell>
+                    <EditableTextCell
+                      value={product.title}
+                      onSave={async (v) => {
+                        await updateProductField(product.id, "title", v);
+                      }}
+                      className="max-w-[300px] font-medium"
+                    />
                     <EditableTextCell
                       value={product.vendor}
                       onSave={async (v) => {
@@ -293,9 +294,13 @@ export default function CatalogPage() {
                       }}
                       className="font-mono text-xs"
                     />
-                    <TableCell className="hidden lg:table-cell text-right text-sm text-muted-foreground">
-                      —
-                    </TableCell>
+                    <EditableNumberCell
+                      value={product.firstVariantCost}
+                      onSave={async (v) => {
+                        if (firstVarId) await updateVariantField(firstVarId, "cost", v);
+                      }}
+                      className="hidden lg:table-cell"
+                    />
                     <EditableNumberCell
                       value={product.firstVariantPrice}
                       onSave={async (v) => {

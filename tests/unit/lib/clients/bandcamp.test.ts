@@ -127,20 +127,26 @@ describe("bandcamp client", () => {
   });
 
   describe("assembleBandcampTitle", () => {
-    it("builds title with album and item (no artist prefix)", () => {
-      expect(assembleBandcampTitle("Artist", "Album", "LP")).toBe("Album - LP");
+    it("builds title with artist and item", () => {
+      expect(assembleBandcampTitle("Artist", "Album", "LP")).toBe("Artist - LP");
     });
 
-    it("uses item title alone when album matches item", () => {
-      expect(assembleBandcampTitle("Artist", "Same Title", "Same Title")).toBe("Same Title");
+    it("keeps artist even when album matches item", () => {
+      expect(assembleBandcampTitle("Artist", "Same Title", "Same Title")).toBe(
+        "Artist - Same Title",
+      );
     });
 
-    it("uses item title alone when album is null", () => {
-      expect(assembleBandcampTitle("Artist", null, "CD")).toBe("CD");
+    it("keeps artist when album is null", () => {
+      expect(assembleBandcampTitle("Artist", null, "CD")).toBe("Artist - CD");
     });
 
-    it("uses item title alone when album is undefined", () => {
-      expect(assembleBandcampTitle("Artist", undefined, "Tape")).toBe("Tape");
+    it("uses item alone when artist matches item", () => {
+      expect(assembleBandcampTitle("Tape", undefined, "Tape")).toBe("Tape");
+    });
+
+    it("uses item alone when artist is empty", () => {
+      expect(assembleBandcampTitle("", null, "Some Item")).toBe("Some Item");
     });
   });
 

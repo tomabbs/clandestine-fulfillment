@@ -224,18 +224,21 @@ export async function updateQuantities(
 /**
  * Build a product title from Bandcamp merch item metadata.
  *
- * Vendor/org is stored separately (warehouse_products.vendor + organizations),
- * so it is NOT included in the title. Title format:
- *   - "{albumTitle} - {itemTitle}" when album differs from item
- *   - "{itemTitle}" otherwise
+ * Artist name is the band/performer — MUST be in the title for identification.
+ * Vendor/org is stored separately and should NOT be duplicated here.
+ *
+ * Format:
+ *   - "{artistName} - {itemTitle}" when artist exists and differs from itemTitle
+ *   - "{itemTitle}" when artist is empty, null, or same as itemTitle
  */
 export function assembleBandcampTitle(
-  _artistName: string,
-  albumTitle: string | null | undefined,
+  artistName: string,
+  _albumTitle: string | null | undefined,
   itemTitle: string,
 ): string {
-  if (albumTitle && albumTitle !== itemTitle) {
-    return `${albumTitle} - ${itemTitle}`;
+  const artist = artistName?.trim();
+  if (artist && artist !== itemTitle) {
+    return `${artist} - ${itemTitle}`;
   }
   return itemTitle;
 }
