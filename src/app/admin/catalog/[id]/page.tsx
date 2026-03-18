@@ -48,6 +48,7 @@ const PRODUCT_TYPES = ["LP", "CD", "Cassette", "Shirt", "Bundle", "Merch", "Othe
 const WEIGHT_UNITS = ["lb", "oz", "kg", "g"];
 
 interface VariantRowState {
+  sku: string;
   title: string;
   price: string;
   compareAt: string;
@@ -58,6 +59,7 @@ interface VariantRowState {
 
 function variantToRow(v: WarehouseProductVariant): VariantRowState {
   return {
+    sku: v.sku,
     title: v.title ?? "",
     price: v.price != null ? String(v.price) : "",
     compareAt: v.compare_at_price != null ? String(v.compare_at_price) : "",
@@ -65,6 +67,24 @@ function variantToRow(v: WarehouseProductVariant): VariantRowState {
     weightUnit: v.weight_unit ?? "lb",
     barcode: v.barcode ?? "",
   };
+}
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function invColor(available: number): string {
+  if (available < 0) return "text-red-600 dark:text-red-400";
+  if (available < 10) return "text-amber-600 dark:text-amber-400";
+  return "";
 }
 
 export default function ProductDetailPage() {
@@ -211,6 +231,12 @@ export default function ProductDetailPage() {
                   >
                     Shopify <ExternalLinkIcon className="size-3" />
                   </a>
+                </>
+              )}
+              {product.synced_at && (
+                <>
+                  {" · "}
+                  <span title={product.synced_at}>Last synced: {timeAgo(product.synced_at)}</span>
                 </>
               )}
             </p>
@@ -375,6 +401,7 @@ export default function ProductDetailPage() {
                     <TableHead className="w-20">Weight</TableHead>
                     <TableHead className="w-16">Unit</TableHead>
                     <TableHead>Barcode</TableHead>
+                    <TableHead className="w-20">Format</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -391,7 +418,11 @@ export default function ProductDetailPage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <span className="font-mono text-xs text-muted-foreground">{v.sku}</span>
+                          <Input
+                            className="h-8 text-sm font-mono"
+                            value={e.sku}
+                            onChange={(ev) => setField(v.id, "sku", ev.currentTarget.value)}
+                          />
                         </TableCell>
                         <TableCell>
                           <Input
@@ -440,12 +471,21 @@ export default function ProductDetailPage() {
                             onChange={(ev) => setField(v.id, "barcode", ev.currentTarget.value)}
                           />
                         </TableCell>
+                        <TableCell>
+                          {v.format_name ? (
+                            <Badge variant="secondary" className="text-xs">
+                              {v.format_name}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                   {variants.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">
                         No variants.
                       </TableCell>
                     </TableRow>
@@ -501,7 +541,9 @@ export default function ProductDetailPage() {
                         <div className="grid grid-cols-3 gap-4 mb-3">
                           <div>
                             <p className="text-xs text-muted-foreground">Available</p>
-                            <p className="text-lg font-semibold">{inv.available}</p>
+                            <p className={`text-lg font-semibold ${invColor(inv.available)}`}>
+                              {inv.available}
+                            </p>
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground">Committed</p>
