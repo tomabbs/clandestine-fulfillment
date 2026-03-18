@@ -187,6 +187,12 @@ function buildStripeLineItems(
       amount: Math.round(snapshot.totals.total_materials * 100),
     });
   }
+  if (snapshot.totals.total_drop_ship > 0) {
+    items.push({
+      description: "Drop Ship Handling",
+      amount: Math.round(snapshot.totals.total_drop_ship * 100),
+    });
+  }
   if (snapshot.totals.total_storage > 0) {
     items.push({
       description: `Storage — ${snapshot.storage_line_items.length} SKUs`,

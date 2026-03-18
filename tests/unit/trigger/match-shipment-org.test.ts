@@ -33,7 +33,7 @@ describe("matchShipmentOrg", () => {
               eq: vi.fn().mockReturnValue({
                 not: vi.fn().mockReturnValue({
                   maybeSingle: vi.fn().mockResolvedValue({
-                    data: { org_id: "org-alpha" },
+                    data: { org_id: "org-alpha", is_drop_ship: false },
                     error: null,
                   }),
                 }),
@@ -46,7 +46,7 @@ describe("matchShipmentOrg", () => {
 
       const result = await matchShipmentOrg(makeSupabase(), 12345, ["SKU-001"]);
 
-      expect(result).toEqual({ orgId: "org-alpha", method: "store_mapping" });
+      expect(result).toEqual({ orgId: "org-alpha", method: "store_mapping", isDropShip: false });
     });
 
     it("skips tier 1 when storeId is null", async () => {
@@ -129,7 +129,7 @@ describe("matchShipmentOrg", () => {
 
       const result = await matchShipmentOrg(makeSupabase(), 99999, ["LP-001", "LP-002"]);
 
-      expect(result).toEqual({ orgId: "org-beta", method: "sku_match" });
+      expect(result).toEqual({ orgId: "org-beta", method: "sku_match", isDropShip: false });
     });
 
     it("picks majority org when SKUs map to multiple orgs", async () => {
@@ -164,7 +164,7 @@ describe("matchShipmentOrg", () => {
 
       const result = await matchShipmentOrg(makeSupabase(), null, ["SKU-A", "SKU-B", "SKU-C"]);
 
-      expect(result).toEqual({ orgId: "org-majority", method: "sku_match" });
+      expect(result).toEqual({ orgId: "org-majority", method: "sku_match", isDropShip: false });
     });
 
     it("filters out UNKNOWN and empty SKUs", async () => {

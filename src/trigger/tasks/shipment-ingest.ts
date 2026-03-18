@@ -6,6 +6,7 @@ import { logger, task } from "@trigger.dev/sdk";
 import { z } from "zod";
 import type { ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { detectShipmentFormat } from "@/trigger/lib/format-detection";
 import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
 
 const payloadSchema = z.object({
@@ -60,10 +61,14 @@ export const shipmentIngestTask = task({
           shipmentData as ShipStationShipment,
         ]);
 
+    // Resolve workspace
+    const { data: workspace } = await supabase.from("workspaces").select("id").limit(1).single();
+    if (!workspace) throw new Error("No workspace found");
+
     let processed = 0;
 
     for (const shipment of shipments) {
-      await ingestSingleShipment(supabase, shipment);
+      await ingestSingleShipment(supabase, shipment, workspace.id);
       processed++;
     }
 
@@ -80,6 +85,7 @@ export const shipmentIngestTask = task({
 async function ingestSingleShipment(
   supabase: ReturnType<typeof createServiceRoleClient>,
   shipment: ShipStationShipment,
+  workspaceId: string,
 ) {
   const shipstationShipmentId = String(shipment.shipmentId);
 
@@ -104,6 +110,7 @@ async function ingestSingleShipment(
     logger.warn(`Unmatched shipment ${shipstationShipmentId}, creating review queue item`);
     await supabase.from("warehouse_review_queue").upsert(
       {
+        workspace_id: workspaceId,
         category: "shipment_org_match",
         severity: "medium" as const,
         title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
@@ -135,10 +142,14 @@ async function ingestSingleShipment(
     `Ingesting shipment ${shipstationShipmentId}: org=${orgMatch.orgId} via ${orgMatch.method}`,
   );
 
+  // Count total units for drop-ship billing
+  const totalUnits = (shipment.shipmentItems ?? []).reduce((sum, i) => sum + (i.quantity ?? 1), 0);
+
   // Insert shipment
   const { data: inserted, error: insertError } = await supabase
     .from("warehouse_shipments")
     .insert({
+      workspace_id: workspaceId,
       shipstation_shipment_id: shipstationShipmentId,
       org_id: orgMatch.orgId,
       tracking_number: shipment.trackingNumber ?? null,
@@ -153,6 +164,8 @@ async function ingestSingleShipment(
       label_data: shipment.shipTo ? { shipTo: shipment.shipTo } : null,
       voided: shipment.voided ?? false,
       billed: false,
+      is_drop_ship: orgMatch.isDropShip,
+      total_units: totalUnits,
     })
     .select("id")
     .single();
@@ -178,4 +191,38 @@ async function ingestSingleShipment(
       throw new Error(`Failed to insert shipment items: ${itemsError.message}`);
     }
   }
+
+  // Detect shipment format for billing/materials
+  const formatItems = (shipment.shipmentItems ?? []).map((item) => ({
+    sku: item.sku ?? null,
+    name: item.name ?? null,
+    weight: shipment.weight?.value ?? null,
+  }));
+  const formatDetection = detectShipmentFormat(formatItems);
+
+  // Store detected format in label_data JSONB alongside existing shipTo
+  await supabase
+    .from("warehouse_shipments")
+    .update({
+      label_data: {
+        ...(shipment.shipTo ? { shipTo: shipment.shipTo } : {}),
+        detectedFormat: {
+          formatKey: formatDetection.formatKey,
+          displayName: formatDetection.displayName,
+          confidence: formatDetection.confidence,
+          matchedBy: formatDetection.matchedBy,
+          itemFormats: formatDetection.itemFormats,
+        },
+      },
+    })
+    .eq("id", inserted.id);
+
+  logger.info(
+    `Shipment ${shipstationShipmentId} format: ${formatDetection.formatKey} (${formatDetection.confidence})`,
+    {
+      format: formatDetection.formatKey,
+      confidence: formatDetection.confidence,
+      matchedBy: formatDetection.matchedBy,
+    },
+  );
 }

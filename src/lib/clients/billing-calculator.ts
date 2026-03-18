@@ -16,6 +16,9 @@ interface ShipmentLineItem {
   format_name: string;
   pick_pack_cost: number;
   material_cost: number;
+  drop_ship_cost: number;
+  is_drop_ship: boolean;
+  total_units: number;
   items: Array<{
     sku: string;
     quantity: number;
@@ -68,6 +71,7 @@ export interface BillingSnapshotData {
     total_shipping: number;
     total_pick_pack: number;
     total_materials: number;
+    total_drop_ship: number;
     total_storage: number;
     total_adjustments: number;
     grand_total: number;
@@ -283,6 +287,8 @@ export async function calculateBillingForOrg(
     // Detect format from first item
     const formatName = detectFormat(primaryTitle, primarySku, [], formatRules);
     const costs = formatCostMap.get(formatName) ?? { pick_pack_cost: 0, material_cost: 0 };
+    const isDropShip = shipment.is_drop_ship ?? false;
+    const totalUnits = shipment.total_units ?? items.reduce((s, i) => s + (i.quantity ?? 1), 0);
 
     includedShipments.push({
       shipment_id: shipment.id,
@@ -291,8 +297,11 @@ export async function calculateBillingForOrg(
       carrier: shipment.carrier,
       shipping_cost: shipment.shipping_cost ?? 0,
       format_name: formatName,
-      pick_pack_cost: costs.pick_pack_cost,
+      pick_pack_cost: isDropShip ? 0 : costs.pick_pack_cost,
       material_cost: costs.material_cost,
+      drop_ship_cost: 0, // calculated below with rates
+      is_drop_ship: isDropShip,
+      total_units: totalUnits,
       items: items.map((i) => ({
         sku: i.sku,
         quantity: i.quantity,
@@ -305,6 +314,7 @@ export async function calculateBillingForOrg(
   let totalShipping = 0;
   let totalPickPack = 0;
   let totalMaterials = 0;
+  let totalDropShip = 0;
 
   for (const s of includedShipments) {
     totalShipping += s.shipping_cost;
@@ -316,6 +326,10 @@ export async function calculateBillingForOrg(
   const effectiveDate = billingPeriod.start;
   const appliedRates: AppliedRate[] = [];
 
+  // Regular shipments: per_shipment rate (applied only to non-drop-ship)
+  const regularShipments = includedShipments.filter((s) => !s.is_drop_ship);
+  const dropShipments = includedShipments.filter((s) => s.is_drop_ship);
+
   const perShipmentRate = await getEffectiveRate(
     supabase,
     workspaceId,
@@ -324,13 +338,58 @@ export async function calculateBillingForOrg(
     effectiveDate,
   );
   if (perShipmentRate) {
-    totalPickPack += perShipmentRate.amount * includedShipments.length;
+    totalPickPack += perShipmentRate.amount * regularShipments.length;
     appliedRates.push({
       ruleType: "per_shipment",
       ruleName: perShipmentRate.ruleName,
       amount: perShipmentRate.amount,
       source: perShipmentRate.source,
     });
+  }
+
+  // Drop-ship shipments: base + per-unit rate
+  if (dropShipments.length > 0) {
+    const dropShipBaseRate = await getEffectiveRate(
+      supabase,
+      workspaceId,
+      orgId,
+      "per_shipment",
+      effectiveDate,
+    );
+    const dropShipPerUnitRate = await getEffectiveRate(
+      supabase,
+      workspaceId,
+      orgId,
+      "per_item",
+      effectiveDate,
+    );
+
+    const baseRate = dropShipBaseRate?.amount ?? 0;
+    const perUnitRate = dropShipPerUnitRate?.amount ?? 0;
+
+    if (dropShipBaseRate) {
+      appliedRates.push({
+        ruleType: "drop_ship_base",
+        ruleName: dropShipBaseRate.ruleName,
+        amount: dropShipBaseRate.amount,
+        source: dropShipBaseRate.source,
+      });
+    }
+    if (dropShipPerUnitRate) {
+      appliedRates.push({
+        ruleType: "drop_ship_per_unit",
+        ruleName: dropShipPerUnitRate.ruleName,
+        amount: dropShipPerUnitRate.amount,
+        source: dropShipPerUnitRate.source,
+      });
+    }
+
+    for (const s of dropShipments) {
+      const units = Math.max(s.total_units, 1);
+      const cost = baseRate + Math.max(units - 1, 0) * perUnitRate;
+      s.drop_ship_cost = cost;
+      totalDropShip += cost;
+    }
   }
 
   // Storage calculation
@@ -413,7 +472,12 @@ export async function calculateBillingForOrg(
   const totalAdjustments = adjustments.reduce((sum, a) => sum + (a.amount ?? 0), 0);
 
   const grandTotal =
-    totalShipping + totalPickPack + totalMaterials + totalStorage + totalAdjustments;
+    totalShipping +
+    totalPickPack +
+    totalMaterials +
+    totalDropShip +
+    totalStorage +
+    totalAdjustments;
 
   return {
     billing_period: billingPeriod.label,
@@ -433,6 +497,7 @@ export async function calculateBillingForOrg(
       total_shipping: totalShipping,
       total_pick_pack: totalPickPack,
       total_materials: totalMaterials,
+      total_drop_ship: totalDropShip,
       total_storage: totalStorage,
       total_adjustments: totalAdjustments,
       grand_total: grandTotal,

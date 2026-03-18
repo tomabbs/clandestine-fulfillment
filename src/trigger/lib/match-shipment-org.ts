@@ -15,6 +15,7 @@ import type { createServiceRoleClient } from "@/lib/server/supabase-server";
 export interface OrgMatchResult {
   orgId: string;
   method: "store_mapping" | "sku_match";
+  isDropShip: boolean;
 }
 
 /**
@@ -34,14 +35,20 @@ export async function matchShipmentOrg(
   if (storeId) {
     const { data: store } = await supabase
       .from("warehouse_shipstation_stores")
-      .select("org_id")
+      .select("org_id, is_drop_ship")
       .eq("store_id", storeId)
       .not("org_id", "is", null)
       .maybeSingle();
 
     if (store?.org_id) {
-      logger.info(`Matched org via store mapping: store_id=${storeId} → org_id=${store.org_id}`);
-      return { orgId: store.org_id, method: "store_mapping" };
+      logger.info(
+        `Matched org via store mapping: store_id=${storeId} → org_id=${store.org_id}, drop_ship=${store.is_drop_ship}`,
+      );
+      return {
+        orgId: store.org_id,
+        method: "store_mapping",
+        isDropShip: store.is_drop_ship ?? false,
+      };
     }
   }
 
@@ -78,7 +85,7 @@ export async function matchShipmentOrg(
         logger.info(
           `Matched org via SKU: ${bestCount}/${validSkus.length} SKUs → org_id=${bestOrgId}`,
         );
-        return { orgId: bestOrgId, method: "sku_match" };
+        return { orgId: bestOrgId, method: "sku_match", isDropShip: false };
       }
     }
   }
