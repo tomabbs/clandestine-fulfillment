@@ -221,17 +221,23 @@ export async function updateQuantities(
 
 // === Title assembly for Shopify product creation ===
 
+/**
+ * Build a product title from Bandcamp merch item metadata.
+ *
+ * Vendor/org is stored separately (warehouse_products.vendor + organizations),
+ * so it is NOT included in the title. Title format:
+ *   - "{albumTitle} - {itemTitle}" when album differs from item
+ *   - "{itemTitle}" otherwise
+ */
 export function assembleBandcampTitle(
-  artistName: string,
+  _artistName: string,
   albumTitle: string | null | undefined,
   itemTitle: string,
 ): string {
-  const parts: string[] = [artistName];
   if (albumTitle && albumTitle !== itemTitle) {
-    parts.push(albumTitle);
+    return `${albumTitle} - ${itemTitle}`;
   }
-  parts.push(itemTitle);
-  return parts.join(" - ");
+  return itemTitle;
 }
 
 // === SKU matching ===
