@@ -209,10 +209,23 @@ export interface FetchShipmentsParams {
   sortDir?: "ASC" | "DESC";
 }
 
+/**
+ * Convert any date string to ShipStation format: "YYYY-MM-DD HH:MM:SS"
+ * ShipStation rejects ISO 8601 T-separator and timezone suffixes.
+ */
+function toShipStationDate(iso: string): string {
+  const d = new Date(iso);
+  return d
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
+}
+
 export async function fetchShipments(params: FetchShipmentsParams = {}) {
   const searchParams = new URLSearchParams();
-  if (params.shipDateStart) searchParams.set("shipDateStart", params.shipDateStart);
-  if (params.shipDateEnd) searchParams.set("shipDateEnd", params.shipDateEnd);
+  if (params.shipDateStart)
+    searchParams.set("shipDateStart", toShipStationDate(params.shipDateStart));
+  if (params.shipDateEnd) searchParams.set("shipDateEnd", toShipStationDate(params.shipDateEnd));
   if (params.page) searchParams.set("page", String(params.page));
   if (params.pageSize) searchParams.set("pageSize", String(params.pageSize));
   if (params.storeId) searchParams.set("storeId", String(params.storeId));

@@ -1,29 +1,108 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Download, ExternalLink, Package, Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import type { GetShipmentsFilters } from "@/actions/shipping";
-import { getShipmentDetail, getShipments } from "@/actions/shipping";
+import {
+  exportShipmentsCsv,
+  getShipmentDetail,
+  getShipments,
+  getShipmentsSummary,
+} from "@/actions/shipping";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
+// === Types ===
+
 type ShipmentRow = Awaited<ReturnType<typeof getShipments>>["shipments"][number];
 type ShipmentDetail = Awaited<ReturnType<typeof getShipmentDetail>>;
+
+interface LabelDataAddress {
+  name?: string | null;
+  company?: string | null;
+  street1?: string | null;
+  street2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  phone?: string | null;
+}
+
+// === Helpers ===
+
+function extractRecipient(labelData: unknown): LabelDataAddress | null {
+  if (!labelData || typeof labelData !== "object") return null;
+  const ld = labelData as Record<string, unknown>;
+  return (ld.shipTo as LabelDataAddress) ?? null;
+}
+
+function getCarrierLabel(carrier: string | null): string {
+  if (!carrier) return "";
+  const c = carrier.toLowerCase();
+  if (c.includes("usps")) return "USPS";
+  if (c.includes("ups")) return "UPS";
+  if (c.includes("fedex")) return "FedEx";
+  if (c.includes("dhl")) return "DHL";
+  return carrier.toUpperCase();
+}
+
+function getCarrierTrackingUrl(
+  carrier: string | null,
+  trackingNumber: string | null,
+): string | null {
+  if (!carrier || !trackingNumber) return null;
+  const c = carrier.toLowerCase();
+  if (c.includes("usps"))
+    return `https://tools.usps.com/go/TrackConfirmAction?qtc_tLabels1=${trackingNumber}`;
+  if (c.includes("ups")) return `https://www.ups.com/track?tracknum=${trackingNumber}`;
+  if (c.includes("fedex")) return `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
+  if (c.includes("dhl"))
+    return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${trackingNumber}`;
+  return null;
+}
+
+function formatCurrency(value: number | null | undefined): string {
+  if (value == null) return "$0.00";
+  return `$${value.toFixed(2)}`;
+}
+
+// === Main Page ===
 
 export default function ShippingPage() {
   const [filters, setFilters] = useState<GetShipmentsFilters>({
     page: 1,
     pageSize: 25,
   });
+  const [searchInput, setSearchInput] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const summaryFilters = useMemo(
+    () => ({
+      orgId: filters.orgId,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    }),
+    [filters.orgId, filters.dateFrom, filters.dateTo],
+  );
 
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.shipments.list(filters),
     queryFn: () => getShipments(filters),
+  });
+
+  const { data: summary } = useAppQuery({
+    tier: CACHE_TIERS.SESSION,
+    queryKey: queryKeys.shipments.summary(summaryFilters),
+    queryFn: () => getShipmentsSummary(summaryFilters),
   });
 
   const { data: detail, isLoading: detailLoading } = useAppQuery({
@@ -33,78 +112,133 @@ export default function ShippingPage() {
     enabled: !!expandedId,
   });
 
+  const handleSearch = useCallback(() => {
+    setFilters((prev) => ({ ...prev, search: searchInput || undefined, page: 1 }));
+    setExpandedId(null);
+  }, [searchInput]);
+
   const handleFilterChange = useCallback((key: keyof GetShipmentsFilters, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value || undefined, page: 1 }));
     setExpandedId(null);
   }, []);
 
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      const csv = await exportShipmentsCsv({
+        orgId: filters.orgId,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+      });
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `shipments-${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }, [filters.orgId, filters.dateFrom, filters.dateTo]);
+
   const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Shipping</h1>
-        <p className="text-muted-foreground mt-1">
-          {data ? `${data.total} shipments` : "Loading..."}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Shipping</h1>
+          <p className="text-muted-foreground mt-1">
+            {data ? `${data.total} shipment${data.total !== 1 ? "s" : ""}` : "Loading..."}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" disabled={exporting} onClick={handleExport}>
+          <Download className="h-4 w-4 mr-1.5" />
+          {exporting ? "Exporting..." : "Export CSV"}
+        </Button>
       </div>
 
-      {/* Filters */}
+      {/* Summary Stat Cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card size="sm">
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+              Shipments
+            </p>
+            <p className="text-2xl font-semibold tabular-nums mt-1">
+              {summary?.totalCount.toLocaleString() ?? "---"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card size="sm">
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+              Total Postage
+            </p>
+            <p className="text-2xl font-semibold tabular-nums mt-1 font-mono">
+              {summary ? formatCurrency(summary.totalPostage) : "---"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card size="sm">
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+              Avg Cost / Shipment
+            </p>
+            <p className="text-2xl font-semibold tabular-nums mt-1 font-mono">
+              {summary ? formatCurrency(summary.avgCost) : "---"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search + Filters */}
       <div className="flex flex-wrap gap-3">
-        <Input
-          placeholder="Filter by org ID..."
-          className="w-64"
-          onChange={(e) => handleFilterChange("orgId", e.target.value)}
-        />
+        <div className="relative w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search tracking, carrier..."
+            className="pl-9"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+          />
+        </div>
         <Input
           type="date"
-          placeholder="From"
           className="w-40"
           onChange={(e) => handleFilterChange("dateFrom", e.target.value)}
         />
         <Input
           type="date"
-          placeholder="To"
           className="w-40"
           onChange={(e) => handleFilterChange("dateTo", e.target.value)}
         />
         <Input
-          placeholder="Carrier..."
-          className="w-40"
-          onChange={(e) => handleFilterChange("carrier", e.target.value)}
-        />
-        <Input
           placeholder="Status..."
-          className="w-40"
+          className="w-32"
           onChange={(e) => handleFilterChange("status", e.target.value)}
         />
       </div>
 
       {/* Table */}
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
-              <th className="px-4 py-3 text-left font-medium">Tracking Number</th>
-              <th className="px-4 py-3 text-left font-medium">Carrier</th>
-              <th className="px-4 py-3 text-left font-medium">Service</th>
               <th className="px-4 py-3 text-left font-medium">Ship Date</th>
-              <th className="px-4 py-3 text-left font-medium">Organization</th>
+              <th className="px-4 py-3 text-left font-medium">Order #</th>
+              <th className="px-4 py-3 text-left font-medium">Recipient</th>
+              <th className="px-4 py-3 text-left font-medium">Tracking</th>
+              <th className="px-4 py-3 text-center font-medium">Items</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-right font-medium">Cost</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && (
-              <>
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-                <SkeletonRow />
-              </>
-            )}
-            {data?.shipments.map((shipment: ShipmentRow) => (
+            {isLoading && [1, 2, 3, 4, 5].map((i) => <SkeletonRow key={i} />)}
+            {data?.shipments.map((shipment) => (
               <ShipmentTableRow
                 key={shipment.id}
                 shipment={shipment}
@@ -157,6 +291,8 @@ export default function ShippingPage() {
   );
 }
 
+// === Table Row ===
+
 function ShipmentTableRow({
   shipment,
   isExpanded,
@@ -170,8 +306,15 @@ function ShipmentTableRow({
   detail: ShipmentDetail | undefined;
   detailLoading: boolean;
 }) {
-  const orgName =
-    (shipment as ShipmentRow & { organizations?: { name: string } }).organizations?.name ?? "---";
+  const recipient = extractRecipient(shipment.label_data);
+  const orderNumber =
+    (shipment.warehouse_orders as unknown as { order_number: string | null } | null)
+      ?.order_number ?? null;
+  const itemCount = Array.isArray(shipment.warehouse_shipment_items)
+    ? shipment.warehouse_shipment_items.length
+    : 0;
+  const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
+  const carrierLabel = getCarrierLabel(shipment.carrier);
 
   return (
     <>
@@ -179,23 +322,54 @@ function ShipmentTableRow({
         className="border-b cursor-pointer hover:bg-muted/30 transition-colors"
         onClick={onToggle}
       >
-        <td className="px-4 py-3 font-mono text-xs">{shipment.tracking_number ?? "---"}</td>
-        <td className="px-4 py-3">{shipment.carrier ?? "---"}</td>
-        <td className="px-4 py-3">{shipment.service ?? "---"}</td>
         <td className="px-4 py-3">
           {shipment.ship_date ? new Date(shipment.ship_date).toLocaleDateString() : "---"}
         </td>
-        <td className="px-4 py-3">{orgName}</td>
+        <td className="px-4 py-3 font-mono text-xs">{orderNumber ?? "---"}</td>
+        <td className="px-4 py-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm">{recipient?.name ?? "---"}</p>
+            {recipient?.city && (
+              <p className="text-xs text-muted-foreground truncate">
+                {recipient.city}
+                {recipient.state ? `, ${recipient.state}` : ""}
+              </p>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            {carrierLabel && <Badge variant="secondary">{carrierLabel}</Badge>}
+            <span className="font-mono text-xs truncate max-w-[140px]">
+              {shipment.tracking_number ?? "---"}
+            </span>
+            {trackingUrl && (
+              <a
+                href={trackingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-blue-600 hover:text-blue-800 shrink-0"
+              >
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-3 text-center">
+          <div className="inline-flex items-center gap-1 text-muted-foreground">
+            <Package className="h-3.5 w-3.5" />
+            <span className="tabular-nums">{itemCount}</span>
+          </div>
+        </td>
         <td className="px-4 py-3">
           <StatusBadge status={shipment.status} />
         </td>
-        <td className="px-4 py-3 text-right font-mono">
-          {shipment.shipping_cost != null ? `$${shipment.shipping_cost.toFixed(2)}` : "---"}
-        </td>
+        <td className="px-4 py-3 text-right font-mono">{formatCurrency(shipment.shipping_cost)}</td>
       </tr>
       {isExpanded && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={7} className="px-6 py-4">
+          <td colSpan={7} className="px-6 py-5">
             {detailLoading ? (
               <div className="space-y-2">
                 <Skeleton className="h-4 w-48" />
@@ -212,56 +386,149 @@ function ShipmentTableRow({
   );
 }
 
+// === Expanded Detail ===
+
 function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
+  const { shipment, recipient, costBreakdown, items, trackingEvents } = detail;
+
   return (
-    <div className="grid grid-cols-2 gap-6">
-      {/* Items */}
-      <div>
-        <h3 className="font-medium mb-2">Shipment Items</h3>
-        {detail.items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No items recorded.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left py-1 pr-4 font-medium">SKU</th>
-                <th className="text-left py-1 pr-4 font-medium">Product</th>
-                <th className="text-right py-1 font-medium">Qty</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.items.map((item) => (
-                <tr key={item.id} className="border-b border-dashed">
-                  <td className="py-1 pr-4 font-mono text-xs">{item.sku}</td>
-                  <td className="py-1 pr-4">{item.product_title ?? "---"}</td>
-                  <td className="py-1 text-right">{item.quantity}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Column 1: Recipient + Shipping Info */}
+      <div className="space-y-4">
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Recipient
+          </h4>
+          {recipient ? (
+            <div className="text-sm space-y-0.5">
+              <p className="font-medium">{recipient.name ?? "---"}</p>
+              {recipient.company && <p>{recipient.company}</p>}
+              {recipient.street1 && <p>{recipient.street1}</p>}
+              {recipient.street2 && <p>{recipient.street2}</p>}
+              <p>
+                {[recipient.city, recipient.state, recipient.postalCode].filter(Boolean).join(", ")}
+              </p>
+              {recipient.country && recipient.country !== "US" && <p>{recipient.country}</p>}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No recipient data</p>
+          )}
+        </div>
+
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Shipping Details
+          </h4>
+          <dl className="text-sm grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            <dt className="text-muted-foreground">Carrier</dt>
+            <dd>{shipment.carrier ?? "---"}</dd>
+            <dt className="text-muted-foreground">Service</dt>
+            <dd>{shipment.service ?? "---"}</dd>
+            <dt className="text-muted-foreground">Weight</dt>
+            <dd>{shipment.weight != null ? `${shipment.weight} oz` : "---"}</dd>
+          </dl>
+        </div>
       </div>
 
-      {/* Tracking Timeline */}
+      {/* Column 2: Items + Cost Breakdown */}
+      <div className="space-y-4">
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Items ({items.length})
+          </h4>
+          {items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No items recorded.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-1 pr-3 font-medium">Product</th>
+                  <th className="text-left py-1 pr-3 font-medium">SKU</th>
+                  <th className="text-right py-1 pr-3 font-medium">Qty</th>
+                  <th className="text-left py-1 font-medium">Format</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id} className="border-b border-dashed">
+                    <td className="py-1 pr-3">{item.product_title ?? "---"}</td>
+                    <td className="py-1 pr-3 font-mono text-xs">{item.sku}</td>
+                    <td className="py-1 pr-3 text-right tabular-nums">{item.quantity}</td>
+                    <td className="py-1">{item.format_name ?? "---"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Cost Breakdown
+          </h4>
+          <dl className="text-sm space-y-1">
+            <div className="flex justify-between">
+              <dt>Postage</dt>
+              <dd className="font-mono">{formatCurrency(costBreakdown.postage)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Materials</dt>
+              <dd className="font-mono">{formatCurrency(costBreakdown.materials)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Pick & Pack</dt>
+              <dd className="font-mono">{formatCurrency(costBreakdown.pickPack)}</dd>
+            </div>
+            {costBreakdown.dropShip > 0 && (
+              <div className="flex justify-between">
+                <dt>Drop Ship</dt>
+                <dd className="font-mono">{formatCurrency(costBreakdown.dropShip)}</dd>
+              </div>
+            )}
+            {costBreakdown.insurance > 0 && (
+              <div className="flex justify-between">
+                <dt>Insurance</dt>
+                <dd className="font-mono">{formatCurrency(costBreakdown.insurance)}</dd>
+              </div>
+            )}
+            <div className="flex justify-between border-t pt-1 font-medium">
+              <dt>Total</dt>
+              <dd className="font-mono">{formatCurrency(costBreakdown.total)}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      {/* Column 3: Tracking Timeline */}
       <div>
-        <h3 className="font-medium mb-2">Tracking Timeline</h3>
-        {detail.trackingEvents.length === 0 ? (
+        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+          Tracking Timeline
+        </h4>
+        {trackingEvents.length === 0 ? (
           <p className="text-sm text-muted-foreground">No tracking events yet.</p>
         ) : (
-          <div className="space-y-2">
-            {detail.trackingEvents.map((event) => (
-              <div key={event.id} className="flex gap-3 text-sm">
-                <span className="text-muted-foreground whitespace-nowrap">
-                  {event.event_time ? new Date(event.event_time).toLocaleString() : "---"}
-                </span>
-                <div>
-                  <p className="font-medium">{event.status}</p>
+          <div className="relative pl-5 space-y-3">
+            <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+            {trackingEvents.map((event, i) => (
+              <div key={event.id} className="relative">
+                <div
+                  className={`absolute -left-3 top-0.5 h-2.5 w-2.5 rounded-full border-2 ${
+                    i === trackingEvents.length - 1
+                      ? "border-green-500 bg-green-500"
+                      : "border-border bg-background"
+                  }`}
+                />
+                <div className="text-sm">
+                  <p className={i === trackingEvents.length - 1 ? "font-medium" : ""}>
+                    {event.status}
+                  </p>
                   {event.description && (
-                    <p className="text-muted-foreground">{event.description}</p>
+                    <p className="text-xs text-muted-foreground">{event.description}</p>
                   )}
-                  {event.location && (
-                    <p className="text-xs text-muted-foreground">{event.location}</p>
-                  )}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                    {event.location && <span>{event.location}</span>}
+                    {event.event_time && <span>{new Date(event.event_time).toLocaleString()}</span>}
+                  </div>
                 </div>
               </div>
             ))}
@@ -272,47 +539,31 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
   );
 }
 
+// === Status Badge ===
+
+function StatusBadge({ status }: { status: string }) {
+  const variant =
+    status === "shipped"
+      ? "default"
+      : status === "delivered"
+        ? "secondary"
+        : status === "voided"
+          ? "destructive"
+          : "outline";
+
+  return <Badge variant={variant}>{status}</Badge>;
+}
+
+// === Skeleton Row ===
+
 function SkeletonRow() {
   return (
     <tr className="border-b">
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-full" />
-      </td>
+      {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+        <td key={i} className="px-4 py-3">
+          <Skeleton className="h-4 w-full" />
+        </td>
+      ))}
     </tr>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    shipped: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-    voided: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-    delivered: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  };
-  const colorClass =
-    colors[status] ?? "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}
-    >
-      {status}
-    </span>
   );
 }

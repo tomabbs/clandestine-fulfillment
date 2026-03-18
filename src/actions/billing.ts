@@ -4,6 +4,7 @@ import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/serve
 import type {
   WarehouseBillingAdjustment,
   WarehouseBillingRule,
+  WarehouseBillingRuleOverride,
   WarehouseBillingSnapshot,
   WarehouseFormatCost,
 } from "@/lib/shared/types";
@@ -77,14 +78,42 @@ export async function createBillingRule(data: Omit<WarehouseBillingRule, "id" | 
 
 // === Format Costs ===
 
+export async function getFormatCosts(workspaceId: string) {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("warehouse_format_costs")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("sort_order")
+    .order("format_name");
+
+  if (error) throw new Error(error.message);
+  return data as WarehouseFormatCost[];
+}
+
 export async function updateFormatCost(
   formatId: string,
-  data: Partial<Pick<WarehouseFormatCost, "pick_pack_cost" | "material_cost">>,
+  data: Partial<
+    Pick<
+      WarehouseFormatCost,
+      "pick_pack_cost" | "material_cost" | "display_name" | "cost_breakdown" | "sort_order"
+    >
+  >,
 ) {
   const supabase = await createServerSupabaseClient();
+  const updateData: Record<string, unknown> = {
+    ...data,
+    updated_at: new Date().toISOString(),
+  };
+  if (data.pick_pack_cost !== undefined || data.material_cost !== undefined) {
+    updateData.cost_breakdown = {
+      pick_pack: data.pick_pack_cost,
+      material: data.material_cost,
+    };
+  }
   const { error } = await supabase
     .from("warehouse_format_costs")
-    .update({ ...data, updated_at: new Date().toISOString() })
+    .update(updateData)
     .eq("id", formatId);
 
   if (error) throw new Error(error.message);
@@ -97,6 +126,9 @@ export async function createFormatCost(
   const now = new Date().toISOString();
   const { error } = await supabase.from("warehouse_format_costs").insert({
     ...data,
+    format_key: data.format_name.toLowerCase().replace(/\s+/g, "_"),
+    display_name: data.display_name ?? data.format_name,
+    cost_breakdown: { pick_pack: data.pick_pack_cost, material: data.material_cost },
     id: crypto.randomUUID(),
     created_at: now,
     updated_at: now,
@@ -194,6 +226,55 @@ export async function createBillingAdjustment(data: {
     snapshot_id: data.snapshot_id ?? null,
     created_at: new Date().toISOString(),
   });
+
+  if (error) throw new Error(error.message);
+}
+
+// === Client Overrides ===
+
+export async function getClientOverrides(workspaceId: string) {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("warehouse_billing_rule_overrides")
+    .select("*, organizations!inner(name), warehouse_billing_rules!inner(rule_name, rule_type)")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data as (WarehouseBillingRuleOverride & {
+    organizations: { name: string };
+    warehouse_billing_rules: { rule_name: string; rule_type: string };
+  })[];
+}
+
+export async function createClientOverride(data: {
+  workspace_id: string;
+  org_id: string;
+  rule_id: string;
+  override_amount: number;
+  effective_from: string;
+}) {
+  const supabase = await createServerSupabaseClient();
+  const { data: user } = await supabase.auth.getUser();
+  const now = new Date().toISOString();
+
+  const { error } = await supabase.from("warehouse_billing_rule_overrides").insert({
+    id: crypto.randomUUID(),
+    ...data,
+    created_by: user?.user?.id ?? null,
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteClientOverride(overrideId: string) {
+  const supabase = await createServerSupabaseClient();
+  const { error } = await supabase
+    .from("warehouse_billing_rule_overrides")
+    .delete()
+    .eq("id", overrideId);
 
   if (error) throw new Error(error.message);
 }

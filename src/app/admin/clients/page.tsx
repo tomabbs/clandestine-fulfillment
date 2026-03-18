@@ -1,11 +1,23 @@
 "use client";
 
-import { Loader2, Plus, Search, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Box,
+  Loader2,
+  Plus,
+  Search,
+  Users,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { ClientStats } from "@/actions/clients";
 import { createClient, getClients } from "@/actions/clients";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,9 +32,24 @@ import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
+type SortField =
+  | "name"
+  | "productCount"
+  | "variantCount"
+  | "shipmentsThisMonth"
+  | "lastBillingTotal"
+  | "stripeStatus";
+type SortDir = "asc" | "desc";
+
+function formatCurrency(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
+
 export default function ClientsPage() {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [showNew, setShowNew] = useState(false);
   const [newClient, setNewClient] = useState({ name: "", slug: "", billingEmail: "" });
 
@@ -41,8 +68,50 @@ export default function ClientsPage() {
     },
   });
 
+  const sortedClients = useMemo(() => {
+    const list = data?.clients ?? [];
+    return [...list].sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortField) {
+        case "name":
+          return dir * a.name.localeCompare(b.name);
+        case "productCount":
+          return dir * (a.productCount - b.productCount);
+        case "variantCount":
+          return dir * (a.variantCount - b.variantCount);
+        case "shipmentsThisMonth":
+          return dir * (a.shipmentsThisMonth - b.shipmentsThisMonth);
+        case "lastBillingTotal":
+          return dir * ((a.lastBillingTotal ?? 0) - (b.lastBillingTotal ?? 0));
+        case "stripeStatus":
+          return dir * a.stripeStatus.localeCompare(b.stripeStatus);
+        default:
+          return 0;
+      }
+    });
+  }, [data?.clients, sortField, sortDir]);
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 inline opacity-40" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="ml-1 h-3 w-3 inline" />
+    ) : (
+      <ArrowDown className="ml-1 h-3 w-3 inline" />
+    );
+  }
+
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
         <Button onClick={() => setShowNew(true)}>
@@ -50,6 +119,62 @@ export default function ClientsPage() {
         </Button>
       </div>
 
+      {/* Summary Cards */}
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Clients
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-muted-foreground" />
+              <span className="text-2xl font-bold">{data?.total ?? 0}</span>
+              <span className="text-sm text-muted-foreground">{sortedClients.length} shown</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Products
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              <Box className="h-5 w-5 text-muted-foreground" />
+              <span className="text-2xl font-bold">{data?.totalProducts ?? 0}</span>
+              <span className="text-sm text-muted-foreground">
+                {data?.totalShipmentsThisMonth ?? 0} shipments this month
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Unmatched Shipments
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              <AlertTriangle
+                className={`h-5 w-5 ${(data?.unmatchedShipments ?? 0) > 0 ? "text-red-500" : "text-muted-foreground"}`}
+              />
+              <span
+                className={`text-2xl font-bold ${(data?.unmatchedShipments ?? 0) > 0 ? "text-red-500" : ""}`}
+              >
+                {data?.unmatchedShipments ?? 0}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search */}
       <div className="relative w-64">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -60,6 +185,7 @@ export default function ClientsPage() {
         />
       </div>
 
+      {/* Table */}
       {isLoading ? (
         <div className="flex justify-center py-8 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -68,36 +194,50 @@ export default function ClientsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Slug</TableHead>
-              <TableHead className="text-right">Products</TableHead>
-              <TableHead className="text-right">Connections</TableHead>
-              <TableHead>Onboarding</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>
+                Client <SortIcon field="name" />
+              </TableHead>
+              <TableHead
+                className="text-right cursor-pointer select-none"
+                onClick={() => toggleSort("productCount")}
+              >
+                Products <SortIcon field="productCount" />
+              </TableHead>
+              <TableHead
+                className="text-right cursor-pointer select-none"
+                onClick={() => toggleSort("variantCount")}
+              >
+                Variants <SortIcon field="variantCount" />
+              </TableHead>
+              <TableHead
+                className="text-right cursor-pointer select-none"
+                onClick={() => toggleSort("shipmentsThisMonth")}
+              >
+                Shipments <SortIcon field="shipmentsThisMonth" />
+              </TableHead>
+              <TableHead
+                className="text-right cursor-pointer select-none"
+                onClick={() => toggleSort("lastBillingTotal")}
+              >
+                Last Billing <SortIcon field="lastBillingTotal" />
+              </TableHead>
+              <TableHead
+                className="cursor-pointer select-none"
+                onClick={() => toggleSort("stripeStatus")}
+              >
+                Stripe <SortIcon field="stripeStatus" />
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(data?.clients ?? []).map((client) => (
-              <TableRow
+            {sortedClients.map((client) => (
+              <ClientRow
                 key={client.id}
-                className="cursor-pointer"
+                client={client}
                 onClick={() => router.push(`/admin/clients/${client.id}`)}
-              >
-                <TableCell className="font-medium">{client.name}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {client.slug}
-                </TableCell>
-                <TableCell className="text-right">{client.productCount}</TableCell>
-                <TableCell className="text-right">{client.activeConnections}</TableCell>
-                <TableCell>
-                  <OnboardingBadge pct={client.onboardingPct} />
-                </TableCell>
-                <TableCell className="text-muted-foreground text-xs">
-                  {new Date(client.createdAt).toLocaleDateString()}
-                </TableCell>
-              </TableRow>
+              />
             ))}
-            {(data?.clients ?? []).length === 0 && (
+            {sortedClients.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                   <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -109,6 +249,7 @@ export default function ClientsPage() {
         </Table>
       )}
 
+      {/* Add Client Dialog */}
       <Dialog open={showNew} onOpenChange={setShowNew}>
         <DialogContent>
           <DialogHeader>
@@ -152,8 +293,30 @@ export default function ClientsPage() {
   );
 }
 
-function OnboardingBadge({ pct }: { pct: number }) {
-  if (pct === 100) return <Badge variant="default">Complete</Badge>;
-  if (pct > 0) return <Badge variant="secondary">{pct}%</Badge>;
-  return <Badge variant="outline">Not started</Badge>;
+function ClientRow({ client, onClick }: { client: ClientStats; onClick: () => void }) {
+  return (
+    <TableRow className="cursor-pointer" onClick={onClick}>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{client.name}</span>
+          <Badge variant="outline" className="font-mono text-xs">
+            {client.slug}
+          </Badge>
+        </div>
+      </TableCell>
+      <TableCell className="text-right">{client.productCount}</TableCell>
+      <TableCell className="text-right">{client.variantCount}</TableCell>
+      <TableCell className="text-right">{client.shipmentsThisMonth}</TableCell>
+      <TableCell className="text-right">
+        {client.lastBillingTotal != null ? formatCurrency(client.lastBillingTotal) : "-"}
+      </TableCell>
+      <TableCell>
+        {client.stripeStatus === "connected" ? (
+          <Badge variant="default">Connected</Badge>
+        ) : (
+          <Badge variant="secondary">No</Badge>
+        )}
+      </TableCell>
+    </TableRow>
+  );
 }

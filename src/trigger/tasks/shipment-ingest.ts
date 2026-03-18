@@ -144,6 +144,7 @@ async function ingestSingleShipment(
       shipping_cost: shipment.shipmentCost ?? null,
       weight: shipment.weight?.value ?? null,
       dimensions: shipment.dimensions ?? null,
+      label_data: shipment.shipTo ? { shipTo: shipment.shipTo } : null,
       voided: shipment.voided ?? false,
       billed: false,
     })

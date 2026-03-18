@@ -8,6 +8,7 @@ import {
   refreshBandcampToken,
 } from "@/lib/clients/bandcamp";
 import { fetchAlbumPage, parseTralbumData } from "@/lib/clients/bandcamp-scraper";
+import { productSetCreate } from "@/lib/clients/shopify-client";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
@@ -65,6 +66,7 @@ export const bandcampScrapePageTask = task({
 export const bandcampSyncTask = task({
   id: "bandcamp-sync",
   queue: bandcampQueue,
+  maxDuration: 600,
   run: async (payload: { workspaceId: string }) => {
     const supabase = createServiceRoleClient();
     const { workspaceId } = payload;
@@ -161,12 +163,13 @@ export const bandcampSyncTask = task({
             {
               workspace_id: workspaceId,
               variant_id: variantId,
-              bandcamp_item_id: merchItem.id,
-              bandcamp_item_type: merchItem.type_name?.toLowerCase().includes("album")
+              bandcamp_item_id: merchItem.package_id,
+              bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album")
                 ? "album"
                 : "package",
               bandcamp_member_band_id: merchItem.member_band_id,
               bandcamp_url: merchItem.url,
+              bandcamp_image_url: merchItem.image_url ?? null,
               last_quantity_sold: merchItem.quantity_sold,
               last_synced_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -222,17 +225,48 @@ export const bandcampSyncTask = task({
             continue;
           }
 
+          // Rule #1: productSet for CREATE only — create DRAFT Shopify product
+          let shopifyProductId: string | null = null;
+          try {
+            shopifyProductId = await productSetCreate({
+              title,
+              status: "DRAFT",
+              vendor: band?.name ?? connection.band_name,
+              productType: merchItem.item_type ?? "Merch",
+              tags,
+              productOptions: [{ name: "Title", values: [{ name: "Default Title" }] }],
+              variants: [
+                {
+                  optionValues: [{ optionName: "Title", name: "Default Title" }],
+                  sku: merchItem.sku,
+                  inventoryPolicy: "DENY",
+                },
+              ],
+              ...(merchItem.image_url
+                ? { media: [{ originalSource: merchItem.image_url, mediaContentType: "IMAGE" }] }
+                : {}),
+            });
+            logger.info("Created Shopify DRAFT product", { sku: merchItem.sku, shopifyProductId });
+          } catch (shopifyError) {
+            logger.error("Failed to create Shopify product, continuing with warehouse-only", {
+              sku: merchItem.sku,
+              error: String(shopifyError),
+            });
+          }
+
           // Create warehouse product as DRAFT
           const { data: product, error: productError } = await supabase
             .from("warehouse_products")
             .insert({
               workspace_id: workspaceId,
               org_id: connection.org_id,
+              shopify_product_id: shopifyProductId,
               title,
               vendor: band?.name ?? connection.band_name,
-              product_type: merchItem.type_name ?? "Merch",
+              product_type: merchItem.item_type ?? "Merch",
               status: "draft",
               tags,
+              image_url: merchItem.image_url ?? null,
             })
             .select("id")
             .single();
@@ -244,6 +278,16 @@ export const bandcampSyncTask = task({
             });
             itemsFailed++;
             continue;
+          }
+
+          // Store Bandcamp image as warehouse_product_images row
+          if (merchItem.image_url) {
+            await supabase.from("warehouse_product_images").insert({
+              product_id: product.id,
+              src: merchItem.image_url,
+              alt: title,
+              position: 0,
+            });
           }
 
           // Create variant
@@ -262,17 +306,38 @@ export const bandcampSyncTask = task({
             .single();
 
           if (newVariant) {
+            // Seed initial inventory from Bandcamp quantity_available
+            const initialAvailable = merchItem.quantity_available ?? 0;
+            await supabase.from("warehouse_inventory_levels").upsert(
+              {
+                variant_id: newVariant.id,
+                workspace_id: workspaceId,
+                sku: merchItem.sku,
+                available: initialAvailable,
+                committed: 0,
+                incoming: 0,
+                last_redis_write_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "variant_id", ignoreDuplicates: true },
+            );
+            logger.info("Seeded initial inventory", {
+              sku: merchItem.sku,
+              available: initialAvailable,
+            });
+
             // Create mapping
             await supabase.from("bandcamp_product_mappings").insert({
               workspace_id: workspaceId,
               variant_id: newVariant.id,
-              bandcamp_item_id: merchItem.id,
-              bandcamp_item_type: merchItem.type_name?.toLowerCase().includes("album")
+              bandcamp_item_id: merchItem.package_id,
+              bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album")
                 ? "album"
                 : "package",
               bandcamp_member_band_id: merchItem.member_band_id,
               bandcamp_url: merchItem.url,
-              bandcamp_type_name: merchItem.type_name,
+              bandcamp_image_url: merchItem.image_url ?? null,
+              bandcamp_type_name: merchItem.item_type,
               bandcamp_new_date: merchItem.new_date,
               last_quantity_sold: merchItem.quantity_sold,
               last_synced_at: new Date().toISOString(),

@@ -48,7 +48,7 @@ export const bandcampSalePollTask = schedules.task({
               .from("bandcamp_product_mappings")
               .select("id, variant_id, last_quantity_sold")
               .eq("workspace_id", workspaceId)
-              .eq("bandcamp_item_id", item.id)
+              .eq("bandcamp_item_id", item.package_id)
               .single();
 
             if (!mapping) continue;
@@ -68,7 +68,7 @@ export const bandcampSalePollTask = schedules.task({
 
               if (variant) {
                 // Stable correlation ID for idempotency
-                const correlationId = `bandcamp-sale:${connection.band_id}:${item.id}:${newSold}`;
+                const correlationId = `bandcamp-sale:${connection.band_id}:${item.package_id}:${newSold}`;
 
                 await recordInventoryChange({
                   workspaceId,
@@ -78,7 +78,7 @@ export const bandcampSalePollTask = schedules.task({
                   correlationId,
                   metadata: {
                     band_id: connection.band_id,
-                    bandcamp_item_id: item.id,
+                    bandcamp_item_id: item.package_id,
                     previous_quantity_sold: lastSold,
                     new_quantity_sold: newSold,
                     run_id: ctx.run.id,

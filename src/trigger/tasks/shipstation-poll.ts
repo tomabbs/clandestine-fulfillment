@@ -2,7 +2,7 @@
 // Rule #7: service_role for Trigger tasks
 // Backup poller: runs every 30 min to catch missed webhooks
 
-import { schedules } from "@trigger.dev/sdk";
+import { logger, schedules } from "@trigger.dev/sdk";
 import { fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
@@ -34,6 +34,8 @@ export const shipstationPollTask = schedules.task({
     let totalSkipped = 0;
     let hasMore = true;
 
+    logger.info("Starting ShipStation poll", { shipDateStart, workspaceId });
+
     while (hasMore) {
       const result = await fetchShipments({
         shipDateStart,
@@ -41,6 +43,13 @@ export const shipstationPollTask = schedules.task({
         pageSize: 100,
         sortBy: "ShipDate",
         sortDir: "ASC",
+      });
+
+      logger.info("Fetched shipments page", {
+        page,
+        total: result.total,
+        pages: result.pages,
+        shipmentsOnPage: result.shipments.length,
       });
 
       for (const shipment of result.shipments) {
@@ -157,6 +166,7 @@ async function ingestFromPoll(
       shipping_cost: shipment.shipmentCost ?? null,
       weight: shipment.weight?.value ?? null,
       dimensions: shipment.dimensions ?? null,
+      label_data: shipment.shipTo ? { shipTo: shipment.shipTo } : null,
       voided: shipment.voided ?? false,
       billed: false,
     })

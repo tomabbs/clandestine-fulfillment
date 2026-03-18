@@ -155,8 +155,8 @@ describe("bandcamp client", () => {
 
     it("matches merch items by SKU", () => {
       const merchItems = [
-        { id: 1, title: "Item 1", sku: "ABC-001" },
-        { id: 2, title: "Item 2", sku: "ABC-002" },
+        { package_id: 1, title: "Item 1", sku: "ABC-001" },
+        { package_id: 2, title: "Item 2", sku: "ABC-002" },
       ] as Parameters<typeof matchSkuToVariants>[0];
 
       const result = matchSkuToVariants(merchItems, variants);
@@ -169,8 +169,8 @@ describe("bandcamp client", () => {
 
     it("separates unmatched items", () => {
       const merchItems = [
-        { id: 1, title: "Known", sku: "ABC-001" },
-        { id: 2, title: "Unknown", sku: "NOPE-999" },
+        { package_id: 1, title: "Known", sku: "ABC-001" },
+        { package_id: 2, title: "Unknown", sku: "NOPE-999" },
       ] as Parameters<typeof matchSkuToVariants>[0];
 
       const result = matchSkuToVariants(merchItems, variants);
@@ -182,8 +182,8 @@ describe("bandcamp client", () => {
 
     it("skips items without SKU", () => {
       const merchItems = [
-        { id: 1, title: "No SKU", sku: null },
-        { id: 2, title: "Also no SKU" },
+        { package_id: 1, title: "No SKU", sku: null },
+        { package_id: 2, title: "Also no SKU" },
       ] as Parameters<typeof matchSkuToVariants>[0];
 
       const result = matchSkuToVariants(merchItems, variants);

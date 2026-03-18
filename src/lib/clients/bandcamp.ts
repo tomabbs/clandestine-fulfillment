@@ -41,6 +41,7 @@ const merchItemSchema = z.object({
   quantity_sold: z.number().nullish(),
   origin_quantity: z.number().nullish(),
   url: z.string().nullish(),
+  image_url: z.string().nullish(),
 });
 
 const merchDetailsResponseSchema = z.object({

@@ -5,120 +5,78 @@ const mockSelect = vi.fn();
 const mockEq = vi.fn();
 const mockGte = vi.fn();
 const mockLte = vi.fn();
+const mockOr = vi.fn();
+const mockIn = vi.fn();
 const mockOrder = vi.fn();
 const mockRange = vi.fn();
+const mockLimit = vi.fn();
 const mockSingle = vi.fn();
 const mockMaybeSingle = vi.fn();
 
-const mockFrom = vi.fn(() => ({
+// biome-ignore lint/suspicious/noExplicitAny: test mock
+const mockFrom: ReturnType<typeof vi.fn<any>> = vi.fn(() => ({
   select: mockSelect,
 }));
 
-mockSelect.mockReturnValue({
-  eq: mockEq,
-  gte: mockGte,
-  lte: mockLte,
-  order: mockOrder,
-  range: mockRange,
-  single: mockSingle,
-});
-
-mockEq.mockReturnValue({
-  eq: mockEq,
-  gte: mockGte,
-  lte: mockLte,
-  order: mockOrder,
-  range: mockRange,
-  single: mockSingle,
-  maybeSingle: mockMaybeSingle,
-});
-
-mockGte.mockReturnValue({
-  eq: mockEq,
-  gte: mockGte,
-  lte: mockLte,
-  order: mockOrder,
-  range: mockRange,
-});
-
-mockLte.mockReturnValue({
-  eq: mockEq,
-  order: mockOrder,
-  range: mockRange,
-});
-
-mockOrder.mockReturnValue({
-  range: mockRange,
-  order: mockOrder,
-});
-
-mockRange.mockResolvedValue({
-  data: [],
-  error: null,
-  count: 0,
-});
-
-mockSingle.mockResolvedValue({
-  data: { id: "test-id", tracking_number: "1Z123" },
-  error: null,
-});
+function wireChain() {
+  const chain = {
+    eq: mockEq,
+    gte: mockGte,
+    lte: mockLte,
+    or: mockOr,
+    in: mockIn,
+    order: mockOrder,
+    range: mockRange,
+    limit: mockLimit,
+    single: mockSingle,
+    maybeSingle: mockMaybeSingle,
+    select: mockSelect,
+  };
+  mockSelect.mockReturnValue(chain);
+  mockEq.mockReturnValue(chain);
+  mockGte.mockReturnValue(chain);
+  mockLte.mockReturnValue(chain);
+  mockOr.mockReturnValue(chain);
+  mockIn.mockReturnValue(chain);
+  mockOrder.mockReturnValue(chain);
+  mockRange.mockResolvedValue({ data: [], error: null, count: 0 });
+  mockLimit.mockResolvedValue({ data: [], error: null });
+  mockSingle.mockResolvedValue({ data: null, error: null });
+}
 
 vi.mock("@/lib/server/supabase-server", () => ({
   createServerSupabaseClient: vi.fn(() => Promise.resolve({ from: mockFrom })),
 }));
 
 // Must import after mocks
-import { getShipmentDetail, getShipments } from "@/actions/shipping";
+import {
+  exportShipmentsCsv,
+  getShipmentDetail,
+  getShipments,
+  getShipmentsSummary,
+} from "@/actions/shipping";
 
 describe("shipping server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // Reset chain
-    mockSelect.mockReturnValue({
-      eq: mockEq,
-      gte: mockGte,
-      lte: mockLte,
-      order: mockOrder,
-      range: mockRange,
-      single: mockSingle,
-    });
-    mockEq.mockReturnValue({
-      eq: mockEq,
-      gte: mockGte,
-      lte: mockLte,
-      order: mockOrder,
-      range: mockRange,
-      single: mockSingle,
-      maybeSingle: mockMaybeSingle,
-    });
-    mockGte.mockReturnValue({
-      eq: mockEq,
-      gte: mockGte,
-      lte: mockLte,
-      order: mockOrder,
-      range: mockRange,
-    });
-    mockLte.mockReturnValue({
-      eq: mockEq,
-      order: mockOrder,
-      range: mockRange,
-    });
-    mockOrder.mockReturnValue({
-      range: mockRange,
-      order: mockOrder,
-    });
-    mockRange.mockResolvedValue({
-      data: [],
-      error: null,
-      count: 0,
-    });
+    wireChain();
   });
 
   describe("getShipments", () => {
     it("returns paginated results with defaults", async () => {
       mockRange.mockResolvedValueOnce({
-        data: [{ id: "1", tracking_number: "TRK-001" }],
+        data: [
+          {
+            id: "1",
+            tracking_number: "TRK-001",
+            carrier: "usps",
+            shipping_cost: 5.99,
+            label_data: null,
+            warehouse_orders: { order_number: "1001" },
+            warehouse_shipment_items: [{ id: "i1" }],
+            organizations: { name: "Test Org" },
+          },
+        ],
         error: null,
         count: 1,
       });
@@ -131,12 +89,16 @@ describe("shipping server actions", () => {
       expect(result.pageSize).toBe(25);
     });
 
+    it("applies search filter using or()", async () => {
+      mockRange.mockResolvedValueOnce({ data: [], error: null, count: 0 });
+
+      await getShipments({ search: "TRK", page: 1, pageSize: 25 });
+
+      expect(mockOr).toHaveBeenCalledWith("tracking_number.ilike.%TRK%,carrier.ilike.%TRK%");
+    });
+
     it("applies org filter", async () => {
-      mockRange.mockResolvedValueOnce({
-        data: [],
-        error: null,
-        count: 0,
-      });
+      mockRange.mockResolvedValueOnce({ data: [], error: null, count: 0 });
 
       await getShipments({
         orgId: "550e8400-e29b-41d4-a716-446655440000",
@@ -148,11 +110,7 @@ describe("shipping server actions", () => {
     });
 
     it("applies date range filters", async () => {
-      mockRange.mockResolvedValueOnce({
-        data: [],
-        error: null,
-        count: 0,
-      });
+      mockRange.mockResolvedValueOnce({ data: [], error: null, count: 0 });
 
       await getShipments({
         dateFrom: "2024-01-01",
@@ -170,50 +128,252 @@ describe("shipping server actions", () => {
     });
   });
 
+  describe("getShipmentsSummary", () => {
+    it("returns summary stats", async () => {
+      const mockData = [
+        { id: "1", shipping_cost: 5.99 },
+        { id: "2", shipping_cost: 8.5 },
+        { id: "3", shipping_cost: null },
+      ];
+
+      mockFrom.mockImplementationOnce(() => ({
+        select: () => Promise.resolve({ data: mockData, error: null, count: 3 }),
+      }));
+
+      const result = await getShipmentsSummary();
+
+      expect(result.totalCount).toBe(3);
+      expect(result.totalPostage).toBeCloseTo(14.49);
+      expect(result.avgCost).toBeCloseTo(4.83);
+    });
+
+    it("returns zeros when no shipments", async () => {
+      mockFrom.mockImplementationOnce(() => ({
+        select: () => Promise.resolve({ data: [], error: null, count: 0 }),
+      }));
+
+      const result = await getShipmentsSummary();
+
+      expect(result.totalCount).toBe(0);
+      expect(result.totalPostage).toBe(0);
+      expect(result.avgCost).toBe(0);
+    });
+  });
+
   describe("getShipmentDetail", () => {
     it("rejects non-UUID id", async () => {
       await expect(getShipmentDetail("not-a-uuid")).rejects.toThrow();
     });
 
-    it("fetches shipment with items and events", async () => {
+    it("fetches shipment with items, events, and cost breakdown", async () => {
       const shipmentId = "550e8400-e29b-41d4-a716-446655440000";
 
-      // Mock parallel calls
-      mockSingle.mockResolvedValueOnce({
-        data: { id: shipmentId, tracking_number: "1Z123" },
-        error: null,
-      });
-      mockOrder.mockReturnValue({
-        range: mockRange,
-        order: mockOrder,
-      });
-      // For items and events queries, mock the full chain
-      const mockItemsResult = { data: [{ id: "item-1", sku: "TEST-001" }], error: null };
-      const mockEventsResult = { data: [{ id: "evt-1", status: "shipped" }], error: null };
-
-      // Since Promise.all is used, we need the from mock to handle multiple tables
-      let callCount = 0;
-      mockFrom.mockImplementation(() => {
-        callCount++;
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({
-                data: { id: shipmentId, tracking_number: "1Z123" },
+      mockFrom.mockImplementation((table) => {
+        if (table === "warehouse_shipments") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: {
+                    id: shipmentId,
+                    tracking_number: "1Z123",
+                    carrier: "ups",
+                    shipping_cost: 12.5,
+                    label_data: {
+                      shipTo: {
+                        name: "John Doe",
+                        city: "Austin",
+                        state: "TX",
+                        postalCode: "78701",
+                      },
+                    },
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_shipment_items") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({
+                  data: [{ id: "item-1", sku: "LP-001", quantity: 1, product_title: "Test LP" }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_tracking_events") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({
+                  data: [{ id: "evt-1", status: "shipped" }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_product_variants") {
+          return {
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: [{ sku: "LP-001", format_name: "LP" }],
                 error: null,
               }),
-              order: vi
-                .fn()
-                .mockResolvedValue(callCount === 2 ? mockItemsResult : mockEventsResult),
             }),
-          }),
-        };
+          };
+        }
+        if (table === "warehouse_format_costs") {
+          return {
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: [
+                  {
+                    format_name: "LP",
+                    pick_pack_cost: 2.5,
+                    material_cost: 1.0,
+                  },
+                ],
+                error: null,
+              }),
+            }),
+          };
+        }
+        return { select: mockSelect };
       });
 
       const result = await getShipmentDetail(shipmentId);
       expect(result).toHaveProperty("shipment");
       expect(result).toHaveProperty("items");
       expect(result).toHaveProperty("trackingEvents");
+      expect(result).toHaveProperty("costBreakdown");
+      expect(result).toHaveProperty("recipient");
+      expect(result.recipient?.name).toBe("John Doe");
+      expect(result.costBreakdown.postage).toBe(12.5);
+      expect(result.costBreakdown.pickPack).toBe(2.5);
+      expect(result.costBreakdown.materials).toBe(1.0);
+      expect(result.costBreakdown.total).toBe(16.0);
+    });
+  });
+
+  describe("exportShipmentsCsv", () => {
+    it("returns CSV with headers", async () => {
+      mockFrom.mockImplementation((table) => {
+        if (table === "warehouse_shipments") {
+          return {
+            select: vi.fn().mockReturnValue({
+              order: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue({
+                  data: [
+                    {
+                      id: "1",
+                      tracking_number: "TRK-001",
+                      carrier: "usps",
+                      service: "priority",
+                      ship_date: "2026-03-15",
+                      shipping_cost: 5.99,
+                      label_data: {
+                        shipTo: {
+                          name: "Jane",
+                          city: "NYC",
+                          state: "NY",
+                          postalCode: "10001",
+                          country: "US",
+                        },
+                      },
+                      warehouse_orders: { order_number: "1001" },
+                      warehouse_shipment_items: [{ sku: "LP-001", quantity: 2 }],
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_product_variants") {
+          return {
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: [{ sku: "LP-001", format_name: "LP" }],
+                error: null,
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_format_costs") {
+          return {
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({
+                data: [{ format_name: "LP", pick_pack_cost: 2.5, material_cost: 1.0 }],
+                error: null,
+              }),
+            }),
+          };
+        }
+        return { select: mockSelect };
+      });
+
+      const csv = await exportShipmentsCsv();
+      const lines = csv.split("\n");
+
+      expect(lines[0]).toBe(
+        "order_number,ship_date,carrier,service,tracking_number,recipient,city,state,zip,country,items,postage,materials,pick_pack,total",
+      );
+      expect(lines).toHaveLength(2); // header + 1 row
+      expect(lines[1]).toContain("1001");
+      expect(lines[1]).toContain("TRK-001");
+      expect(lines[1]).toContain("Jane");
+    });
+
+    it("escapes CSV fields with commas", async () => {
+      mockFrom.mockImplementation((table) => {
+        if (table === "warehouse_shipments") {
+          return {
+            select: vi.fn().mockReturnValue({
+              order: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue({
+                  data: [
+                    {
+                      id: "1",
+                      tracking_number: "TRK-001",
+                      carrier: "usps",
+                      service: "priority",
+                      ship_date: "2026-03-15",
+                      shipping_cost: 5.99,
+                      label_data: {
+                        shipTo: {
+                          name: "Doe, Jane",
+                          city: "NYC",
+                          state: "NY",
+                          postalCode: "10001",
+                          country: "US",
+                        },
+                      },
+                      warehouse_orders: { order_number: "1001" },
+                      warehouse_shipment_items: [],
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            in: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
+        };
+      });
+
+      const csv = await exportShipmentsCsv();
+      expect(csv).toContain('"Doe, Jane"');
     });
   });
 });

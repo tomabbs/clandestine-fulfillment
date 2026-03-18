@@ -1,18 +1,23 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, Pencil } from "lucide-react";
 import { useCallback, useState } from "react";
 import {
   createBillingAdjustment,
   createBillingRule,
+  createClientOverride,
   createFormatCost,
+  deleteClientOverride,
   getAuthWorkspaceId,
   getBillingRules,
   getBillingSnapshotDetail,
   getBillingSnapshots,
+  getClientOverrides,
+  getFormatCosts,
   updateBillingRule,
   updateFormatCost,
 } from "@/actions/billing";
+import { getClients } from "@/actions/clients";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
@@ -20,7 +25,7 @@ import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import type { WarehouseBillingRule, WarehouseFormatCost } from "@/lib/shared/types";
 
-type Tab = "snapshots" | "rules" | "formats" | "adjustments";
+type Tab = "snapshots" | "default-rates" | "client-overrides" | "formats" | "adjustments";
 
 export default function BillingPage() {
   const [activeTab, setActiveTab] = useState<Tab>("snapshots");
@@ -41,7 +46,8 @@ export default function BillingPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "snapshots", label: "Snapshots" },
-    { key: "rules", label: "Rules" },
+    { key: "default-rates", label: "Default Rates" },
+    { key: "client-overrides", label: "Client Overrides" },
     { key: "formats", label: "Format Costs" },
     { key: "adjustments", label: "Adjustments" },
   ];
@@ -68,7 +74,8 @@ export default function BillingPage() {
       </div>
 
       {activeTab === "snapshots" && <SnapshotsTab workspaceId={workspaceId} />}
-      {activeTab === "rules" && <RulesTab workspaceId={workspaceId} />}
+      {activeTab === "default-rates" && <DefaultRatesTab workspaceId={workspaceId} />}
+      {activeTab === "client-overrides" && <ClientOverridesTab workspaceId={workspaceId} />}
       {activeTab === "formats" && <FormatCostsTab workspaceId={workspaceId} />}
       {activeTab === "adjustments" && <AdjustmentsTab workspaceId={workspaceId} />}
     </div>
@@ -389,9 +396,9 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
   );
 }
 
-// === Rules Tab ===
+// === Default Rates Tab (renamed from Rules) ===
 
-function RulesTab({ workspaceId }: { workspaceId: string }) {
+function DefaultRatesTab({ workspaceId }: { workspaceId: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Partial<WarehouseBillingRule>>({});
   const [showNew, setShowNew] = useState(false);
@@ -405,7 +412,7 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
   });
 
   const { data, isLoading } = useAppQuery({
-    tier: CACHE_TIERS.SESSION,
+    tier: CACHE_TIERS.STABLE,
     queryKey: queryKeys.billing.rules(),
     queryFn: () => getBillingRules(workspaceId),
   });
@@ -429,7 +436,7 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
   );
 
   if (isLoading) {
-    return <p className="text-muted-foreground text-sm">Loading rules…</p>;
+    return <p className="text-muted-foreground text-sm">Loading default rates…</p>;
   }
 
   const rules = data?.rules ?? [];
@@ -438,7 +445,7 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-4">
       <div className="flex justify-end">
         <Button size="sm" onClick={() => setShowNew(!showNew)}>
-          {showNew ? "Cancel" : "Add Rule"}
+          {showNew ? "Cancel" : "Add Rate"}
         </Button>
       </div>
 
@@ -495,7 +502,7 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
               )
             }
           >
-            Create Rule
+            Create Rate
           </Button>
         </div>
       )}
@@ -506,9 +513,9 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
             <tr>
               <th className="text-left p-3 font-medium">Name</th>
               <th className="text-left p-3 font-medium">Type</th>
-              <th className="text-right p-3 font-medium">Amount</th>
-              <th className="text-center p-3 font-medium">Active</th>
+              <th className="text-right p-3 font-medium">Current Rate</th>
               <th className="text-left p-3 font-medium">Effective From</th>
+              <th className="text-right p-3 font-medium">Last Updated</th>
               <th className="text-right p-3 font-medium">Actions</th>
             </tr>
           </thead>
@@ -529,7 +536,7 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
                       rule.rule_name
                     )}
                   </td>
-                  <td className="p-3 text-muted-foreground">{rule.rule_type}</td>
+                  <td className="p-3 text-muted-foreground">{rule.rule_type.replace(/_/g, " ")}</td>
                   <td className="p-3 text-right font-mono">
                     {isEditing ? (
                       <Input
@@ -548,27 +555,10 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
                       `$${rule.amount.toFixed(2)}`
                     )}
                   </td>
-                  <td className="p-3 text-center">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateMutation.mutate({
-                          id: rule.id,
-                          data: { is_active: !rule.is_active },
-                        })
-                      }
-                      className={`w-8 h-5 rounded-full transition-colors ${
-                        rule.is_active ? "bg-green-500" : "bg-gray-300"
-                      }`}
-                    >
-                      <span
-                        className={`block w-3.5 h-3.5 bg-white rounded-full transition-transform ${
-                          rule.is_active ? "translate-x-3.5" : "translate-x-0.5"
-                        }`}
-                      />
-                    </button>
-                  </td>
                   <td className="p-3 text-muted-foreground">{rule.effective_from}</td>
+                  <td className="p-3 text-right text-muted-foreground">
+                    {new Date(rule.created_at).toLocaleDateString()}
+                  </td>
                   <td className="p-3 text-right">
                     {isEditing ? (
                       <div className="flex gap-1 justify-end">
@@ -606,6 +596,167 @@ function RulesTab({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+// === Client Overrides Tab ===
+
+function ClientOverridesTab({ workspaceId }: { workspaceId: string }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    org_id: "",
+    rule_id: "",
+    override_amount: 0,
+    effective_from: new Date().toISOString().split("T")[0],
+  });
+
+  const { data: overrides, isLoading } = useAppQuery({
+    tier: CACHE_TIERS.STABLE,
+    queryKey: queryKeys.billing.overrides(),
+    queryFn: () => getClientOverrides(workspaceId),
+  });
+
+  const { data: rulesData } = useAppQuery({
+    tier: CACHE_TIERS.STABLE,
+    queryKey: queryKeys.billing.rules(),
+    queryFn: () => getBillingRules(workspaceId),
+  });
+
+  const { data: clientsData } = useAppQuery({
+    tier: CACHE_TIERS.SESSION,
+    queryKey: queryKeys.clients.list(),
+    queryFn: () => getClients({ pageSize: 200 }),
+    enabled: showForm,
+  });
+
+  const createMutation = useAppMutation({
+    mutationFn: (data: Parameters<typeof createClientOverride>[0]) => createClientOverride(data),
+    invalidateKeys: [queryKeys.billing.all],
+  });
+
+  const deleteMutation = useAppMutation({
+    mutationFn: (id: string) => deleteClientOverride(id),
+    invalidateKeys: [queryKeys.billing.all],
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Cancel" : "Add Override"}
+        </Button>
+      </div>
+
+      {showForm && (
+        <div className="border rounded-lg p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <select
+              className="border rounded-md px-3 py-2 text-sm"
+              value={form.org_id}
+              onChange={(e) => setForm((f) => ({ ...f, org_id: e.target.value }))}
+            >
+              <option value="">Select client…</option>
+              {clientsData?.clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              className="border rounded-md px-3 py-2 text-sm"
+              value={form.rule_id}
+              onChange={(e) => setForm((f) => ({ ...f, rule_id: e.target.value }))}
+            >
+              <option value="">Select rule type…</option>
+              {rulesData?.rules.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.rule_name} ({r.rule_type.replace(/_/g, " ")})
+                </option>
+              ))}
+            </select>
+            <Input
+              type="number"
+              step="0.01"
+              placeholder="Override amount"
+              value={form.override_amount || ""}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  override_amount: Number.parseFloat(e.target.value) || 0,
+                }))
+              }
+            />
+            <Input
+              type="date"
+              value={form.effective_from}
+              onChange={(e) => setForm((f) => ({ ...f, effective_from: e.target.value }))}
+            />
+          </div>
+          <Button
+            size="sm"
+            disabled={!form.org_id || !form.rule_id}
+            onClick={() =>
+              createMutation.mutate(
+                { ...form, workspace_id: workspaceId },
+                {
+                  onSuccess: () => {
+                    setShowForm(false);
+                    setForm({
+                      org_id: "",
+                      rule_id: "",
+                      override_amount: 0,
+                      effective_from: new Date().toISOString().split("T")[0],
+                    });
+                  },
+                },
+              )
+            }
+          >
+            Create Override
+          </Button>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-muted-foreground text-sm">Loading overrides…</p>
+      ) : !overrides?.length ? (
+        <p className="text-sm text-muted-foreground">
+          No client overrides configured. All clients use default rates.
+        </p>
+      ) : (
+        <div className="border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-medium">Client</th>
+                <th className="text-left p-3 font-medium">Rule Type</th>
+                <th className="text-right p-3 font-medium">Override Rate</th>
+                <th className="text-left p-3 font-medium">Effective From</th>
+                <th className="text-right p-3 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {overrides.map((o) => (
+                <tr key={o.id}>
+                  <td className="p-3">{o.organizations.name}</td>
+                  <td className="p-3 text-muted-foreground">
+                    {o.warehouse_billing_rules.rule_name} (
+                    {o.warehouse_billing_rules.rule_type.replace(/_/g, " ")})
+                  </td>
+                  <td className="p-3 text-right font-mono">${o.override_amount.toFixed(2)}</td>
+                  <td className="p-3 text-muted-foreground">{o.effective_from}</td>
+                  <td className="p-3 text-right">
+                    <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(o.id)}>
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // === Format Costs Tab ===
 
 function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
@@ -616,12 +767,13 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
     format_name: "",
     pick_pack_cost: 0,
     material_cost: 0,
+    sort_order: 0,
   });
 
-  const { data, isLoading } = useAppQuery({
-    tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.billing.rules(),
-    queryFn: () => getBillingRules(workspaceId),
+  const { data: formatCosts, isLoading } = useAppQuery({
+    tier: CACHE_TIERS.STABLE,
+    queryKey: ["billing", "format-costs"],
+    queryFn: () => getFormatCosts(workspaceId),
   });
 
   const updateMutation = useAppMutation({
@@ -640,7 +792,7 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
     return <p className="text-muted-foreground text-sm">Loading format costs…</p>;
   }
 
-  const formatCosts = data?.formatCosts ?? [];
+  const costs = formatCosts ?? [];
 
   return (
     <div className="space-y-4">
@@ -687,7 +839,16 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
             size="sm"
             onClick={() =>
               createMutation.mutate(
-                { ...newFormat, workspace_id: workspaceId },
+                {
+                  ...newFormat,
+                  workspace_id: workspaceId,
+                  format_key: newFormat.format_name.toLowerCase().replace(/\s+/g, "_"),
+                  display_name: newFormat.format_name,
+                  cost_breakdown: {
+                    pick_pack: newFormat.pick_pack_cost,
+                    material: newFormat.material_cost,
+                  },
+                },
                 { onSuccess: () => setShowNew(false) },
               )
             }
@@ -701,54 +862,68 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
-              <th className="text-left p-3 font-medium">Format</th>
-              <th className="text-right p-3 font-medium">Pick & Pack</th>
-              <th className="text-right p-3 font-medium">Material</th>
+              <th className="text-left p-3 font-medium">Format Key</th>
+              <th className="text-left p-3 font-medium">Display Name</th>
+              <th className="text-right p-3 font-medium">Combined Cost</th>
+              <th className="text-left p-3 font-medium">Cost Breakdown</th>
+              <th className="text-right p-3 font-medium">Sort Order</th>
               <th className="text-right p-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {formatCosts.map((fc) => {
+            {costs.map((fc) => {
               const isEditing = editingId === fc.id;
+              const combinedCost = fc.pick_pack_cost + fc.material_cost;
+              const breakdown = fc.cost_breakdown ?? {
+                pick_pack: fc.pick_pack_cost,
+                material: fc.material_cost,
+              };
+
               return (
                 <tr key={fc.id}>
-                  <td className="p-3 font-medium">{fc.format_name}</td>
+                  <td className="p-3 font-mono text-xs">{fc.format_key ?? "—"}</td>
+                  <td className="p-3 font-medium">{fc.display_name ?? fc.format_name}</td>
                   <td className="p-3 text-right font-mono">
                     {isEditing ? (
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="text-right"
-                        value={editValues.pick_pack_cost ?? fc.pick_pack_cost}
-                        onChange={(e) =>
-                          setEditValues((v) => ({
-                            ...v,
-                            pick_pack_cost: Number.parseFloat(e.target.value) || 0,
-                          }))
-                        }
-                      />
+                      <div className="space-y-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          className="text-right"
+                          placeholder="Pick & Pack"
+                          value={editValues.pick_pack_cost ?? fc.pick_pack_cost}
+                          onChange={(e) =>
+                            setEditValues((v) => ({
+                              ...v,
+                              pick_pack_cost: Number.parseFloat(e.target.value) || 0,
+                            }))
+                          }
+                        />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          className="text-right"
+                          placeholder="Material"
+                          value={editValues.material_cost ?? fc.material_cost}
+                          onChange={(e) =>
+                            setEditValues((v) => ({
+                              ...v,
+                              material_cost: Number.parseFloat(e.target.value) || 0,
+                            }))
+                          }
+                        />
+                      </div>
                     ) : (
-                      `$${fc.pick_pack_cost.toFixed(2)}`
+                      `$${combinedCost.toFixed(2)}`
                     )}
                   </td>
-                  <td className="p-3 text-right font-mono">
-                    {isEditing ? (
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="text-right"
-                        value={editValues.material_cost ?? fc.material_cost}
-                        onChange={(e) =>
-                          setEditValues((v) => ({
-                            ...v,
-                            material_cost: Number.parseFloat(e.target.value) || 0,
-                          }))
-                        }
-                      />
-                    ) : (
-                      `$${fc.material_cost.toFixed(2)}`
-                    )}
+                  <td className="p-3 text-xs text-muted-foreground">
+                    <span className="font-mono">
+                      P&P: ${(breakdown.pick_pack ?? 0).toFixed(2)}, Mat: $
+                      {(breakdown.material ?? 0).toFixed(2)}
+                    </span>
                   </td>
+                  <td className="p-3 text-right text-muted-foreground">{fc.sort_order}</td>
                   <td className="p-3 text-right">
                     {isEditing ? (
                       <div className="flex gap-1 justify-end">
@@ -769,7 +944,7 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
                       </div>
                     ) : (
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={() => {
                           setEditingId(fc.id);
@@ -779,7 +954,7 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
                           });
                         }}
                       >
-                        Edit
+                        <Pencil className="h-4 w-4" />
                       </Button>
                     )}
                   </td>

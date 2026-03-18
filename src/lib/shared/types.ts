@@ -49,6 +49,8 @@ export interface Workspace {
   created_at: string;
 }
 
+export type ServiceType = "full_service" | "storage_only" | "drop_ship";
+
 export interface Organization {
   id: string;
   workspace_id: string;
@@ -59,6 +61,9 @@ export interface Organization {
   onboarding_state: Record<string, unknown>;
   storage_fee_waived: boolean;
   warehouse_grace_period_ends_at: string | null;
+  service_type: ServiceType;
+  shopify_vendor_name: string | null;
+  stripe_customer_id: string | null;
   created_at: string;
 }
 
@@ -284,8 +289,24 @@ export interface WarehouseFormatCost {
   id: string;
   workspace_id: string;
   format_name: string;
+  format_key: string | null;
+  display_name: string | null;
   pick_pack_cost: number;
   material_cost: number;
+  cost_breakdown: Record<string, number>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WarehouseBillingRuleOverride {
+  id: string;
+  workspace_id: string;
+  org_id: string;
+  rule_id: string;
+  override_amount: number;
+  effective_from: string;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -8,6 +8,8 @@ import {
   Library,
   LogOut,
   MessageSquare,
+  Monitor,
+  Moon,
   Package,
   PackagePlus,
   Radio,
@@ -15,6 +17,7 @@ import {
   ScanBarcode,
   Settings,
   ShoppingCart,
+  Sun,
   Truck,
   Users,
 } from "lucide-react";
@@ -43,6 +46,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+import { useTheme } from "@/contexts/ThemeContext";
 
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -142,6 +146,7 @@ export function AdminSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t">
+        <ThemeToggle />
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
@@ -162,5 +167,35 @@ export function AdminSidebar() {
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+
+  const options = [
+    { value: "light" as const, icon: Sun, label: "Light" },
+    { value: "dark" as const, icon: Moon, label: "Dark" },
+    { value: "system" as const, icon: Monitor, label: "System" },
+  ];
+
+  return (
+    <div className="flex items-center justify-center gap-1 px-3 py-2">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          title={opt.label}
+          onClick={() => setTheme(opt.value)}
+          className={`rounded-md p-1.5 transition-colors ${
+            theme === opt.value
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
+          }`}
+        >
+          <opt.icon className="h-4 w-4" />
+        </button>
+      ))}
+    </div>
   );
 }
