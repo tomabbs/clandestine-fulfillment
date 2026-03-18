@@ -52,6 +52,54 @@ async function requireAuth() {
 
 // === Server Actions ===
 
+/**
+ * Search product variants by SKU or title for inbound item selection.
+ * Returns variants with their parent product title, format, and current stock.
+ */
+export async function searchProductVariants(query: string): Promise<
+  Array<{
+    variantId: string;
+    productTitle: string;
+    sku: string;
+    format: string | null;
+    currentStock: number | null;
+  }>
+> {
+  await requireAuth();
+  if (!query || query.length < 2) return [];
+
+  const serviceClient = createServiceRoleClient();
+  const term = `%${query}%`;
+
+  const { data: variants } = await serviceClient
+    .from("warehouse_product_variants")
+    .select("id, sku, title, format_name, warehouse_products!inner(title)")
+    .or(`sku.ilike.${term},title.ilike.${term},warehouse_products.title.ilike.${term}`)
+    .limit(20);
+
+  if (!variants) return [];
+
+  // Get inventory levels for matched variants
+  const variantIds = variants.map((v) => v.id);
+  const { data: levels } = await serviceClient
+    .from("warehouse_inventory_levels")
+    .select("variant_id, available")
+    .in("variant_id", variantIds);
+
+  const stockMap = new Map((levels ?? []).map((l) => [l.variant_id, l.available]));
+
+  return variants.map((v) => {
+    const product = v.warehouse_products as unknown as { title: string };
+    return {
+      variantId: v.id,
+      productTitle: product?.title ?? v.title ?? "",
+      sku: v.sku,
+      format: v.format_name,
+      currentStock: stockMap.get(v.id) ?? null,
+    };
+  });
+}
+
 export async function getProducts(rawFilters: ProductFilters) {
   await requireAuth();
   const filters = productFiltersSchema.parse(rawFilters);
