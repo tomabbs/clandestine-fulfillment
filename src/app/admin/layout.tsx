@@ -7,7 +7,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider>
+    <SidebarProvider data-warehouse-theme>
       <AdminSidebar />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b px-4">

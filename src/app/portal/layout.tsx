@@ -6,7 +6,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider>
+    <SidebarProvider data-warehouse-theme>
       <PortalSidebar />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b px-4">

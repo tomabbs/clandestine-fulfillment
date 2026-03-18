@@ -139,3 +139,153 @@
     @apply font-sans;
     }
 }
+
+/* ================================================================
+ * Warehouse Theme Layer
+ *
+ * Amber accent family scoped to warehouse pages (/admin, /portal).
+ * Does NOT override core shadcn/ui tokens — adds warehouse-specific
+ * CSS variables consumed by utility classes below.
+ *
+ * Parity with old app: amber-600 active nav, amber-100/800 badges,
+ * amber-500 indicators, dense table styling.
+ * ================================================================ */
+
+:root {
+  --wh-accent: #d97706;
+  --wh-accent-light: #fbbf24;
+  --wh-accent-bg: #fffbeb;
+  --wh-accent-bg-subtle: #fef3c7;
+  --wh-accent-text: #92400e;
+  --wh-success: #059669;
+  --wh-success-bg: #ecfdf5;
+  --wh-warning: #d97706;
+  --wh-warning-bg: #fffbeb;
+  --wh-error: #dc2626;
+  --wh-error-bg: #fef2f2;
+}
+
+.dark {
+  --wh-accent: #fbbf24;
+  --wh-accent-light: #fcd34d;
+  --wh-accent-bg: rgba(234, 179, 8, 0.15);
+  --wh-accent-bg-subtle: rgba(234, 179, 8, 0.08);
+  --wh-accent-text: #fcd34d;
+  --wh-success: #34d399;
+  --wh-success-bg: rgba(52, 211, 153, 0.12);
+  --wh-warning: #fbbf24;
+  --wh-warning-bg: rgba(234, 179, 8, 0.12);
+  --wh-error: #f87171;
+  --wh-error-bg: rgba(248, 113, 113, 0.12);
+}
+
+/* --- Warehouse status badges --- */
+.wh-badge-active {
+  background-color: var(--wh-success-bg);
+  color: var(--wh-success);
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.wh-badge-draft {
+  background-color: var(--wh-warning-bg);
+  color: var(--wh-warning);
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.wh-badge-archived,
+.wh-badge-voided {
+  background-color: var(--wh-accent-bg-subtle);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.wh-badge-error {
+  background-color: var(--wh-error-bg);
+  color: var(--wh-error);
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* --- Warehouse accent utilities --- */
+.wh-accent-text { color: var(--wh-accent); }
+.wh-accent-bg { background-color: var(--wh-accent-bg); }
+.wh-accent-border { border-color: var(--wh-accent); }
+
+/* --- Dense table styling for warehouse data --- */
+.wh-table th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  padding: 0.5rem 0.75rem;
+}
+.wh-table td {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+}
+.wh-table tr {
+  border-bottom: 1px solid var(--border);
+}
+.wh-table tr:hover {
+  background-color: var(--wh-accent-bg-subtle);
+}
+
+/* --- Warehouse panel hierarchy --- */
+.wh-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.wh-panel-header {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--wh-accent);
+  margin-bottom: 0.5rem;
+}
+
+/* --- Amber highlight for warehouse metric cards --- */
+.wh-metric-highlight {
+  border-left: 3px solid var(--wh-accent);
+  padding-left: 0.75rem;
+}
+
+/* --- Warehouse sidebar active state: amber instead of purple --- */
+[data-warehouse-theme] {
+  --sidebar-primary: oklch(0.769 0.188 70.08); /* amber-500 */
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-ring: oklch(0.769 0.188 70.08);
+}
+.dark [data-warehouse-theme],
+[data-warehouse-theme]:is(.dark *) {
+  --sidebar-primary: oklch(0.828 0.189 84.429); /* amber-400 */
+  --sidebar-primary-foreground: oklch(0.12 0 0);
+  --sidebar-ring: oklch(0.828 0.189 84.429);
+}
+
+/* --- Warehouse page section spacing (denser than default) --- */
+.wh-section {
+  margin-bottom: 1.25rem;
+}
+.wh-section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
