@@ -65,7 +65,7 @@ export async function getProducts(rawFilters: ProductFilters) {
     .select(
       `
       *,
-      warehouse_product_variants (id, sku, title, price, cost, format_name, is_preorder, street_date, bandcamp_url),
+      warehouse_product_variants (id, sku, title, price, format_name, is_preorder, street_date, bandcamp_url),
       warehouse_product_images (id, src, alt, position),
       organizations!inner (id, name)
     `,
@@ -100,12 +100,8 @@ export async function getProducts(rawFilters: ProductFilters) {
       return variants?.some((v) => v.format_name === filters.format);
     });
   }
-  if (filters.missingCost) {
-    products = products.filter((p) => {
-      const variants = p.warehouse_product_variants as Array<{ cost: number | null }>;
-      return variants?.some((v) => v.cost == null || v.cost === 0);
-    });
-  }
+  // missingCost filter — cost column does not exist in current schema, skip for now
+  // TODO: add cost column to warehouse_product_variants if needed
 
   const allVariantIds = products.flatMap((p) => {
     const vs = p.warehouse_product_variants as Array<{ id: string }>;
@@ -141,7 +137,6 @@ export async function getProducts(rawFilters: ProductFilters) {
       id: string;
       sku: string;
       price: number | null;
-      cost: number | null;
     }>;
     const first = vs[0] ?? null;
     const inventoryTotal = vs.reduce((sum, v) => sum + (inventoryByVariant[v.id] ?? 0), 0);
@@ -150,7 +145,6 @@ export async function getProducts(rawFilters: ProductFilters) {
       bandcampMappings,
       firstVariantSku: first?.sku ?? null,
       firstVariantPrice: first?.price ?? null,
-      firstVariantCost: first?.cost ?? null,
       inventoryTotal,
     };
   });
@@ -173,14 +167,11 @@ export async function getCatalogStats() {
   const { count: totalVariants } = await sc
     .from("warehouse_product_variants")
     .select("id", { count: "exact", head: true });
-  const { count: missingCostCount } = await sc
-    .from("warehouse_product_variants")
-    .select("id", { count: "exact", head: true })
-    .or("cost.is.null,cost.eq.0");
+  // cost column does not exist in current schema — report 0 for now
   return {
     totalProducts: totalProducts ?? 0,
     totalVariants: totalVariants ?? 0,
-    missingCostCount: missingCostCount ?? 0,
+    missingCostCount: 0,
   };
 }
 

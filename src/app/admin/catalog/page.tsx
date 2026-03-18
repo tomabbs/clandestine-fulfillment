@@ -265,11 +265,7 @@ export default function CatalogPage() {
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {product.firstVariantSku ?? "—"}
                   </TableCell>
-                  <TableCell
-                    className={`text-right text-sm ${product.firstVariantCost == null || product.firstVariantCost === 0 ? "text-red-500" : ""}`}
-                  >
-                    {formatCurrency(product.firstVariantCost)}
-                  </TableCell>
+                  <TableCell className="text-right text-sm">—</TableCell>
                   <TableCell className="text-right text-sm">
                     {formatCurrency(product.firstVariantPrice)}
                   </TableCell>
