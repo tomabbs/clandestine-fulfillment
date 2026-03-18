@@ -13,6 +13,11 @@ export const shipstationPollTask = schedules.task({
   run: async () => {
     const supabase = createServiceRoleClient();
 
+    // Get workspace ID (single-workspace for now)
+    const { data: workspace } = await supabase.from("workspaces").select("id").limit(1).single();
+    if (!workspace) throw new Error("No workspace found");
+    const workspaceId = workspace.id;
+
     // Get last poll cursor from sync state
     const { data: syncState } = await supabase
       .from("warehouse_sync_state")
@@ -54,7 +59,7 @@ export const shipstationPollTask = schedules.task({
         }
 
         // Ingest via the same logic as webhook task
-        await ingestFromPoll(supabase, shipment);
+        await ingestFromPoll(supabase, shipment, workspaceId);
         totalProcessed++;
       }
 
@@ -75,6 +80,7 @@ export const shipstationPollTask = schedules.task({
         .eq("id", syncState.id);
     } else {
       await supabase.from("warehouse_sync_state").insert({
+        workspace_id: workspaceId,
         sync_type: "shipstation_poll",
         last_sync_cursor: now,
         last_sync_wall_clock: now,
@@ -89,6 +95,7 @@ export const shipstationPollTask = schedules.task({
 async function ingestFromPoll(
   supabase: ReturnType<typeof createServiceRoleClient>,
   shipment: ShipStationShipment,
+  workspaceId: string,
 ) {
   const shipstationShipmentId = String(shipment.shipmentId);
 
@@ -109,6 +116,7 @@ async function ingestFromPoll(
   if (!orgId) {
     await supabase.from("warehouse_review_queue").upsert(
       {
+        workspace_id: workspaceId,
         category: "shipment_org_match",
         severity: "medium" as const,
         title: `Unmatched shipment: ${shipment.trackingNumber ?? shipstationShipmentId}`,
@@ -137,6 +145,7 @@ async function ingestFromPoll(
   const { data: inserted, error } = await supabase
     .from("warehouse_shipments")
     .insert({
+      workspace_id: workspaceId,
       shipstation_shipment_id: shipstationShipmentId,
       org_id: orgId,
       tracking_number: shipment.trackingNumber ?? null,
