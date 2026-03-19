@@ -13,6 +13,7 @@ import { productSetCreate } from "@/lib/clients/shopify-client";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
+import { preorderSetupTask } from "@/trigger/tasks/preorder-setup";
 
 // === Scrape task (Rule #60 — separate queue, concurrency 3) ===
 
@@ -35,6 +36,49 @@ export const bandcampScrapePageTask = task({
           updated_at: new Date().toISOString(),
         })
         .eq("id", payload.mappingId);
+
+      // Propagate scraped release date to the linked variant
+      if (scraped.releaseDate) {
+        const { data: mapping } = await supabase
+          .from("bandcamp_product_mappings")
+          .select("variant_id")
+          .eq("id", payload.mappingId)
+          .single();
+
+        if (mapping?.variant_id) {
+          const { data: variant } = await supabase
+            .from("warehouse_product_variants")
+            .select("id, street_date, is_preorder")
+            .eq("id", mapping.variant_id)
+            .single();
+
+          if (variant && !variant.street_date) {
+            const updates: Record<string, unknown> = {
+              street_date: scraped.releaseDate,
+              updated_at: new Date().toISOString(),
+            };
+
+            // If scraped date is in the future, mark as preorder
+            const streetDate = new Date(scraped.releaseDate);
+            if (streetDate > new Date() && !variant.is_preorder) {
+              updates.is_preorder = true;
+            }
+
+            await supabase.from("warehouse_product_variants").update(updates).eq("id", variant.id);
+
+            if (updates.is_preorder === true) {
+              await preorderSetupTask.trigger({
+                variant_id: variant.id,
+                workspace_id: payload.workspaceId,
+              });
+              logger.info("Triggered preorder-setup from scraper", {
+                variantId: variant.id,
+                releaseDate: scraped.releaseDate,
+              });
+            }
+          }
+        }
+      }
 
       if (scraped.metadataIncomplete) {
         await supabase.from("warehouse_review_queue").upsert(
@@ -178,30 +222,62 @@ export const bandcampSyncTask = task({
             { onConflict: "variant_id" },
           );
 
-          // Backfill price/cost on variant if missing
-          if (merchItem.price != null) {
+          // Backfill price/cost/street_date on variant if missing
+          {
             const { data: existingVar } = await supabase
               .from("warehouse_product_variants")
-              .select("id, price, cost, product_id")
+              .select("id, price, cost, product_id, street_date, is_preorder")
               .eq("id", variantId)
               .single();
 
             if (existingVar) {
               const updates: Record<string, unknown> = {};
-              // Update price if null or 0 (0 is a Shopify import placeholder, not real)
-              if (existingVar.price == null || existingVar.price === 0) {
+
+              // Update price if null or 0
+              if (
+                (existingVar.price == null || existingVar.price === 0) &&
+                merchItem.price != null
+              ) {
                 updates.price = merchItem.price;
               }
-              if (existingVar.cost == null || existingVar.cost === 0) {
+              if ((existingVar.cost == null || existingVar.cost === 0) && merchItem.price != null) {
                 const p = (updates.price as number | undefined) ?? merchItem.price;
                 updates.cost = Math.round(p * 0.5 * 100) / 100;
               }
+
+              // Backfill street_date from Bandcamp new_date
+              if (!existingVar.street_date && merchItem.new_date) {
+                updates.street_date = merchItem.new_date;
+              }
+
+              // Detect preorder: if street_date is in the future and not already a preorder
+              const effectiveStreetDate =
+                (updates.street_date as string | undefined) ?? existingVar.street_date;
+              if (effectiveStreetDate && !existingVar.is_preorder) {
+                const streetDate = new Date(effectiveStreetDate);
+                if (streetDate > new Date()) {
+                  updates.is_preorder = true;
+                }
+              }
+
               if (Object.keys(updates).length > 0) {
                 updates.updated_at = new Date().toISOString();
                 await supabase
                   .from("warehouse_product_variants")
                   .update(updates)
                   .eq("id", variantId);
+
+                // Trigger preorder setup if variant just became a preorder
+                if (updates.is_preorder === true) {
+                  await preorderSetupTask.trigger({
+                    variant_id: variantId,
+                    workspace_id: workspaceId,
+                  });
+                  logger.info("Triggered preorder-setup for matched variant", {
+                    variantId,
+                    streetDate: effectiveStreetDate,
+                  });
+                }
               }
 
               // Backfill image on product if Bandcamp has one and product doesn't
@@ -411,6 +487,15 @@ export const bandcampSyncTask = task({
               last_quantity_sold: merchItem.quantity_sold,
               last_synced_at: new Date().toISOString(),
             });
+
+            // Trigger preorder setup on Shopify if this is a preorder
+            if (tags.includes("Pre-Orders")) {
+              await preorderSetupTask.trigger({
+                variant_id: newVariant.id,
+                workspace_id: workspaceId,
+              });
+              logger.info("Triggered preorder-setup", { sku: merchItem.sku });
+            }
 
             // Scrape if URL available
             if (merchItem.url) {
