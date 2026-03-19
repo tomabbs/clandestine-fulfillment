@@ -163,7 +163,7 @@ export async function getProducts(rawFilters: ProductFilters) {
     .select(
       `
       *,
-      warehouse_product_variants (id, sku, title, price, format_name, is_preorder, street_date, bandcamp_url),
+      warehouse_product_variants (id, sku, title, price, cost, format_name, is_preorder, street_date, bandcamp_url),
       warehouse_product_images (id, src, alt, position),
       organizations!inner (id, name)
     `,
@@ -239,6 +239,7 @@ export async function getProducts(rawFilters: ProductFilters) {
       id: string;
       sku: string;
       price: number | null;
+      cost: number | null;
     }>;
     const first = vs[0] ?? null;
     const inventoryTotal = vs.reduce((sum, v) => sum + (inventoryByVariant[v.id] ?? 0), 0);
@@ -248,6 +249,7 @@ export async function getProducts(rawFilters: ProductFilters) {
       firstVariantId: first?.id ?? null,
       firstVariantSku: first?.sku ?? null,
       firstVariantPrice: first?.price ?? null,
+      firstVariantCost: first?.cost ?? null,
       inventoryTotal,
     };
   });
