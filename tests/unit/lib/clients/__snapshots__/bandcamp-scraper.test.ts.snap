@@ -2,9 +2,23 @@
 
 exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture parse output 1`] = `
 {
+  "albumArtUrl": "https://f4.bcbits.com/img/a1234567890_10.jpg",
+  "artId": 1234567890,
   "metadataIncomplete": false,
   "packages": [
     {
+      "arts": [
+        {
+          "imageId": 1110001,
+          "url": "https://f4.bcbits.com/img/1110001_10.jpg",
+        },
+        {
+          "imageId": 2220002,
+          "url": "https://f4.bcbits.com/img/2220002_10.jpg",
+        },
+      ],
+      "imageId": 9876543210,
+      "imageUrl": "https://f4.bcbits.com/img/9876543210_10.jpg",
       "newDate": "01 Mar 2026 00:00:00 GMT",
       "sku": "TA-CD-001",
       "title": "Test Album CD",
@@ -12,6 +26,14 @@ exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture
       "url": "https://testartist.bandcamp.com/album/test-album",
     },
     {
+      "arts": [
+        {
+          "imageId": 3330003,
+          "url": "https://f4.bcbits.com/img/3330003_10.jpg",
+        },
+      ],
+      "imageId": 9876543211,
+      "imageUrl": "https://f4.bcbits.com/img/9876543211_10.jpg",
       "newDate": "15 Mar 2026 00:00:00 GMT",
       "sku": "TA-LP-001",
       "title": "Test Album LP",
@@ -19,6 +41,9 @@ exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture
       "url": "https://testartist.bandcamp.com/album/test-album",
     },
     {
+      "arts": [],
+      "imageId": null,
+      "imageUrl": null,
       "newDate": null,
       "sku": "TA-CASS-001",
       "title": "Test Album Cassette",
@@ -28,6 +53,7 @@ exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture
   ],
   "parserVersion": "v1",
   "raw": {
+    "art_id": 1234567890,
     "current": {
       "release_date": "01 Mar 2026 00:00:00 GMT",
       "title": "Test Album",
@@ -36,6 +62,19 @@ exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture
     "item_type": "album",
     "packages": [
       {
+        "arts": [
+          {
+            "height": 700,
+            "image_id": 1110001,
+            "width": 700,
+          },
+          {
+            "height": 700,
+            "image_id": 2220002,
+            "width": 700,
+          },
+        ],
+        "image_id": 9876543210,
         "new_date": "01 Mar 2026 00:00:00 GMT",
         "sku": "TA-CD-001",
         "title": "Test Album CD",
@@ -43,6 +82,14 @@ exports[`bandcamp-scraper > parseTralbumData (combined) > snapshot: full fixture
         "url": "https://testartist.bandcamp.com/album/test-album",
       },
       {
+        "arts": [
+          {
+            "height": 700,
+            "image_id": 3330003,
+            "width": 700,
+          },
+        ],
+        "image_id": 9876543211,
         "new_date": "15 Mar 2026 00:00:00 GMT",
         "sku": "TA-LP-001",
         "title": "Test Album LP",

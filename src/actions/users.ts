@@ -83,13 +83,20 @@ export async function inviteUser(input: InviteUserInput) {
     throw new Error("A user with this email already exists");
   }
 
-  // Create auth user via Supabase Admin API
-  const { data: authData, error: authError } = await serviceClient.auth.admin.inviteUserByEmail(
-    parsed.email,
-    { data: { full_name: parsed.name } },
-  );
+  // Create auth user via Supabase Admin API (requires service_role key)
+  let authData: { user: { id: string } | null };
+  try {
+    const result = await serviceClient.auth.admin.inviteUserByEmail(parsed.email, {
+      data: { full_name: parsed.name },
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://clandestinefulfillment.com"}/auth/callback`,
+    });
+    if (result.error) throw new Error(result.error.message);
+    authData = result.data;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`Failed to send invite: ${msg}`);
+  }
 
-  if (authError) throw new Error(`Failed to send invite: ${authError.message}`);
   if (!authData.user) throw new Error("No auth user returned from invite");
 
   // Insert users table row

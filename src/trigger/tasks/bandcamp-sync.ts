@@ -38,27 +38,27 @@ export const bandcampScrapePageTask = task({
         .eq("id", payload.mappingId);
 
       // Propagate scraped release date to the linked variant
-      if (scraped.releaseDate) {
-        const { data: mapping } = await supabase
-          .from("bandcamp_product_mappings")
-          .select("variant_id")
-          .eq("id", payload.mappingId)
+      const { data: mapping } = await supabase
+        .from("bandcamp_product_mappings")
+        .select("variant_id")
+        .eq("id", payload.mappingId)
+        .single();
+
+      if (mapping?.variant_id) {
+        const { data: variant } = await supabase
+          .from("warehouse_product_variants")
+          .select("id, street_date, is_preorder, product_id")
+          .eq("id", mapping.variant_id)
           .single();
 
-        if (mapping?.variant_id) {
-          const { data: variant } = await supabase
-            .from("warehouse_product_variants")
-            .select("id, street_date, is_preorder")
-            .eq("id", mapping.variant_id)
-            .single();
-
-          if (variant && !variant.street_date) {
+        if (variant) {
+          // Backfill street_date if missing
+          if (scraped.releaseDate && !variant.street_date) {
             const updates: Record<string, unknown> = {
               street_date: scraped.releaseDate,
               updated_at: new Date().toISOString(),
             };
 
-            // If scraped date is in the future, mark as preorder
             const streetDate = new Date(scraped.releaseDate);
             if (streetDate > new Date() && !variant.is_preorder) {
               updates.is_preorder = true;
@@ -76,6 +76,17 @@ export const bandcampScrapePageTask = task({
                 releaseDate: scraped.releaseDate,
               });
             }
+          }
+
+          // Store album art + merch images in warehouse_product_images
+          if (variant.product_id) {
+            await storeScrapedImages(
+              supabase,
+              variant.product_id,
+              payload.workspaceId,
+              scraped,
+              variant.id,
+            );
           }
         }
       }
@@ -105,6 +116,117 @@ export const bandcampScrapePageTask = task({
     }
   },
 });
+
+// === Image storage helper ===
+
+import type { ScrapedAlbumData } from "@/lib/clients/bandcamp-scraper";
+
+/**
+ * Store album art as position=0 and merch product photos as position=1,2,3...
+ * in warehouse_product_images. Matches the correct package by variant_id → SKU.
+ * Skips if images already exist for this product (idempotent).
+ */
+async function storeScrapedImages(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  productId: string,
+  workspaceId: string,
+  scraped: ScrapedAlbumData,
+  variantId: string,
+) {
+  // Check if product already has images — skip if so (idempotent)
+  const { count: existingCount } = await supabase
+    .from("warehouse_product_images")
+    .select("id", { count: "exact", head: true })
+    .eq("product_id", productId);
+
+  if ((existingCount ?? 0) > 0) return;
+
+  const imagesToInsert: Array<{
+    product_id: string;
+    workspace_id: string;
+    src: string;
+    alt: string | null;
+    position: number;
+  }> = [];
+
+  let position = 0;
+
+  // Position 0: Album art (cover image shared across all packages)
+  if (scraped.albumArtUrl) {
+    imagesToInsert.push({
+      product_id: productId,
+      workspace_id: workspaceId,
+      src: scraped.albumArtUrl,
+      alt: scraped.title ? `${scraped.title} - Album Art` : "Album Art",
+      position: position++,
+    });
+  }
+
+  // Find the matching package for this variant by looking up the variant's SKU
+  const { data: variantData } = await supabase
+    .from("warehouse_product_variants")
+    .select("sku")
+    .eq("id", variantId)
+    .single();
+
+  const variantSku = variantData?.sku;
+  const matchedPkg = variantSku ? scraped.packages.find((p) => p.sku === variantSku) : null;
+
+  if (matchedPkg) {
+    // Primary merch image (the main package photo)
+    if (matchedPkg.imageUrl) {
+      imagesToInsert.push({
+        product_id: productId,
+        workspace_id: workspaceId,
+        src: matchedPkg.imageUrl,
+        alt: matchedPkg.title ? `${matchedPkg.title} - Product Photo` : "Product Photo",
+        position: position++,
+      });
+    }
+
+    // Additional merch arts (extra product photos)
+    for (const art of matchedPkg.arts) {
+      // Skip if same as primary image
+      if (art.imageId === matchedPkg.imageId) continue;
+
+      imagesToInsert.push({
+        product_id: productId,
+        workspace_id: workspaceId,
+        src: art.url,
+        alt: matchedPkg.title ? `${matchedPkg.title} - Photo` : "Product Photo",
+        position: position++,
+      });
+    }
+  }
+
+  if (imagesToInsert.length === 0) return;
+
+  const { error } = await supabase.from("warehouse_product_images").insert(imagesToInsert);
+
+  if (error) {
+    logger.warn("Failed to insert scraped images", {
+      productId,
+      imageCount: imagesToInsert.length,
+      error: error.message,
+    });
+    return;
+  }
+
+  // Update product.images JSONB for legacy compatibility
+  await supabase
+    .from("warehouse_products")
+    .update({
+      images: imagesToInsert.map((img) => ({ src: img.src, alt: img.alt, position: img.position })),
+    })
+    .eq("id", productId);
+
+  logger.info("Stored scraped images", {
+    productId,
+    imageCount: imagesToInsert.length,
+    hasAlbumArt: !!scraped.albumArtUrl,
+    hasMerchImages: (matchedPkg?.arts.length ?? 0) > 0,
+  });
+}
 
 // === Main sync task (Rule #9 — serialized API access via bandcampQueue) ===
 

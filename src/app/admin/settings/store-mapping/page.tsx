@@ -396,50 +396,52 @@ export default function StoreMappingPage() {
           No ShipStation stores found. Click &ldquo;Sync Stores&rdquo; to import.
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Store Name</TableHead>
-              <TableHead>Store ID</TableHead>
-              <TableHead>Marketplace</TableHead>
-              <TableHead>Assigned Client</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(stores ?? []).map((store) => (
-              <TableRow key={store.id}>
-                <TableCell className="font-medium">{store.store_name ?? "Unnamed"}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {store.store_id}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {store.marketplace_name ?? "—"}
-                </TableCell>
-                <TableCell>
-                  <OrgSelector
-                    value={store.org_id ?? null}
-                    orgName={store.org_name ?? null}
-                    orgs={orgs ?? []}
-                    onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
-                    onClear={() => unmapMutation.mutate(store.id)}
-                    onAddNew={() => openNewClientDialog(store.id)}
-                    disabled={assignMutation.isPending || unmapMutation.isPending}
-                  />
-                </TableCell>
-                <TableCell>
-                  {store.org_id ? (
-                    <Badge variant="default" className="gap-1">
-                      <CheckCircle2 className="h-3 w-3" /> Mapped
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline">Unmapped</Badge>
-                  )}
-                </TableCell>
+        <div className="[&>[data-slot=table-container]]:overflow-visible">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Store Name</TableHead>
+                <TableHead>Store ID</TableHead>
+                <TableHead>Marketplace</TableHead>
+                <TableHead>Assigned Client</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {(stores ?? []).map((store) => (
+                <TableRow key={store.id}>
+                  <TableCell className="font-medium">{store.store_name ?? "Unnamed"}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {store.store_id}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {store.marketplace_name ?? "—"}
+                  </TableCell>
+                  <TableCell className="overflow-visible">
+                    <OrgSelector
+                      value={store.org_id ?? null}
+                      orgName={store.org_name ?? null}
+                      orgs={orgs ?? []}
+                      onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
+                      onClear={() => unmapMutation.mutate(store.id)}
+                      onAddNew={() => openNewClientDialog(store.id)}
+                      disabled={assignMutation.isPending || unmapMutation.isPending}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {store.org_id ? (
+                      <Badge variant="default" className="gap-1">
+                        <CheckCircle2 className="h-3 w-3" /> Mapped
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">Unmapped</Badge>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {/* Add New Client Dialog */}

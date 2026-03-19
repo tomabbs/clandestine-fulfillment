@@ -65,7 +65,11 @@ const USER_QUERY_KEY = ["admin", "settings", "users"] as const;
 export default function UsersPage() {
   const [search, setSearch] = useState("");
 
-  const { data: users, isLoading } = useAppQuery({
+  const {
+    data: users,
+    isLoading,
+    error,
+  } = useAppQuery({
     queryKey: [...USER_QUERY_KEY, search],
     queryFn: () => getUsers({ search: search || undefined }),
     tier: CACHE_TIERS.SESSION,
@@ -104,6 +108,12 @@ export default function UsersPage() {
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading users...
         </div>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-8 text-center text-destructive">
+            {(error as Error).message}
+          </CardContent>
+        </Card>
       ) : !users || users.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">

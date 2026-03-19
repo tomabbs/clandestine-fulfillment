@@ -2,7 +2,14 @@ import { z } from "zod";
 
 // === Zod schema for parsed TralbumData ===
 
+const packageArtSchema = z.object({
+  image_id: z.number().nullish(),
+  width: z.number().nullish(),
+  height: z.number().nullish(),
+});
+
 const tralbumDataSchema = z.object({
+  art_id: z.number().nullish(),
   item_type: z.string().nullish(),
   release_date: z.string().nullish(),
   current: z
@@ -20,6 +27,8 @@ const tralbumDataSchema = z.object({
         new_date: z.string().nullish(),
         url: z.string().nullish(),
         sku: z.string().nullish(),
+        image_id: z.number().nullish(),
+        arts: z.array(packageArtSchema).nullish(),
       }),
     )
     .nullish(),
@@ -27,20 +36,50 @@ const tralbumDataSchema = z.object({
 
 export type TralbumData = z.infer<typeof tralbumDataSchema>;
 
+export interface ScrapedPackageImage {
+  imageId: number;
+  url: string;
+}
+
 export interface ScrapedAlbumData {
   releaseDate: string | null;
   typeName: string | null;
   title: string | null;
+  artId: number | null;
+  albumArtUrl: string | null;
   packages: Array<{
     typeName: string | null;
     title: string | null;
     newDate: string | null;
     url: string | null;
     sku: string | null;
+    imageId: number | null;
+    imageUrl: string | null;
+    arts: ScrapedPackageImage[];
   }>;
   raw: TralbumData | null;
   parserVersion: "v1" | "v2";
   metadataIncomplete: boolean;
+}
+
+// === Image URL construction ===
+
+/**
+ * Construct a 700px Bandcamp image URL from an art_id.
+ * Album art uses the "a" prefix: https://f4.bcbits.com/img/a{art_id}_10.jpg
+ */
+export function bandcampAlbumArtUrl(artId: number | null | undefined): string | null {
+  if (artId == null) return null;
+  return `https://f4.bcbits.com/img/a${artId}_10.jpg`;
+}
+
+/**
+ * Construct a 700px Bandcamp image URL from a package/merch image_id.
+ * Merch images omit the "a" prefix: https://f4.bcbits.com/img/{image_id}_10.jpg
+ */
+export function bandcampMerchImageUrl(imageId: number | null | undefined): string | null {
+  if (imageId == null) return null;
+  return `https://f4.bcbits.com/img/${imageId}_10.jpg`;
 }
 
 // === HTML fetching ===
@@ -121,6 +160,8 @@ export function parseTralbumData(html: string): ScrapedAlbumData {
       releaseDate: null,
       typeName: "Merch",
       title: null,
+      artId: null,
+      albumArtUrl: null,
       packages: [],
       raw: null,
       parserVersion: version,
@@ -131,6 +172,7 @@ export function parseTralbumData(html: string): ScrapedAlbumData {
   const releaseDate = data.current?.release_date ?? data.release_date ?? null;
   const typeName = data.current?.type ?? data.item_type ?? null;
   const title = data.current?.title ?? null;
+  const artId = data.art_id ?? null;
 
   const packages = (data.packages ?? []).map((pkg) => ({
     typeName: pkg.type_name ?? null,
@@ -138,6 +180,14 @@ export function parseTralbumData(html: string): ScrapedAlbumData {
     newDate: pkg.new_date ?? null,
     url: pkg.url ?? null,
     sku: pkg.sku ?? null,
+    imageId: pkg.image_id ?? null,
+    imageUrl: bandcampMerchImageUrl(pkg.image_id),
+    arts: (pkg.arts ?? [])
+      .filter((a) => a.image_id != null)
+      .map((a) => ({
+        imageId: a.image_id as number,
+        url: bandcampMerchImageUrl(a.image_id) as string,
+      })),
   }));
 
   const metadataIncomplete = !typeName || !releaseDate;
@@ -146,6 +196,8 @@ export function parseTralbumData(html: string): ScrapedAlbumData {
     releaseDate,
     typeName: typeName || "Merch",
     title,
+    artId,
+    albumArtUrl: bandcampAlbumArtUrl(artId),
     packages,
     raw: data,
     parserVersion: version,
