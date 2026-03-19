@@ -189,7 +189,11 @@ function InviteDialog() {
 
   const inviteMut = useAppMutation({
     mutationFn: async (vars: { email: string; name: string; role: string }) => {
-      const result = await inviteUser({ email: vars.email, name: vars.name, role: vars.role as never });
+      const result = await inviteUser({
+        email: vars.email,
+        name: vars.name,
+        role: vars.role as never,
+      });
       if (!result.success) {
         throw new Error(result.error);
       }

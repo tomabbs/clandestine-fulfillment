@@ -175,13 +175,26 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
       };
     }
 
-    const inviteLink = linkResult.data.properties?.action_link;
+    let inviteLink = linkResult.data.properties?.action_link;
     if (!inviteLink) {
       return {
         success: false,
         code: "INVITE_LINK_MISSING",
         error: "Invite link was generated without an action URL.",
       };
+    }
+
+    // Supabase generateLink sometimes encodes redirect_to as just the Site URL,
+    // stripping the /auth/callback path. Force-fix the redirect_to in the link.
+    try {
+      const linkUrl = new URL(inviteLink);
+      const currentRedirect = linkUrl.searchParams.get("redirect_to") ?? "";
+      if (currentRedirect && !currentRedirect.includes("/auth/callback")) {
+        linkUrl.searchParams.set("redirect_to", `${appUrl}/auth/callback`);
+        inviteLink = linkUrl.toString();
+      }
+    } catch {
+      // URL parse failed — use link as-is
     }
 
     const authUserId = linkResult.data.user.id;
