@@ -182,3 +182,20 @@ export async function deactivateUser(input: { userId: string }) {
 
   return { id: parsed.userId, is_active: newActive };
 }
+
+/** Remove a client user from their organization (sets org_id to null). */
+export async function removeClientUser(userId: string) {
+  const { userRecord } = await requireAuth();
+  requireAdmin(userRecord.role);
+
+  const serviceClient = createServiceRoleClient();
+
+  const { error } = await serviceClient
+    .from("users")
+    .update({ org_id: null, role: "client" })
+    .eq("id", userId)
+    .eq("workspace_id", userRecord.workspace_id);
+
+  if (error) throw new Error(`Failed to remove user: ${error.message}`);
+  return { success: true };
+}

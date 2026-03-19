@@ -1,6 +1,16 @@
 "use client";
 
-import { ArrowLeft, CheckCircle, Circle, Loader2, Package, Search, Ship } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  Circle,
+  Loader2,
+  Package,
+  Plus,
+  Search,
+  Ship,
+  Trash2,
+} from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { MonthlySales } from "@/actions/clients";
@@ -16,6 +26,7 @@ import {
   updateClient,
   updateOnboardingStep,
 } from "@/actions/clients";
+import { inviteUser, removeClientUser } from "@/actions/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -790,26 +801,131 @@ function SettingsField({
 }
 
 function ClientUsersCard({ orgId }: { orgId: string }) {
-  const { data: users, isLoading } = useAppQuery({
+  const {
+    data: users,
+    isLoading,
+    refetch,
+  } = useAppQuery({
     queryKey: ["client-users", orgId],
     queryFn: () => getClientUsers(orgId),
     tier: CACHE_TIERS.SESSION,
   });
 
+  const [showInvite, setShowInvite] = useState(false);
+  const [invEmail, setInvEmail] = useState("");
+  const [invName, setInvName] = useState("");
+  const [invRole, setInvRole] = useState<"client" | "client_admin">("client");
+  const [invError, setInvError] = useState<string | null>(null);
+
+  const inviteMut = useAppMutation({
+    mutationFn: () =>
+      inviteUser({
+        email: invEmail,
+        name: invName || invEmail.split("@")[0],
+        role: invRole,
+        orgId,
+      }),
+    invalidateKeys: [["client-users", orgId]],
+    onSuccess: () => {
+      setShowInvite(false);
+      setInvEmail("");
+      setInvName("");
+      setInvRole("client");
+      setInvError(null);
+      refetch();
+    },
+    onError: (err) => setInvError((err as Error).message),
+  });
+
+  const removeMut = useAppMutation({
+    mutationFn: (userId: string) => removeClientUser(userId),
+    invalidateKeys: [["client-users", orgId]],
+    onSuccess: () => refetch(),
+  });
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Client Users</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>Client Portal Users</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => setShowInvite(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Invite User
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
+        {showInvite && (
+          <div className="border rounded-lg p-4 mb-4 space-y-3">
+            <p className="text-sm font-medium">Invite a client user via magic link email</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="inv-email" className="text-sm font-medium mb-1 block">
+                  Email <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  id="inv-email"
+                  type="email"
+                  value={invEmail}
+                  onChange={(e) => setInvEmail(e.target.value)}
+                  placeholder="user@label.com"
+                />
+              </div>
+              <div>
+                <label htmlFor="inv-name" className="text-sm font-medium mb-1 block">
+                  Name
+                </label>
+                <Input
+                  id="inv-name"
+                  value={invName}
+                  onChange={(e) => setInvName(e.target.value)}
+                  placeholder="Full name (optional)"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="inv-role" className="text-sm font-medium mb-1 block">
+                Role
+              </label>
+              <select
+                id="inv-role"
+                value={invRole}
+                onChange={(e) => setInvRole(e.target.value as "client" | "client_admin")}
+                className="border-input bg-background h-9 rounded-md border px-3 text-sm w-48"
+              >
+                <option value="client">Client (view only)</option>
+                <option value="client_admin">Client Admin (can manage)</option>
+              </select>
+            </div>
+            {invError && <p className="text-sm text-destructive">{invError}</p>}
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => inviteMut.mutate()}
+                disabled={!invEmail || inviteMut.isPending}
+              >
+                {inviteMut.isPending ? "Sending..." : "Send Invite"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setShowInvite(false);
+                  setInvError(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading users...
           </div>
         ) : (users ?? []).length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No portal users for this client. Client users are created when they accept a magic link
-            invite.
+            No portal users yet. Click &ldquo;Invite User&rdquo; to send a magic link.
           </p>
         ) : (
           <Table>
@@ -819,6 +935,7 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
                 <TableHead>Name</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Joined</TableHead>
+                <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -828,11 +945,22 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
                   <TableCell>{user.name ?? "—"}</TableCell>
                   <TableCell>
                     <Badge variant={user.role === "client_admin" ? "default" : "secondary"}>
-                      {user.role}
+                      {user.role === "client_admin" ? "Admin" : "Client"}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {new Date(user.created_at).toLocaleDateString()}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => removeMut.mutate(user.id)}
+                      disabled={removeMut.isPending}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
