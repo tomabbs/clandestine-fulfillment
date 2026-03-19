@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Loader2,
+  Plus,
   RefreshCw,
   RotateCcw,
   X,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import { getOrganizationsForWorkspace } from "@/actions/bandcamp";
+import { createOrganization, getOrganizations } from "@/actions/organizations";
 import {
   type AutoMatchSuggestion,
   autoMatchStores,
@@ -25,6 +26,7 @@ import {
 } from "@/actions/store-mapping";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -38,7 +40,7 @@ import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
-// --- Searchable org selector ---
+// --- Searchable org selector with "Add New Client" ---
 
 function OrgSelector({
   value,
@@ -46,6 +48,7 @@ function OrgSelector({
   orgs,
   onSelect,
   onClear,
+  onAddNew,
   disabled,
 }: {
   value: string | null;
@@ -53,6 +56,7 @@ function OrgSelector({
   orgs: Array<{ id: string; name: string }>;
   onSelect: (orgId: string) => void;
   onClear: () => void;
+  onAddNew: () => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -125,8 +129,8 @@ function OrgSelector({
         >
           (Unassigned)
         </button>
-        {filtered.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No clients found</div>
+        {filtered.length === 0 && search ? (
+          <div className="px-3 py-2 text-xs text-muted-foreground">No clients match</div>
         ) : (
           filtered.map((org) => (
             <button
@@ -142,6 +146,16 @@ function OrgSelector({
             </button>
           ))
         )}
+        <button
+          type="button"
+          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-accent border-t flex items-center gap-1"
+          onClick={() => {
+            setOpen(false);
+            onAddNew();
+          }}
+        >
+          <Plus className="h-3 w-3" /> Add New Client
+        </button>
       </div>
     </div>
   );
@@ -151,6 +165,11 @@ function OrgSelector({
 
 export default function StoreMappingPage() {
   const [suggestions, setSuggestions] = useState<AutoMatchSuggestion[]>([]);
+  const [showNewClientDialog, setShowNewClientDialog] = useState(false);
+  const [pendingStoreId, setPendingStoreId] = useState<string | null>(null);
+  const [newClientName, setNewClientName] = useState("");
+  const [newClientEmail, setNewClientEmail] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const { data: ctx } = useAppQuery({
     queryKey: ["user-context"],
@@ -166,9 +185,9 @@ export default function StoreMappingPage() {
     enabled: !!workspaceId,
   });
 
-  const { data: orgs } = useAppQuery({
+  const { data: orgs, refetch: refetchOrgs } = useAppQuery({
     queryKey: ["organizations", workspaceId],
-    queryFn: () => getOrganizationsForWorkspace(workspaceId),
+    queryFn: () => getOrganizations(),
     tier: CACHE_TIERS.STABLE,
     enabled: !!workspaceId,
   });
@@ -208,6 +227,32 @@ export default function StoreMappingPage() {
   const acceptSuggestion = (s: AutoMatchSuggestion) => {
     assignMutation.mutate({ storeId: s.storeId, orgId: s.suggestedOrgId });
     setSuggestions((prev) => prev.filter((x) => x.storeId !== s.storeId));
+  };
+
+  const openNewClientDialog = (storeId: string) => {
+    setPendingStoreId(storeId);
+    setNewClientName("");
+    setNewClientEmail("");
+    setCreateError(null);
+    setShowNewClientDialog(true);
+  };
+
+  const handleCreateClient = async () => {
+    if (!newClientName.trim()) return;
+    setCreateError(null);
+    try {
+      const org = await createOrganization({
+        name: newClientName.trim(),
+        billingEmail: newClientEmail.trim() || undefined,
+      });
+      await refetchOrgs();
+      if (pendingStoreId) {
+        assignMutation.mutate({ storeId: pendingStoreId, orgId: org.id });
+      }
+      setShowNewClientDialog(false);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create client");
+    }
   };
 
   return (
@@ -279,7 +324,7 @@ export default function StoreMappingPage() {
             />
           </div>
           {unmappedCount > 0 ? (
-            <span className="text-xs wh-accent-text flex items-center gap-1">
+            <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
               <AlertTriangle className="h-3.5 w-3.5" /> {unmappedCount} unmapped
             </span>
           ) : (
@@ -292,10 +337,10 @@ export default function StoreMappingPage() {
 
       {/* Auto-match suggestions */}
       {suggestions.length > 0 && (
-        <div className="wh-accent-bg border border-amber-200 dark:border-amber-800 rounded-lg overflow-hidden">
+        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-amber-200 dark:border-amber-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4 wh-accent-text" />
+              <Zap className="h-4 w-4 text-amber-600" />
               <span className="text-sm font-medium">
                 Auto-Match Suggestions ({suggestions.length})
               </span>
@@ -330,7 +375,9 @@ export default function StoreMappingPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => setSuggestions((p) => p.filter((x) => x.storeId !== s.storeId))}
+                    onClick={() =>
+                      setSuggestions((p) => p.filter((x) => x.storeId !== s.storeId))
+                    }
                   >
                     Dismiss
                   </Button>
@@ -376,8 +423,11 @@ export default function StoreMappingPage() {
                     value={store.org_id ?? null}
                     orgName={store.org_name ?? null}
                     orgs={orgs ?? []}
-                    onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
+                    onSelect={(orgId) =>
+                      assignMutation.mutate({ storeId: store.id, orgId })
+                    }
                     onClear={() => unmapMutation.mutate(store.id)}
+                    onAddNew={() => openNewClientDialog(store.id)}
                     disabled={assignMutation.isPending || unmapMutation.isPending}
                   />
                 </TableCell>
@@ -395,6 +445,57 @@ export default function StoreMappingPage() {
           </TableBody>
         </Table>
       )}
+
+      {/* Add New Client Dialog */}
+      <Dialog open={showNewClientDialog} onOpenChange={setShowNewClientDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Client</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div>
+              <label htmlFor="new-client-name" className="text-sm font-medium">
+                Name
+              </label>
+              <Input
+                id="new-client-name"
+                autoFocus
+                placeholder="e.g. Northern Spy Records"
+                value={newClientName}
+                onChange={(e) => setNewClientName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateClient();
+                }}
+              />
+            </div>
+            <div>
+              <label htmlFor="new-client-email" className="text-sm font-medium">
+                Billing Email (optional)
+              </label>
+              <Input
+                id="new-client-email"
+                type="email"
+                placeholder="billing@label.com"
+                value={newClientEmail}
+                onChange={(e) => setNewClientEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateClient();
+                }}
+              />
+            </div>
+            {createError && (
+              <p className="text-sm text-red-500">{createError}</p>
+            )}
+            <Button
+              className="w-full"
+              disabled={!newClientName.trim()}
+              onClick={handleCreateClient}
+            >
+              Create & Assign
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
