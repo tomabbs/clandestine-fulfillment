@@ -3,6 +3,7 @@
 import { formatDistanceToNow } from "date-fns";
 import { Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { useCallback } from "react";
+import { triggerTagCleanup } from "@/actions/admin-settings";
 import { getBandcampSyncStatus, triggerBandcampSync } from "@/actions/bandcamp";
 import { getShopifySyncStatus, triggerFullBackfill, triggerShopifySync } from "@/actions/shopify";
 import { Badge } from "@/components/ui/badge";
@@ -115,9 +116,7 @@ function SyncHistoryTable({
                 <span className="text-destructive ml-1">({log.items_failed} failed)</span>
               )}
             </TableCell>
-            <TableCell className="text-xs">
-              {formatRelativeTime(log.started_at)}
-            </TableCell>
+            <TableCell className="text-xs">{formatRelativeTime(log.started_at)}</TableCell>
             <TableCell className="text-xs">
               {formatDuration(log.started_at, log.completed_at)}
             </TableCell>
@@ -135,7 +134,11 @@ function SyncHistoryTable({
 
 export default function ChannelsPage() {
   // --- Shopify ---
-  const { data: shopifyData, isLoading: shopifyLoading, refetch: refetchShopify } = useAppQuery<{
+  const {
+    data: shopifyData,
+    isLoading: shopifyLoading,
+    refetch: refetchShopify,
+  } = useAppQuery<{
     syncState: SyncState | null;
     recentLogs: SyncLog[];
   }>({
@@ -360,6 +363,41 @@ export default function ChannelsPage() {
           <SyncHistoryTable logs={bandcampLogs} showSyncType />
         </CardContent>
       </Card>
+
+      {/* Admin Tools */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Admin Tools</CardTitle>
+          <CardDescription>One-time operations and maintenance tasks</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TagCleanupButton />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function TagCleanupButton() {
+  const tagMut = useAppMutation({
+    mutationFn: () => triggerTagCleanup(),
+    invalidateKeys: [],
+  });
+
+  return (
+    <div className="flex items-center gap-4">
+      <Button variant="outline" disabled={tagMut.isPending} onClick={() => tagMut.mutate()}>
+        {tagMut.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCw className="mr-2 h-4 w-4" />
+        )}
+        Sync All Tags
+      </Button>
+      <p className="text-sm text-muted-foreground">
+        Scans all products and fixes Pre-Orders / New Releases tags based on street dates
+      </p>
+      {tagMut.isSuccess && <span className="text-sm text-green-600">Triggered successfully</span>}
     </div>
   );
 }

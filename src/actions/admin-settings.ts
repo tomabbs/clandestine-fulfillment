@@ -97,3 +97,12 @@ export async function triggerSensorCheck() {
   const handle = await tasks.trigger("sensor-check", {});
   return { runId: handle.id };
 }
+
+export async function triggerTagCleanup() {
+  const supabase = await createServerSupabaseClient();
+  const { data: ws } = await supabase.from("workspaces").select("id").limit(1).single();
+  if (!ws) throw new Error("No workspace found");
+
+  const handle = await tasks.trigger("tag-cleanup-backfill", { workspace_id: ws.id });
+  return { runId: handle.id };
+}

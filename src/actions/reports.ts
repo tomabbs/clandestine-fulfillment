@@ -29,9 +29,7 @@ export interface TopSellerRow {
  * Bandcamp quantity_sold is all-time units sold via Bandcamp.
  * We store the latest snapshot in bandcamp_product_mappings.last_quantity_sold.
  */
-export async function getTopSellers(
-  rawFilters?: TopSellersFilters,
-): Promise<TopSellerRow[]> {
+export async function getTopSellers(rawFilters?: TopSellersFilters): Promise<TopSellerRow[]> {
   await requireAuth();
   const filters = topSellersFiltersSchema.parse(rawFilters ?? {});
   const serviceClient = createServiceRoleClient();
@@ -115,7 +113,8 @@ export async function getTopSellersSummary(): Promise<{
 
   for (const row of data ?? []) {
     const qty = row.last_quantity_sold ?? 0;
-    const price = (row.warehouse_product_variants as unknown as { price: number | null })?.price ?? 0;
+    const price =
+      (row.warehouse_product_variants as unknown as { price: number | null })?.price ?? 0;
     totalUnits += qty;
     totalRevenue += qty * price;
   }

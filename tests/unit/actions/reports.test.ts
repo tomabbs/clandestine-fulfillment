@@ -8,7 +8,14 @@ vi.mock("@/lib/server/auth-context", () => ({
   requireAuth: vi.fn().mockResolvedValue({
     supabase: {},
     authUserId: "auth-user-1",
-    userRecord: { id: "u1", workspace_id: WS_ID, org_id: null, role: "admin", email: "t@t.com", name: "T" },
+    userRecord: {
+      id: "u1",
+      workspace_id: WS_ID,
+      org_id: null,
+      role: "admin",
+      email: "t@t.com",
+      name: "T",
+    },
     isStaff: true,
   }),
 }));
@@ -19,8 +26,8 @@ vi.mock("@/lib/server/supabase-server", () => ({
   createServiceRoleClient: () => mockServiceClient,
 }));
 
-import { requireAuth } from "@/lib/server/auth-context";
 import { getTopSellers, getTopSellersSummary } from "@/actions/reports";
+import { requireAuth } from "@/lib/server/auth-context";
 
 describe("reports server actions", () => {
   beforeEach(() => {
@@ -28,7 +35,14 @@ describe("reports server actions", () => {
     vi.mocked(requireAuth).mockResolvedValue({
       supabase: {} as never,
       authUserId: "auth-user-1",
-      userRecord: { id: "u1", workspace_id: WS_ID, org_id: null, role: "admin", email: "t@t.com", name: "T" },
+      userRecord: {
+        id: "u1",
+        workspace_id: WS_ID,
+        org_id: null,
+        role: "admin",
+        email: "t@t.com",
+        name: "T",
+      },
       isStaff: true,
     });
   });

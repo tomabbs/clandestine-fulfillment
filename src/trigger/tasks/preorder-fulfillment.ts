@@ -62,7 +62,52 @@ export const preorderFulfillmentTask = schedules.task({
       });
     }
 
-    return { variantsReleased, ordersAllocated, shortShipments };
+    // --- "New Releases" tag cleanup (45 days after street_date) ---
+    let newReleasesRemoved = 0;
+    const cutoff45 = new Date();
+    cutoff45.setDate(cutoff45.getDate() - 45);
+    const cutoff45Str = cutoff45.toISOString().split("T")[0];
+
+    for (const workspaceId of workspaceIds) {
+      const { data: staleProducts } = await supabase
+        .from("warehouse_product_variants")
+        .select("product_id")
+        .eq("workspace_id", workspaceId)
+        .not("street_date", "is", null)
+        .lte("street_date", cutoff45Str);
+
+      if (!staleProducts || staleProducts.length === 0) continue;
+
+      const productIds = Array.from(new Set(staleProducts.map((v) => v.product_id)));
+
+      const { data: products } = await supabase
+        .from("warehouse_products")
+        .select("id, shopify_product_id, tags")
+        .in("id", productIds)
+        .contains("tags", ["New Releases"]);
+
+      for (const product of products ?? []) {
+        const tags = (product.tags as string[]) ?? [];
+        const updatedTags = tags.filter((t) => t !== "New Releases");
+
+        if (product.shopify_product_id) {
+          try {
+            await tagsRemove(product.shopify_product_id, ["New Releases"]);
+          } catch {
+            // Best-effort — don't fail the run
+          }
+        }
+
+        await supabase
+          .from("warehouse_products")
+          .update({ tags: updatedTags, updated_at: new Date().toISOString() })
+          .eq("id", product.id);
+
+        newReleasesRemoved++;
+      }
+    }
+
+    return { variantsReleased, ordersAllocated, shortShipments, newReleasesRemoved };
   },
 });
 
