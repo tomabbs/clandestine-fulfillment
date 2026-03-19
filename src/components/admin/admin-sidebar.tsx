@@ -18,6 +18,7 @@ import {
   Settings,
   ShoppingCart,
   Sun,
+  TrendingUp,
   Truck,
   Users,
 } from "lucide-react";
@@ -59,6 +60,7 @@ const NAV_ITEMS = [
   { title: "Shipping", href: "/admin/shipping", icon: Truck },
   { title: "Billing", href: "/admin/billing", icon: Receipt },
   { title: "Channels", href: "/admin/channels", icon: Radio },
+  { title: "Top Sellers", href: "/admin/reports/top-sellers", icon: TrendingUp },
   { title: "Review Q", href: "/admin/review-queue", icon: AlertCircle },
   { title: "Support", href: "/admin/support", icon: MessageSquare },
 ] as const;
