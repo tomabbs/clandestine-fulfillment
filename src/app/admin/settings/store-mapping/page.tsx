@@ -188,7 +188,8 @@ export default function StoreMappingPage() {
   const { data: orgs, refetch: refetchOrgs } = useAppQuery({
     queryKey: ["organizations"],
     queryFn: () => getOrganizations(),
-    tier: CACHE_TIERS.STABLE,
+    tier: CACHE_TIERS.SESSION,
+    enabled: !!ctx,
   });
 
   const syncMutation = useAppMutation({
