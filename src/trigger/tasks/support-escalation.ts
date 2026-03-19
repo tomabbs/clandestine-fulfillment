@@ -39,10 +39,7 @@ export const supportEscalationTask = schedules.task({
 
         // Send escalation email to assigned staff or all staff
         const { data: staffUsers } = conversation.assigned_to
-          ? await supabase
-              .from("users")
-              .select("email, name")
-              .eq("id", conversation.assigned_to)
+          ? await supabase.from("users").select("email, name").eq("id", conversation.assigned_to)
           : await supabase
               .from("users")
               .select("email, name")

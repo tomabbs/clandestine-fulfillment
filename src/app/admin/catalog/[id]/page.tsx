@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// Tabs removed — all sections displayed vertically
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -368,290 +368,277 @@ export default function ProductDetailPage() {
           </Card>
         )}
 
-        <Tabs defaultValue="variants">
-          <TabsList>
-            <TabsTrigger value="variants">Variants ({variants.length})</TabsTrigger>
-            <TabsTrigger value="images">Images ({images.length})</TabsTrigger>
-            <TabsTrigger value="inventory">Inventory</TabsTrigger>
-            <TabsTrigger value="bandcamp">Bandcamp</TabsTrigger>
-          </TabsList>
-
-          {/* Variants — inline editable */}
-          <TabsContent value="variants">
-            <div className="space-y-3">
-              {dirty.size > 0 && (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => variantMut.mutate(undefined)}
-                    disabled={variantMut.isPending}
-                  >
-                    <Save className="h-3 w-3 mr-1" />
-                    {variantMut.isPending
-                      ? "Saving..."
-                      : `Save ${dirty.size} variant${dirty.size > 1 ? "s" : ""}`}
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    {dirty.size} unsaved change{dirty.size > 1 ? "s" : ""}
-                  </span>
-                </div>
-              )}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Option Title</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead className="w-24">Price</TableHead>
-                    <TableHead className="w-24">Cost</TableHead>
-                    <TableHead className="w-24">Compare At</TableHead>
-                    <TableHead className="w-20">Weight</TableHead>
-                    <TableHead className="w-16">Unit</TableHead>
-                    <TableHead>Barcode</TableHead>
-                    <TableHead className="w-20">Format</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {variants.map((v) => {
-                    const e = vEdits[v.id];
-                    if (!e) return null;
-                    return (
-                      <TableRow key={v.id} className={dirty.has(v.id) ? "bg-amber-50/50" : ""}>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm"
-                            value={e.title}
-                            onChange={(ev) => setField(v.id, "title", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm font-mono"
-                            value={e.sku}
-                            onChange={(ev) => setField(v.id, "sku", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm w-24"
-                            type="number"
-                            step="0.01"
-                            value={e.price}
-                            onChange={(ev) => setField(v.id, "price", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm w-24"
-                            type="number"
-                            step="0.01"
-                            value={e.cost}
-                            onChange={(ev) => setField(v.id, "cost", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm w-24"
-                            type="number"
-                            step="0.01"
-                            value={e.compareAt}
-                            onChange={(ev) => setField(v.id, "compareAt", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm w-20"
-                            type="number"
-                            step="0.01"
-                            value={e.weight}
-                            onChange={(ev) => setField(v.id, "weight", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            className="border-input bg-background h-8 rounded-md border px-2 text-xs"
-                            value={e.weightUnit}
-                            onChange={(ev) => setField(v.id, "weightUnit", ev.target.value)}
-                          >
-                            {WEIGHT_UNITS.map((u) => (
-                              <option key={u} value={u}>
-                                {u}
-                              </option>
-                            ))}
-                          </select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            className="h-8 text-sm"
-                            value={e.barcode}
-                            onChange={(ev) => setField(v.id, "barcode", ev.currentTarget.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {v.format_name ? (
-                            <Badge variant="secondary" className="text-xs">
-                              {v.format_name}
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {variants.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
-                        No variants.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-              <Button variant="outline" size="sm" disabled>
-                <Plus className="h-3 w-3 mr-1" /> Add Variant
+        {/* Variants */}
+        <section className="space-y-3">
+          <h3 className="text-lg font-semibold">Variants ({variants.length})</h3>
+          {dirty.size > 0 && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => variantMut.mutate(undefined)}
+                disabled={variantMut.isPending}
+              >
+                <Save className="h-3 w-3 mr-1" />
+                {variantMut.isPending
+                  ? "Saving..."
+                  : `Save ${dirty.size} variant${dirty.size > 1 ? "s" : ""}`}
               </Button>
+              <span className="text-xs text-muted-foreground">
+                {dirty.size} unsaved change{dirty.size > 1 ? "s" : ""}
+              </span>
             </div>
-          </TabsContent>
-
-          {/* Images */}
-          <TabsContent value="images">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {images
-                .sort((a, b) => a.position - b.position)
-                .map((img) => (
-                  <div key={img.id} className="rounded-lg overflow-hidden border">
-                    <Image
-                      src={img.src}
-                      alt={img.alt ?? product.title}
-                      width={300}
-                      height={300}
-                      className="object-cover w-full aspect-square"
-                    />
-                    {img.alt && (
-                      <p className="px-2 py-1 text-xs text-muted-foreground truncate">{img.alt}</p>
-                    )}
-                  </div>
-                ))}
-              {images.length === 0 && (
-                <p className="col-span-full text-muted-foreground py-4">No images.</p>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* Inventory */}
-          <TabsContent value="inventory">
-            <div className="space-y-4">
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Option Title</TableHead>
+                <TableHead>SKU</TableHead>
+                <TableHead className="w-24">Price</TableHead>
+                <TableHead className="w-24">Cost</TableHead>
+                <TableHead className="w-24">Compare At</TableHead>
+                <TableHead className="w-20">Weight</TableHead>
+                <TableHead className="w-16">Unit</TableHead>
+                <TableHead>Barcode</TableHead>
+                <TableHead className="w-20">Format</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {variants.map((v) => {
-                const inv = invLevels.find((l) => l.variant_id === v.id);
-                const locs = varLocs.filter((vl) => vl.variant_id === v.id);
+                const e = vEdits[v.id];
+                if (!e) return null;
                 return (
-                  <Card key={v.id}>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">
-                        {v.sku} — {v.title ?? "Default"}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {inv ? (
-                        <div className="grid grid-cols-3 gap-4 mb-3">
-                          <div>
-                            <p className="text-xs text-muted-foreground">Available</p>
-                            <p className={`text-lg font-semibold ${invColor(inv.available)}`}>
-                              {inv.available}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground">Committed</p>
-                            <p className="text-lg font-semibold">{inv.committed}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground">Incoming</p>
-                            <p className="text-lg font-semibold">{inv.incoming}</p>
-                          </div>
-                        </div>
+                  <TableRow key={v.id} className={dirty.has(v.id) ? "bg-amber-50/50" : ""}>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm"
+                        value={e.title}
+                        onChange={(ev) => setField(v.id, "title", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm font-mono"
+                        value={e.sku}
+                        onChange={(ev) => setField(v.id, "sku", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm w-24"
+                        type="number"
+                        step="0.01"
+                        value={e.price}
+                        onChange={(ev) => setField(v.id, "price", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm w-24"
+                        type="number"
+                        step="0.01"
+                        value={e.cost}
+                        onChange={(ev) => setField(v.id, "cost", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm w-24"
+                        type="number"
+                        step="0.01"
+                        value={e.compareAt}
+                        onChange={(ev) => setField(v.id, "compareAt", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm w-20"
+                        type="number"
+                        step="0.01"
+                        value={e.weight}
+                        onChange={(ev) => setField(v.id, "weight", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <select
+                        className="border-input bg-background h-8 rounded-md border px-2 text-xs"
+                        value={e.weightUnit}
+                        onChange={(ev) => setField(v.id, "weightUnit", ev.target.value)}
+                      >
+                        {WEIGHT_UNITS.map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                      </select>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 text-sm"
+                        value={e.barcode}
+                        onChange={(ev) => setField(v.id, "barcode", ev.currentTarget.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      {v.format_name ? (
+                        <Badge variant="secondary" className="text-xs">
+                          {v.format_name}
+                        </Badge>
                       ) : (
-                        <p className="text-sm text-muted-foreground mb-3">No inventory data.</p>
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
-                      {locs.length > 0 && (
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Location</TableHead>
-                              <TableHead>Type</TableHead>
-                              <TableHead>Quantity</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {locs.map((loc) => (
-                              <TableRow key={loc.id}>
-                                <TableCell>{loc.warehouse_locations?.name ?? "Unknown"}</TableCell>
-                                <TableCell>
-                                  {loc.warehouse_locations?.location_type ?? "—"}
-                                </TableCell>
-                                <TableCell>{loc.quantity}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      )}
-                    </CardContent>
-                  </Card>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
               {variants.length === 0 && (
-                <p className="text-muted-foreground py-4">No variants to show inventory for.</p>
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
+                    No variants.
+                  </TableCell>
+                </TableRow>
               )}
-            </div>
-          </TabsContent>
+            </TableBody>
+          </Table>
+          <Button variant="outline" size="sm" disabled>
+            <Plus className="h-3 w-3 mr-1" /> Add Variant
+          </Button>
+        </section>
 
-          {/* Bandcamp */}
-          <TabsContent value="bandcamp">
-            {bcMappings.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Variant</TableHead>
-                    <TableHead>Bandcamp URL</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>New Date</TableHead>
-                    <TableHead>Last Qty Sold</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bcMappings.map((m) => {
-                    const v = variants.find((x) => x.id === m.variant_id);
-                    return (
-                      <TableRow key={m.id}>
-                        <TableCell className="font-mono text-xs">
-                          {v?.sku ?? m.variant_id}
-                        </TableCell>
-                        <TableCell>
-                          {m.bandcamp_url ? (
-                            <a
-                              href={m.bandcamp_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                            >
-                              {m.bandcamp_url} <ExternalLinkIcon className="size-3" />
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell>{m.bandcamp_type_name ?? "—"}</TableCell>
-                        <TableCell>{m.bandcamp_new_date ?? "—"}</TableCell>
-                        <TableCell>{m.last_quantity_sold ?? "—"}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            ) : (
-              <p className="text-muted-foreground py-4">No Bandcamp mappings for this product.</p>
+        {/* Images */}
+        <section>
+          <h3 className="text-lg font-semibold mb-3">Images ({images.length})</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {images
+              .sort((a, b) => a.position - b.position)
+              .map((img) => (
+                <div key={img.id} className="rounded-lg overflow-hidden border">
+                  <Image
+                    src={img.src}
+                    alt={img.alt ?? product.title}
+                    width={300}
+                    height={300}
+                    className="object-cover w-full aspect-square"
+                  />
+                  {img.alt && (
+                    <p className="px-2 py-1 text-xs text-muted-foreground truncate">{img.alt}</p>
+                  )}
+                </div>
+              ))}
+            {images.length === 0 && (
+              <p className="col-span-full text-muted-foreground py-4">No images.</p>
             )}
-          </TabsContent>
-        </Tabs>
+          </div>
+        </section>
+
+        {/* Inventory */}
+        <section className="space-y-4">
+          <h3 className="text-lg font-semibold">Inventory</h3>
+          {variants.map((v) => {
+            const inv = invLevels.find((l) => l.variant_id === v.id);
+            const locs = varLocs.filter((vl) => vl.variant_id === v.id);
+            return (
+              <Card key={v.id}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">
+                    {v.sku} — {v.title ?? "Default"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {inv ? (
+                    <div className="grid grid-cols-3 gap-4 mb-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Available</p>
+                        <p className={`text-lg font-semibold ${invColor(inv.available)}`}>
+                          {inv.available}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Committed</p>
+                        <p className="text-lg font-semibold">{inv.committed}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Incoming</p>
+                        <p className="text-lg font-semibold">{inv.incoming}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground mb-3">No inventory data.</p>
+                  )}
+                  {locs.length > 0 && (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Location</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Quantity</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {locs.map((loc) => (
+                          <TableRow key={loc.id}>
+                            <TableCell>{loc.warehouse_locations?.name ?? "Unknown"}</TableCell>
+                            <TableCell>{loc.warehouse_locations?.location_type ?? "—"}</TableCell>
+                            <TableCell>{loc.quantity}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+          {variants.length === 0 && (
+            <p className="text-muted-foreground py-4">No variants to show inventory for.</p>
+          )}
+        </section>
+
+        {/* Bandcamp */}
+        <section>
+          <h3 className="text-lg font-semibold mb-3">Bandcamp</h3>
+          {bcMappings.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Variant</TableHead>
+                  <TableHead>Bandcamp URL</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>New Date</TableHead>
+                  <TableHead>Last Qty Sold</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bcMappings.map((m) => {
+                  const v = variants.find((x) => x.id === m.variant_id);
+                  return (
+                    <TableRow key={m.id}>
+                      <TableCell className="font-mono text-xs">{v?.sku ?? m.variant_id}</TableCell>
+                      <TableCell>
+                        {m.bandcamp_url ? (
+                          <a
+                            href={m.bandcamp_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                          >
+                            {m.bandcamp_url} <ExternalLinkIcon className="size-3" />
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>{m.bandcamp_type_name ?? "—"}</TableCell>
+                      <TableCell>{m.bandcamp_new_date ?? "—"}</TableCell>
+                      <TableCell>{m.last_quantity_sold ?? "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-muted-foreground py-4">No Bandcamp mappings for this product.</p>
+          )}
+        </section>
       </div>
     </CollaborativePage>
   );
