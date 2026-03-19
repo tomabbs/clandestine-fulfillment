@@ -97,7 +97,7 @@ export function AdminSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b px-4 py-3">
-        <Image src="/logo.webp" alt="Clandestine Distribution" width={180} height={36} priority />
+        <Image src="/logo.webp" alt="Clandestine Distribution" width={216} height={43} priority />
       </SidebarHeader>
 
       <SidebarContent>

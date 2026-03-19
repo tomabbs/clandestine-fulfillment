@@ -83,8 +83,8 @@ export default function LoginPage() {
         <Image
           src="/logo.webp"
           alt="Clandestine Distribution"
-          width={250}
-          height={50}
+          width={325}
+          height={65}
           priority
           className="mx-auto"
         />
