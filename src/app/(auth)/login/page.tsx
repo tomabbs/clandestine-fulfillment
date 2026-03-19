@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
 
   const supabaseRef = useRef<ReturnType<typeof createBrowserClient> | null>(null);
   function getSupabase() {
@@ -35,20 +36,44 @@ export default function LoginPage() {
   async function handleMagicLink(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    // Client-side cooldown: prevent rapid retries
+    if (cooldownUntil && Date.now() < cooldownUntil) {
+      const secsLeft = Math.ceil((cooldownUntil - Date.now()) / 1000);
+      setError(`Please wait ${secsLeft} seconds before requesting another link.`);
+      return;
+    }
+
     setLoading(true);
 
     const { error: magicError } = await getSupabase().auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
+        shouldCreateUser: false,
       },
     });
 
     setLoading(false);
+
     if (magicError) {
-      setError(magicError.message);
+      const msg = magicError.message.toLowerCase();
+      if (msg.includes("rate") || msg.includes("limit") || msg.includes("exceeded")) {
+        setError(
+          "Too many sign-in requests. Please check your inbox for an existing link, or wait a few minutes and try again.",
+        );
+        // Set 60-second client-side cooldown
+        setCooldownUntil(Date.now() + 60_000);
+      } else if (msg.includes("signups not allowed") || msg.includes("not allowed")) {
+        // shouldCreateUser: false returns this when email doesn't exist
+        setError("No account found for this email. Please contact your label administrator.");
+      } else {
+        setError(magicError.message);
+      }
     } else {
       setMagicLinkSent(true);
+      // Set cooldown after successful send too (prevent resend spam)
+      setCooldownUntil(Date.now() + 30_000);
     }
   }
 
@@ -93,8 +118,20 @@ export default function LoginPage() {
       <div className="space-y-4">
         <h2 className="text-sm font-medium text-gray-700">Client</h2>
         {magicLinkSent ? (
-          <div className="rounded-md bg-green-50 p-3 text-sm text-green-700">
-            Check your email for a sign-in link.
+          <div className="space-y-3">
+            <div className="rounded-md bg-green-50 p-3 text-sm text-green-700">
+              Check your email for a sign-in link.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMagicLinkSent(false);
+                setError(null);
+              }}
+              className="text-sm text-blue-600 hover:underline"
+            >
+              Didn&apos;t receive it? Try again
+            </button>
           </div>
         ) : (
           <form onSubmit={handleMagicLink} className="space-y-3">
