@@ -65,6 +65,7 @@ const NAV_ITEMS = [
 
 const SETTINGS_ITEMS = [
   { title: "General", href: "/admin/settings" },
+  { title: "Users", href: "/admin/settings/users" },
   { title: "Bandcamp Accounts", href: "/admin/settings/bandcamp" },
   { title: "Store Connections", href: "/admin/settings/store-connections" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },

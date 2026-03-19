@@ -19,6 +19,6 @@ export async function getUserContext(): Promise<{
     orgId: userRecord.org_id,
     isStaff,
     userId: userRecord.id,
-    userName: userRecord.full_name ?? userRecord.email ?? "Unknown",
+    userName: userRecord.name ?? userRecord.email ?? "Unknown",
   };
 }
