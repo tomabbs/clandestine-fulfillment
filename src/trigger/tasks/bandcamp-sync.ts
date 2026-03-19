@@ -2,6 +2,7 @@ import { logger, schedules, task } from "@trigger.dev/sdk";
 import type { BandcampBand, BandcampMerchItem } from "@/lib/clients/bandcamp";
 import {
   assembleBandcampTitle,
+  bandcampImageUrl,
   getMerchDetails,
   getMyBands,
   matchSkuToVariants,
@@ -169,7 +170,7 @@ export const bandcampSyncTask = task({
                 : "package",
               bandcamp_member_band_id: merchItem.member_band_id,
               bandcamp_url: merchItem.url,
-              bandcamp_image_url: merchItem.image_url ?? null,
+              bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
               last_quantity_sold: merchItem.quantity_sold,
               last_synced_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
@@ -204,7 +205,7 @@ export const bandcampSyncTask = task({
               }
 
               // Backfill image on product if Bandcamp has one and product doesn't
-              if (merchItem.image_url && existingVar.product_id) {
+              if (bandcampImageUrl(merchItem.image_url) && existingVar.product_id) {
                 const { count: imgCount } = await supabase
                   .from("warehouse_product_images")
                   .select("id", { count: "exact", head: true })
@@ -214,7 +215,7 @@ export const bandcampSyncTask = task({
                   const { error: imgErr } = await supabase.from("warehouse_product_images").insert({
                     product_id: existingVar.product_id,
                     workspace_id: workspaceId,
-                    src: merchItem.image_url,
+                    src: bandcampImageUrl(merchItem.image_url),
                     alt: merchItem.title,
                     position: 0,
                   });
@@ -226,7 +227,7 @@ export const bandcampSyncTask = task({
                   }
                   await supabase
                     .from("warehouse_products")
-                    .update({ images: [{ src: merchItem.image_url }] })
+                    .update({ images: [{ src: bandcampImageUrl(merchItem.image_url) }] })
                     .eq("id", existingVar.product_id);
                 }
               }
@@ -299,8 +300,15 @@ export const bandcampSyncTask = task({
                   inventoryPolicy: "DENY",
                 },
               ],
-              ...(merchItem.image_url
-                ? { media: [{ originalSource: merchItem.image_url, mediaContentType: "IMAGE" }] }
+              ...(bandcampImageUrl(merchItem.image_url)
+                ? {
+                    media: [
+                      {
+                        originalSource: bandcampImageUrl(merchItem.image_url),
+                        mediaContentType: "IMAGE",
+                      },
+                    ],
+                  }
                 : {}),
             });
             logger.info("Created Shopify DRAFT product", { sku: merchItem.sku, shopifyProductId });
@@ -323,7 +331,7 @@ export const bandcampSyncTask = task({
               product_type: merchItem.item_type ?? "Merch",
               status: "draft",
               tags,
-              image_url: merchItem.image_url ?? null,
+              image_url: bandcampImageUrl(merchItem.image_url) ?? null,
             })
             .select("id")
             .single();
@@ -338,10 +346,10 @@ export const bandcampSyncTask = task({
           }
 
           // Store Bandcamp image as warehouse_product_images row
-          if (merchItem.image_url) {
+          if (bandcampImageUrl(merchItem.image_url)) {
             await supabase.from("warehouse_product_images").insert({
               product_id: product.id,
-              src: merchItem.image_url,
+              src: bandcampImageUrl(merchItem.image_url),
               alt: title,
               position: 0,
             });
@@ -397,7 +405,7 @@ export const bandcampSyncTask = task({
                 : "package",
               bandcamp_member_band_id: merchItem.member_band_id,
               bandcamp_url: merchItem.url,
-              bandcamp_image_url: merchItem.image_url ?? null,
+              bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
               bandcamp_type_name: merchItem.item_type,
               bandcamp_new_date: merchItem.new_date,
               last_quantity_sold: merchItem.quantity_sold,

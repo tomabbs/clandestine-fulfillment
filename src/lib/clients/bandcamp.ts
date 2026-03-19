@@ -219,6 +219,17 @@ export async function updateQuantities(
   }
 }
 
+// === Image URL helpers ===
+
+/**
+ * Bandcamp API returns tiny thumbnail URLs (e.g. _36.jpg = 36px).
+ * Replace the size suffix with _10.jpg for 700px standard display size.
+ */
+export function bandcampImageUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.replace(/_\d+\.jpg$/, "_10.jpg");
+}
+
 // === Title assembly for Shopify product creation ===
 
 /**
