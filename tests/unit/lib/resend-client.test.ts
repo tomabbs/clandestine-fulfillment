@@ -5,7 +5,7 @@ describe("parseInboundEmail", () => {
   it("parses a complete inbound email payload", () => {
     const payload = {
       from: "Alice <alice@example.com>",
-      to: "support@mail.clandestinefulfillment.com",
+      to: "support@mail.clandestinedistro.com",
       subject: "Need help with my order",
       text: "Hi, I have a question about order #1234.",
       message_id: "<msg-123@example.com>",
@@ -16,7 +16,7 @@ describe("parseInboundEmail", () => {
 
     expect(result).toEqual({
       from: "Alice <alice@example.com>",
-      to: "support@mail.clandestinefulfillment.com",
+      to: "support@mail.clandestinedistro.com",
       subject: "Need help with my order",
       body: "Hi, I have a question about order #1234.",
       messageId: "<msg-123@example.com>",
@@ -27,7 +27,7 @@ describe("parseInboundEmail", () => {
   it("handles missing optional fields with defaults", () => {
     const payload = {
       from: "bob@example.com",
-      to: "support@mail.clandestinefulfillment.com",
+      to: "support@mail.clandestinedistro.com",
       message_id: "<msg-456@example.com>",
     };
 
