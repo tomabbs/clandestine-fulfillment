@@ -12,7 +12,6 @@ import {
   Moon,
   Package,
   PackagePlus,
-  Radio,
   Receipt,
   ScanBarcode,
   Settings,
@@ -59,7 +58,6 @@ const NAV_ITEMS = [
   { title: "Clients", href: "/admin/clients", icon: Users },
   { title: "Shipping", href: "/admin/shipping", icon: Truck },
   { title: "Billing", href: "/admin/billing", icon: Receipt },
-  { title: "Channels", href: "/admin/channels", icon: Radio },
   { title: "Top Sellers", href: "/admin/reports/top-sellers", icon: TrendingUp },
   { title: "Review Q", href: "/admin/review-queue", icon: AlertCircle },
   { title: "Support", href: "/admin/support", icon: MessageSquare },
@@ -71,6 +69,7 @@ const SETTINGS_ITEMS = [
   { title: "Bandcamp Accounts", href: "/admin/settings/bandcamp" },
   { title: "Store Connections", href: "/admin/settings/store-connections" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },
+  { title: "Channels", href: "/admin/channels" },
   { title: "Integrations", href: "/admin/settings/integrations" },
   { title: "Health", href: "/admin/settings/health" },
 ] as const;
