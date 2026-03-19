@@ -83,27 +83,71 @@ export async function inviteUser(input: InviteUserInput) {
     throw new Error("A user with this email already exists");
   }
 
+  // Check if this email already has an auth account (re-invite scenario)
+  const { data: existingAuthUsers } = await serviceClient.auth.admin.listUsers({
+    perPage: 1,
+    page: 1,
+  });
+  // Search for existing auth user by email
+  let existingAuthId: string | null = null;
+  {
+    const { data: authLookup } = await serviceClient
+      .from("users")
+      .select("auth_user_id")
+      .eq("email", parsed.email)
+      .neq("workspace_id", userRecord.workspace_id)
+      .maybeSingle();
+    if (authLookup) existingAuthId = authLookup.auth_user_id;
+  }
+
   // Create auth user via Supabase Admin API (requires service_role key)
-  let authData: { user: { id: string } | null };
+  let authUserId: string;
   try {
-    const result = await serviceClient.auth.admin.inviteUserByEmail(parsed.email, {
-      data: { full_name: parsed.name },
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://clandestinefulfillment.com"}/auth/callback`,
-    });
-    if (result.error) throw new Error(result.error.message);
-    authData = result.data;
+    if (existingAuthId) {
+      // User exists in auth but not in this workspace — reuse auth ID
+      authUserId = existingAuthId;
+    } else {
+      // Try invite first
+      const result = await serviceClient.auth.admin.inviteUserByEmail(parsed.email, {
+        data: { full_name: parsed.name },
+        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/auth/callback`,
+      });
+
+      if (result.error) {
+        // Rate limit or duplicate — try createUser as fallback
+        if (
+          result.error.message.includes("rate limit") ||
+          result.error.message.includes("already been registered")
+        ) {
+          // Try to find existing auth user
+          const { data: lookup } = await serviceClient.auth.admin.listUsers({ perPage: 1000 });
+          const found = lookup?.users?.find(
+            (u) => u.email?.toLowerCase() === parsed.email.toLowerCase(),
+          );
+          if (found) {
+            authUserId = found.id;
+          } else {
+            throw new Error(result.error.message);
+          }
+        } else {
+          throw new Error(result.error.message);
+        }
+      } else if (!result.data.user) {
+        throw new Error("No auth user returned from invite");
+      } else {
+        authUserId = result.data.user.id;
+      }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`Failed to send invite: ${msg}`);
   }
 
-  if (!authData.user) throw new Error("No auth user returned from invite");
-
   // Insert users table row
   const { data: created, error: insertError } = await serviceClient
     .from("users")
     .insert({
-      auth_user_id: authData.user.id,
+      auth_user_id: authUserId,
       email: parsed.email,
       name: parsed.name,
       role: parsed.role,
