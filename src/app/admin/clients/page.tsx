@@ -55,7 +55,7 @@ export default function ClientsPage() {
 
   const { data, isLoading } = useAppQuery({
     queryKey: queryKeys.clients.list(),
-    queryFn: () => getClients({ search: search || undefined }),
+    queryFn: () => getClients({ pageSize: 500 }),
     tier: CACHE_TIERS.SESSION,
   });
 
@@ -69,7 +69,9 @@ export default function ClientsPage() {
   });
 
   const sortedClients = useMemo(() => {
-    const list = data?.clients ?? [];
+    const all = data?.clients ?? [];
+    const searchLower = search.toLowerCase();
+    const list = search ? all.filter((c) => c.name.toLowerCase().includes(searchLower)) : all;
     return [...list].sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
       switch (sortField) {
@@ -89,7 +91,7 @@ export default function ClientsPage() {
           return 0;
       }
     });
-  }, [data?.clients, sortField, sortDir]);
+  }, [data?.clients, sortField, sortDir, search]);
 
   function toggleSort(field: SortField) {
     if (sortField === field) {

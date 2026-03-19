@@ -26,6 +26,13 @@ import {
   updateClient,
   updateOnboardingStep,
 } from "@/actions/clients";
+import {
+  getOrganizations,
+  type MergePreview,
+  mergeOrganizations,
+  previewMerge,
+  setParentOrganization,
+} from "@/actions/organizations";
 import { inviteUser, removeClientUser } from "@/actions/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -726,8 +733,14 @@ function SettingsTab({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
 
+      {/* Parent Organization */}
+      <ParentOrgCard orgId={orgId} />
+
       {/* Client Users */}
       <ClientUsersCard orgId={orgId} />
+
+      {/* Merge Organization */}
+      <MergeOrgCard orgId={orgId} />
 
       {/* Portal toggles */}
       <Card>
@@ -966,6 +979,187 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
               ))}
             </TableBody>
           </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Parent Organization ────────────────────────────────────────────────────
+
+function ParentOrgCard({ orgId }: { orgId: string }) {
+  const { data: orgs } = useAppQuery({
+    queryKey: ["organizations"],
+    queryFn: () => getOrganizations(),
+    tier: CACHE_TIERS.STABLE,
+  });
+
+  const { data: settings } = useAppQuery({
+    queryKey: queryKeys.clients.settings(orgId),
+    queryFn: () => getClientSettings(orgId),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  const currentParentId = (settings?.org as Record<string, unknown>)?.parent_org_id as
+    | string
+    | null;
+
+  const saveMut = useAppMutation({
+    mutationFn: (parentId: string | null) => setParentOrganization(orgId, parentId),
+    invalidateKeys: [queryKeys.clients.settings(orgId), queryKeys.clients.all],
+  });
+
+  const others = (orgs ?? []).filter((o) => o.id !== orgId);
+  const children = (orgs ?? []).filter((o) => o.parent_org_id === orgId);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Organization Hierarchy</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div>
+          <label htmlFor="parent-org" className="text-sm font-medium mb-1 block">
+            Parent Organization
+          </label>
+          <select
+            id="parent-org"
+            value={currentParentId ?? ""}
+            onChange={(e) => saveMut.mutate(e.target.value || null)}
+            disabled={saveMut.isPending}
+            className="border-input bg-background h-9 w-64 rounded-md border px-3 text-sm"
+          >
+            <option value="">None (top-level)</option>
+            {others.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          {saveMut.isPending && (
+            <span className="text-xs text-muted-foreground ml-2">Saving...</span>
+          )}
+        </div>
+        {children.length > 0 && (
+          <div>
+            <p className="text-sm font-medium mb-1">Sub-Labels ({children.length})</p>
+            <ul className="text-sm text-muted-foreground space-y-1">
+              {children.map((c) => (
+                <li key={c.id}>• {c.name}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Merge Organization ─────────────────────────────────────────────────────
+
+function MergeOrgCard({ orgId }: { orgId: string }) {
+  const router = useRouter();
+  const { data: orgs } = useAppQuery({
+    queryKey: ["organizations"],
+    queryFn: () => getOrganizations(),
+    tier: CACHE_TIERS.STABLE,
+  });
+
+  const [targetId, setTargetId] = useState("");
+  const [preview, setPreview] = useState<MergePreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const previewMut = useAppMutation({
+    mutationFn: () => previewMerge(orgId, targetId),
+    invalidateKeys: [],
+    onSuccess: (data) => {
+      setPreview(data);
+      setPreviewError(null);
+    },
+    onError: (err) => setPreviewError((err as Error).message),
+  });
+
+  const mergeMut = useAppMutation({
+    mutationFn: () => mergeOrganizations(orgId, targetId),
+    invalidateKeys: [queryKeys.clients.all],
+    onSuccess: () => router.push("/admin/clients"),
+  });
+
+  const others = (orgs ?? []).filter((o) => o.id !== orgId);
+
+  return (
+    <Card className="border-destructive/30">
+      <CardHeader>
+        <CardTitle className="text-destructive">Merge Organization</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Merge this organization into another. All products, shipments, orders, and users will be
+          reassigned to the target. This organization will be deleted. This action is irreversible.
+        </p>
+        <div className="flex items-end gap-2">
+          <div>
+            <label htmlFor="merge-target" className="text-sm font-medium mb-1 block">
+              Merge into
+            </label>
+            <select
+              id="merge-target"
+              value={targetId}
+              onChange={(e) => {
+                setTargetId(e.target.value);
+                setPreview(null);
+              }}
+              className="border-input bg-background h-9 w-64 rounded-md border px-3 text-sm"
+            >
+              <option value="">Select target organization...</option>
+              {others.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!targetId || previewMut.isPending}
+            onClick={() => previewMut.mutate()}
+          >
+            {previewMut.isPending ? "Checking..." : "Preview"}
+          </Button>
+        </div>
+
+        {previewError && <p className="text-sm text-destructive">{previewError}</p>}
+
+        {preview && (
+          <div className="border rounded-lg p-3 space-y-2 bg-destructive/5">
+            <p className="text-sm font-medium">
+              Merge &ldquo;{preview.sourceOrg.name}&rdquo; → &ldquo;{preview.targetOrg.name}&rdquo;
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {preview.totalAffected} records will be reassigned:
+            </p>
+            <ul className="text-xs text-muted-foreground space-y-0.5">
+              {Object.entries(preview.affectedRows).map(([table, count]) => (
+                <li key={table}>
+                  {table}: {count} row{count !== 1 ? "s" : ""}
+                </li>
+              ))}
+            </ul>
+            {preview.totalAffected === 0 && (
+              <p className="text-xs text-muted-foreground italic">
+                No records to reassign — organization is empty.
+              </p>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={mergeMut.isPending}
+              onClick={() => mergeMut.mutate()}
+            >
+              {mergeMut.isPending ? "Merging..." : "Confirm Merge & Delete"}
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>
