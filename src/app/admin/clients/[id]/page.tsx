@@ -733,7 +733,7 @@ function SettingsTab({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
 
-      {/* Parent Organization */}
+      {/* Parent Client */}
       <ParentOrgCard orgId={orgId} />
 
       {/* Client Users */}
@@ -985,7 +985,7 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
   );
 }
 
-// ─── Parent Organization ────────────────────────────────────────────────────
+// ─── Parent Client ────────────────────────────────────────────────────
 
 function ParentOrgCard({ orgId }: { orgId: string }) {
   const { data: orgs } = useAppQuery({
@@ -1015,12 +1015,12 @@ function ParentOrgCard({ orgId }: { orgId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Organization Hierarchy</CardTitle>
+        <CardTitle>Client Hierarchy</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
           <label htmlFor="parent-org" className="text-sm font-medium mb-1 block">
-            Parent Organization
+            Parent Client
           </label>
           <select
             id="parent-org"
@@ -1042,7 +1042,7 @@ function ParentOrgCard({ orgId }: { orgId: string }) {
         </div>
         {children.length > 0 && (
           <div>
-            <p className="text-sm font-medium mb-1">Sub-Labels ({children.length})</p>
+            <p className="text-sm font-medium mb-1">Sub-Clients ({children.length})</p>
             <ul className="text-sm text-muted-foreground space-y-1">
               {children.map((c) => (
                 <li key={c.id}>• {c.name}</li>
