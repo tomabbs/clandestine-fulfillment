@@ -39,6 +39,64 @@ export async function sendSupportEmail(
   return { messageId: data.id };
 }
 
+export async function sendPortalInviteEmail(params: {
+  to: string;
+  inviteLink: string;
+  inviteeName?: string;
+  inviterName?: string | null;
+}): Promise<{ messageId: string }> {
+  const resend = getResendClient();
+  const inviteeName = params.inviteeName?.trim() || "there";
+  const inviterLine = params.inviterName?.trim()
+    ? `${params.inviterName} invited you to Clandestine Fulfillment.`
+    : "You were invited to Clandestine Fulfillment.";
+
+  const subject = "Your Clandestine Fulfillment portal invite";
+  const text = [
+    `Hi ${inviteeName},`,
+    "",
+    inviterLine,
+    "",
+    "Use this secure link to finish sign in:",
+    params.inviteLink,
+    "",
+    "If you were not expecting this invite, you can safely ignore this email.",
+    "",
+    "— Clandestine Fulfillment",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827">
+      <p>Hi ${escapeHtml(inviteeName)},</p>
+      <p>${escapeHtml(inviterLine)}</p>
+      <p>
+        <a href="${escapeAttribute(params.inviteLink)}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:10px 14px;border-radius:6px">
+          Open Portal Invite
+        </a>
+      </p>
+      <p style="font-size:12px;color:#6b7280">
+        If the button does not work, copy and paste this link:<br/>
+        <a href="${escapeAttribute(params.inviteLink)}">${escapeHtml(params.inviteLink)}</a>
+      </p>
+      <p style="font-size:12px;color:#6b7280">If you were not expecting this invite, you can ignore this email.</p>
+    </div>
+  `;
+
+  const { data, error } = await resend.emails.send({
+    from: "Clandestine Fulfillment Support <support@mail.clandestinefulfillment.com>",
+    to: params.to,
+    subject,
+    text,
+    html,
+  });
+
+  if (error || !data) {
+    throw new Error(`Failed to send invite email: ${error?.message ?? "unknown error"}`);
+  }
+
+  return { messageId: data.id };
+}
+
 export const inboundEmailSchema = z.object({
   from: z.string(),
   to: z.string(),
@@ -69,4 +127,17 @@ export function parseInboundEmail(payload: unknown): ParsedInboundEmail {
     messageId: parsed.message_id,
     inReplyTo: parsed.in_reply_to,
   };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value);
 }

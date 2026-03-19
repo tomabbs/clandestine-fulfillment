@@ -188,8 +188,13 @@ function InviteDialog() {
   const [role, setRole] = useState("label_staff");
 
   const inviteMut = useAppMutation({
-    mutationFn: (vars: { email: string; name: string; role: string }) =>
-      inviteUser({ email: vars.email, name: vars.name, role: vars.role as never }),
+    mutationFn: async (vars: { email: string; name: string; role: string }) => {
+      const result = await inviteUser({ email: vars.email, name: vars.name, role: vars.role as never });
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.user;
+    },
     invalidateKeys: [USER_QUERY_KEY],
     onSuccess: () => {
       setOpen(false);

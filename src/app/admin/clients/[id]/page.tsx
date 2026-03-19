@@ -840,13 +840,18 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
   const [invError, setInvError] = useState<string | null>(null);
 
   const inviteMut = useAppMutation({
-    mutationFn: () =>
-      inviteUser({
+    mutationFn: async () => {
+      const result = await inviteUser({
         email: invEmail,
         name: invName || invEmail.split("@")[0],
         role: invRole,
         orgId,
-      }),
+      });
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.user;
+    },
     invalidateKeys: [["client-users", orgId]],
     onSuccess: () => {
       setShowInvite(false);

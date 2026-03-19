@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { sendPortalInviteEmail } from "@/lib/clients/resend-client";
 import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { CLIENT_ROLES, STAFF_ROLES } from "@/lib/shared/constants";
@@ -26,6 +27,17 @@ const deactivateSchema = z.object({
 });
 
 export type InviteUserInput = z.infer<typeof inviteUserSchema>;
+type InvitedUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  created_at: string;
+};
+
+export type InviteUserResult =
+  | { success: true; user: InvitedUser }
+  | { success: false; code: string; error: string };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -59,107 +71,175 @@ export async function getUsers(filters?: { search?: string }) {
   return data ?? [];
 }
 
-export async function inviteUser(input: InviteUserInput) {
-  const { userRecord } = await requireAuth();
-  requireAdmin(userRecord.role);
-
-  const parsed = inviteUserSchema.parse(input);
-  const serviceClient = createServiceRoleClient();
-
-  // Client roles require orgId
-  if ((CLIENT_ROLES as readonly string[]).includes(parsed.role) && !parsed.orgId) {
-    throw new Error("Client roles require an organization");
-  }
-
-  // Check for duplicate email
-  const { data: existingUser } = await serviceClient
-    .from("users")
-    .select("id")
-    .eq("email", parsed.email)
-    .eq("workspace_id", userRecord.workspace_id)
-    .maybeSingle();
-
-  if (existingUser) {
-    throw new Error("A user with this email already exists");
-  }
-
-  // Check if this email already has an auth account (re-invite scenario)
-  const { data: existingAuthUsers } = await serviceClient.auth.admin.listUsers({
-    perPage: 1,
-    page: 1,
-  });
-  // Search for existing auth user by email
-  let existingAuthId: string | null = null;
-  {
-    const { data: authLookup } = await serviceClient
-      .from("users")
-      .select("auth_user_id")
-      .eq("email", parsed.email)
-      .neq("workspace_id", userRecord.workspace_id)
-      .maybeSingle();
-    if (authLookup) existingAuthId = authLookup.auth_user_id;
-  }
-
-  // Create auth user via Supabase Admin API (requires service_role key)
-  let authUserId: string;
+export async function inviteUser(input: InviteUserInput): Promise<InviteUserResult> {
   try {
-    if (existingAuthId) {
-      // User exists in auth but not in this workspace — reuse auth ID
-      authUserId = existingAuthId;
-    } else {
-      // Try invite first
-      const result = await serviceClient.auth.admin.inviteUserByEmail(parsed.email, {
-        data: { full_name: parsed.name },
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/auth/callback`,
-      });
+    const { userRecord } = await requireAuth();
+    requireAdmin(userRecord.role);
 
-      if (result.error) {
-        // Rate limit or duplicate — try createUser as fallback
-        if (
-          result.error.message.includes("rate limit") ||
-          result.error.message.includes("already been registered")
-        ) {
-          // Try to find existing auth user
-          const { data: lookup } = await serviceClient.auth.admin.listUsers({ perPage: 1000 });
-          const found = lookup?.users?.find(
-            (u) => u.email?.toLowerCase() === parsed.email.toLowerCase(),
-          );
-          if (found) {
-            authUserId = found.id;
-          } else {
-            throw new Error(result.error.message);
-          }
-        } else {
-          throw new Error(result.error.message);
-        }
-      } else if (!result.data.user) {
-        throw new Error("No auth user returned from invite");
-      } else {
-        authUserId = result.data.user.id;
+    const parsedResult = inviteUserSchema.safeParse(input);
+    if (!parsedResult.success) {
+      return {
+        success: false,
+        code: "INVALID_INPUT",
+        error: "Please provide a valid email, name, and role.",
+      };
+    }
+    const parsed = parsedResult.data;
+    const serviceClient = createServiceRoleClient();
+
+    // Client roles require orgId
+    if ((CLIENT_ROLES as readonly string[]).includes(parsed.role) && !parsed.orgId) {
+      return {
+        success: false,
+        code: "ORG_REQUIRED",
+        error: "Client roles require an organization.",
+      };
+    }
+
+    // Check for duplicate email in this workspace
+    const { data: existingUser, error: existingUserError } = await serviceClient
+      .from("users")
+      .select("id")
+      .eq("email", parsed.email)
+      .eq("workspace_id", userRecord.workspace_id)
+      .maybeSingle();
+
+    if (existingUserError) {
+      return {
+        success: false,
+        code: "USER_LOOKUP_FAILED",
+        error: `Failed to check existing users: ${existingUserError.message}`,
+      };
+    }
+
+    if (existingUser) {
+      return {
+        success: false,
+        code: "USER_EXISTS",
+        error: "A user with this email already exists in this workspace.",
+      };
+    }
+
+    // If this email is already linked in another workspace, we cannot safely reuse auth_user_id
+    // because users.auth_user_id is globally unique in this schema.
+    {
+      const { data: authLookup, error: authLookupError } = await serviceClient
+        .from("users")
+        .select("id")
+        .eq("email", parsed.email)
+        .neq("workspace_id", userRecord.workspace_id)
+        .maybeSingle();
+      if (authLookupError) {
+        return {
+          success: false,
+          code: "AUTH_LOOKUP_FAILED",
+          error: `Failed to check auth user: ${authLookupError.message}`,
+        };
+      }
+      if (authLookup) {
+        return {
+          success: false,
+          code: "EMAIL_IN_OTHER_WORKSPACE",
+          error:
+            "This email is already assigned in another workspace. Use a different email or move the existing user.",
+        };
       }
     }
+
+    // Create auth user and invite link without relying on Supabase hosted email sending.
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const linkResult = await serviceClient.auth.admin.generateLink({
+      type: "invite",
+      email: parsed.email,
+      options: {
+        data: { full_name: parsed.name },
+        redirectTo: `${appUrl}/auth/callback`,
+      },
+    });
+
+    if (linkResult.error || !linkResult.data.user) {
+      const msg = linkResult.error?.message ?? "Failed to generate invite link";
+      const lower = msg.toLowerCase();
+      if (lower.includes("rate limit")) {
+        return {
+          success: false,
+          code: "INVITE_RATE_LIMITED",
+          error:
+            "Invite generation is temporarily rate-limited. Please wait a few minutes and try again.",
+        };
+      }
+      return {
+        success: false,
+        code: "INVITE_LINK_FAILED",
+        error: `Failed to generate invite link: ${msg}`,
+      };
+    }
+
+    const inviteLink = linkResult.data.properties?.action_link;
+    if (!inviteLink) {
+      return {
+        success: false,
+        code: "INVITE_LINK_MISSING",
+        error: "Invite link was generated without an action URL.",
+      };
+    }
+
+    const authUserId = linkResult.data.user.id;
+
+    // Insert users table row
+    const { data: created, error: insertError } = await serviceClient
+      .from("users")
+      .insert({
+        auth_user_id: authUserId,
+        email: parsed.email,
+        name: parsed.name,
+        role: parsed.role,
+        workspace_id: userRecord.workspace_id,
+        org_id: parsed.orgId ?? null,
+      })
+      .select("id, email, name, role, created_at")
+      .single();
+
+    if (insertError) {
+      return {
+        success: false,
+        code: "USER_CREATE_FAILED",
+        error: `Failed to create user: ${insertError.message}`,
+      };
+    }
+
+    try {
+      await sendPortalInviteEmail({
+        to: parsed.email,
+        inviteLink,
+        inviteeName: parsed.name,
+        inviterName: userRecord.name ?? userRecord.email ?? null,
+      });
+    } catch (emailError) {
+      // Best-effort rollback to keep retry path clean if email delivery fails.
+      try {
+        await serviceClient.from("users").delete().eq("id", created.id);
+      } catch {}
+      try {
+        await serviceClient.auth.admin.deleteUser(authUserId);
+      } catch {}
+      const msg = emailError instanceof Error ? emailError.message : String(emailError);
+      return {
+        success: false,
+        code: "INVITE_EMAIL_FAILED",
+        error: `Failed to send invite email via Resend: ${msg}`,
+      };
+    }
+
+    return { success: true, user: created as InvitedUser };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`Failed to send invite: ${msg}`);
+    return {
+      success: false,
+      code: "UNEXPECTED",
+      error: `Unexpected invite failure: ${msg}`,
+    };
   }
-
-  // Insert users table row
-  const { data: created, error: insertError } = await serviceClient
-    .from("users")
-    .insert({
-      auth_user_id: authUserId,
-      email: parsed.email,
-      name: parsed.name,
-      role: parsed.role,
-      workspace_id: userRecord.workspace_id,
-      org_id: parsed.orgId ?? null,
-    })
-    .select("id, email, name, role, created_at")
-    .single();
-
-  if (insertError) throw new Error(`Failed to create user: ${insertError.message}`);
-
-  return created;
 }
 
 export async function updateUserRole(input: { userId: string; role: string }) {
