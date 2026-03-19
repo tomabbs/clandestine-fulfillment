@@ -1,6 +1,7 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
+import Image from "next/image";
 import { useRef, useState } from "react";
 
 export default function LoginPage() {
@@ -54,8 +55,15 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-sm space-y-8">
       <div className="text-center">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Clandestine Fulfillment</h1>
-        <p className="mt-2 text-sm text-gray-600">Sign in to your account</p>
+        <Image
+          src="/logo.webp"
+          alt="Clandestine Distribution"
+          width={250}
+          height={50}
+          priority
+          className="mx-auto"
+        />
+        <p className="mt-4 text-sm text-gray-600">Sign in to your account</p>
       </div>
 
       {error && <div className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</div>}

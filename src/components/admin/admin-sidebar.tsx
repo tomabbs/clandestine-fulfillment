@@ -1,6 +1,7 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
+import Image from "next/image";
 import {
   AlertCircle,
   ChevronDown,
@@ -96,7 +97,7 @@ export function AdminSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b px-4 py-3">
-        <span className="text-sm font-semibold">Clandestine Fulfillment</span>
+        <Image src="/logo.webp" alt="Clandestine Distribution" width={180} height={36} priority />
       </SidebarHeader>
 
       <SidebarContent>

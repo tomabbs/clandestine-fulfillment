@@ -105,7 +105,7 @@ export const supportEscalationTask = schedules.task({
             await sendSupportEmail(
               mapping.email_address,
               `Reminder: ${conversation.subject}`,
-              `Hi there,\n\nWe're following up on your support conversation: "${conversation.subject}"\n\nWe sent a reply and are waiting for your response. If you have any questions or need further assistance, please reply to this email or log in to your portal.\n\nBest regards,\nClandestine Fulfillment Support`,
+              `Hi there,\n\nWe're following up on your support conversation: "${conversation.subject}"\n\nWe sent a reply and are waiting for your response. If you have any questions or need further assistance, please reply to this email or log in to your portal.\n\nBest regards,\nClandestine Distribution Support`,
             );
           }
         }

@@ -25,7 +25,7 @@ export async function sendSupportEmail(
   }
 
   const { data, error } = await resend.emails.send({
-    from: "Clandestine Fulfillment Support <support@clandestinedistro.com>",
+    from: "Clandestine Distribution Support <support@clandestinedistro.com>",
     to,
     subject,
     text: body,
@@ -48,10 +48,10 @@ export async function sendPortalInviteEmail(params: {
   const resend = getResendClient();
   const inviteeName = params.inviteeName?.trim() || "there";
   const inviterLine = params.inviterName?.trim()
-    ? `${params.inviterName} invited you to Clandestine Fulfillment.`
-    : "You were invited to Clandestine Fulfillment.";
+    ? `${params.inviterName} invited you to Clandestine Distribution.`
+    : "You were invited to Clandestine Distribution.";
 
-  const subject = "Your Clandestine Fulfillment portal invite";
+  const subject = "Your Clandestine Distribution portal invite";
   const text = [
     `Hi ${inviteeName},`,
     "",
@@ -62,7 +62,7 @@ export async function sendPortalInviteEmail(params: {
     "",
     "If you were not expecting this invite, you can safely ignore this email.",
     "",
-    "— Clandestine Fulfillment",
+    "— Clandestine Distribution",
   ].join("\n");
 
   const html = `
@@ -83,7 +83,7 @@ export async function sendPortalInviteEmail(params: {
   `;
 
   const { data, error } = await resend.emails.send({
-    from: "Clandestine Fulfillment Support <support@clandestinedistro.com>",
+    from: "Clandestine Distribution Support <support@clandestinedistro.com>",
     to: params.to,
     subject,
     text,
