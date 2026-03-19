@@ -258,17 +258,19 @@ export default function CatalogPage() {
                     className="cursor-pointer"
                     onClick={() => router.push(`/admin/catalog/${product.id}`)}
                   >
-                    <TableCell>
+                    <TableCell className="w-10 p-2">
                       {thumbSrc ? (
-                        <Image
-                          src={thumbSrc}
-                          alt={primaryImage?.alt ?? product.title}
-                          width={40}
-                          height={40}
-                          className="h-10 w-10 rounded object-cover"
-                        />
+                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
+                          <Image
+                            src={thumbSrc}
+                            alt={primaryImage?.alt ?? product.title}
+                            fill
+                            sizes="40px"
+                            className="object-cover"
+                          />
+                        </div>
                       ) : (
-                        <div className="bg-muted flex h-10 w-10 items-center justify-center rounded">
+                        <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded">
                           <Package className="text-muted-foreground h-5 w-5" />
                         </div>
                       )}
