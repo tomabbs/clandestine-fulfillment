@@ -41,11 +41,11 @@ export const supportEscalationTask = schedules.task({
         const { data: staffUsers } = conversation.assigned_to
           ? await supabase
               .from("users")
-              .select("email, full_name")
+              .select("email, name")
               .eq("id", conversation.assigned_to)
           : await supabase
               .from("users")
-              .select("email, full_name")
+              .select("email, name")
               .in("role", [...STAFF_ROLES]);
 
         const orgs = conversation.organizations as unknown as

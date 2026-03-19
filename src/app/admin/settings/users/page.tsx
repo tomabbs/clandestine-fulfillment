@@ -157,9 +157,7 @@ export default function UsersPage() {
                   </Select>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={user.is_active ? "default" : "destructive"}>
-                    {user.is_active ? "Active" : "Deactivated"}
-                  </Badge>
+                  <Badge variant="default">Active</Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {new Date(user.created_at).toLocaleDateString()}
@@ -171,7 +169,7 @@ export default function UsersPage() {
                     onClick={() => deactivateMut.mutate({ userId: user.id })}
                     disabled={deactivateMut.isPending}
                   >
-                    {user.is_active ? "Deactivate" : "Reactivate"}
+                    Deactivate
                   </Button>
                 </TableCell>
               </TableRow>

@@ -99,7 +99,7 @@ export async function getConversationDetail(id: string): Promise<{
   const { data: conversation, error: convError } = await supabase
     .from("support_conversations")
     .select(
-      "*, organizations!inner(name), assigned_user:users!support_conversations_assigned_to_fkey(full_name)",
+      "*, organizations!inner(name), assigned_user:users!support_conversations_assigned_to_fkey(name)",
     )
     .eq("id", id)
     .single();
@@ -115,13 +115,13 @@ export async function getConversationDetail(id: string): Promise<{
   if (msgError) throw new Error(`Failed to fetch messages: ${msgError.message}`);
 
   const org = conversation.organizations as { name: string } | null;
-  const assignedUser = conversation.assigned_user as { full_name: string } | null;
+  const assignedUser = conversation.assigned_user as { name: string } | null;
 
   return {
     conversation: {
       ...(conversation as unknown as SupportConversation),
       org_name: org?.name,
-      assigned_name: assignedUser?.full_name,
+      assigned_name: assignedUser?.name,
     },
     messages: (messages ?? []) as SupportMessage[],
   };

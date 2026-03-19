@@ -45,7 +45,7 @@ export async function getUsers(filters?: { search?: string }) {
 
   let query = serviceClient
     .from("users")
-    .select("id, auth_user_id, email, name, role, org_id, is_active, created_at")
+    .select("id, auth_user_id, email, name, role, org_id, created_at")
     .eq("workspace_id", userRecord.workspace_id)
     .order("created_at", { ascending: false });
 
@@ -110,7 +110,7 @@ export async function inviteUser(input: InviteUserInput) {
       workspace_id: userRecord.workspace_id,
       org_id: parsed.orgId ?? null,
     })
-    .select("id, email, name, role, is_active, created_at")
+    .select("id, email, name, role, created_at")
     .single();
 
   if (insertError) throw new Error(`Failed to create user: ${insertError.message}`);
@@ -164,23 +164,17 @@ export async function deactivateUser(input: { userId: string }) {
   // Get the auth_user_id to ban at auth level
   const { data: target } = await serviceClient
     .from("users")
-    .select("auth_user_id, is_active")
+    .select("auth_user_id")
     .eq("id", parsed.userId)
     .eq("workspace_id", userRecord.workspace_id)
     .single();
 
   if (!target) throw new Error("User not found");
 
-  // Toggle active status
-  const newActive = !target.is_active;
-
-  // Update users table
-  const { error: updateError } = await serviceClient
-    .from("users")
-    .update({ is_active: newActive })
-    .eq("id", parsed.userId);
-
-  if (updateError) throw new Error(`Failed to update user: ${updateError.message}`);
+  // Check current ban status from Supabase Auth
+  const { data: authUser } = await serviceClient.auth.admin.getUserById(target.auth_user_id);
+  const currentlyBanned = !!authUser?.user?.banned_until;
+  const newActive = currentlyBanned; // if banned, toggling makes active; if active, toggling bans
 
   // Ban/unban at Supabase Auth level
   await serviceClient.auth.admin.updateUserById(target.auth_user_id, {
