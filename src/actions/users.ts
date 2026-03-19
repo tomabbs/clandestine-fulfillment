@@ -146,19 +146,51 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
       }
     }
 
-    // Create auth user and invite link without relying on Supabase hosted email sending.
+    // Create auth user and generate invite link.
+    // IMPORTANT: Use type "magiclink" NOT "invite" — Supabase's generateLink with
+    // type "invite" still sends the default Supabase invite email as a side effect,
+    // even though the docs say it shouldn't. "magiclink" generates the link without
+    // triggering any Supabase-hosted email. We send our own branded email via Resend.
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+
+    // First, create the auth user if they don't exist yet
+    let authUserId: string;
+    const { data: existingAuthUsers } = await serviceClient.auth.admin.listUsers();
+    const existingAuthUser = existingAuthUsers?.users?.find(
+      (u) => u.email?.toLowerCase() === parsed.email.toLowerCase(),
+    );
+
+    if (existingAuthUser) {
+      authUserId = existingAuthUser.id;
+    } else {
+      // Create a new auth user (without sending any email)
+      const { data: newAuthUser, error: createAuthError } =
+        await serviceClient.auth.admin.createUser({
+          email: parsed.email,
+          email_confirm: false,
+          user_metadata: { full_name: parsed.name },
+        });
+      if (createAuthError || !newAuthUser.user) {
+        return {
+          success: false,
+          code: "AUTH_USER_CREATE_FAILED",
+          error: `Failed to create auth user: ${createAuthError?.message ?? "unknown"}`,
+        };
+      }
+      authUserId = newAuthUser.user.id;
+    }
+
+    // Generate a magic link for the user (does NOT send any email)
     const linkResult = await serviceClient.auth.admin.generateLink({
-      type: "invite",
+      type: "magiclink",
       email: parsed.email,
       options: {
-        data: { full_name: parsed.name },
         redirectTo: `${appUrl}/auth/callback`,
       },
     });
 
-    if (linkResult.error || !linkResult.data.user) {
-      const msg = linkResult.error?.message ?? "Failed to generate invite link";
+    if (linkResult.error) {
+      const msg = linkResult.error.message;
       const lower = msg.toLowerCase();
       if (lower.includes("rate limit")) {
         return {
@@ -196,8 +228,6 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
     } catch {
       // URL parse failed — use link as-is
     }
-
-    const authUserId = linkResult.data.user.id;
 
     // Insert users table row
     const { data: created, error: insertError } = await serviceClient
