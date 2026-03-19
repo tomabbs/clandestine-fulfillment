@@ -14,22 +14,26 @@ import type { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 export interface OrgMatchResult {
   orgId: string;
-  method: "store_mapping" | "sku_match";
+  method: "store_mapping" | "alias_match" | "sku_match";
   isDropShip: boolean;
 }
 
 /**
  * Attempt to match a ShipStation shipment to an organization.
  *
- * @param supabase - Service-role Supabase client
- * @param storeId  - ShipStation store ID (from advancedOptions or top-level)
- * @param itemSkus - SKUs from shipment items (for fallback matching)
+ * @param supabase    - Service-role Supabase client
+ * @param storeId     - ShipStation store ID (from advancedOptions or top-level)
+ * @param itemSkus    - SKUs from shipment items (for fallback matching)
+ * @param storeName   - Optional store name for alias matching
+ * @param workspaceId - Optional workspace ID for alias matching
  * @returns OrgMatchResult if matched, null if all tiers fail
  */
 export async function matchShipmentOrg(
   supabase: ReturnType<typeof createServiceRoleClient>,
   storeId: number | null | undefined,
   itemSkus: string[],
+  storeName?: string | null,
+  workspaceId?: string,
 ): Promise<OrgMatchResult | null> {
   // Tier 1: warehouse_shipstation_stores lookup
   if (storeId) {
@@ -49,6 +53,18 @@ export async function matchShipmentOrg(
         method: "store_mapping",
         isDropShip: store.is_drop_ship ?? false,
       };
+    }
+  }
+
+  // Tier 1.5: Alias-based matching (store name → org name or alias)
+  if (storeName && workspaceId) {
+    const { findOrgByNameOrAlias } = await import("@/actions/organizations");
+    const result = await findOrgByNameOrAlias(storeName, workspaceId, supabase);
+    if (result) {
+      logger.info(
+        `Matched org via ${result.matchMethod}: storeName="${storeName}" → org_id=${result.orgId}`,
+      );
+      return { orgId: result.orgId, method: "alias_match", isDropShip: false };
     }
   }
 

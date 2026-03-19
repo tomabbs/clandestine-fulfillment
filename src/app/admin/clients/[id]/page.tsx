@@ -9,7 +9,9 @@ import {
   Plus,
   Search,
   Ship,
+  Tag,
   Trash2,
+  X,
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -27,10 +29,14 @@ import {
   updateOnboardingStep,
 } from "@/actions/clients";
 import {
+  addAlias,
+  getAliases,
   getOrganizations,
   type MergePreview,
   mergeOrganizations,
+  type OrgAlias,
   previewMerge,
+  removeAlias,
   setParentOrganization,
 } from "@/actions/organizations";
 import { inviteUser, removeClientUser } from "@/actions/users";
@@ -736,6 +742,9 @@ function SettingsTab({ orgId }: { orgId: string }) {
       {/* Parent Client */}
       <ParentOrgCard orgId={orgId} />
 
+      {/* Aliases */}
+      <AliasesCard orgId={orgId} />
+
       {/* Client Users */}
       <ClientUsersCard orgId={orgId} />
 
@@ -979,6 +988,163 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
               ))}
             </TableBody>
           </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Aliases ──────────────────────────────────────────────────────────
+
+const ALIAS_SOURCES = [
+  { value: "pirate_ship", label: "Pirate Ship" },
+  { value: "shipstation", label: "ShipStation" },
+  { value: "bandcamp", label: "Bandcamp" },
+  { value: "shopify", label: "Shopify" },
+  { value: "manual", label: "Manual" },
+];
+
+function AliasesCard({ orgId }: { orgId: string }) {
+  const {
+    data: aliases,
+    isLoading,
+    refetch,
+  } = useAppQuery({
+    queryKey: queryKeys.clients.aliases(orgId),
+    queryFn: () => getAliases(orgId),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [newAlias, setNewAlias] = useState("");
+  const [newSource, setNewSource] = useState("manual");
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const addMut = useAppMutation({
+    mutationFn: () => addAlias(orgId, newAlias, newSource),
+    invalidateKeys: [queryKeys.clients.aliases(orgId)],
+    onSuccess: () => {
+      setNewAlias("");
+      setNewSource("manual");
+      setShowAdd(false);
+      setAddError(null);
+      refetch();
+    },
+    onError: (err) => setAddError((err as Error).message),
+  });
+
+  const removeMut = useAppMutation({
+    mutationFn: (aliasId: string) => removeAlias(aliasId),
+    invalidateKeys: [queryKeys.clients.aliases(orgId)],
+    onSuccess: () => refetch(),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Tag className="h-4 w-4" /> Name Aliases
+          </CardTitle>
+          <Button variant="outline" size="sm" onClick={() => setShowAdd(true)}>
+            <Plus className="h-4 w-4 mr-1" /> Add Alias
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground mb-3">
+          Aliases match this client when importing from Pirate Ship, ShipStation, or other sources
+          where the name may differ.
+        </p>
+
+        {showAdd && (
+          <div className="border rounded-lg p-3 mb-3 space-y-2">
+            <div className="flex items-end gap-2">
+              <div className="flex-1">
+                <label htmlFor="alias-name" className="text-sm font-medium mb-1 block">
+                  Alias Name
+                </label>
+                <Input
+                  id="alias-name"
+                  value={newAlias}
+                  onChange={(e) => setNewAlias(e.target.value)}
+                  placeholder='e.g. "Label Name LLC"'
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newAlias.trim()) addMut.mutate();
+                  }}
+                />
+              </div>
+              <div>
+                <label htmlFor="alias-source" className="text-sm font-medium mb-1 block">
+                  Source
+                </label>
+                <select
+                  id="alias-source"
+                  value={newSource}
+                  onChange={(e) => setNewSource(e.target.value)}
+                  className="border-input bg-background h-9 rounded-md border px-3 text-sm w-36"
+                >
+                  {ALIAS_SOURCES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => addMut.mutate()}
+                disabled={!newAlias.trim() || addMut.isPending}
+              >
+                {addMut.isPending ? "Adding..." : "Add"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setShowAdd(false);
+                  setAddError(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+            {addError && <p className="text-sm text-destructive">{addError}</p>}
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading aliases...
+          </div>
+        ) : (aliases ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground italic">
+            No aliases configured. Import matching will use the organization name only.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {(aliases ?? []).map((alias: OrgAlias) => (
+              <div
+                key={alias.id}
+                className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm"
+              >
+                <span>{alias.alias_name}</span>
+                {alias.source && (
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                    {ALIAS_SOURCES.find((s) => s.value === alias.source)?.label ?? alias.source}
+                  </Badge>
+                )}
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-destructive ml-0.5"
+                  onClick={() => removeMut.mutate(alias.id)}
+                  disabled={removeMut.isPending}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>

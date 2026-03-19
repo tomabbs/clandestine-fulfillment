@@ -73,9 +73,14 @@ function matchScore(tokens: string[], orgName: string): number {
   return score;
 }
 
+/**
+ * Compute match suggestions using both org names and aliases.
+ * Aliases are treated as additional org name variants for scoring.
+ */
 export function computeMatchSuggestions(
   unmappedStores: Array<{ id: string; store_name: string | null }>,
   orgs: Array<{ id: string; name: string }>,
+  aliases?: Array<{ org_id: string; alias_name: string }>,
 ): AutoMatchSuggestion[] {
   const suggestions: AutoMatchSuggestion[] = [];
 
@@ -91,6 +96,21 @@ export function computeMatchSuggestions(
       const score = matchScore(tokens, org.name);
       if (score > 0 && (!bestMatch || score > bestMatch.score)) {
         bestMatch = { orgId: org.id, orgName: org.name, score };
+      }
+    }
+
+    // Also score against aliases — an alias match credits the owning org
+    if (aliases) {
+      for (const alias of aliases) {
+        const score = matchScore(tokens, alias.alias_name);
+        if (score > 0 && (!bestMatch || score > bestMatch.score)) {
+          const org = orgs.find((o) => o.id === alias.org_id);
+          bestMatch = {
+            orgId: alias.org_id,
+            orgName: org?.name ?? alias.alias_name,
+            score,
+          };
+        }
       }
     }
 

@@ -57,6 +57,7 @@ export const queryKeys = {
     billing: (id: string) => ["clients", "billing", id] as const,
     stores: (id: string) => ["clients", "stores", id] as const,
     settings: (id: string) => ["clients", "settings", id] as const,
+    aliases: (id: string) => ["clients", "aliases", id] as const,
   },
   storeConnections: {
     all: ["store-connections"] as const,

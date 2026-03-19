@@ -120,6 +120,7 @@ const ORG_TABLES = [
   "support_email_mappings",
   "portal_admin_settings",
   "users",
+  "organization_aliases",
 ] as const;
 
 export interface MergePreview {
@@ -236,4 +237,151 @@ export async function mergeOrganizations(
   }
 
   return { merged: totalMerged };
+}
+
+// === Organization Aliases ===
+
+export interface OrgAlias {
+  id: string;
+  org_id: string;
+  alias_name: string;
+  source: string | null;
+  created_at: string;
+}
+
+/**
+ * Add an alias for an organization (e.g. "Pirate Ship name", "ShipStation store name").
+ */
+export async function addAlias(
+  orgId: string,
+  aliasName: string,
+  source?: string,
+): Promise<OrgAlias> {
+  const { userRecord } = await requireAuth();
+  if (userRecord.role !== "admin" && userRecord.role !== "super_admin") {
+    throw new Error("Only admins can manage aliases");
+  }
+
+  const trimmed = aliasName.trim();
+  if (!trimmed) throw new Error("Alias name cannot be empty");
+
+  const serviceClient = createServiceRoleClient();
+
+  const { data, error } = await serviceClient
+    .from("organization_aliases")
+    .insert({
+      org_id: orgId,
+      alias_name: trimmed,
+      source: source ?? null,
+      workspace_id: userRecord.workspace_id,
+    })
+    .select("id, org_id, alias_name, source, created_at")
+    .single();
+
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error(`Alias "${trimmed}" is already in use`);
+    }
+    throw new Error(`Failed to add alias: ${error.message}`);
+  }
+
+  return data as OrgAlias;
+}
+
+/**
+ * Remove an alias by ID.
+ */
+export async function removeAlias(aliasId: string): Promise<void> {
+  const { userRecord } = await requireAuth();
+  if (userRecord.role !== "admin" && userRecord.role !== "super_admin") {
+    throw new Error("Only admins can manage aliases");
+  }
+
+  const serviceClient = createServiceRoleClient();
+  const { error } = await serviceClient.from("organization_aliases").delete().eq("id", aliasId);
+
+  if (error) throw new Error(`Failed to remove alias: ${error.message}`);
+}
+
+/**
+ * Get all aliases for a single organization.
+ */
+export async function getAliases(orgId: string): Promise<OrgAlias[]> {
+  await requireAuth();
+  const serviceClient = createServiceRoleClient();
+
+  const { data, error } = await serviceClient
+    .from("organization_aliases")
+    .select("id, org_id, alias_name, source, created_at")
+    .eq("org_id", orgId)
+    .order("alias_name", { ascending: true });
+
+  if (error) throw new Error(`Failed to fetch aliases: ${error.message}`);
+  return (data ?? []) as OrgAlias[];
+}
+
+/**
+ * Get all aliases across all organizations in the workspace.
+ * Returns a map of lowercase alias_name → org_id for fast lookup.
+ */
+export async function getAllAliasMap(): Promise<Map<string, string>> {
+  const { userRecord } = await requireAuth();
+  const serviceClient = createServiceRoleClient();
+
+  const { data, error } = await serviceClient
+    .from("organization_aliases")
+    .select("alias_name, org_id")
+    .eq("workspace_id", userRecord.workspace_id);
+
+  if (error) throw new Error(`Failed to fetch aliases: ${error.message}`);
+
+  const map = new Map<string, string>();
+  for (const row of data ?? []) {
+    map.set((row.alias_name as string).toLowerCase(), row.org_id as string);
+  }
+  return map;
+}
+
+/**
+ * Find an organization by name or alias (case-insensitive).
+ * Used by import matching to resolve client names from external sources.
+ *
+ * This is a server-only function (no auth required) for use in Trigger tasks.
+ */
+export async function findOrgByNameOrAlias(
+  name: string,
+  workspaceId: string,
+  supabase?: ReturnType<typeof createServiceRoleClient>,
+): Promise<{ orgId: string; matchMethod: "name" | "alias" } | null> {
+  const client = supabase ?? createServiceRoleClient();
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  // Try exact org name match first (case-insensitive)
+  const { data: orgMatch } = await client
+    .from("organizations")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .ilike("name", trimmed)
+    .limit(1)
+    .maybeSingle();
+
+  if (orgMatch) {
+    return { orgId: orgMatch.id, matchMethod: "name" };
+  }
+
+  // Try alias match (case-insensitive via the LOWER index)
+  const { data: aliasMatch } = await client
+    .from("organization_aliases")
+    .select("org_id")
+    .eq("workspace_id", workspaceId)
+    .ilike("alias_name", trimmed)
+    .limit(1)
+    .maybeSingle();
+
+  if (aliasMatch) {
+    return { orgId: aliasMatch.org_id as string, matchMethod: "alias" };
+  }
+
+  return null;
 }

@@ -91,9 +91,16 @@ export async function autoMatchStores(workspaceId: string): Promise<AutoMatchSug
   if (orgError) throw new Error(`Failed to fetch organizations: ${orgError.message}`);
   if (!orgs?.length) return [];
 
+  // Fetch aliases for enhanced matching
+  const { data: aliases } = await serviceClient
+    .from("organization_aliases")
+    .select("org_id, alias_name")
+    .eq("workspace_id", workspaceId);
+
   return computeMatchSuggestions(
     unmapped as Array<{ id: string; store_name: string | null }>,
     orgs as Array<{ id: string; name: string }>,
+    (aliases ?? []) as Array<{ org_id: string; alias_name: string }>,
   );
 }
 
