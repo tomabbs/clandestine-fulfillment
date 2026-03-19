@@ -157,7 +157,7 @@ export const bandcampSyncTask = task({
 
         const { matched, unmatched } = matchSkuToVariants(merchItems, variants ?? []);
 
-        // Process matched items — update mappings
+        // Process matched items — update mappings + backfill price/images
         for (const { merchItem, variantId } of matched) {
           await supabase.from("bandcamp_product_mappings").upsert(
             {
@@ -176,6 +176,63 @@ export const bandcampSyncTask = task({
             },
             { onConflict: "variant_id" },
           );
+
+          // Backfill price/cost on variant if missing
+          if (merchItem.price != null) {
+            const { data: existingVar } = await supabase
+              .from("warehouse_product_variants")
+              .select("id, price, cost, product_id")
+              .eq("id", variantId)
+              .single();
+
+            if (existingVar) {
+              const updates: Record<string, unknown> = {};
+              // Update price if null or 0 (0 is a Shopify import placeholder, not real)
+              if (existingVar.price == null || existingVar.price === 0) {
+                updates.price = merchItem.price;
+              }
+              if (existingVar.cost == null || existingVar.cost === 0) {
+                const p = (updates.price as number | undefined) ?? merchItem.price;
+                updates.cost = Math.round(p * 0.5 * 100) / 100;
+              }
+              if (Object.keys(updates).length > 0) {
+                updates.updated_at = new Date().toISOString();
+                await supabase
+                  .from("warehouse_product_variants")
+                  .update(updates)
+                  .eq("id", variantId);
+              }
+
+              // Backfill image on product if Bandcamp has one and product doesn't
+              if (merchItem.image_url && existingVar.product_id) {
+                const { count: imgCount } = await supabase
+                  .from("warehouse_product_images")
+                  .select("id", { count: "exact", head: true })
+                  .eq("product_id", existingVar.product_id);
+
+                if ((imgCount ?? 0) === 0) {
+                  const { error: imgErr } = await supabase.from("warehouse_product_images").insert({
+                    product_id: existingVar.product_id,
+                    workspace_id: workspaceId,
+                    src: merchItem.image_url,
+                    alt: merchItem.title,
+                    position: 0,
+                  });
+                  if (imgErr) {
+                    logger.warn("Failed to insert Bandcamp image", {
+                      productId: existingVar.product_id,
+                      error: imgErr.message,
+                    });
+                  }
+                  await supabase
+                    .from("warehouse_products")
+                    .update({ images: [{ src: merchItem.image_url }] })
+                    .eq("id", existingVar.product_id);
+                }
+              }
+            }
+          }
+
           itemsProcessed++;
 
           // Scrape album page if URL available (Rule #60)

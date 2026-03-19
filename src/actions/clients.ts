@@ -454,6 +454,9 @@ export async function updateClient(
     name: string;
     billing_email: string | null;
     pirate_ship_name: string | null;
+    shopify_vendor_name: string | null;
+    stripe_customer_id: string | null;
+    service_type: string | null;
     storage_fee_waived: boolean;
     warehouse_grace_period_ends_at: string | null;
   }>,
@@ -461,6 +464,33 @@ export async function updateClient(
   const supabase = await createServerSupabaseClient();
   await supabase.from("organizations").update(data).eq("id", orgId);
   return { success: true };
+}
+
+/** Get users linked to this organization (client portal users). */
+export async function getClientUsers(orgId: string): Promise<
+  Array<{
+    id: string;
+    email: string | null;
+    name: string | null;
+    role: string;
+    created_at: string;
+  }>
+> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, name, role, created_at")
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`Failed to fetch client users: ${error.message}`);
+  return (data ?? []) as Array<{
+    id: string;
+    email: string | null;
+    name: string | null;
+    role: string;
+    created_at: string;
+  }>;
 }
 
 export async function updateOnboardingStep(orgId: string, step: string, completed: boolean) {

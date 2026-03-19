@@ -12,6 +12,8 @@ import {
   getClientSettings,
   getClientShipments,
   getClientStores,
+  getClientUsers,
+  updateClient,
   updateOnboardingStep,
 } from "@/actions/clients";
 import { Badge } from "@/components/ui/badge";
@@ -529,10 +531,37 @@ function StoresTab({ orgId }: { orgId: string }) {
 // ─── Tab 6: Settings ─────────────────────────────────────────────────────────
 
 function SettingsTab({ orgId }: { orgId: string }) {
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, refetch } = useAppQuery({
     queryKey: queryKeys.clients.settings(orgId),
     queryFn: () => getClientSettings(orgId),
     tier: CACHE_TIERS.SESSION,
+  });
+
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    billing_email: "",
+    pirate_ship_name: "",
+    shopify_vendor_name: "",
+    stripe_customer_id: "",
+    service_type: "full_service",
+    storage_fee_waived: false,
+  });
+
+  const saveMut = useAppMutation({
+    mutationFn: () =>
+      updateClient(orgId, {
+        billing_email: form.billing_email || null,
+        pirate_ship_name: form.pirate_ship_name || null,
+        shopify_vendor_name: form.shopify_vendor_name || null,
+        stripe_customer_id: form.stripe_customer_id || null,
+        service_type: form.service_type || null,
+        storage_fee_waived: form.storage_fee_waived,
+      }),
+    invalidateKeys: [queryKeys.clients.settings(orgId), queryKeys.clients.detail(orgId)],
+    onSuccess: () => {
+      setEditing(false);
+      refetch();
+    },
   });
 
   if (isLoading) {
@@ -550,37 +579,144 @@ function SettingsTab({ orgId }: { orgId: string }) {
   const { org, portalSettings, billingRules } = data;
   const serviceType = (org.service_type as string) ?? "full_service";
 
+  const startEdit = () => {
+    setForm({
+      billing_email: (org.billing_email as string) ?? "",
+      pirate_ship_name: (org.pirate_ship_name as string) ?? "",
+      shopify_vendor_name: (org.shopify_vendor_name as string) ?? "",
+      stripe_customer_id: (org.stripe_customer_id as string) ?? "",
+      service_type: serviceType,
+      storage_fee_waived: !!org.storage_fee_waived,
+    });
+    setEditing(true);
+  };
+
   return (
     <div className="space-y-6 pt-4">
       {/* Org fields */}
       <Card>
         <CardHeader>
-          <CardTitle>Organization</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Organization</CardTitle>
+            {!editing && (
+              <Button variant="outline" size="sm" onClick={startEdit}>
+                Edit Settings
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-            <SettingsField
-              label="Service Type"
-              value={SERVICE_TYPE_LABELS[serviceType] ?? serviceType}
-            />
-            <SettingsField
-              label="Shopify Vendor Name"
-              value={org.shopify_vendor_name as string | null}
-            />
-            <SettingsField label="Pirate Ship Name" value={org.pirate_ship_name as string | null} />
-            <SettingsField
-              label="Stripe Customer ID"
-              value={org.stripe_customer_id as string | null}
-              mono
-            />
-            <SettingsField
-              label="Storage Fee Waived"
-              value={org.storage_fee_waived ? "Yes" : "No"}
-            />
-            <SettingsField label="Billing Email" value={org.billing_email as string | null} />
-          </dl>
+          {editing ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="set-svc" className="text-sm font-medium mb-1 block">
+                  Service Type
+                </label>
+                <select
+                  id="set-svc"
+                  value={form.service_type}
+                  onChange={(e) => setForm((f) => ({ ...f, service_type: e.target.value }))}
+                  className="border-input bg-background w-full h-9 rounded-md border px-3 text-sm"
+                >
+                  <option value="full_service">Full Service</option>
+                  <option value="storage_only">Storage Only</option>
+                  <option value="drop_ship">Drop Ship</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="set-vendor" className="text-sm font-medium mb-1 block">
+                  Shopify Vendor Name
+                </label>
+                <Input
+                  id="set-vendor"
+                  value={form.shopify_vendor_name}
+                  onChange={(e) => setForm((f) => ({ ...f, shopify_vendor_name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label htmlFor="set-ps" className="text-sm font-medium mb-1 block">
+                  Pirate Ship Name
+                </label>
+                <Input
+                  id="set-ps"
+                  value={form.pirate_ship_name}
+                  onChange={(e) => setForm((f) => ({ ...f, pirate_ship_name: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label htmlFor="set-stripe" className="text-sm font-medium mb-1 block">
+                  Stripe Customer ID
+                </label>
+                <Input
+                  id="set-stripe"
+                  value={form.stripe_customer_id}
+                  onChange={(e) => setForm((f) => ({ ...f, stripe_customer_id: e.target.value }))}
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div>
+                <label htmlFor="set-email" className="text-sm font-medium mb-1 block">
+                  Billing Email
+                </label>
+                <Input
+                  id="set-email"
+                  type="email"
+                  value={form.billing_email}
+                  onChange={(e) => setForm((f) => ({ ...f, billing_email: e.target.value }))}
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-6">
+                <input
+                  id="set-waived"
+                  type="checkbox"
+                  checked={form.storage_fee_waived}
+                  onChange={(e) => setForm((f) => ({ ...f, storage_fee_waived: e.target.checked }))}
+                  className="h-4 w-4 rounded border"
+                />
+                <label htmlFor="set-waived" className="text-sm font-medium">
+                  Storage Fee Waived
+                </label>
+              </div>
+              <div className="col-span-2 flex gap-2 pt-2">
+                <Button size="sm" onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+                  {saveMut.isPending ? "Saving..." : "Save Settings"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+              <SettingsField
+                label="Service Type"
+                value={SERVICE_TYPE_LABELS[serviceType] ?? serviceType}
+              />
+              <SettingsField
+                label="Shopify Vendor Name"
+                value={org.shopify_vendor_name as string | null}
+              />
+              <SettingsField
+                label="Pirate Ship Name"
+                value={org.pirate_ship_name as string | null}
+              />
+              <SettingsField
+                label="Stripe Customer ID"
+                value={org.stripe_customer_id as string | null}
+                mono
+              />
+              <SettingsField
+                label="Storage Fee Waived"
+                value={org.storage_fee_waived ? "Yes" : "No"}
+              />
+              <SettingsField label="Billing Email" value={org.billing_email as string | null} />
+            </dl>
+          )}
         </CardContent>
       </Card>
+
+      {/* Client Users */}
+      <ClientUsersCard orgId={orgId} />
 
       {/* Portal toggles */}
       <Card>
@@ -650,5 +786,60 @@ function SettingsField({
         {value ?? <span className="text-muted-foreground italic">Not set</span>}
       </dd>
     </div>
+  );
+}
+
+function ClientUsersCard({ orgId }: { orgId: string }) {
+  const { data: users, isLoading } = useAppQuery({
+    queryKey: ["client-users", orgId],
+    queryFn: () => getClientUsers(orgId),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Client Users</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading users...
+          </div>
+        ) : (users ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No portal users for this client. Client users are created when they accept a magic link
+            invite.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Email</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Joined</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(users ?? []).map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell className="font-mono text-xs">{user.email ?? "—"}</TableCell>
+                  <TableCell>{user.name ?? "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant={user.role === "client_admin" ? "default" : "secondary"}>
+                      {user.role}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {new Date(user.created_at).toLocaleDateString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
