@@ -3,7 +3,7 @@
 import { ArrowLeftIcon, ExternalLinkIcon, Plus, Save } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getProductDetail, updateProduct, updateVariants } from "@/actions/catalog";
 import {
@@ -91,6 +91,7 @@ function invColor(available: number): string {
 
 export default function ProductDetailPage() {
   const { id: productId } = useParams<{ id: string }>();
+  const router = useRouter();
 
   const { data: product, isLoading } = useAppQuery({
     queryKey: queryKeys.products.detail(productId),
@@ -118,6 +119,11 @@ export default function ProductDetailPage() {
     setEditMode(true);
   }, [product]);
 
+  // Auto-enter edit mode when product data loads
+  useEffect(() => {
+    if (product && !editMode) startEdit();
+  }, [product, editMode, startEdit]);
+
   const productMut = useAppMutation({
     mutationFn: () =>
       updateProduct(productId, {
@@ -132,7 +138,7 @@ export default function ProductDetailPage() {
         status: editStatus,
       }),
     invalidateKeys: [queryKeys.products.detail(productId), queryKeys.products.all],
-    onSuccess: () => setEditMode(false),
+    onSuccess: () => {}, // stay in edit mode after save
   });
 
   // Variant inline edit
@@ -245,11 +251,6 @@ export default function ProductDetailPage() {
               )}
             </p>
           </div>
-          {!editMode && (
-            <Button variant="outline" onClick={startEdit}>
-              Edit Product
-            </Button>
-          )}
         </div>
 
         {/* Edit form */}
@@ -359,8 +360,8 @@ export default function ProductDetailPage() {
                   <Save className="h-4 w-4 mr-1" />
                   {productMut.isPending ? "Saving..." : "Save Product"}
                 </Button>
-                <Button variant="outline" onClick={() => setEditMode(false)}>
-                  Cancel
+                <Button variant="outline" onClick={() => router.push("/admin/catalog")}>
+                  Back to Catalog
                 </Button>
               </div>
             </CardContent>

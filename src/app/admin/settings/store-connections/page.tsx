@@ -7,20 +7,26 @@ import {
   Globe,
   Loader2,
   Plug,
+  Plus,
   Search,
   ShieldAlert,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
+import { getUserContext } from "@/actions/auth";
+import { getOrganizationsForWorkspace } from "@/actions/bandcamp";
 import {
   type ConnectionFilters,
+  createStoreConnection,
   disableStoreConnection,
   getStoreConnections,
   testStoreConnection,
 } from "@/actions/store-connections";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -71,8 +77,22 @@ export default function StoreConnectionsPage() {
   const [platformFilter, setPlatformFilter] = useState<StorePlatform | "">("");
   const [statusFilter, setStatusFilter] = useState<ConnectionStatus | "">("");
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newConn, setNewConn] = useState({
+    orgId: "",
+    platform: "" as StorePlatform | "",
+    storeUrl: "",
+  });
+
+  const { data: ctx } = useAppQuery({
+    queryKey: ["user-context"],
+    queryFn: () => getUserContext(),
+    tier: CACHE_TIERS.STABLE,
+  });
+  const workspaceId = ctx?.workspaceId ?? "";
 
   const filters: ConnectionFilters = {
+    ...(workspaceId && { workspaceId }),
     ...(platformFilter && { platform: platformFilter }),
     ...(statusFilter && { status: statusFilter }),
   };
@@ -81,6 +101,13 @@ export default function StoreConnectionsPage() {
     queryKey: queryKeys.storeConnections.list(JSON.stringify(filters)),
     queryFn: () => getStoreConnections(filters),
     tier: CACHE_TIERS.SESSION,
+  });
+
+  const { data: orgs } = useAppQuery({
+    queryKey: ["organizations", workspaceId],
+    queryFn: () => getOrganizationsForWorkspace(workspaceId),
+    tier: CACHE_TIERS.STABLE,
+    enabled: !!workspaceId && showAddDialog,
   });
 
   const testMutation = useAppMutation({
@@ -92,6 +119,16 @@ export default function StoreConnectionsPage() {
   const disableMutation = useAppMutation({
     mutationFn: (id: string) => disableStoreConnection(id),
     invalidateKeys: [queryKeys.storeConnections.all],
+  });
+
+  const createMutation = useAppMutation({
+    mutationFn: (data: { orgId: string; platform: StorePlatform; storeUrl: string }) =>
+      createStoreConnection(data),
+    invalidateKeys: [queryKeys.storeConnections.all],
+    onSuccess: () => {
+      setShowAddDialog(false);
+      setNewConn({ orgId: "", platform: "", storeUrl: "" });
+    },
   });
 
   // Group connections by org
@@ -112,9 +149,16 @@ export default function StoreConnectionsPage() {
     byOrg.set(orgName, list);
   }
 
+  const canCreate = newConn.orgId && newConn.platform && newConn.storeUrl.startsWith("http");
+
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Store Connections</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Store Connections</h1>
+        <Button onClick={() => setShowAddDialog(true)} disabled={!workspaceId}>
+          <Plus className="h-4 w-4 mr-1" /> Add Connection
+        </Button>
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
@@ -158,7 +202,10 @@ export default function StoreConnectionsPage() {
       ) : filtered.length === 0 ? (
         <div className="py-8 text-center text-muted-foreground">
           <Plug className="h-8 w-8 mx-auto mb-2 opacity-50" />
-          No store connections found.
+          <p>No store connections found.</p>
+          <p className="text-sm mt-1">
+            Click &ldquo;Add Connection&rdquo; to create a new connection for a client store.
+          </p>
         </div>
       ) : (
         Array.from(byOrg.entries()).map(([orgName, conns]) => (
@@ -249,6 +296,74 @@ export default function StoreConnectionsPage() {
           </div>
         ))
       )}
+
+      {/* Add Connection Dialog */}
+      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Store Connection</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div>
+              <Label htmlFor="add-org">Organization (Client)</Label>
+              <select
+                id="add-org"
+                value={newConn.orgId}
+                onChange={(e) => setNewConn((c) => ({ ...c, orgId: e.target.value }))}
+                className="border-input bg-background w-full h-9 rounded-md border px-3 text-sm mt-1"
+              >
+                <option value="">Select an organization...</option>
+                {(orgs ?? []).map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="add-platform">Platform</Label>
+              <select
+                id="add-platform"
+                value={newConn.platform}
+                onChange={(e) =>
+                  setNewConn((c) => ({ ...c, platform: e.target.value as StorePlatform | "" }))
+                }
+                className="border-input bg-background w-full h-9 rounded-md border px-3 text-sm mt-1"
+              >
+                <option value="">Select platform...</option>
+                <option value="shopify">Shopify</option>
+                <option value="woocommerce">WooCommerce</option>
+                <option value="squarespace">Squarespace</option>
+                <option value="bigcommerce">BigCommerce</option>
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="add-url">Store URL</Label>
+              <Input
+                id="add-url"
+                type="url"
+                placeholder="https://store.example.com"
+                value={newConn.storeUrl}
+                onChange={(e) => setNewConn((c) => ({ ...c, storeUrl: e.target.value }))}
+                className="mt-1"
+              />
+            </div>
+            <Button
+              className="w-full"
+              disabled={!canCreate || createMutation.isPending}
+              onClick={() =>
+                createMutation.mutate({
+                  orgId: newConn.orgId,
+                  platform: newConn.platform as StorePlatform,
+                  storeUrl: newConn.storeUrl,
+                })
+              }
+            >
+              {createMutation.isPending ? "Creating..." : "Add Connection"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

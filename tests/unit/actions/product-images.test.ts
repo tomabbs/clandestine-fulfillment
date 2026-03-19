@@ -20,7 +20,7 @@ vi.mock("@/lib/server/auth-context", () => ({
       org_id: "org-1",
       role: "admin",
       email: "test@test.com",
-      full_name: "Test User",
+      name: "Test User",
     },
     isStaff: true,
   }),
@@ -75,7 +75,7 @@ describe("product-images server actions", () => {
         org_id: "org-1",
         role: "admin",
         email: "test@test.com",
-        full_name: "Test User",
+        name: "Test User",
       },
       isStaff: true,
     });

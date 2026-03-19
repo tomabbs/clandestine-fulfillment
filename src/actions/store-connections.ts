@@ -12,6 +12,7 @@ import type {
 // === Zod schemas (Rule #5) ===
 
 const connectionFiltersSchema = z.object({
+  workspaceId: z.string().uuid().optional(),
   orgId: z.string().optional(),
   platform: z.enum(["shopify", "woocommerce", "squarespace", "bigcommerce"]).optional(),
   status: z.enum(["pending", "active", "disabled_auth_failure", "error"]).optional(),
@@ -57,6 +58,7 @@ export async function getStoreConnections(rawFilters?: ConnectionFilters): Promi
     .select("*, organizations!inner(name)")
     .order("created_at", { ascending: false });
 
+  if (filters.workspaceId) query = query.eq("workspace_id", filters.workspaceId);
   if (filters.orgId) query = query.eq("org_id", filters.orgId);
   if (filters.platform) query = query.eq("platform", filters.platform);
   if (filters.status) query = query.eq("connection_status", filters.status);

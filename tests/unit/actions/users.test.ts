@@ -73,21 +73,17 @@ describe("users actions", () => {
     }
 
     it("prevents admin from demoting self to label_staff", () => {
-      expect(() =>
-        checkSelfDemotion("admin", "user-1", "user-1", "label_staff"),
-      ).toThrow("Cannot demote yourself");
+      expect(() => checkSelfDemotion("admin", "user-1", "user-1", "label_staff")).toThrow(
+        "Cannot demote yourself",
+      );
     });
 
     it("allows admin to change self to super_admin", () => {
-      expect(() =>
-        checkSelfDemotion("admin", "user-1", "user-1", "super_admin"),
-      ).not.toThrow();
+      expect(() => checkSelfDemotion("admin", "user-1", "user-1", "super_admin")).not.toThrow();
     });
 
     it("allows admin to demote a different user", () => {
-      expect(() =>
-        checkSelfDemotion("admin", "user-1", "user-2", "label_staff"),
-      ).not.toThrow();
+      expect(() => checkSelfDemotion("admin", "user-1", "user-2", "label_staff")).not.toThrow();
     });
   });
 
@@ -97,9 +93,7 @@ describe("users actions", () => {
     }
 
     it("prevents self-deactivation", () => {
-      expect(() => checkSelfDeactivation("user-1", "user-1")).toThrow(
-        "Cannot deactivate yourself",
-      );
+      expect(() => checkSelfDeactivation("user-1", "user-1")).toThrow("Cannot deactivate yourself");
     });
 
     it("allows deactivating another user", () => {
@@ -117,21 +111,15 @@ describe("users actions", () => {
     }
 
     it("requires orgId for client role", () => {
-      expect(() => validateClientOrgId("client", undefined)).toThrow(
-        "Client roles require",
-      );
+      expect(() => validateClientOrgId("client", undefined)).toThrow("Client roles require");
     });
 
     it("requires orgId for client_admin role", () => {
-      expect(() => validateClientOrgId("client_admin", undefined)).toThrow(
-        "Client roles require",
-      );
+      expect(() => validateClientOrgId("client_admin", undefined)).toThrow("Client roles require");
     });
 
     it("accepts orgId for client role", () => {
-      expect(() =>
-        validateClientOrgId("client", "org-123"),
-      ).not.toThrow();
+      expect(() => validateClientOrgId("client", "org-123")).not.toThrow();
     });
 
     it("does not require orgId for staff roles", () => {

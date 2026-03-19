@@ -67,11 +67,7 @@ export async function getOrCreateUserRecord(
   if (existing) return existing as UserRecord;
 
   // No record — auto-provision
-  const { data: workspace } = await serviceClient
-    .from("workspaces")
-    .select("id")
-    .limit(1)
-    .single();
+  const { data: workspace } = await serviceClient.from("workspaces").select("id").limit(1).single();
 
   if (!workspace) throw new Error("No workspace exists. Seed the database first.");
 

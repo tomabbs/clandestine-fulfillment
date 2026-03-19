@@ -2,15 +2,10 @@
 
 import { Loader2, Plus, Search, UserPlus } from "lucide-react";
 import { useState } from "react";
-import {
-  deactivateUser,
-  getUsers,
-  inviteUser,
-  updateUserRole,
-} from "@/actions/users";
+import { deactivateUser, getUsers, inviteUser, updateUserRole } from "@/actions/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogClose,
@@ -41,7 +36,7 @@ import {
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
-const ROLE_LABELS: Record<string, string> = {
+const _ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
   super_admin: "Super Admin",
   label_staff: "Label Staff",
@@ -236,7 +231,12 @@ function InviteDialog() {
           </div>
           <div>
             <Label>Role</Label>
-            <Select value={role} onValueChange={(v) => { if (v) setRole(v); }}>
+            <Select
+              value={role}
+              onValueChange={(v) => {
+                if (v) setRole(v);
+              }}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "db:seed": "npx tsx scripts/seed-dev-data.ts",
     "build": "next build",
     "start": "next start",
     "check": "biome check .",
