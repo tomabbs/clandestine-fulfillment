@@ -124,14 +124,44 @@ export async function getOrganizationsForWorkspace(
   return (orgs ?? []) as Array<{ id: string; name: string }>;
 }
 
-export async function triggerBandcampSync(workspaceId: string): Promise<{ taskRunId: string }> {
-  await requireAuth();
+export async function triggerBandcampSync(workspaceId?: string): Promise<{ taskRunId: string }> {
+  const { userRecord } = await requireAuth();
+  const wsId = workspaceId ?? userRecord.workspace_id;
 
   // Dynamic import to avoid bundling trigger SDK in client
   const { tasks } = await import("@trigger.dev/sdk");
-  const handle = await tasks.trigger("bandcamp-sync", { workspaceId });
+  const handle = await tasks.trigger("bandcamp-sync", { workspaceId: wsId });
 
   return { taskRunId: handle.id };
+}
+
+export async function getBandcampSyncStatus() {
+  const { supabase, userRecord } = await requireAuth();
+  const workspaceId = userRecord.workspace_id;
+
+  const { data: recentLogs } = await supabase
+    .from("channel_sync_log")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("channel", "bandcamp")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const logs = recentLogs ?? [];
+
+  // Derive last completed times per sync_type from logs
+  const lastMerchSync = logs.find((l) => l.sync_type === "merch_sync" && l.status !== "started");
+  const lastSalePoll = logs.find((l) => l.sync_type === "sale_poll" && l.status !== "started");
+  const lastInventoryPush = logs.find(
+    (l) => l.sync_type === "inventory_push" && l.status !== "started",
+  );
+
+  return {
+    lastMerchSync: lastMerchSync?.completed_at ?? null,
+    lastSalePoll: lastSalePoll?.completed_at ?? null,
+    lastInventoryPush: lastInventoryPush?.completed_at ?? null,
+    recentLogs: logs,
+  };
 }
 
 export async function getBandcampAccounts(workspaceId: string): Promise<

@@ -39,7 +39,7 @@ export const queryKeys = {
   },
   channels: {
     all: ["channels"] as const,
-    syncStatus: () => ["channels", "sync-status"] as const,
+    syncStatus: (channel?: string) => ["channels", "sync-status", channel] as const,
   },
   reviewQueue: {
     all: ["review-queue"] as const,

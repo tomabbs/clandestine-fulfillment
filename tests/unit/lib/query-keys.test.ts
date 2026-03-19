@@ -92,8 +92,16 @@ describe("queryKeys", () => {
   });
 
   describe("channels", () => {
-    it("syncStatus returns expected key", () => {
-      expect(queryKeys.channels.syncStatus()).toEqual(["channels", "sync-status"]);
+    it("syncStatus returns expected key without channel", () => {
+      expect(queryKeys.channels.syncStatus()).toEqual(["channels", "sync-status", undefined]);
+    });
+
+    it("syncStatus returns expected key with channel", () => {
+      expect(queryKeys.channels.syncStatus("shopify")).toEqual([
+        "channels",
+        "sync-status",
+        "shopify",
+      ]);
     });
   });
 

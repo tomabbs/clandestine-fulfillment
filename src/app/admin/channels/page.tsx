@@ -3,6 +3,7 @@
 import { formatDistanceToNow } from "date-fns";
 import { Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { useCallback } from "react";
+import { getBandcampSyncStatus, triggerBandcampSync } from "@/actions/bandcamp";
 import { getShopifySyncStatus, triggerFullBackfill, triggerShopifySync } from "@/actions/shopify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,31 +51,151 @@ function statusBadgeVariant(status: string) {
   }
 }
 
+function syncTypeLabel(syncType: string | null): string {
+  switch (syncType) {
+    case "merch_sync":
+      return "Merch Sync";
+    case "sale_poll":
+      return "Sale Poll";
+    case "inventory_push":
+      return "Inventory Push";
+    default:
+      return syncType ?? "unknown";
+  }
+}
+
+function formatDuration(startedAt: string | null, completedAt: string | null): string {
+  if (!startedAt || !completedAt) return "—";
+  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  return `${Math.round(ms / 1000)}s`;
+}
+
+function formatRelativeTime(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  return formatDistanceToNow(new Date(dateStr), { addSuffix: true });
+}
+
+// === Sync History Table (reused for both channels) ===
+
+function SyncHistoryTable({
+  logs,
+  showSyncType = false,
+}: {
+  logs: SyncLog[];
+  showSyncType?: boolean;
+}) {
+  if (logs.length === 0) {
+    return <p className="text-muted-foreground text-sm">No sync history yet.</p>;
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Type</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Items</TableHead>
+          <TableHead>Started</TableHead>
+          <TableHead>Duration</TableHead>
+          <TableHead>Error</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {logs.map((log) => (
+          <TableRow key={log.id}>
+            <TableCell className="font-mono text-xs">
+              {showSyncType ? syncTypeLabel(log.sync_type) : (log.sync_type ?? "unknown")}
+            </TableCell>
+            <TableCell>
+              <Badge variant={statusBadgeVariant(log.status)}>{log.status}</Badge>
+            </TableCell>
+            <TableCell>
+              {log.items_processed}
+              {log.items_failed > 0 && (
+                <span className="text-destructive ml-1">({log.items_failed} failed)</span>
+              )}
+            </TableCell>
+            <TableCell className="text-xs">
+              {formatRelativeTime(log.started_at)}
+            </TableCell>
+            <TableCell className="text-xs">
+              {formatDuration(log.started_at, log.completed_at)}
+            </TableCell>
+            <TableCell className="max-w-48 truncate text-xs text-destructive">
+              {log.error_message ?? "—"}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+// === Main Page ===
+
 export default function ChannelsPage() {
-  const { data, isLoading, refetch } = useAppQuery<{
+  // --- Shopify ---
+  const { data: shopifyData, isLoading: shopifyLoading, refetch: refetchShopify } = useAppQuery<{
     syncState: SyncState | null;
     recentLogs: SyncLog[];
   }>({
-    queryKey: queryKeys.channels.syncStatus(),
+    queryKey: queryKeys.channels.syncStatus("shopify"),
     queryFn: () => getShopifySyncStatus(),
     tier: CACHE_TIERS.REALTIME,
   });
 
-  const syncMutation = useAppMutation({
+  const shopifySyncMutation = useAppMutation({
     mutationFn: triggerShopifySync,
     invalidateKeys: [queryKeys.channels.all],
   });
 
-  const backfillMutation = useAppMutation({
+  const shopifyBackfillMutation = useAppMutation({
     mutationFn: triggerFullBackfill,
     invalidateKeys: [queryKeys.channels.all],
   });
 
-  const handleSync = useCallback(() => syncMutation.mutate(undefined), [syncMutation]);
-  const handleBackfill = useCallback(() => backfillMutation.mutate(undefined), [backfillMutation]);
+  // --- Bandcamp ---
+  const {
+    data: bandcampData,
+    isLoading: bandcampLoading,
+    refetch: refetchBandcamp,
+  } = useAppQuery<{
+    lastMerchSync: string | null;
+    lastSalePoll: string | null;
+    lastInventoryPush: string | null;
+    recentLogs: SyncLog[];
+  }>({
+    queryKey: queryKeys.channels.syncStatus("bandcamp"),
+    queryFn: () => getBandcampSyncStatus(),
+    tier: CACHE_TIERS.REALTIME,
+  });
 
-  const syncState = data?.syncState;
-  const recentLogs = data?.recentLogs ?? [];
+  const bandcampSyncMutation = useAppMutation({
+    mutationFn: () => triggerBandcampSync(),
+    invalidateKeys: [queryKeys.channels.all],
+  });
+
+  // --- Handlers ---
+  const handleShopifySync = useCallback(
+    () => shopifySyncMutation.mutate(undefined),
+    [shopifySyncMutation],
+  );
+  const handleShopifyBackfill = useCallback(
+    () => shopifyBackfillMutation.mutate(undefined),
+    [shopifyBackfillMutation],
+  );
+  const handleBandcampSync = useCallback(
+    () => bandcampSyncMutation.mutate(undefined),
+    [bandcampSyncMutation],
+  );
+  const handleRefreshAll = useCallback(() => {
+    refetchShopify();
+    refetchBandcamp();
+  }, [refetchShopify, refetchBandcamp]);
+
+  const shopifySyncState = shopifyData?.syncState;
+  const shopifyLogs = shopifyData?.recentLogs ?? [];
+  const bandcampLogs = bandcampData?.recentLogs ?? [];
 
   return (
     <div className="space-y-6 p-6">
@@ -83,13 +204,14 @@ export default function ChannelsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Channels</h1>
           <p className="text-muted-foreground mt-1">Manage integrations and sync status.</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
+        <Button variant="outline" size="sm" onClick={handleRefreshAll}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
       </div>
 
-      {/* Shopify sync status card */}
+      {/* ── Shopify ────────────────────────────────────────────────────────── */}
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -98,8 +220,12 @@ export default function ChannelsPage() {
               <CardDescription>Product catalog and inventory sync</CardDescription>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={handleSync} disabled={syncMutation.isPending}>
-                {syncMutation.isPending ? (
+              <Button
+                size="sm"
+                onClick={handleShopifySync}
+                disabled={shopifySyncMutation.isPending}
+              >
+                {shopifySyncMutation.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <RefreshCw className="mr-2 h-4 w-4" />
@@ -109,10 +235,10 @@ export default function ChannelsPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleBackfill}
-                disabled={backfillMutation.isPending}
+                onClick={handleShopifyBackfill}
+                disabled={shopifyBackfillMutation.isPending}
               >
-                {backfillMutation.isPending ? (
+                {shopifyBackfillMutation.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                   <RotateCcw className="mr-2 h-4 w-4" />
@@ -123,7 +249,7 @@ export default function ChannelsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {shopifyLoading ? (
             <div className="flex items-center gap-2 text-muted-foreground text-sm">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading sync status...
@@ -133,28 +259,20 @@ export default function ChannelsPage() {
               <div>
                 <p className="text-muted-foreground">Last Sync</p>
                 <p className="font-medium">
-                  {syncState?.last_sync_wall_clock
-                    ? formatDistanceToNow(new Date(syncState.last_sync_wall_clock), {
-                        addSuffix: true,
-                      })
-                    : "Never"}
+                  {formatRelativeTime(shopifySyncState?.last_sync_wall_clock ?? null)}
                 </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Last Full Backfill</p>
                 <p className="font-medium">
-                  {syncState?.last_full_sync_at
-                    ? formatDistanceToNow(new Date(syncState.last_full_sync_at), {
-                        addSuffix: true,
-                      })
-                    : "Never"}
+                  {formatRelativeTime(shopifySyncState?.last_full_sync_at ?? null)}
                 </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Sync Cursor</p>
                 <p className="font-medium font-mono text-xs">
-                  {syncState?.last_sync_cursor
-                    ? new Date(syncState.last_sync_cursor).toLocaleString()
+                  {shopifySyncState?.last_sync_cursor
+                    ? new Date(shopifySyncState.last_sync_cursor).toLocaleString()
                     : "—"}
                 </p>
               </div>
@@ -163,55 +281,83 @@ export default function ChannelsPage() {
         </CardContent>
       </Card>
 
-      {/* Sync history */}
       <Card>
         <CardHeader>
-          <CardTitle>Sync History</CardTitle>
-          <CardDescription>Recent sync runs for Shopify</CardDescription>
+          <CardTitle>Shopify Sync History</CardTitle>
+          <CardDescription>Recent sync runs</CardDescription>
         </CardHeader>
         <CardContent>
-          {recentLogs.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No sync history yet.</p>
+          <SyncHistoryTable logs={shopifyLogs} />
+        </CardContent>
+      </Card>
+
+      {/* ── Bandcamp ───────────────────────────────────────────────────────── */}
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Bandcamp</CardTitle>
+              <CardDescription>
+                Merch catalog sync, sale polling, and inventory push
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={handleBandcampSync}
+                disabled={bandcampSyncMutation.isPending}
+              >
+                {bandcampSyncMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Force Sync
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {bandcampLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading sync status...
+            </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Error</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentLogs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="font-mono text-xs">
-                      {log.sync_type ?? "unknown"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={statusBadgeVariant(log.status)}>{log.status}</Badge>
-                    </TableCell>
-                    <TableCell>{log.items_processed}</TableCell>
-                    <TableCell className="text-xs">
-                      {log.started_at
-                        ? formatDistanceToNow(new Date(log.started_at), { addSuffix: true })
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {log.started_at && log.completed_at
-                        ? `${Math.round((new Date(log.completed_at).getTime() - new Date(log.started_at).getTime()) / 1000)}s`
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="max-w-48 truncate text-xs text-destructive">
-                      {log.error_message ?? "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Last Merch Sync</p>
+                <p className="font-medium">
+                  {formatRelativeTime(bandcampData?.lastMerchSync ?? null)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Last Sale Poll</p>
+                <p className="font-medium">
+                  {formatRelativeTime(bandcampData?.lastSalePoll ?? null)}
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Last Inventory Push</p>
+                <p className="font-medium">
+                  {formatRelativeTime(bandcampData?.lastInventoryPush ?? null)}
+                </p>
+              </div>
+            </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Bandcamp Sync History</CardTitle>
+          <CardDescription>
+            Recent runs across merch sync, sale poll, and inventory push
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SyncHistoryTable logs={bandcampLogs} showSyncType />
         </CardContent>
       </Card>
     </div>
