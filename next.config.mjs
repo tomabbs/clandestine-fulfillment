@@ -2,6 +2,13 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "cdn.shopify.com" },
+      { protocol: "https", hostname: "*.bcbits.com" },
+      { protocol: "https", hostname: "f4.bcbits.com" },
+    ],
+  },
   modularizeImports: {
     "lucide-react": {
       transform: "lucide-react/dist/esm/icons/{{kebabCase member}}",
