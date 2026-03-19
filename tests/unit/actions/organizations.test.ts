@@ -28,8 +28,8 @@ vi.mock("@/lib/server/supabase-server", () => ({
   createServiceRoleClient: () => mockServiceClient,
 }));
 
-import { requireAuth } from "@/lib/server/auth-context";
 import { createOrganization, getOrganizations } from "@/actions/organizations";
+import { requireAuth } from "@/lib/server/auth-context";
 
 describe("organizations server actions", () => {
   beforeEach(() => {

@@ -186,10 +186,9 @@ export default function StoreMappingPage() {
   });
 
   const { data: orgs, refetch: refetchOrgs } = useAppQuery({
-    queryKey: ["organizations", workspaceId],
+    queryKey: ["organizations"],
     queryFn: () => getOrganizations(),
     tier: CACHE_TIERS.STABLE,
-    enabled: !!workspaceId,
   });
 
   const syncMutation = useAppMutation({
@@ -375,9 +374,7 @@ export default function StoreMappingPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() =>
-                      setSuggestions((p) => p.filter((x) => x.storeId !== s.storeId))
-                    }
+                    onClick={() => setSuggestions((p) => p.filter((x) => x.storeId !== s.storeId))}
                   >
                     Dismiss
                   </Button>
@@ -423,9 +420,7 @@ export default function StoreMappingPage() {
                     value={store.org_id ?? null}
                     orgName={store.org_name ?? null}
                     orgs={orgs ?? []}
-                    onSelect={(orgId) =>
-                      assignMutation.mutate({ storeId: store.id, orgId })
-                    }
+                    onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
                     onClear={() => unmapMutation.mutate(store.id)}
                     onAddNew={() => openNewClientDialog(store.id)}
                     disabled={assignMutation.isPending || unmapMutation.isPending}
@@ -483,9 +478,7 @@ export default function StoreMappingPage() {
                 }}
               />
             </div>
-            {createError && (
-              <p className="text-sm text-red-500">{createError}</p>
-            )}
+            {createError && <p className="text-sm text-red-500">{createError}</p>}
             <Button
               className="w-full"
               disabled={!newClientName.trim()}

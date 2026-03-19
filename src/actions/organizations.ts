@@ -31,9 +31,10 @@ export async function getOrganizations(): Promise<
 /**
  * Create a new organization in the authenticated user's workspace.
  */
-export async function createOrganization(
-  rawData: { name: string; billingEmail?: string },
-): Promise<{ id: string; name: string; slug: string }> {
+export async function createOrganization(rawData: {
+  name: string;
+  billingEmail?: string;
+}): Promise<{ id: string; name: string; slug: string }> {
   const { userRecord } = await requireAuth();
   const data = createOrgSchema.parse(rawData);
   const serviceClient = createServiceRoleClient();
