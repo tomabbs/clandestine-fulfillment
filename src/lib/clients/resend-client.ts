@@ -25,7 +25,7 @@ export async function sendSupportEmail(
   }
 
   const { data, error } = await resend.emails.send({
-    from: "Clandestine Fulfillment Support <support@mail.clandestinedistro.com>",
+    from: "Clandestine Fulfillment Support <support@clandestinedistro.com>",
     to,
     subject,
     text: body,
@@ -83,7 +83,7 @@ export async function sendPortalInviteEmail(params: {
   `;
 
   const { data, error } = await resend.emails.send({
-    from: "Clandestine Fulfillment Support <support@mail.clandestinedistro.com>",
+    from: "Clandestine Fulfillment Support <support@clandestinedistro.com>",
     to: params.to,
     subject,
     text,

@@ -250,6 +250,14 @@ describe("store mapping server actions", () => {
               error: null,
             }),
           }),
+        })
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
         });
 
       const result = await autoMatchStores("ws-1");
