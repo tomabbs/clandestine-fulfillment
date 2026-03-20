@@ -1,0 +1,102 @@
+version: 1
+updated_at: 2026-03-20
+
+domains:
+  - name: auth_and_access
+    paths:
+      - src/lib/server/auth-context.ts
+      - src/actions/auth.ts
+      - src/app/(auth)/**
+      - middleware.ts
+    responsibilities:
+      - session resolution
+      - role enforcement
+      - portal/admin route protection
+
+  - name: query_and_cache
+    paths:
+      - src/lib/hooks/use-app-query.ts
+      - src/lib/shared/query-tiers.ts
+      - src/lib/shared/query-keys.ts
+      - src/lib/query-client.ts
+    responsibilities:
+      - canonical query wrappers
+      - cache tier policy
+      - invalidation contracts
+
+  - name: staff_portal
+    paths:
+      - src/app/admin/**
+      - src/components/admin/**
+    responsibilities:
+      - warehouse operations
+      - client management
+      - billing controls
+      - integration settings
+
+  - name: client_portal
+    paths:
+      - src/app/portal/**
+      - src/components/portal/**
+    responsibilities:
+      - inventory visibility
+      - inbound submissions
+      - releases
+      - support and settings
+
+  - name: server_actions
+    paths:
+      - src/actions/**
+    responsibilities:
+      - validated read/write boundaries
+      - service role guarded mutations
+      - envelope error contracts
+
+  - name: api_routes
+    paths:
+      - src/app/api/**
+    responsibilities:
+      - webhook ingestion
+      - health probes
+      - provider signature validation
+
+  - name: trigger_runtime
+    paths:
+      - src/trigger/tasks/**
+      - trigger.config.ts
+    responsibilities:
+      - cron/event processing
+      - asynchronous orchestration
+      - resilience and retry policy
+
+  - name: integrations
+    paths:
+      - src/lib/clients/**
+      - src/actions/shopify.ts
+      - src/actions/bandcamp.ts
+      - src/actions/store-connections.ts
+    responsibilities:
+      - shopify/bandcamp/store sync
+      - shipstation/aftership/stripe/resend wiring
+      - credential and connection health
+
+  - name: database_and_rls
+    paths:
+      - supabase/migrations/**
+      - scripts/sql/**
+      - docs/PROD_MIGRATION_RLS_PARITY_CHECKLIST.md
+    responsibilities:
+      - schema parity
+      - policy correctness
+      - migration traceability
+
+  - name: quality_and_release
+    paths:
+      - tests/**
+      - scripts/release-gate.sh
+      - docs/RELEASE_GATE_CRITERIA.md
+      - reports/playwright-audit/**
+    responsibilities:
+      - static and runtime gate checks
+      - e2e diagnostics
+      - release confidence criteria

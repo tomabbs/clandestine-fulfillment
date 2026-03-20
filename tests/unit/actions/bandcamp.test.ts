@@ -131,10 +131,10 @@ describe("bandcamp server actions", () => {
       expect(result[0].merchItemCount).toBe(15);
     });
 
-    it("throws when user is not authenticated", async () => {
+    it("returns empty list when user is not authenticated", async () => {
       mockGetUser.mockResolvedValue({ data: { user: null } });
 
-      await expect(getBandcampAccounts("ws-1")).rejects.toThrow("Unauthorized");
+      await expect(getBandcampAccounts("ws-1")).resolves.toEqual([]);
     });
   });
 
@@ -330,10 +330,10 @@ describe("bandcamp server actions", () => {
       expect(result[0].name).toBe("Alpha Records");
     });
 
-    it("throws when user is not authenticated", async () => {
+    it("returns empty list when user is not authenticated", async () => {
       mockGetUser.mockResolvedValue({ data: { user: null } });
 
-      await expect(getOrganizationsForWorkspace("ws-1")).rejects.toThrow("Unauthorized");
+      await expect(getOrganizationsForWorkspace("ws-1")).resolves.toEqual([]);
     });
   });
 });

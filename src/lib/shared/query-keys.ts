@@ -36,6 +36,11 @@ export const queryKeys = {
     conversations: (filters?: Record<string, unknown>) =>
       ["support", "conversations", filters] as const,
     messages: (conversationId: string) => ["support", "messages", conversationId] as const,
+    viewerContext: () => ["support", "viewer-context"] as const,
+  },
+  auth: {
+    all: ["auth"] as const,
+    userContext: () => ["auth", "user-context"] as const,
   },
   channels: {
     all: ["channels"] as const,
@@ -58,6 +63,8 @@ export const queryKeys = {
     stores: (id: string) => ["clients", "stores", id] as const,
     settings: (id: string) => ["clients", "settings", id] as const,
     aliases: (id: string) => ["clients", "aliases", id] as const,
+    presence: (orgIds: string[], onlineUserIds: string[]) =>
+      ["clients", "presence", orgIds, onlineUserIds] as const,
   },
   storeConnections: {
     all: ["store-connections"] as const,

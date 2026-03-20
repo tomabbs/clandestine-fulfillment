@@ -1,6 +1,7 @@
 "use server";
 
 import { requireAuth } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 /**
  * Returns the authenticated user's workspace and org context.
@@ -12,6 +13,7 @@ export async function getUserContext(): Promise<{
   isStaff: boolean;
   userId: string;
   userName: string;
+  userRole: string;
 }> {
   const { userRecord, isStaff } = await requireAuth();
   return {
@@ -20,5 +22,32 @@ export async function getUserContext(): Promise<{
     isStaff,
     userId: userRecord.id,
     userName: userRecord.name ?? userRecord.email ?? "Unknown",
+    userRole: userRecord.role,
   };
+}
+
+export async function heartbeatPresence(currentPage: string): Promise<void> {
+  let userRecord: Awaited<ReturnType<typeof requireAuth>>["userRecord"];
+  try {
+    const auth = await requireAuth();
+    userRecord = auth.userRecord;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) {
+      // Best-effort tracker: ignore anonymous/transition states.
+      return;
+    }
+    throw error;
+  }
+  const serviceClient = createServiceRoleClient();
+  const now = new Date().toISOString();
+
+  const { error } = await serviceClient
+    .from("users")
+    .update({ last_seen_at: now, last_seen_page: currentPage })
+    .eq("id", userRecord.id);
+
+  if (error) {
+    throw new Error(`Failed to update user presence heartbeat: ${error.message}`);
+  }
 }

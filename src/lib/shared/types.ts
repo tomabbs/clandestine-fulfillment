@@ -75,6 +75,8 @@ export interface User {
   role: string;
   workspace_id: string;
   org_id: string | null;
+  last_seen_at: string | null;
+  last_seen_page: string | null;
   created_at: string;
 }
 
@@ -496,6 +498,10 @@ export interface SupportConversation {
   assigned_to: string | null;
   inbound_email_id: string | null;
   created_by: string | null;
+  client_last_read_at: string | null;
+  staff_last_read_at: string | null;
+  last_staff_escalated_at: string | null;
+  last_client_reminded_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -506,6 +512,8 @@ export interface SupportMessage {
   workspace_id: string;
   sender_id: string | null;
   sender_type: "staff" | "client" | "system";
+  source: "app" | "email";
+  delivered_via_email: boolean;
   body: string;
   email_message_id: string | null;
   attachments: Record<string, unknown>[];

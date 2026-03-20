@@ -21,6 +21,7 @@ describe("parseInboundEmail", () => {
       body: "Hi, I have a question about order #1234.",
       messageId: "<msg-123@example.com>",
       inReplyTo: "<msg-000@example.com>",
+      references: [],
     });
   });
 
@@ -36,6 +37,18 @@ describe("parseInboundEmail", () => {
     expect(result.subject).toBe("(no subject)");
     expect(result.body).toBe("");
     expect(result.inReplyTo).toBeUndefined();
+    expect(result.references).toEqual([]);
+  });
+
+  it("parses references into message-id list", () => {
+    const payload = {
+      from: "bob@example.com",
+      to: "support@clandestinedistro.com",
+      message_id: "<msg-456@example.com>",
+      references: "<a@example.com> <b@example.com>",
+    };
+    const result = parseInboundEmail(payload);
+    expect(result.references).toEqual(["<a@example.com>", "<b@example.com>"]);
   });
 
   it("parses plain email address in from field", () => {

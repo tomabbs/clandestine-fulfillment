@@ -37,6 +37,7 @@ describe("auth Server Actions", () => {
         isStaff: true,
         userId: "user-1",
         userName: "Admin User",
+        userRole: "admin",
       });
     });
 
@@ -63,6 +64,7 @@ describe("auth Server Actions", () => {
         isStaff: false,
         userId: "user-2",
         userName: "Client User",
+        userRole: "client",
       });
     });
 

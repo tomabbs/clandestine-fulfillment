@@ -93,6 +93,10 @@ Required flows:
 2. Portal support create + reply
 3. Portal inbound submit
 4. One core admin operational page load (`/admin/inventory` or `/admin/inbound`)
+5. Support omnichannel checks:
+   - floating launcher unread count updates
+   - presence indicators show online/offline state
+   - email reply lands in existing conversation timeline
 
 Pass criteria:
 - no generic Server Components 500 errors

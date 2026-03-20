@@ -1,0 +1,88 @@
+version: 1
+updated_at: 2026-03-20
+
+journeys:
+  - id: staff_client_invite
+    area: admin_clients
+    paths:
+      - src/app/admin/clients/[id]/page.tsx
+      - src/app/admin/clients/page.tsx
+      - src/app/admin/settings/users/page.tsx
+      - src/components/portal/portal-presence-tracker.tsx
+      - src/actions/users.ts
+      - src/actions/clients.ts
+      - src/actions/auth.ts
+    status: green
+    checks:
+      - invite returns structured success/error envelope
+      - resend-backed magic link delivery path
+      - no generic server component 500 in UI
+      - client list shows org online/offline and last-online hints
+
+  - id: client_support_flow
+    area: portal_support
+    paths:
+      - src/app/portal/support/page.tsx
+      - src/app/admin/support/page.tsx
+      - src/actions/support.ts
+      - src/components/support/support-launcher.tsx
+      - src/app/api/webhooks/resend-inbound/route.ts
+      - src/trigger/tasks/support-escalation.ts
+    status: green
+    checks:
+      - create and reply paths return readable errors
+      - role/org access enforced
+      - floating launcher shows unread support state in admin and portal
+      - presence indicators reflect online availability in list/detail views
+      - app/email thread continuity preserved through resend inbound routing
+      - escalation automation avoids reminder spam during active sessions
+
+  - id: client_inbound_submission
+    area: portal_inbound
+    paths:
+      - src/app/portal/inbound/new/page.tsx
+      - src/actions/inbound.ts
+      - src/trigger/tasks/inbound-product-create.ts
+      - src/trigger/tasks/inbound-checkin-complete.ts
+    status: green
+    checks:
+      - submit path stable for client role
+      - check-in transitions valid
+      - task handoff for async stages
+
+  - id: inventory_adjust_and_visibility
+    area: inventory
+    paths:
+      - src/app/admin/inventory/**
+      - src/actions/inventory.ts
+      - src/lib/server/record-inventory-change.ts
+      - src/trigger/tasks/redis-backfill.ts
+    status: green
+    checks:
+      - single write path respected
+      - query failures fail-soft where appropriate
+      - redis parity tooling available
+
+  - id: release_health_gate
+    area: qa_release
+    paths:
+      - scripts/release-gate.sh
+      - docs/RELEASE_GATE_CRITERIA.md
+      - tests/e2e/full-site-audit.spec.ts
+    status: green
+    checks:
+      - release gate runs and reports all failures
+      - full-site audit emits markdown/json reports
+      - fail criteria include page errors and http 5xx
+
+  - id: webhook_and_trigger_pipeline
+    area: integrations_async
+    paths:
+      - src/app/api/webhooks/**
+      - src/trigger/tasks/**
+      - docs/system_map/TRIGGER_TASK_CATALOG.md
+    status: green
+    checks:
+      - webhook ingress mapped to trigger tasks
+      - retries and idempotency paths documented
+      - troubleshooting requires trigger touchpoint review

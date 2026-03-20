@@ -1,6 +1,7 @@
 "use server";
 
 import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { CLIENT_ROLES } from "@/lib/shared/constants";
 import { parseOnboardingState } from "@/lib/shared/onboarding";
 
 export interface ClientStats {
@@ -24,6 +25,12 @@ export interface GetClientsResult {
   unmatchedShipments: number;
   page: number;
   pageSize: number;
+}
+
+export interface ClientPresenceSummary {
+  online: boolean;
+  onlineCount: number;
+  lastSeenAt: string | null;
 }
 
 export async function getClients(filters?: {
@@ -174,6 +181,53 @@ export async function getClients(filters?: {
     page,
     pageSize,
   };
+}
+
+export async function getClientPresenceSummary(input: {
+  orgIds: string[];
+  onlineUserIds?: string[];
+}): Promise<{ byOrg: Record<string, ClientPresenceSummary> }> {
+  const supabase = await createServerSupabaseClient();
+  const orgIds = input.orgIds ?? [];
+  const onlineUserIds = new Set(input.onlineUserIds ?? []);
+
+  if (orgIds.length === 0) {
+    return { byOrg: {} };
+  }
+
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("id, org_id, role, last_seen_at")
+    .in("org_id", orgIds)
+    .in("role", [...CLIENT_ROLES]);
+
+  if (error) {
+    throw new Error(`Failed to load client presence summary: ${error.message}`);
+  }
+
+  const byOrg: Record<string, ClientPresenceSummary> = {};
+  for (const orgId of orgIds) {
+    byOrg[orgId] = { online: false, onlineCount: 0, lastSeenAt: null };
+  }
+
+  for (const user of users ?? []) {
+    if (!user.org_id) continue;
+    const current = byOrg[user.org_id] ?? { online: false, onlineCount: 0, lastSeenAt: null };
+
+    const isOnline = onlineUserIds.has(user.id);
+    if (isOnline) {
+      current.online = true;
+      current.onlineCount += 1;
+    }
+
+    if (user.last_seen_at && (!current.lastSeenAt || user.last_seen_at > current.lastSeenAt)) {
+      current.lastSeenAt = user.last_seen_at;
+    }
+
+    byOrg[user.org_id] = current;
+  }
+
+  return { byOrg };
 }
 
 export interface MonthlySales {

@@ -104,6 +104,7 @@ export const inboundEmailSchema = z.object({
   text: z.string().default(""),
   message_id: z.string(),
   in_reply_to: z.string().optional(),
+  references: z.string().optional(),
 });
 
 export type InboundEmail = z.infer<typeof inboundEmailSchema>;
@@ -115,10 +116,18 @@ export interface ParsedInboundEmail {
   body: string;
   messageId: string;
   inReplyTo: string | undefined;
+  references: string[];
 }
 
 export function parseInboundEmail(payload: unknown): ParsedInboundEmail {
   const parsed = inboundEmailSchema.parse(payload);
+  const references = parsed.references
+    ? parsed.references
+        .split(/\s+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : [];
+
   return {
     from: parsed.from,
     to: parsed.to,
@@ -126,6 +135,7 @@ export function parseInboundEmail(payload: unknown): ParsedInboundEmail {
     body: parsed.text,
     messageId: parsed.message_id,
     inReplyTo: parsed.in_reply_to,
+    references,
   };
 }
 

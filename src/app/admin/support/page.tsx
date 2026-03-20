@@ -1,12 +1,15 @@
 "use client";
 
+import { createBrowserClient } from "@supabase/ssr";
 import { ArrowLeft, CheckCircle, MessageSquare, Plus, Send, UserPlus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   assignConversation,
   createConversation,
   getConversationDetail,
   getConversations,
+  getSupportViewerContext,
+  markConversationRead,
   resolveConversation,
   sendMessage,
 } from "@/actions/support";
@@ -16,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useSupportPresence } from "@/lib/hooks/use-support-presence";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import type { ConversationStatus } from "@/lib/shared/types";
@@ -97,6 +101,19 @@ function ConversationList({
   status: ConversationStatus | undefined;
   onSelect: (id: string) => void;
 }) {
+  const { data: viewer } = useAppQuery({
+    queryKey: queryKeys.support.viewerContext(),
+    queryFn: getSupportViewerContext,
+    tier: CACHE_TIERS.REALTIME,
+  });
+  const { counts } = useSupportPresence({
+    userId: viewer?.userId ?? "unknown-user",
+    userName: viewer?.userName ?? "Staff User",
+    role: "staff",
+    orgId: viewer?.orgId ?? null,
+    currentPage: "/admin/support",
+  });
+
   const { data, isLoading } = useAppQuery({
     queryKey: queryKeys.support.conversations({ status }),
     queryFn: () => getConversations({ status }),
@@ -129,6 +146,11 @@ function ConversationList({
 
   return (
     <div className="space-y-1">
+      <div className="mb-2 rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        {counts.client > 0
+          ? `${counts.client} client${counts.client === 1 ? "" : "s"} active in support`
+          : "No active clients in support right now"}
+      </div>
       {conversations.map((conv) => {
         const timeSince = conv.last_message_at
           ? formatTimeSince(new Date(conv.last_message_at))
@@ -154,6 +176,11 @@ function ConversationList({
                   )}
                 </div>
                 <div className="text-sm text-muted-foreground mt-0.5">{conv.org_name}</div>
+                {(conv.unread_count ?? 0) > 0 && (
+                  <span className="mt-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                    {conv.unread_count} unread
+                  </span>
+                )}
                 {conv.last_message_preview && (
                   <p className="text-sm text-muted-foreground mt-1 truncate">
                     {conv.last_message_preview}
@@ -184,6 +211,52 @@ function ConversationDetail({
     queryFn: () => getConversationDetail(conversationId),
     tier: CACHE_TIERS.REALTIME,
   });
+  const { data: viewer } = useAppQuery({
+    queryKey: queryKeys.support.viewerContext(),
+    queryFn: getSupportViewerContext,
+    tier: CACHE_TIERS.REALTIME,
+  });
+  const { counts } = useSupportPresence({
+    userId: viewer?.userId ?? "unknown-user",
+    userName: viewer?.userName ?? "Staff User",
+    role: "staff",
+    orgId: viewer?.orgId ?? null,
+    currentPage: "/admin/support",
+    conversationId,
+  });
+
+  useEffect(() => {
+    markConversationRead(conversationId).catch(() => {
+      // Non-blocking read marker update.
+    });
+  }, [conversationId]);
+
+  useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    );
+    const channel = supabase
+      .channel(`support:conversation:${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "support_messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          void markConversationRead(conversationId);
+          void refetch();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId, refetch]);
 
   const sendMutation = useAppMutation({
     mutationFn: async (body: string) => {
@@ -237,6 +310,16 @@ function ConversationDetail({
               <span>{conversation.org_name}</span>
               <span>&middot;</span>
               <span className="capitalize">{conversation.status.replace(/_/g, " ")}</span>
+              <span>&middot;</span>
+              <span>{counts.client > 0 ? "Client active now" : "Client offline"}</span>
+              {conversation.client_last_read_at && (
+                <>
+                  <span>&middot;</span>
+                  <span>
+                    Client last seen {new Date(conversation.client_last_read_at).toLocaleString()}
+                  </span>
+                </>
+              )}
               {conversation.assigned_name && (
                 <>
                   <span>&middot;</span>
@@ -294,6 +377,8 @@ function ConversationDetail({
                 <div className="text-xs opacity-70 mb-1">
                   {msg.sender_type === "staff" ? "Staff" : "Client"} &middot;{" "}
                   {new Date(msg.created_at).toLocaleString()}
+                  {msg.source === "email" && " · reply from email"}
+                  {msg.delivered_via_email && " · delivered via email"}
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
               </div>

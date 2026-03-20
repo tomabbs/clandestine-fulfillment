@@ -1,11 +1,14 @@
 "use client";
 
+import { createBrowserClient } from "@supabase/ssr";
 import { ArrowLeft, MessageSquare, Plus, Send } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createConversation,
   getConversationDetail,
   getConversations,
+  getSupportViewerContext,
+  markConversationRead,
   sendMessage,
 } from "@/actions/support";
 import { Button } from "@/components/ui/button";
@@ -14,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useSupportPresence } from "@/lib/hooks/use-support-presence";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -66,6 +70,18 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
     queryFn: () => getConversations({}),
     tier: CACHE_TIERS.REALTIME,
   });
+  const { data: viewer } = useAppQuery({
+    queryKey: queryKeys.support.viewerContext(),
+    queryFn: getSupportViewerContext,
+    tier: CACHE_TIERS.REALTIME,
+  });
+  const { counts } = useSupportPresence({
+    userId: viewer?.userId ?? "unknown-user",
+    userName: viewer?.userName ?? "Portal User",
+    role: "client",
+    orgId: viewer?.orgId ?? null,
+    currentPage: "/portal/support",
+  });
 
   if (isLoading) {
     return (
@@ -91,6 +107,11 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
 
   return (
     <div className="space-y-1">
+      <div className="mb-2 rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        {counts.staff > 0
+          ? `${counts.staff} support teammate${counts.staff === 1 ? "" : "s"} online now`
+          : "Support is currently offline; email continuity is active."}
+      </div>
       {conversations.map((conv) => {
         const timeSince = conv.last_message_at
           ? formatTimeSince(new Date(conv.last_message_at))
@@ -108,6 +129,11 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
                 <span className="font-medium truncate block">{conv.subject}</span>
                 <div className="flex items-center gap-2 mt-0.5">
                   <StatusBadge status={conv.status} />
+                  {(conv.unread_count ?? 0) > 0 && (
+                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                      {conv.unread_count} new
+                    </span>
+                  )}
                 </div>
                 {conv.last_message_preview && (
                   <p className="text-sm text-muted-foreground mt-1 truncate">
@@ -154,6 +180,51 @@ function ConversationDetail({
     queryFn: () => getConversationDetail(conversationId),
     tier: CACHE_TIERS.REALTIME,
   });
+  const { data: viewer } = useAppQuery({
+    queryKey: queryKeys.support.viewerContext(),
+    queryFn: getSupportViewerContext,
+    tier: CACHE_TIERS.REALTIME,
+  });
+  const { counts } = useSupportPresence({
+    userId: viewer?.userId ?? "unknown-user",
+    userName: viewer?.userName ?? "Portal User",
+    role: "client",
+    orgId: viewer?.orgId ?? null,
+    currentPage: "/portal/support",
+    conversationId,
+  });
+
+  useEffect(() => {
+    markConversationRead(conversationId).catch(() => {
+      // Non-blocking read marker update.
+    });
+  }, [conversationId]);
+
+  useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    );
+    const channel = supabase
+      .channel(`support:conversation:${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "support_messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          void markConversationRead(conversationId);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId]);
 
   const sendMutation = useAppMutation({
     mutationFn: async (body: string) => {
@@ -190,6 +261,14 @@ function ConversationDetail({
           <h2 className="text-lg font-semibold">{conversation.subject}</h2>
           <div className="text-sm text-muted-foreground">
             <StatusBadge status={conversation.status} />
+            <span className="ml-2">
+              {counts.staff > 0 ? "Support active now" : "Support currently offline"}
+            </span>
+            {conversation.staff_last_read_at && (
+              <span className="ml-2">
+                Last seen {new Date(conversation.staff_last_read_at).toLocaleString()}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -211,6 +290,8 @@ function ConversationDetail({
                 <div className="text-xs opacity-70 mb-1">
                   {msg.sender_type === "staff" ? "Support Team" : "You"} &middot;{" "}
                   {new Date(msg.created_at).toLocaleString()}
+                  {msg.source === "email" && " · reply from email"}
+                  {msg.delivered_via_email && " · delivered via email"}
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
               </div>

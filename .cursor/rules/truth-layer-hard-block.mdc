@@ -1,0 +1,24 @@
+---
+description: Hard-block truth preflight for plan/build/audit work
+alwaysApply: true
+---
+
+# Truth Layer Hard Block
+
+Before PLAN, BUILD, or AUDIT output, always read:
+
+- `TRUTH_LAYER.md`
+- `docs/system_map/INDEX.md`
+- `docs/system_map/API_CATALOG.md`
+- `docs/system_map/TRIGGER_TASK_CATALOG.md`
+- `project_state/engineering_map.yaml`
+- `project_state/journeys.yaml`
+- `docs/RELEASE_GATE_CRITERIA.md`
+
+If required context is missing for scope, return `BLOCKED` with missing files.
+
+For issues touching sync, webhooks, inventory, orders, billing, releases, or support:
+
+- include an explicit Trigger touchpoint check,
+- cite reviewed task IDs,
+- do not finalize without Trigger evidence.

@@ -1,7 +1,9 @@
 "use client";
 
+import { PortalPresenceTracker } from "@/components/portal/portal-presence-tracker";
 import { PortalSidebar } from "@/components/portal/portal-sidebar";
 import { CommandPalette } from "@/components/shared/command-palette";
+import { SupportLauncher } from "@/components/support/support-launcher";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
@@ -15,6 +17,8 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
         <main className="flex-1">{children}</main>
       </SidebarInset>
       <CommandPalette />
+      <SupportLauncher supportPath="/portal/support" />
+      <PortalPresenceTracker />
     </SidebarProvider>
   );
 }

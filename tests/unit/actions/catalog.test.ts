@@ -49,9 +49,14 @@ describe("catalog server actions", () => {
   // === Auth tests ===
 
   describe("authentication", () => {
-    it("getProducts throws when user is not authenticated", async () => {
+    it("getProducts returns empty result when user is not authenticated", async () => {
       mockGetUser.mockResolvedValue({ data: { user: null } });
-      await expect(getProducts({ page: 1, pageSize: 25 })).rejects.toThrow("Unauthorized");
+      await expect(getProducts({ page: 1, pageSize: 25 })).resolves.toEqual({
+        products: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+      });
     });
 
     it("getProductDetail throws when user is not authenticated", async () => {
@@ -71,9 +76,12 @@ describe("catalog server actions", () => {
       ).rejects.toThrow("Unauthorized");
     });
 
-    it("getClientReleases throws when user is not authenticated", async () => {
+    it("getClientReleases returns empty release groups when user is not authenticated", async () => {
       mockGetUser.mockResolvedValue({ data: { user: null } });
-      await expect(getClientReleases()).rejects.toThrow("Unauthorized");
+      await expect(getClientReleases()).resolves.toEqual({
+        preorders: [],
+        newReleases: [],
+      });
     });
   });
 

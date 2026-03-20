@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   Box,
+  Circle,
   Loader2,
   Plus,
   Search,
@@ -13,8 +14,9 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { getUserContext } from "@/actions/auth";
 import type { ClientStats } from "@/actions/clients";
-import { createClient, getClients } from "@/actions/clients";
+import { createClient, getClientPresenceSummary, getClients } from "@/actions/clients";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { usePresenceTracking } from "@/lib/hooks/use-presence-tracking";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -57,6 +60,17 @@ export default function ClientsPage() {
     queryKey: queryKeys.clients.list(),
     queryFn: () => getClients({ pageSize: 500 }),
     tier: CACHE_TIERS.SESSION,
+  });
+  const { data: userContext } = useAppQuery({
+    queryKey: queryKeys.auth.userContext(),
+    queryFn: getUserContext,
+    tier: CACHE_TIERS.REALTIME,
+  });
+  const { onlineUsers } = usePresenceTracking({
+    userId: userContext?.userId ?? "unknown-user",
+    userName: userContext?.userName ?? "Staff User",
+    role: userContext?.userRole ?? "staff",
+    currentPage: "/admin/clients",
   });
 
   const createMut = useAppMutation({
@@ -92,6 +106,25 @@ export default function ClientsPage() {
       }
     });
   }, [data?.clients, sortField, sortDir, search]);
+  const orgIds = useMemo(() => (data?.clients ?? []).map((client) => client.id), [data?.clients]);
+  const onlineClientUserIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const onlineUser of onlineUsers) {
+      if (onlineUser.role === "client" || onlineUser.role === "client_admin") {
+        ids.add(onlineUser.userId);
+      }
+    }
+    return Array.from(ids);
+  }, [onlineUsers]);
+  const { data: presenceSummary } = useAppQuery({
+    queryKey: queryKeys.clients.presence(orgIds, onlineClientUserIds),
+    queryFn: () =>
+      getClientPresenceSummary({
+        orgIds,
+        onlineUserIds: onlineClientUserIds,
+      }),
+    tier: CACHE_TIERS.REALTIME,
+  });
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -236,6 +269,7 @@ export default function ClientsPage() {
               <ClientRow
                 key={client.id}
                 client={client}
+                presence={presenceSummary?.byOrg[client.id]}
                 onClick={() => router.push(`/admin/clients/${client.id}`)}
               />
             ))}
@@ -295,15 +329,37 @@ export default function ClientsPage() {
   );
 }
 
-function ClientRow({ client, onClick }: { client: ClientStats; onClick: () => void }) {
+function ClientRow({
+  client,
+  presence,
+  onClick,
+}: {
+  client: ClientStats;
+  presence?: { online: boolean; onlineCount: number; lastSeenAt: string | null };
+  onClick: () => void;
+}) {
   return (
     <TableRow className="cursor-pointer" onClick={onClick}>
       <TableCell>
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{client.name}</span>
-          <Badge variant="outline" className="font-mono text-xs">
-            {client.slug}
-          </Badge>
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{client.name}</span>
+            <Badge variant="outline" className="font-mono text-xs">
+              {client.slug}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Circle
+              className={`h-2.5 w-2.5 fill-current ${
+                presence?.online ? "text-green-500" : "text-muted-foreground/60"
+              }`}
+            />
+            {presence?.online
+              ? `${presence.onlineCount} user${presence.onlineCount === 1 ? "" : "s"} online`
+              : presence?.lastSeenAt
+                ? `Last online ${formatTimeSince(new Date(presence.lastSeenAt))}`
+                : "No recent activity"}
+          </div>
         </div>
       </TableCell>
       <TableCell className="text-right">{client.productCount}</TableCell>
@@ -321,4 +377,15 @@ function ClientRow({ client, onClick }: { client: ClientStats; onClick: () => vo
       </TableCell>
     </TableRow>
   );
+}
+
+function formatTimeSince(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) return "just now";
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }

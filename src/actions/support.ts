@@ -34,14 +34,18 @@ export async function getConversations(
     org_name?: string;
     last_message_at?: string;
     last_message_preview?: string;
+    unread_count?: number;
+    counterpart_last_seen_at?: string | null;
   })[];
   total: number;
 }> {
   const { status, orgId, assignedTo, page, pageSize } = getConversationsSchema.parse(filters);
   let supabase: Awaited<ReturnType<typeof getAuthContext>>["supabase"];
+  let isStaff = false;
   try {
     const auth = await getAuthContext();
     supabase = auth.supabase;
+    isStaff = auth.isStaff;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.toLowerCase().includes("unauthorized")) {
@@ -68,19 +72,26 @@ export async function getConversations(
 
   // Fetch last message per conversation for preview
   const conversationIds = (data ?? []).map((c: { id: string }) => c.id);
-  const lastMessages: Record<string, { body: string; created_at: string }> = {};
+  const lastMessages: Record<
+    string,
+    { body: string; created_at: string; sender_type: SupportMessage["sender_type"] }
+  > = {};
 
   if (conversationIds.length > 0) {
     const { data: messages } = await supabase
       .from("support_messages")
-      .select("conversation_id, body, created_at")
+      .select("conversation_id, body, created_at, sender_type")
       .in("conversation_id", conversationIds)
       .order("created_at", { ascending: false });
 
     if (messages) {
       for (const msg of messages) {
         if (!lastMessages[msg.conversation_id]) {
-          lastMessages[msg.conversation_id] = { body: msg.body, created_at: msg.created_at };
+          lastMessages[msg.conversation_id] = {
+            body: msg.body,
+            created_at: msg.created_at,
+            sender_type: (msg.sender_type as SupportMessage["sender_type"]) ?? "system",
+          };
         }
       }
     }
@@ -89,11 +100,28 @@ export async function getConversations(
   const conversations = (data ?? []).map((c: Record<string, unknown>) => {
     const org = c.organizations as { name: string } | null;
     const lastMsg = lastMessages[(c as { id: string }).id];
+    const readAt = isStaff
+      ? (c.staff_last_read_at as string | null | undefined)
+      : (c.client_last_read_at as string | null | undefined);
+    const unreadCount = lastMsg
+      ? lastMsg.sender_type === (isStaff ? "staff" : "client")
+        ? 0
+        : readAt
+          ? lastMsg.created_at > readAt
+            ? 1
+            : 0
+          : 1
+      : 0;
+
     return {
       ...(c as unknown as SupportConversation),
       org_name: org?.name,
       last_message_at: lastMsg?.created_at,
       last_message_preview: lastMsg?.body?.slice(0, 120),
+      unread_count: unreadCount,
+      counterpart_last_seen_at: isStaff
+        ? ((c.client_last_read_at as string | null | undefined) ?? null)
+        : ((c.staff_last_read_at as string | null | undefined) ?? null),
     };
   });
 
@@ -148,6 +176,21 @@ export async function getConversationDetail(id: string): Promise<{
   };
 }
 
+export async function getSupportViewerContext(): Promise<{
+  userId: string;
+  userName: string;
+  role: "staff" | "client";
+  orgId: string | null;
+}> {
+  const { user, isStaff } = await getAuthContext();
+  return {
+    userId: user.id,
+    userName: user.name ?? user.email ?? "Unknown User",
+    role: isStaff ? "staff" : "client",
+    orgId: user.org_id,
+  };
+}
+
 const createConversationSchema = z.object({
   subject: z.string().min(1).max(500),
   body: z.string().min(1).max(10000),
@@ -187,6 +230,9 @@ export async function createConversation(
         subject,
         status: isStaff ? "waiting_on_client" : "waiting_on_staff",
         created_by: user.id,
+        ...(isStaff
+          ? { staff_last_read_at: new Date().toISOString() }
+          : { client_last_read_at: new Date().toISOString() }),
       })
       .select("id")
       .single();
@@ -203,6 +249,7 @@ export async function createConversation(
       workspace_id: workspaceId,
       sender_id: user.id,
       sender_type: isStaff ? "staff" : "client",
+      source: "app",
       body,
     });
     if (messageError) {
@@ -277,9 +324,10 @@ export async function sendMessage(
         workspace_id: workspaceId,
         sender_id: user.id,
         sender_type: senderType,
+        source: "app",
         body,
       })
-      .select("id, email_message_id")
+      .select("id, email_message_id, delivered_via_email")
       .single();
 
     if (msgError || !message) {
@@ -288,7 +336,13 @@ export async function sendMessage(
 
     await serviceClient
       .from("support_conversations")
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .update({
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+        ...(isStaff
+          ? { staff_last_read_at: new Date().toISOString() }
+          : { client_last_read_at: new Date().toISOString() }),
+      })
       .eq("id", conversationId);
 
     // Best-effort email fanout.
@@ -319,7 +373,7 @@ export async function sendMessage(
             );
             await serviceClient
               .from("support_messages")
-              .update({ email_message_id: result.messageId })
+              .update({ email_message_id: result.messageId, delivered_via_email: true })
               .eq("id", message.id);
           } catch (emailError) {
             console.error("[support] failed to send staff reply email:", emailError);
@@ -384,4 +438,27 @@ export async function assignConversation(id: string, staffUserId: string): Promi
     .eq("id", id);
 
   if (error) throw new Error(`Failed to assign conversation: ${error.message}`);
+}
+
+export async function markConversationRead(conversationId: string): Promise<void> {
+  z.string().uuid().parse(conversationId);
+  const { isStaff, supabase } = await getAuthContext();
+  const payload = isStaff
+    ? { staff_last_read_at: new Date().toISOString() }
+    : { client_last_read_at: new Date().toISOString() };
+
+  const { error } = await supabase
+    .from("support_conversations")
+    .update(payload)
+    .eq("id", conversationId);
+  if (error) {
+    throw new Error(`Failed to mark conversation as read: ${error.message}`);
+  }
+}
+
+export async function suggestSupportReply(_params: {
+  conversationId: string;
+  latestMessage: string;
+}): Promise<{ suggestions: string[] }> {
+  return { suggestions: [] };
 }

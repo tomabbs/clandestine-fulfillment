@@ -87,13 +87,18 @@ export async function POST(req: Request): Promise<Response> {
   const emailPayload = eventData.data ?? eventData;
   const email = parseInboundEmail(emailPayload);
 
-  // Strategy 1: Match by In-Reply-To header against existing messages
-  if (email.inReplyTo) {
+  const relatedMessageIdCandidates = [email.inReplyTo, ...email.references].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  // Strategy 1: Match by In-Reply-To / References against existing messages
+  if (relatedMessageIdCandidates.length > 0) {
     const { data: existingMessage } = await supabase
       .from("support_messages")
-      .select("conversation_id, support_conversations!inner(org_id)")
-      .eq("email_message_id", email.inReplyTo)
-      .single();
+      .select("conversation_id")
+      .in("email_message_id", relatedMessageIdCandidates)
+      .limit(1)
+      .maybeSingle();
 
     if (existingMessage) {
       await appendMessageToConversation(supabase, existingMessage.conversation_id, email);
@@ -132,7 +137,7 @@ export async function POST(req: Request): Promise<Response> {
 function extractEmailAddress(from: string): string {
   // Handles "Name <email@example.com>" or plain "email@example.com"
   const match = from.match(/<([^>]+)>/);
-  return match ? match[1] : from.trim();
+  return (match ? match[1] : from.trim()).toLowerCase();
 }
 
 async function appendMessageToConversation(
@@ -140,6 +145,14 @@ async function appendMessageToConversation(
   conversationId: string,
   email: { body: string; messageId: string },
 ): Promise<void> {
+  const { data: existingByMessageId } = await supabase
+    .from("support_messages")
+    .select("id")
+    .eq("email_message_id", email.messageId)
+    .maybeSingle();
+
+  if (existingByMessageId) return;
+
   // Get conversation workspace_id for the message
   const { data: conversation } = await supabase
     .from("support_conversations")
@@ -153,13 +166,19 @@ async function appendMessageToConversation(
     conversation_id: conversationId,
     workspace_id: conversation.workspace_id,
     sender_type: "client",
+    source: "email",
+    delivered_via_email: true,
     body: email.body,
     email_message_id: email.messageId,
   });
 
   await supabase
     .from("support_conversations")
-    .update({ status: "waiting_on_staff", updated_at: new Date().toISOString() })
+    .update({
+      status: "waiting_on_staff",
+      updated_at: new Date().toISOString(),
+      client_last_read_at: new Date().toISOString(),
+    })
     .eq("id", conversationId);
 }
 
@@ -168,6 +187,14 @@ async function createConversationFromEmail(
   orgId: string,
   email: { subject: string; body: string; messageId: string },
 ): Promise<void> {
+  const { data: existingByMessageId } = await supabase
+    .from("support_messages")
+    .select("id")
+    .eq("email_message_id", email.messageId)
+    .maybeSingle();
+
+  if (existingByMessageId) return;
+
   // Resolve workspace from the org
   const { data: org } = await supabase
     .from("organizations")
@@ -186,6 +213,7 @@ async function createConversationFromEmail(
       subject: email.subject,
       status: "waiting_on_staff",
       inbound_email_id: email.messageId,
+      client_last_read_at: new Date().toISOString(),
     })
     .select("id")
     .single();
@@ -196,6 +224,8 @@ async function createConversationFromEmail(
     conversation_id: conversation.id,
     workspace_id: wsId,
     sender_type: "client",
+    source: "email",
+    delivered_via_email: true,
     body: email.body,
     email_message_id: email.messageId,
   });

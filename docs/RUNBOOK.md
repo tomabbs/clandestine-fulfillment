@@ -1,5 +1,18 @@
 # Operations Runbook
 
+## Truth layer maintenance (required after behavior changes)
+
+When a session changes system behavior, update truth docs in the same session:
+
+1. `TRUTH_LAYER.md`
+2. `project_state/engineering_map.yaml`
+3. `project_state/journeys.yaml`
+4. `docs/system_map/API_CATALOG.md` (if route/action boundary changed)
+5. `docs/system_map/TRIGGER_TASK_CATALOG.md` (if async/task wiring changed)
+6. `docs/RELEASE_GATE_CRITERIA.md` (if verification expectations changed)
+
+Do not treat implementation as complete until this sync is done.
+
 ## billing_invoice_failed (Stripe payment failure)
 
 **Trigger**: Stripe webhook `invoice.payment_failed` creates a review queue item with severity `high`.

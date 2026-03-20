@@ -123,12 +123,17 @@ describe("pirate-ship server actions", () => {
       expect(result.page).toBe(1);
     });
 
-    it("throws on unauthenticated access", async () => {
+    it("returns empty paginated response on unauthenticated access", async () => {
       mockGetUser.mockResolvedValue({ data: { user: null } });
       mockFrom.mockReturnValue({ select: vi.fn() });
 
       const { getImportHistory } = await import("@/actions/pirate-ship");
-      await expect(getImportHistory()).rejects.toThrow("Unauthorized");
+      await expect(getImportHistory()).resolves.toEqual({
+        imports: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+      });
     });
   });
 

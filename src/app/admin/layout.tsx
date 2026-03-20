@@ -3,6 +3,7 @@
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { PresenceHeaderWrapper } from "@/components/admin/presence-header-wrapper";
 import { CommandPalette } from "@/components/shared/command-palette";
+import { SupportLauncher } from "@/components/support/support-launcher";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <main className="flex-1">{children}</main>
       </SidebarInset>
       <CommandPalette />
+      <SupportLauncher supportPath="/admin/support" />
     </SidebarProvider>
   );
 }

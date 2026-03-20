@@ -1,0 +1,31 @@
+---
+description: Enforce PLAN/BUILD/AUDIT prompt pack structure and doc sync
+alwaysApply: true
+---
+
+# Prompt Pack Enforcement
+
+When user intent is planning, building, or auditing, follow these prompt packs:
+
+- `docs/prompt-packs/PLAN.md`
+- `docs/prompt-packs/BUILD.md`
+- `docs/prompt-packs/AUDIT.md`
+
+## Required Output Structure
+
+- List evidence files read.
+- Identify API boundary entries used.
+- Identify Trigger task entries used when async/integration scope exists.
+- Include verification steps.
+
+## Doc Sync Contract (Mandatory)
+
+If code changes in session, update truth docs in same session:
+
+- architecture/ownership -> `TRUTH_LAYER.md`, `project_state/engineering_map.yaml`
+- behavior/journey -> `project_state/journeys.yaml`
+- API boundary -> `docs/system_map/API_CATALOG.md`
+- Trigger wiring -> `docs/system_map/TRIGGER_TASK_CATALOG.md`
+- release verification policy -> `docs/RELEASE_GATE_CRITERIA.md`
+
+Do not mark work complete if required doc updates are missing.

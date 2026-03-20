@@ -12,10 +12,14 @@ export const supportEscalationTask = schedules.task({
 
     // 1. Find conversations waiting on staff with no reply for 15+ minutes
     const fifteenMinAgo = new Date(now.getTime() - 15 * 60 * 1000).toISOString();
+    const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+    const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000).toISOString();
 
     const { data: staffEscalations } = await supabase
       .from("support_conversations")
-      .select("id, subject, org_id, assigned_to, organizations!inner(name)")
+      .select(
+        "id, subject, org_id, assigned_to, staff_last_read_at, last_staff_escalated_at, organizations!inner(name)",
+      )
       .eq("status", "waiting_on_staff");
 
     if (staffEscalations) {
@@ -36,6 +40,16 @@ export const supportEscalationTask = schedules.task({
 
         // Skip if last message is recent
         if (lastMessage.created_at > fifteenMinAgo) continue;
+        // Skip escalation if staff appears active in this conversation.
+        if (conversation.staff_last_read_at && conversation.staff_last_read_at > fiveMinAgo)
+          continue;
+        // Avoid reminder spam every 5 minutes.
+        if (
+          conversation.last_staff_escalated_at &&
+          conversation.last_staff_escalated_at > thirtyMinAgo
+        ) {
+          continue;
+        }
 
         // Send escalation email to assigned staff or all staff
         const { data: staffUsers } = conversation.assigned_to
@@ -64,15 +78,21 @@ export const supportEscalationTask = schedules.task({
             }
           }
         }
+
+        await supabase
+          .from("support_conversations")
+          .update({ last_staff_escalated_at: new Date().toISOString() })
+          .eq("id", conversation.id);
       }
     }
 
     // 2. Find conversations waiting on client with no reply for 24+ hours
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
 
     const { data: clientReminders } = await supabase
       .from("support_conversations")
-      .select("id, subject, org_id")
+      .select("id, subject, org_id, client_last_read_at, last_client_reminded_at")
       .eq("status", "waiting_on_client");
 
     if (clientReminders) {
@@ -92,6 +112,16 @@ export const supportEscalationTask = schedules.task({
 
         // Skip if last message is recent
         if (lastMessage.created_at > twentyFourHoursAgo) continue;
+        // If client recently viewed the conversation, avoid sending a reminder.
+        if (conversation.client_last_read_at && conversation.client_last_read_at > oneHourAgo)
+          continue;
+        // Do not send more than one reminder per 24 hours.
+        if (
+          conversation.last_client_reminded_at &&
+          conversation.last_client_reminded_at > twentyFourHoursAgo
+        ) {
+          continue;
+        }
 
         // Send gentle reminder to client
         const { data: mappings } = await supabase
@@ -109,6 +139,11 @@ export const supportEscalationTask = schedules.task({
             );
           }
         }
+
+        await supabase
+          .from("support_conversations")
+          .update({ last_client_reminded_at: new Date().toISOString() })
+          .eq("id", conversation.id);
       }
     }
   },
