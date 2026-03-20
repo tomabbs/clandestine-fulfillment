@@ -402,7 +402,11 @@ export default function NewInboundPage() {
   const [error, setError] = useState<string | null>(null);
 
   const createMutation = useAppMutation({
-    mutationFn: (input: CreateInboundInput) => createInbound(input),
+    mutationFn: async (input: CreateInboundInput) => {
+      const result = await createInbound(input);
+      if (!result.success) throw new Error(result.error);
+      return result;
+    },
     invalidateKeys: [queryKeys.inbound.all],
     onSuccess: () => router.push("/portal/inbound"),
   });

@@ -12,7 +12,7 @@ import type {
 export async function getAuthWorkspaceId(): Promise<string> {
   const supabase = await createServerSupabaseClient();
   const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error("Unauthorized");
+  if (!authData.user) return "";
 
   const serviceClient = createServiceRoleClient();
   const { data: userRecord, error: userError } = await serviceClient

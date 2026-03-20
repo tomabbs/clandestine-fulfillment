@@ -75,7 +75,14 @@ export async function getImportHistory(filters?: {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
+  if (!user) {
+    return {
+      imports: [],
+      total: 0,
+      page: input.page,
+      pageSize: input.pageSize,
+    };
+  }
 
   let query = supabase
     .from("warehouse_pirate_ship_imports")
@@ -107,7 +114,13 @@ export async function getImportDetail(importId: string) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
+  if (!user) {
+    return {
+      import: null,
+      unmatchedItems: [],
+      matchedShipments: [],
+    };
+  }
 
   const { data, error } = await supabase
     .from("warehouse_pirate_ship_imports")

@@ -28,26 +28,35 @@ export async function triggerFullBackfill() {
 }
 
 export async function getShopifySyncStatus() {
-  const { supabase, userRecord } = await requireAuth();
-  const workspaceId = userRecord.workspace_id;
+  try {
+    const { supabase, userRecord } = await requireAuth();
+    const workspaceId = userRecord.workspace_id;
 
-  const { data: syncState } = await supabase
-    .from("warehouse_sync_state")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .eq("sync_type", "shopify_delta")
-    .single();
+    const { data: syncState } = await supabase
+      .from("warehouse_sync_state")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("sync_type", "shopify_delta")
+      .single();
 
-  const { data: recentLogs } = await supabase
-    .from("channel_sync_log")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .eq("channel", "shopify")
-    .order("created_at", { ascending: false })
-    .limit(10);
+    const { data: recentLogs } = await supabase
+      .from("channel_sync_log")
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .eq("channel", "shopify")
+      .order("created_at", { ascending: false })
+      .limit(10);
 
-  return {
-    syncState: syncState ?? null,
-    recentLogs: recentLogs ?? [],
-  };
+    return {
+      syncState: syncState ?? null,
+      recentLogs: recentLogs ?? [],
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.toLowerCase().includes("unauthorized")) throw error;
+    return {
+      syncState: null,
+      recentLogs: [],
+    };
+  }
 }

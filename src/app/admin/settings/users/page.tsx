@@ -62,6 +62,12 @@ const ALL_ROLE_OPTIONS = [
 
 const USER_QUERY_KEY = ["admin", "settings", "users"] as const;
 
+function formatDateUTC(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toISOString().slice(0, 10);
+}
+
 export default function UsersPage() {
   const [search, setSearch] = useState("");
 
@@ -160,7 +166,7 @@ export default function UsersPage() {
                   <Badge variant="default">Active</Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
-                  {new Date(user.created_at).toLocaleDateString()}
+                  {formatDateUTC(user.created_at)}
                 </TableCell>
                 <TableCell className="text-right">
                   <Button

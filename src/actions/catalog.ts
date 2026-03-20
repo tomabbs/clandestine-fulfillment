@@ -51,6 +51,11 @@ async function requireAuth() {
   return { supabase, user: userData.user };
 }
 
+function isUnauthorizedError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.toLowerCase().includes("unauthorized");
+}
+
 // === Inline single-field updates (for editable table cells) ===
 
 const PRODUCT_EDITABLE_FIELDS = ["title", "vendor", "product_type", "status"] as const;
@@ -115,7 +120,12 @@ export async function searchProductVariants(query: string): Promise<
     currentStock: number | null;
   }>
 > {
-  await requireAuth();
+  // Autocomplete can fire during initial hydration; fail-soft instead of surfacing server errors.
+  try {
+    await requireAuth();
+  } catch {
+    return [];
+  }
   if (!query || query.length < 2) return [];
 
   const serviceClient = createServiceRoleClient();
@@ -151,8 +161,20 @@ export async function searchProductVariants(query: string): Promise<
 }
 
 export async function getProducts(rawFilters: ProductFilters) {
-  await requireAuth();
   const filters = productFiltersSchema.parse(rawFilters);
+  try {
+    await requireAuth();
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return {
+        products: [],
+        total: 0,
+        page: filters.page,
+        pageSize: filters.pageSize,
+      };
+    }
+    throw error;
+  }
   const serviceClient = createServiceRoleClient();
 
   const offset = (filters.page - 1) * filters.pageSize;
@@ -264,7 +286,18 @@ export async function getProducts(rawFilters: ProductFilters) {
 
 /** Summary stats for catalog page header cards. */
 export async function getCatalogStats() {
-  await requireAuth();
+  try {
+    await requireAuth();
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return {
+        totalProducts: 0,
+        totalVariants: 0,
+        missingCostCount: 0,
+      };
+    }
+    throw error;
+  }
   const sc = createServiceRoleClient();
   const { count: totalProducts } = await sc
     .from("warehouse_products")
@@ -461,7 +494,16 @@ export async function updateVariants(
 }
 
 export async function getClientReleases(rawFilters?: { page?: number; pageSize?: 25 | 50 | 100 }) {
-  const { supabase } = await requireAuth();
+  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
+  try {
+    const auth = await requireAuth();
+    supabase = auth.supabase;
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return { preorders: [], newReleases: [] };
+    }
+    throw error;
+  }
   // Validate filters (pagination reserved for future use)
   clientReleasesFiltersSchema.parse(rawFilters ?? {});
 

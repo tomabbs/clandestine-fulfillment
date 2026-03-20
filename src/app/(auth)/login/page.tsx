@@ -86,7 +86,7 @@ export default function LoginPage() {
           width={325}
           height={65}
           priority
-          className="mx-auto"
+          className="mx-auto h-auto w-auto"
         />
         <p className="mt-4 text-sm text-gray-600">Sign in to your account</p>
       </div>

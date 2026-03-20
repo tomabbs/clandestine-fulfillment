@@ -1,4 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import { config as loadEnv } from "dotenv";
+
+// Ensure Playwright test process gets the same env vars as Next dev/build.
+loadEnv({ path: ".env.local", quiet: true });
+loadEnv({ path: ".env.development.local", override: true, quiet: true });
+
+const e2ePort = process.env.E2E_PORT ?? "3000";
+const e2eBaseUrl = process.env.E2E_BASE_URL ?? `http://localhost:${e2ePort}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -12,7 +20,7 @@ export default defineConfig({
     timeout: 5_000,
   },
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: e2eBaseUrl,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -23,8 +31,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm dev",
-    url: "http://localhost:3000",
+    command: `pnpm dev --port ${e2ePort}`,
+    url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

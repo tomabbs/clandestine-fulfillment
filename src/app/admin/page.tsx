@@ -11,7 +11,7 @@ import {
   ShoppingCart,
   Truck,
 } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getDashboardStats } from "@/actions/admin-dashboard";
 import { getPreorderProducts, manualRelease } from "@/actions/preorders";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,7 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 type PreorderVariant = Awaited<ReturnType<typeof getPreorderProducts>>["variants"][number];
 
 export default function DashboardPage() {
+  const [hydrated, setHydrated] = useState(false);
   const { data: stats } = useAppQuery({
     queryKey: ["admin", "dashboard-stats"],
     queryFn: () => getDashboardStats(),
@@ -31,6 +32,21 @@ export default function DashboardPage() {
   });
 
   const s = stats?.stats;
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  if (!hydrated) {
+    return (
+      <div className="space-y-6 p-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading dashboard...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">

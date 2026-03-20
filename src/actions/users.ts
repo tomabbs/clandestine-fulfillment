@@ -50,8 +50,18 @@ function requireAdmin(role: string) {
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
 export async function getUsers(filters?: { search?: string }) {
-  const { userRecord } = await requireAuth();
-  requireAdmin(userRecord.role);
+  let userRecord: { role: string; workspace_id: string };
+  try {
+    const auth = await requireAuth();
+    userRecord = auth.userRecord;
+    requireAdmin(userRecord.role);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) {
+      return [];
+    }
+    throw error;
+  }
 
   const serviceClient = createServiceRoleClient();
 

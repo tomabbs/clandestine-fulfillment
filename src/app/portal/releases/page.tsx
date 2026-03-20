@@ -2,6 +2,7 @@
 
 import { Calendar, Disc3, Loader2, Package } from "lucide-react";
 import Image from "next/image";
+import { useEffect, useState } from "react";
 import { getClientReleases } from "@/actions/catalog";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,20 +43,45 @@ type ReleaseVariant = {
   }>;
 };
 
+function formatDateUTC(value: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toISOString().slice(0, 10);
+}
+
 export default function ReleasesPage() {
-  const { data, isLoading } = useAppQuery({
+  const [hydrated, setHydrated] = useState(false);
+  const { data, isLoading, error } = useAppQuery({
     queryKey: queryKeys.clientReleases.list(),
     queryFn: () => getClientReleases(),
     tier: CACHE_TIERS.SESSION,
   });
 
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
   const preorders = (data?.preorders ?? []) as unknown as ReleaseVariant[];
   const newReleases = (data?.newReleases ?? []) as unknown as ReleaseVariant[];
 
-  if (isLoading) {
+  if (!hydrated || isLoading) {
     return (
       <div className="p-6 flex justify-center py-12 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Releases</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-destructive">{(error as Error).message}</CardContent>
+        </Card>
       </div>
     );
   }
@@ -109,7 +135,7 @@ export default function ReleasesPage() {
               {preorders.map((v) => {
                 const product = v.warehouse_products;
                 const images = product?.warehouse_product_images ?? [];
-                const primaryImage = images.sort((a, b) => a.position - b.position)[0];
+                const primaryImage = [...images].sort((a, b) => a.position - b.position)[0];
                 const inv = v.warehouse_inventory_levels?.[0];
 
                 return (
@@ -135,9 +161,7 @@ export default function ReleasesPage() {
                     </TableCell>
                     <TableCell>
                       {v.street_date ? (
-                        <Badge variant="secondary">
-                          {new Date(v.street_date).toLocaleDateString()}
-                        </Badge>
+                        <Badge variant="secondary">{formatDateUTC(v.street_date)}</Badge>
                       ) : (
                         <span className="text-muted-foreground">TBD</span>
                       )}
@@ -173,7 +197,7 @@ export default function ReleasesPage() {
               {newReleases.map((v) => {
                 const product = v.warehouse_products;
                 const images = product?.warehouse_product_images ?? [];
-                const primaryImage = images.sort((a, b) => a.position - b.position)[0];
+                const primaryImage = [...images].sort((a, b) => a.position - b.position)[0];
                 const inv = v.warehouse_inventory_levels?.[0];
 
                 return (
@@ -199,9 +223,7 @@ export default function ReleasesPage() {
                     </TableCell>
                     <TableCell>
                       {v.street_date ? (
-                        <span className="text-sm">
-                          {new Date(v.street_date).toLocaleDateString()}
-                        </span>
+                        <span className="text-sm">{formatDateUTC(v.street_date)}</span>
                       ) : (
                         "—"
                       )}

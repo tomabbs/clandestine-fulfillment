@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Pencil } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   createBillingAdjustment,
   createBillingRule,
@@ -19,6 +19,7 @@ import {
 } from "@/actions/billing";
 import { getClients } from "@/actions/clients";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -27,19 +28,61 @@ import type { WarehouseBillingRule, WarehouseFormatCost } from "@/lib/shared/typ
 
 type Tab = "snapshots" | "default-rates" | "client-overrides" | "formats" | "adjustments";
 
+function formatDateUTC(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toISOString().slice(0, 10);
+}
+
 export default function BillingPage() {
+  const [hydrated, setHydrated] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("snapshots");
 
-  const { data: workspaceId, isLoading: wsLoading } = useAppQuery({
+  const {
+    data: workspaceId,
+    isLoading: wsLoading,
+    error: wsError,
+  } = useAppQuery({
     queryKey: ["auth", "workspace-id"],
     queryFn: () => getAuthWorkspaceId(),
     tier: CACHE_TIERS.SESSION,
   });
 
-  if (wsLoading || !workspaceId) {
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  if (!hydrated || wsLoading) {
     return (
       <div className="p-6 flex items-center gap-2 text-muted-foreground">
+        <h1 className="sr-only">Billing</h1>
         <Loader2 className="h-4 w-4 animate-spin" /> Loading billing...
+      </div>
+    );
+  }
+
+  if (wsError) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-semibold tracking-tight mb-4">Billing</h1>
+        <Card>
+          <CardContent className="py-8 text-center text-destructive">
+            {(wsError as Error).message}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!workspaceId) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-semibold tracking-tight mb-4">Billing</h1>
+        <Card>
+          <CardContent className="py-8 text-center text-muted-foreground">
+            You are not authorized to view billing.
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -153,7 +196,7 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
                     </td>
                     <td className="p-3 text-right font-mono">${s.grand_total.toFixed(2)}</td>
                     <td className="p-3 text-right text-muted-foreground">
-                      {new Date(s.created_at).toLocaleDateString()}
+                      {formatDateUTC(s.created_at)}
                     </td>
                   </tr>
                 ))}
@@ -383,7 +426,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
                     <td className="p-2">{a.reason ?? "—"}</td>
                     <td className="p-2 text-right font-mono">${a.amount.toFixed(2)}</td>
                     <td className="p-2 text-right text-muted-foreground">
-                      {new Date(a.created_at).toLocaleDateString()}
+                      {formatDateUTC(a.created_at)}
                     </td>
                   </tr>
                 ))}
@@ -557,7 +600,7 @@ function DefaultRatesTab({ workspaceId }: { workspaceId: string }) {
                   </td>
                   <td className="p-3 text-muted-foreground">{rule.effective_from}</td>
                   <td className="p-3 text-right text-muted-foreground">
-                    {new Date(rule.created_at).toLocaleDateString()}
+                    {formatDateUTC(rule.created_at)}
                   </td>
                   <td className="p-3 text-right">
                     {isEditing ? (

@@ -42,7 +42,14 @@ test.describe("Inbound shipment flow", () => {
 
       const carrierInput = page.getByLabel(/carrier/i);
       if (await carrierInput.isVisible()) {
-        await carrierInput.fill("UPS");
+        const carrierTag = await carrierInput.evaluate((el) => el.tagName.toLowerCase());
+        if (carrierTag === "select") {
+          await carrierInput.selectOption({ label: "UPS" }).catch(async () => {
+            await carrierInput.selectOption({ value: "ups" });
+          });
+        } else {
+          await carrierInput.fill("UPS");
+        }
       }
 
       const dateInput = page.getByLabel(/expected.*date/i);

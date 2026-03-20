@@ -110,7 +110,13 @@ export async function deleteBandcampConnection(rawData: {
 export async function getOrganizationsForWorkspace(
   workspaceId: string,
 ): Promise<Array<{ id: string; name: string }>> {
-  await requireAuth();
+  try {
+    await requireAuth();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) return [];
+    throw error;
+  }
   const serviceClient = createServiceRoleClient();
 
   const { data: orgs, error } = await serviceClient
@@ -136,8 +142,24 @@ export async function triggerBandcampSync(workspaceId?: string): Promise<{ taskR
 }
 
 export async function getBandcampSyncStatus() {
-  const { supabase, userRecord } = await requireAuth();
-  const workspaceId = userRecord.workspace_id;
+  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
+  let workspaceId = "";
+  try {
+    const auth = await requireAuth();
+    supabase = auth.supabase;
+    workspaceId = auth.userRecord.workspace_id;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) {
+      return {
+        lastMerchSync: null,
+        lastSalePoll: null,
+        lastInventoryPush: null,
+        recentLogs: [],
+      };
+    }
+    throw error;
+  }
 
   const { data: recentLogs } = await supabase
     .from("channel_sync_log")
@@ -172,7 +194,13 @@ export async function getBandcampAccounts(workspaceId: string): Promise<
     }
   >
 > {
-  await requireAuth();
+  try {
+    await requireAuth();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) return [];
+    throw error;
+  }
   const serviceClient = createServiceRoleClient();
 
   const { data: connections, error } = await serviceClient
@@ -208,7 +236,13 @@ export async function getBandcampAccounts(workspaceId: string): Promise<
 export async function getBandcampMappings(
   orgId: string,
 ): Promise<Array<BandcampProductMapping & { variant_sku: string; variant_title: string | null }>> {
-  await requireAuth();
+  try {
+    await requireAuth();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) return [];
+    throw error;
+  }
   const serviceClient = createServiceRoleClient();
 
   const { data: mappings, error } = await serviceClient

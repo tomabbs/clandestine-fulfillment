@@ -1,0 +1,611 @@
+{
+  "startedAt": "2026-03-20T06:24:08.441Z",
+  "baseUrl": "http://localhost:3000",
+  "routes": [
+    {
+      "role": "staff",
+      "path": "/admin",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inventory",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987850879",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inbound",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987851744",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/orders",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987852199",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/catalog",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987852663",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/clients",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987853140",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987853612",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipping/pirate-ship",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987854168",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/billing",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987854676",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/channels",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987855219",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/review-queue",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987855749",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/support",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987856275",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/scan",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987857270",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987857995",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/users",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/bandcamp",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987862344",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/store-connections",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987863322",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/store-mapping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987864002",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/integrations",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987864866",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/health",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/reports/top-sellers",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987867781",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/clients/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in clients list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/catalog/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in catalog list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inbound/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in inbound list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/inventory",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal/releases",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987873729",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/inbound",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal/inbound/new",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987876927",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/orders",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987877981",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/shipping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987878790",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/sales",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987879606",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/billing",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal/support",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987882993",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/settings",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1773987884116",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "public",
+      "path": "/login",
+      "ok": true,
+      "headingCheck": "not_checked",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    }
+  ],
+  "finishedAt": "2026-03-20T06:24:47.284Z"
+}

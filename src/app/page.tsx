@@ -16,7 +16,7 @@ export default function Home() {
       const hash = window.location.hash;
 
       // Supabase email invite lands here with #access_token=...&refresh_token=...
-      if (hash && hash.includes("access_token")) {
+      if (hash?.includes("access_token")) {
         const params = new URLSearchParams(hash.substring(1));
         const accessToken = params.get("access_token");
         const refreshToken = params.get("refresh_token");

@@ -1,7 +1,6 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
-import Image from "next/image";
 import {
   AlertCircle,
   ChevronDown,
@@ -22,6 +21,7 @@ import {
   Truck,
   Users,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
@@ -97,7 +97,14 @@ export function AdminSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="border-b px-4 py-3">
-        <Image src="/logo.webp" alt="Clandestine Distribution" width={216} height={43} priority />
+        <Image
+          src="/logo.webp"
+          alt="Clandestine Distribution"
+          width={216}
+          height={43}
+          priority
+          className="h-auto w-auto"
+        />
       </SidebarHeader>
 
       <SidebarContent>

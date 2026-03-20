@@ -2,7 +2,8 @@
 
 import { tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireAuth } from "@/lib/server/auth-context";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { isValidTransition } from "@/lib/shared/inbound-transitions";
 import type {
   InboundStatus,
@@ -39,6 +40,7 @@ const createInboundSchema = z.object({
 });
 
 export type CreateInboundInput = z.infer<typeof createInboundSchema>;
+export type CreateInboundResult = { success: true; id: string } | { success: false; error: string };
 
 const checkInItemSchema = z.object({
   itemId: z.string().uuid(),
@@ -144,108 +146,109 @@ export async function getInboundDetail(id: string): Promise<InboundDetailResult>
   } as InboundDetailResult;
 }
 
-export async function createInbound(input: CreateInboundInput): Promise<{ id: string }> {
-  const parsed = createInboundSchema.parse(input);
-  const supabase = await createServerSupabaseClient();
+export async function createInbound(input: CreateInboundInput): Promise<CreateInboundResult> {
+  try {
+    const parsedResult = createInboundSchema.safeParse(input);
+    if (!parsedResult.success) {
+      return { success: false, error: "Please complete all required inbound fields." };
+    }
+    const parsed = parsedResult.data;
+    const { userRecord } = await requireAuth();
+    const serviceClient = createServiceRoleClient();
 
-  // Get current user for submitted_by and org_id
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
+    if (!userRecord.org_id) {
+      return {
+        success: false,
+        error: "Your user is not linked to an organization. Contact support to fix your account.",
+      };
+    }
 
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("id, org_id, workspace_id")
-    .eq("auth_user_id", user.id)
-    .single();
+    // Create the shipment using service role with explicit user/org context checks.
+    const { data: shipment, error: shipmentError } = await serviceClient
+      .from("warehouse_inbound_shipments")
+      .insert({
+        workspace_id: userRecord.workspace_id,
+        org_id: userRecord.org_id,
+        tracking_number: parsed.tracking_number ?? null,
+        carrier: parsed.carrier ?? null,
+        expected_date: parsed.expected_date ?? null,
+        status: "expected" as InboundStatus,
+        notes: parsed.notes ?? null,
+        submitted_by: userRecord.id,
+      })
+      .select("id")
+      .single();
 
-  if (userError || !userData) {
-    throw new Error("User record not found");
-  }
+    if (shipmentError || !shipment) {
+      return {
+        success: false,
+        error: `Failed to create inbound shipment: ${shipmentError?.message ?? "unknown error"}`,
+      };
+    }
 
-  if (!userData.org_id) {
-    throw new Error("User has no organization assigned");
-  }
+    // Look up existing SKUs to determine which items need new products
+    const itemsWithSku = parsed.items.filter((item) => item.sku);
+    let existingVariants: Record<string, string> = {};
+    if (itemsWithSku.length > 0) {
+      const skus = itemsWithSku.map((i) => i.sku).filter(Boolean) as string[];
+      const { data: variants } = await serviceClient
+        .from("warehouse_product_variants")
+        .select("id, sku")
+        .eq("workspace_id", userRecord.workspace_id)
+        .in("sku", skus);
 
-  // Create the shipment
-  const { data: shipment, error: shipmentError } = await supabase
-    .from("warehouse_inbound_shipments")
-    .insert({
-      workspace_id: userData.workspace_id,
-      org_id: userData.org_id,
-      tracking_number: parsed.tracking_number ?? null,
-      carrier: parsed.carrier ?? null,
-      expected_date: parsed.expected_date ?? null,
-      status: "expected" as InboundStatus,
-      notes: parsed.notes ?? null,
-      submitted_by: userData.id,
-    })
-    .select("id")
-    .single();
+      existingVariants = Object.fromEntries((variants ?? []).map((v) => [v.sku, v.id]));
+    }
 
-  if (shipmentError || !shipment) {
-    throw new Error(`Failed to create inbound shipment: ${shipmentError?.message}`);
-  }
+    // Insert inbound items
+    const itemRows = parsed.items.map((item) => ({
+      inbound_shipment_id: shipment.id,
+      workspace_id: userRecord.workspace_id,
+      sku: item.sku ?? `PENDING-${crypto.randomUUID().slice(0, 8)}`,
+      expected_quantity: item.expected_quantity,
+      received_quantity: null,
+      condition_notes: null,
+      location_id: null,
+    }));
 
-  // Look up existing SKUs to determine which items need new products
-  const itemsWithSku = parsed.items.filter((item) => item.sku);
-  let existingVariants: Record<string, string> = {};
-  if (itemsWithSku.length > 0) {
-    const skus = itemsWithSku.map((i) => i.sku).filter(Boolean) as string[];
-    const { data: variants } = await supabase
-      .from("warehouse_product_variants")
-      .select("id, sku")
-      .in("sku", skus);
+    const { data: insertedItems, error: itemsError } = await serviceClient
+      .from("warehouse_inbound_items")
+      .insert(itemRows)
+      .select("id, sku");
 
-    existingVariants = Object.fromEntries((variants ?? []).map((v) => [v.sku, v.id]));
-  }
+    if (itemsError) {
+      return { success: false, error: `Failed to create inbound items: ${itemsError.message}` };
+    }
 
-  // Insert inbound items
-  const itemRows = parsed.items.map((item) => ({
-    inbound_shipment_id: shipment.id,
-    workspace_id: userData.workspace_id,
-    sku: item.sku ?? `PENDING-${crypto.randomUUID().slice(0, 8)}`,
-    expected_quantity: item.expected_quantity,
-    received_quantity: null,
-    condition_notes: null,
-    location_id: null,
-  }));
-
-  const { data: insertedItems, error: itemsError } = await supabase
-    .from("warehouse_inbound_items")
-    .insert(itemRows)
-    .select("id, sku");
-
-  if (itemsError) {
-    throw new Error(`Failed to create inbound items: ${itemsError.message}`);
-  }
-
-  // Flag items with no matching SKU for product creation
-  const itemsNeedingProducts = (insertedItems ?? []).filter((item) => {
-    const originalItem = parsed.items.find(
-      (i) => i.sku === item.sku || item.sku.startsWith("PENDING-"),
-    );
-    return originalItem && (!originalItem.sku || !existingVariants[originalItem.sku]);
-  });
-
-  // Also include items where user provided a SKU but it doesn't exist
-  const itemsWithUnknownSku = (insertedItems ?? []).filter((item) => {
-    const originalItem = parsed.items.find((i) => i.sku === item.sku);
-    return originalItem?.sku && !existingVariants[originalItem.sku];
-  });
-
-  const allItemsNeedingProducts = Array.from(
-    new Set([...itemsNeedingProducts, ...itemsWithUnknownSku].map((i) => i.id)),
-  );
-
-  if (allItemsNeedingProducts.length > 0) {
-    await tasks.trigger("inbound-product-create", {
-      inboundItemIds: allItemsNeedingProducts,
+    // Flag items with no matching SKU for product creation
+    const itemsNeedingProducts = (insertedItems ?? []).filter((item) => {
+      const originalItem = parsed.items.find(
+        (i) => i.sku === item.sku || item.sku.startsWith("PENDING-"),
+      );
+      return originalItem && (!originalItem.sku || !existingVariants[originalItem.sku]);
     });
-  }
 
-  return { id: shipment.id };
+    // Also include items where user provided a SKU but it doesn't exist
+    const itemsWithUnknownSku = (insertedItems ?? []).filter((item) => {
+      const originalItem = parsed.items.find((i) => i.sku === item.sku);
+      return originalItem?.sku && !existingVariants[originalItem.sku];
+    });
+
+    const allItemsNeedingProducts = Array.from(
+      new Set([...itemsNeedingProducts, ...itemsWithUnknownSku].map((i) => i.id)),
+    );
+
+    if (allItemsNeedingProducts.length > 0) {
+      await tasks.trigger("inbound-product-create", {
+        inboundItemIds: allItemsNeedingProducts,
+      });
+    }
+
+    return { success: true, id: shipment.id };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { success: false, error: `Unexpected inbound error: ${msg}` };
+  }
 }
 
 export async function markArrived(id: string): Promise<void> {

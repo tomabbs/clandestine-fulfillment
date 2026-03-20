@@ -124,7 +124,65 @@ export async function getInventoryLevels(
 
   query = query.range(offset, offset + pageSize - 1).order("sku", { ascending: true });
 
-  const { data, error, count } = await query;
+  let { data, error, count } = await query;
+
+  // Some PostgREST versions reject deep nested OR logic trees. Fall back to SKU-only search.
+  if (error && filters.search && error.message.includes("failed to parse logic tree")) {
+    let fallbackQuery = supabase.from("warehouse_inventory_levels").select(
+      `
+      id,
+      variant_id,
+      sku,
+      available,
+      committed,
+      incoming,
+      warehouse_product_variants!inner (
+        id,
+        product_id,
+        title,
+        format_name,
+        bandcamp_url,
+        warehouse_products!inner (
+          id,
+          title,
+          status,
+          org_id,
+          images,
+          organizations!inner (
+            id,
+            name
+          )
+        )
+      )
+    `,
+      { count: "exact" },
+    );
+
+    if (filters.orgId) {
+      fallbackQuery = fallbackQuery.eq(
+        "warehouse_product_variants.warehouse_products.org_id",
+        filters.orgId,
+      );
+    }
+    if (filters.format) {
+      fallbackQuery = fallbackQuery.eq("warehouse_product_variants.format_name", filters.format);
+    }
+    if (filters.status) {
+      fallbackQuery = fallbackQuery.eq(
+        "warehouse_product_variants.warehouse_products.status",
+        filters.status,
+      );
+    }
+    fallbackQuery = fallbackQuery
+      .ilike("sku", `%${filters.search}%`)
+      .range(offset, offset + pageSize - 1)
+      .order("sku", { ascending: true });
+
+    const fallback = await fallbackQuery;
+    data = fallback.data;
+    error = fallback.error;
+    count = fallback.count;
+  }
 
   if (error) {
     throw new Error(`Failed to fetch inventory levels: ${error.message}`);

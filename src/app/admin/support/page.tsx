@@ -186,7 +186,11 @@ function ConversationDetail({
   });
 
   const sendMutation = useAppMutation({
-    mutationFn: (body: string) => sendMessage({ conversationId, body }),
+    mutationFn: async (body: string) => {
+      const result = await sendMessage({ conversationId, body });
+      if (!result.success) throw new Error(result.error);
+      return result;
+    },
     invalidateKeys: [queryKeys.support.messages(conversationId), queryKeys.support.all],
     onSuccess: () => setReplyBody(""),
   });
@@ -321,6 +325,9 @@ function ConversationDetail({
           </Button>
         </div>
       )}
+      {sendMutation.error && (
+        <p className="text-sm text-destructive mt-2">{(sendMutation.error as Error).message}</p>
+      )}
     </div>
   );
 }
@@ -337,7 +344,11 @@ function NewConversationForm({
   const [body, setBody] = useState("");
 
   const createMutation = useAppMutation({
-    mutationFn: () => createConversation({ subject, body, orgId: orgId || undefined }),
+    mutationFn: async () => {
+      const result = await createConversation({ subject, body, orgId: orgId || undefined });
+      if (!result.success) throw new Error(result.error);
+      return result;
+    },
     invalidateKeys: [queryKeys.support.all],
     onSuccess: (data) => onCreated(data.conversationId),
   });
@@ -397,6 +408,9 @@ function NewConversationForm({
             Create Conversation
           </Button>
         </div>
+        {createMutation.error && (
+          <p className="text-sm text-destructive">{(createMutation.error as Error).message}</p>
+        )}
       </div>
     </div>
   );
