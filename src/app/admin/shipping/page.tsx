@@ -364,7 +364,23 @@ function ShipmentTableRow({
           </div>
         </td>
         <td className="px-4 py-3">
-          <StatusBadge status={shipment.status} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <StatusBadge status={shipment.status} />
+            {(
+              shipment as ShipmentRow & {
+                bandcamp_payment_id?: number | null;
+                bandcamp_synced_at?: string | null;
+              }
+            ).bandcamp_payment_id != null && (
+              <Badge variant="secondary" className="text-xs">
+                BC
+                {(shipment as ShipmentRow & { bandcamp_synced_at?: string | null })
+                  .bandcamp_synced_at
+                  ? " ✓"
+                  : ""}
+              </Badge>
+            )}
+          </div>
         </td>
         <td className="px-4 py-3 text-right font-mono">{formatCurrency(shipment.shipping_cost)}</td>
       </tr>

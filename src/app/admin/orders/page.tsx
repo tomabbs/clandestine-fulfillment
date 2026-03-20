@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Package } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, Package } from "lucide-react";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
@@ -124,13 +124,24 @@ export default function AdminOrdersPage() {
                     onClick={() => setExpandedId((prev) => (prev === order.id ? null : order.id))}
                   >
                     <TableCell>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-sm">{order.order_number ?? "—"}</span>
                         {order.is_preorder && (
                           <Badge variant="secondary" className="text-xs">
                             Pre-Order
                           </Badge>
                         )}
+                        {order.source === "bandcamp" &&
+                          (order as OrderRow & { bandcamp_payment_id?: number | null })
+                            .bandcamp_payment_id != null && (
+                            <Badge variant="outline" className="text-xs font-mono">
+                              BC{" "}
+                              {
+                                (order as OrderRow & { bandcamp_payment_id?: number })
+                                  .bandcamp_payment_id
+                              }
+                            </Badge>
+                          )}
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -209,44 +220,80 @@ export default function AdminOrdersPage() {
 }
 
 function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof getOrderDetail>> }) {
+  const [copied, setCopied] = useState(false);
+  const order = detail.order as { source?: string; bandcamp_payment_id?: number | null };
+  const showBandcamp = order.source === "bandcamp" && order.bandcamp_payment_id != null;
+
+  const handleCopyPaymentId = async () => {
+    const id = String(order.bandcamp_payment_id);
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: selectable text remains
+    }
+  };
+
   return (
-    <div className="grid grid-cols-2 gap-6">
-      <div>
-        <h4 className="text-sm font-semibold mb-2">Line Items</h4>
-        <div className="space-y-1 text-sm">
-          {detail.items.map((item) => (
-            <div key={item.id} className="flex justify-between">
-              <span>
-                <span className="font-mono text-xs text-muted-foreground">{item.sku}</span>{" "}
-                {item.title ?? ""}
-              </span>
-              <span className="font-mono">
-                x{item.quantity}
-                {item.price != null && ` · $${Number(item.price).toFixed(2)}`}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div>
-        <h4 className="text-sm font-semibold mb-2">Shipments</h4>
-        {detail.shipments.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No shipments yet</p>
-        ) : (
-          <div className="space-y-3">
-            {detail.shipments.map((s) => (
-              <div key={s.id} className="border rounded-lg p-3">
-                <TrackingTimeline
-                  shipmentId={s.id}
-                  trackingNumber={s.tracking_number}
-                  carrier={s.carrier}
-                  fetchEvents={getTrackingEvents}
-                />
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <h4 className="text-sm font-semibold mb-2">Line Items</h4>
+          <div className="space-y-1 text-sm">
+            {detail.items.map((item) => (
+              <div key={item.id} className="flex justify-between">
+                <span>
+                  <span className="font-mono text-xs text-muted-foreground">{item.sku}</span>{" "}
+                  {item.title ?? ""}
+                </span>
+                <span className="font-mono">
+                  x{item.quantity}
+                  {item.price != null && ` · $${Number(item.price).toFixed(2)}`}
+                </span>
               </div>
             ))}
           </div>
-        )}
+        </div>
+        <div>
+          <h4 className="text-sm font-semibold mb-2">Shipments</h4>
+          {detail.shipments.length === 0 ? (
+            <p className="text-muted-foreground text-sm">No shipments yet</p>
+          ) : (
+            <div className="space-y-3">
+              {detail.shipments.map((s) => (
+                <div key={s.id} className="border rounded-lg p-3">
+                  <TrackingTimeline
+                    shipmentId={s.id}
+                    trackingNumber={s.tracking_number}
+                    carrier={s.carrier}
+                    fetchEvents={getTrackingEvents}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+      {showBandcamp && (
+        <div className="border rounded-lg p-3 bg-muted/30">
+          <h4 className="text-sm font-semibold mb-2">Bandcamp</h4>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-sm">Payment ID:</span>
+            <span className="font-mono text-sm select-all">{order.bandcamp_payment_id}</span>
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={handleCopyPaymentId}>
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-green-600" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Use this ID when linking a shipment to Bandcamp on the Shipping page.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

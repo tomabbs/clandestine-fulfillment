@@ -27,6 +27,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bandcamp-sale-poll` | `src/trigger/tasks/bandcamp-sale-poll.ts` | `*/5 * * * *` |
 | `bandcamp-inventory-push` | `src/trigger/tasks/bandcamp-inventory-push.ts` | `*/15 * * * *` |
 | `bandcamp-sync-cron` | `src/trigger/tasks/bandcamp-sync.ts` | `*/30 * * * *` |
+| `bandcamp-order-sync-cron` | `src/trigger/tasks/bandcamp-order-sync.ts` | `0 */6 * * *` |
+| `bandcamp-mark-shipped-cron` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `*/15 * * * *` |
 | `client-store-order-detect` | `src/trigger/tasks/client-store-order-detect.ts` | `*/10 * * * *` |
 | `multi-store-inventory-push` | `src/trigger/tasks/multi-store-inventory-push.ts` | `*/5 * * * *` |
 | `sensor-check` | `src/trigger/tasks/sensor-check.ts` | `*/5 * * * *` |
@@ -46,6 +48,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `shopify-full-backfill` | `src/trigger/tasks/shopify-full-backfill.ts` | `src/actions/shopify.ts` |
 | `bandcamp-sync` | `src/trigger/tasks/bandcamp-sync.ts` | `src/actions/bandcamp.ts`, `bandcamp-sync-cron` |
 | `bandcamp-scrape-page` | `src/trigger/tasks/bandcamp-sync.ts` | `bandcamp-sync` |
+| `bandcamp-order-sync` | `src/trigger/tasks/bandcamp-order-sync.ts` | `bandcamp-order-sync-cron` |
+| `bandcamp-mark-shipped` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `src/actions/bandcamp-shipping.ts`, `bandcamp-mark-shipped-cron` |
 | `pirate-ship-import` | `src/trigger/tasks/pirate-ship-import.ts` | `src/actions/pirate-ship.ts` |
 | `inbound-product-create` | `src/trigger/tasks/inbound-product-create.ts` | `src/actions/inbound.ts` |
 | `inbound-checkin-complete` | `src/trigger/tasks/inbound-checkin-complete.ts` | `src/actions/inbound.ts` |
@@ -56,7 +60,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 ## Domain Touchpoints
 
 - Inventory: `process-shopify-webhook`, `process-client-store-webhook`, `multi-store-inventory-push`, `bandcamp-inventory-push`, `redis-backfill`
-- Orders/shipments: `shipstation-poll`, `shipment-ingest`, `aftership-register`, `client-store-order-detect`
+- Orders/shipments: `shipstation-poll`, `shipment-ingest`, `aftership-register`, `client-store-order-detect`, `bandcamp-order-sync`, `bandcamp-mark-shipped`
 - Catalog/release readiness: `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
 - Billing/storage: `monthly-billing`, `storage-calc`
 - Support/reliability: `support-escalation`, `sensor-check`, `tag-cleanup-backfill`

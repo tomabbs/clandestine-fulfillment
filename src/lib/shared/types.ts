@@ -199,6 +199,7 @@ export interface WarehouseOrder {
   org_id: string;
   shopify_order_id: string | null;
   order_number: string | null;
+  bandcamp_payment_id: number | null;
   customer_name: string | null;
   customer_email: string | null;
   financial_status: string | null;
@@ -235,6 +236,8 @@ export interface WarehouseShipment {
   org_id: string;
   shipstation_shipment_id: string | null;
   order_id: string | null;
+  bandcamp_payment_id: number | null;
+  bandcamp_synced_at: string | null;
   tracking_number: string | null;
   carrier: string | null;
   service: string | null;
