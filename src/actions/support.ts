@@ -7,6 +7,21 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { STAFF_ROLES } from "@/lib/shared/constants";
 import type { ConversationStatus, SupportConversation, SupportMessage } from "@/lib/shared/types";
 
+const OPTIONAL_SUPPORT_CONVERSATION_COLUMNS = [
+  "client_last_read_at",
+  "staff_last_read_at",
+] as const;
+const OPTIONAL_SUPPORT_MESSAGE_COLUMNS = ["source", "delivered_via_email"] as const;
+
+function isMissingColumnMessage(message: string, columns: readonly string[]): boolean {
+  return columns.some((column) => message.includes(`Could not find the '${column}' column`));
+}
+
+function isMissingColumnError(error: unknown, columns: readonly string[]): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return isMissingColumnMessage(msg, columns);
+}
+
 async function getAuthContext() {
   const { supabase, userRecord, isStaff } = await requireAuth();
   return {
@@ -222,20 +237,41 @@ export async function createConversation(
       return { success: false, error: "Unauthorized organization access." };
     }
 
-    const { data: conversation, error: convError } = await serviceClient
+    const createConversationPayload = {
+      workspace_id: workspaceId,
+      org_id: targetOrgId,
+      subject,
+      status: isStaff ? "waiting_on_client" : "waiting_on_staff",
+      created_by: user.id,
+      ...(isStaff
+        ? { staff_last_read_at: new Date().toISOString() }
+        : { client_last_read_at: new Date().toISOString() }),
+    };
+
+    let { data: conversation, error: convError } = await serviceClient
       .from("support_conversations")
-      .insert({
-        workspace_id: workspaceId,
-        org_id: targetOrgId,
-        subject,
-        status: isStaff ? "waiting_on_client" : "waiting_on_staff",
-        created_by: user.id,
-        ...(isStaff
-          ? { staff_last_read_at: new Date().toISOString() }
-          : { client_last_read_at: new Date().toISOString() }),
-      })
+      .insert(createConversationPayload)
       .select("id")
       .single();
+
+    if (
+      convError &&
+      isMissingColumnMessage(convError.message, OPTIONAL_SUPPORT_CONVERSATION_COLUMNS)
+    ) {
+      const retry = await serviceClient
+        .from("support_conversations")
+        .insert({
+          workspace_id: workspaceId,
+          org_id: targetOrgId,
+          subject,
+          status: isStaff ? "waiting_on_client" : "waiting_on_staff",
+          created_by: user.id,
+        })
+        .select("id")
+        .single();
+      conversation = retry.data;
+      convError = retry.error;
+    }
 
     if (convError || !conversation) {
       return {
@@ -244,7 +280,7 @@ export async function createConversation(
       };
     }
 
-    const { error: messageError } = await serviceClient.from("support_messages").insert({
+    let { error: messageError } = await serviceClient.from("support_messages").insert({
       conversation_id: conversation.id,
       workspace_id: workspaceId,
       sender_id: user.id,
@@ -252,6 +288,19 @@ export async function createConversation(
       source: "app",
       body,
     });
+    if (
+      messageError &&
+      isMissingColumnError(messageError.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)
+    ) {
+      const retry = await serviceClient.from("support_messages").insert({
+        conversation_id: conversation.id,
+        workspace_id: workspaceId,
+        sender_id: user.id,
+        sender_type: isStaff ? "staff" : "client",
+        body,
+      });
+      messageError = retry.error;
+    }
     if (messageError) {
       return { success: false, error: `Failed to create message: ${messageError.message}` };
     }
@@ -317,7 +366,7 @@ export async function sendMessage(
     const senderType = isStaff ? "staff" : "client";
     const newStatus: ConversationStatus = isStaff ? "waiting_on_client" : "waiting_on_staff";
 
-    const { data: message, error: msgError } = await serviceClient
+    let { data: message, error: msgError } = await serviceClient
       .from("support_messages")
       .insert({
         conversation_id: conversationId,
@@ -327,14 +376,30 @@ export async function sendMessage(
         source: "app",
         body,
       })
-      .select("id, email_message_id, delivered_via_email")
+      .select("id, email_message_id")
       .single();
+
+    if (msgError && isMissingColumnMessage(msgError.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)) {
+      const retry = await serviceClient
+        .from("support_messages")
+        .insert({
+          conversation_id: conversationId,
+          workspace_id: workspaceId,
+          sender_id: user.id,
+          sender_type: senderType,
+          body,
+        })
+        .select("id, email_message_id")
+        .single();
+      message = retry.data;
+      msgError = retry.error;
+    }
 
     if (msgError || !message) {
       return { success: false, error: `Failed to send message: ${msgError?.message}` };
     }
 
-    await serviceClient
+    const conversationUpdate = await serviceClient
       .from("support_conversations")
       .update({
         status: newStatus,
@@ -344,6 +409,18 @@ export async function sendMessage(
           : { client_last_read_at: new Date().toISOString() }),
       })
       .eq("id", conversationId);
+    if (
+      conversationUpdate.error &&
+      isMissingColumnMessage(
+        conversationUpdate.error.message,
+        OPTIONAL_SUPPORT_CONVERSATION_COLUMNS,
+      )
+    ) {
+      await serviceClient
+        .from("support_conversations")
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq("id", conversationId);
+    }
 
     // Best-effort email fanout.
     if (isStaff) {
@@ -371,10 +448,21 @@ export async function sendMessage(
               body,
               lastEmailMsg?.email_message_id ?? undefined,
             );
-            await serviceClient
+            // Older DBs may not have delivered_via_email yet.
+            // Retry with minimal payload to avoid failing message send flow.
+            const updateResult = await serviceClient
               .from("support_messages")
               .update({ email_message_id: result.messageId, delivered_via_email: true })
               .eq("id", message.id);
+            if (
+              updateResult.error &&
+              isMissingColumnMessage(updateResult.error.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)
+            ) {
+              await serviceClient
+                .from("support_messages")
+                .update({ email_message_id: result.messageId })
+                .eq("id", message.id);
+            }
           } catch (emailError) {
             console.error("[support] failed to send staff reply email:", emailError);
           }
@@ -452,6 +540,9 @@ export async function markConversationRead(conversationId: string): Promise<void
     .update(payload)
     .eq("id", conversationId);
   if (error) {
+    if (isMissingColumnMessage(error.message, OPTIONAL_SUPPORT_CONVERSATION_COLUMNS)) {
+      return;
+    }
     throw new Error(`Failed to mark conversation as read: ${error.message}`);
   }
 }

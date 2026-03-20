@@ -35,6 +35,20 @@ export default function AdminSupportPage() {
   const [activeTab, setActiveTab] = useState<ConversationStatus | undefined>("waiting_on_staff");
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [showNewConversation, setShowNewConversation] = useState(false);
+  const [initializedFromQuery, setInitializedFromQuery] = useState(false);
+
+  useEffect(() => {
+    if (initializedFromQuery) {
+      return;
+    }
+    const search = window.location.search;
+    const params = new URLSearchParams(search);
+    const conversationId = params.get("conversation");
+    if (conversationId) {
+      setSelectedConversationId(conversationId);
+    }
+    setInitializedFromQuery(true);
+  }, [initializedFromQuery]);
 
   if (showNewConversation) {
     return (

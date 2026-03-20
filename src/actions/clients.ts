@@ -238,6 +238,85 @@ export interface MonthlySales {
   margin_pct: number;
 }
 
+export interface ClientSupportHistoryRow {
+  id: string;
+  subject: string;
+  status: string;
+  updated_at: string;
+  assigned_name: string | null;
+  message_count: number;
+  last_message_preview: string | null;
+  last_message_at: string | null;
+}
+
+export async function getClientSupportHistory(orgId: string): Promise<ClientSupportHistoryRow[]> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data: conversations, error: conversationError } = await supabase
+    .from("support_conversations")
+    .select(
+      "id, subject, status, updated_at, assigned_user:users!support_conversations_assigned_to_fkey(name)",
+    )
+    .eq("org_id", orgId)
+    .order("updated_at", { ascending: false })
+    .limit(100);
+
+  if (conversationError) {
+    throw new Error(`Failed to load support history: ${conversationError.message}`);
+  }
+  if (!conversations || conversations.length === 0) {
+    return [];
+  }
+
+  const conversationIds = conversations.map((conversation) => conversation.id);
+  const { data: messages, error: messageError } = await supabase
+    .from("support_messages")
+    .select("conversation_id, body, created_at")
+    .in("conversation_id", conversationIds)
+    .order("created_at", { ascending: false });
+
+  if (messageError) {
+    throw new Error(`Failed to load support messages: ${messageError.message}`);
+  }
+
+  const messageStats = new Map<
+    string,
+    { count: number; lastPreview: string | null; lastAt: string | null }
+  >();
+
+  for (const message of messages ?? []) {
+    const current = messageStats.get(message.conversation_id) ?? {
+      count: 0,
+      lastPreview: null,
+      lastAt: null,
+    };
+    current.count += 1;
+    if (!current.lastAt || message.created_at > current.lastAt) {
+      current.lastAt = message.created_at;
+      current.lastPreview = message.body?.slice(0, 140) ?? null;
+    }
+    messageStats.set(message.conversation_id, current);
+  }
+
+  return conversations.map((conversation) => {
+    const assignedRaw = conversation.assigned_user as unknown;
+    const assignedName = Array.isArray(assignedRaw)
+      ? ((assignedRaw[0] as { name?: string } | undefined)?.name ?? null)
+      : ((assignedRaw as { name?: string } | null)?.name ?? null);
+    const stats = messageStats.get(conversation.id);
+    return {
+      id: conversation.id,
+      subject: conversation.subject,
+      status: conversation.status,
+      updated_at: conversation.updated_at,
+      assigned_name: assignedName,
+      message_count: stats?.count ?? 0,
+      last_message_preview: stats?.lastPreview ?? null,
+      last_message_at: stats?.lastAt ?? null,
+    };
+  });
+}
+
 export async function getClientDetail(orgId: string) {
   const supabase = await createServerSupabaseClient();
 

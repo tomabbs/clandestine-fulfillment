@@ -62,6 +62,7 @@ export const queryKeys = {
     billing: (id: string) => ["clients", "billing", id] as const,
     stores: (id: string) => ["clients", "stores", id] as const,
     settings: (id: string) => ["clients", "settings", id] as const,
+    supportHistory: (id: string) => ["clients", "support-history", id] as const,
     aliases: (id: string) => ["clients", "aliases", id] as const,
     presence: (orgIds: string[], onlineUserIds: string[]) =>
       ["clients", "presence", orgIds, onlineUserIds] as const,

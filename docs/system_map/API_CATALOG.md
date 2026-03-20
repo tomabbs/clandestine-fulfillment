@@ -44,7 +44,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/organizations.ts`
 - Key exports:
   - client lifecycle: `getClients`, `getClientDetail`, `createClient`, `updateClient`
-  - client presence: `getClientPresenceSummary`
+  - client presence + support history: `getClientPresenceSummary`, `getClientSupportHistory`
   - user lifecycle: `getUsers`, `inviteUser`, `updateUserRole`, `deactivateUser`, `removeClientUser`
   - org lifecycle: `getOrganizations`, `createOrganization`, `mergeOrganizations`, alias management
 

@@ -5,6 +5,13 @@ import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
+const OPTIONAL_SUPPORT_CONVERSATION_COLUMNS = ["client_last_read_at"] as const;
+const OPTIONAL_SUPPORT_MESSAGE_COLUMNS = ["source", "delivered_via_email"] as const;
+
+function isMissingColumnMessage(message: string, columns: readonly string[]): boolean {
+  return columns.some((column) => message.includes(`Could not find the '${column}' column`));
+}
+
 // Rule #63: Verify Resend Svix signature before any side effects
 function verifySvixSignature(
   rawBody: string,
@@ -162,7 +169,7 @@ async function appendMessageToConversation(
 
   if (!conversation) return;
 
-  await supabase.from("support_messages").insert({
+  let messageInsert = await supabase.from("support_messages").insert({
     conversation_id: conversationId,
     workspace_id: conversation.workspace_id,
     sender_type: "client",
@@ -171,8 +178,20 @@ async function appendMessageToConversation(
     body: email.body,
     email_message_id: email.messageId,
   });
+  if (
+    messageInsert.error &&
+    isMissingColumnMessage(messageInsert.error.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)
+  ) {
+    messageInsert = await supabase.from("support_messages").insert({
+      conversation_id: conversationId,
+      workspace_id: conversation.workspace_id,
+      sender_type: "client",
+      body: email.body,
+      email_message_id: email.messageId,
+    });
+  }
 
-  await supabase
+  let conversationUpdate = await supabase
     .from("support_conversations")
     .update({
       status: "waiting_on_staff",
@@ -180,6 +199,18 @@ async function appendMessageToConversation(
       client_last_read_at: new Date().toISOString(),
     })
     .eq("id", conversationId);
+  if (
+    conversationUpdate.error &&
+    isMissingColumnMessage(conversationUpdate.error.message, OPTIONAL_SUPPORT_CONVERSATION_COLUMNS)
+  ) {
+    conversationUpdate = await supabase
+      .from("support_conversations")
+      .update({
+        status: "waiting_on_staff",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId);
+  }
 }
 
 async function createConversationFromEmail(
@@ -205,7 +236,7 @@ async function createConversationFromEmail(
   const wsId = org?.workspace_id;
   if (!wsId) return;
 
-  const { data: conversation } = await supabase
+  let { data: conversation, error: conversationError } = await supabase
     .from("support_conversations")
     .insert({
       workspace_id: wsId,
@@ -218,9 +249,28 @@ async function createConversationFromEmail(
     .select("id")
     .single();
 
-  if (!conversation) return;
+  if (
+    conversationError &&
+    isMissingColumnMessage(conversationError.message, OPTIONAL_SUPPORT_CONVERSATION_COLUMNS)
+  ) {
+    const retry = await supabase
+      .from("support_conversations")
+      .insert({
+        workspace_id: wsId,
+        org_id: orgId,
+        subject: email.subject,
+        status: "waiting_on_staff",
+        inbound_email_id: email.messageId,
+      })
+      .select("id")
+      .single();
+    conversation = retry.data;
+    conversationError = retry.error;
+  }
 
-  await supabase.from("support_messages").insert({
+  if (conversationError || !conversation) return;
+
+  let messageInsert = await supabase.from("support_messages").insert({
     conversation_id: conversation.id,
     workspace_id: wsId,
     sender_type: "client",
@@ -229,4 +279,16 @@ async function createConversationFromEmail(
     body: email.body,
     email_message_id: email.messageId,
   });
+  if (
+    messageInsert.error &&
+    isMissingColumnMessage(messageInsert.error.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)
+  ) {
+    messageInsert = await supabase.from("support_messages").insert({
+      conversation_id: conversation.id,
+      workspace_id: wsId,
+      sender_type: "client",
+      body: email.body,
+      email_message_id: email.messageId,
+    });
+  }
 }

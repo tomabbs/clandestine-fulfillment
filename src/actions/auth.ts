@@ -48,6 +48,12 @@ export async function heartbeatPresence(currentPage: string): Promise<void> {
     .eq("id", userRecord.id);
 
   if (error) {
+    if (
+      error.message.includes("Could not find the 'last_seen_at' column") ||
+      error.message.includes("Could not find the 'last_seen_page' column")
+    ) {
+      return;
+    }
     throw new Error(`Failed to update user presence heartbeat: ${error.message}`);
   }
 }

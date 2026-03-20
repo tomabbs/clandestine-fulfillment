@@ -1,7 +1,8 @@
 "use client";
 
-import { Download, ExternalLink, Package, Search } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { Download, ExternalLink, Loader2, Package, Search, Send } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { setBandcampPaymentId, triggerBandcampMarkShipped } from "@/actions/bandcamp-shipping";
 import type { GetShipmentsFilters } from "@/actions/shipping";
 import {
   exportShipmentsCsv,
@@ -14,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -390,6 +391,35 @@ function ShipmentTableRow({
 
 function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
   const { shipment, recipient, costBreakdown, items, trackingEvents } = detail;
+  const bandcampPaymentId = (shipment as { bandcamp_payment_id?: number | null })
+    .bandcamp_payment_id;
+  const [bcPaymentInput, setBcPaymentInput] = useState(String(bandcampPaymentId ?? ""));
+  useEffect(() => {
+    setBcPaymentInput(String(bandcampPaymentId ?? ""));
+  }, [bandcampPaymentId]);
+
+  const setPaymentMut = useAppMutation({
+    mutationFn: (paymentId: number | null) =>
+      setBandcampPaymentId({ shipmentId: shipment.id, bandcampPaymentId: paymentId }),
+    invalidateKeys: [queryKeys.shipments.all],
+  });
+
+  const syncMut = useAppMutation({
+    mutationFn: () => triggerBandcampMarkShipped({ shipmentId: shipment.id }),
+    invalidateKeys: [queryKeys.shipments.all],
+  });
+
+  const bandcampSyncedAt = (shipment as { bandcamp_synced_at?: string | null }).bandcamp_synced_at;
+  const canSync = bandcampPaymentId != null && shipment.tracking_number != null;
+
+  const handleSetBcPayment = () => {
+    const parsed = Number.parseInt(bcPaymentInput, 10);
+    if (Number.isNaN(parsed) || parsed <= 0) {
+      setPaymentMut.mutate(null);
+    } else {
+      setPaymentMut.mutate(parsed);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -427,6 +457,51 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
             <dt className="text-muted-foreground">Weight</dt>
             <dd>{shipment.weight != null ? `${shipment.weight} oz` : "---"}</dd>
           </dl>
+        </div>
+
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Bandcamp Sync
+          </h4>
+          <p className="text-xs text-muted-foreground mb-2">
+            Link this shipment to a Bandcamp order (payment ID) to mark it shipped and send
+            tracking.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              type="number"
+              placeholder="Bandcamp payment ID"
+              className="w-40 h-8 text-sm"
+              value={bcPaymentInput}
+              onChange={(e) => setBcPaymentInput(e.target.value)}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={setPaymentMut.isPending}
+              onClick={handleSetBcPayment}
+            >
+              {setPaymentMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Set"}
+            </Button>
+            {bandcampPaymentId != null && (
+              <>
+                <span className="text-xs text-muted-foreground">
+                  Payment ID: {bandcampPaymentId}
+                  {bandcampSyncedAt && ` · Synced ${new Date(bandcampSyncedAt).toLocaleString()}`}
+                </span>
+                {canSync && (
+                  <Button size="sm" disabled={syncMut.isPending} onClick={() => syncMut.mutate()}>
+                    {syncMut.isPending ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <Send className="h-3 w-3 mr-1" />
+                    )}
+                    Sync to Bandcamp
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 

@@ -124,7 +124,7 @@ import type { ScrapedAlbumData } from "@/lib/clients/bandcamp-scraper";
 /**
  * Store album art as position=0 and merch product photos as position=1,2,3...
  * in warehouse_product_images. Matches the correct package by variant_id → SKU.
- * Skips if images already exist for this product (idempotent).
+ * Merges with existing images — only adds scraped images whose src is not already present.
  */
 async function storeScrapedImages(
   supabase: ReturnType<typeof createServiceRoleClient>,
@@ -133,13 +133,18 @@ async function storeScrapedImages(
   scraped: ScrapedAlbumData,
   variantId: string,
 ) {
-  // Check if product already has images — skip if so (idempotent)
-  const { count: existingCount } = await supabase
+  // Fetch existing image srcs so we don't duplicate
+  const { data: existingImages } = await supabase
     .from("warehouse_product_images")
-    .select("id", { count: "exact", head: true })
-    .eq("product_id", productId);
+    .select("src, position")
+    .eq("product_id", productId)
+    .order("position", { ascending: true });
 
-  if ((existingCount ?? 0) > 0) return;
+  const existingSrcs = new Set((existingImages ?? []).map((i) => i.src));
+  const nextPosition =
+    (existingImages?.length ?? 0) > 0
+      ? Math.max(...(existingImages ?? []).map((i) => i.position), -1) + 1
+      : 0;
 
   const imagesToInsert: Array<{
     product_id: string;
@@ -149,10 +154,10 @@ async function storeScrapedImages(
     position: number;
   }> = [];
 
-  let position = 0;
+  let position = nextPosition;
 
-  // Position 0: Album art (cover image shared across all packages)
-  if (scraped.albumArtUrl) {
+  // Album art (cover image shared across all packages) — only if not already present
+  if (scraped.albumArtUrl && !existingSrcs.has(scraped.albumArtUrl)) {
     imagesToInsert.push({
       product_id: productId,
       workspace_id: workspaceId,
@@ -173,8 +178,8 @@ async function storeScrapedImages(
   const matchedPkg = variantSku ? scraped.packages.find((p) => p.sku === variantSku) : null;
 
   if (matchedPkg) {
-    // Primary merch image (the main package photo)
-    if (matchedPkg.imageUrl) {
+    // Primary merch image (the main package photo) — only if not already present
+    if (matchedPkg.imageUrl && !existingSrcs.has(matchedPkg.imageUrl)) {
       imagesToInsert.push({
         product_id: productId,
         workspace_id: workspaceId,
@@ -186,8 +191,8 @@ async function storeScrapedImages(
 
     // Additional merch arts (extra product photos)
     for (const art of matchedPkg.arts) {
-      // Skip if same as primary image
       if (art.imageId === matchedPkg.imageId) continue;
+      if (existingSrcs.has(art.url)) continue;
 
       imagesToInsert.push({
         product_id: productId,
@@ -212,12 +217,27 @@ async function storeScrapedImages(
     return;
   }
 
-  // Update product.images JSONB for legacy compatibility
+  // Update product.images JSONB for legacy compatibility — merge with existing
+  const { data: product } = await supabase
+    .from("warehouse_products")
+    .select("images")
+    .eq("id", productId)
+    .single();
+
+  const existingImagesJson =
+    (product?.images as Array<{ src: string; alt?: string; position?: number }> | null) ?? [];
+  const newImagesJson = imagesToInsert.map((img) => ({
+    src: img.src,
+    alt: img.alt,
+    position: img.position,
+  }));
+  const mergedImages = [...existingImagesJson, ...newImagesJson].sort(
+    (a, b) => (a.position ?? 0) - (b.position ?? 0),
+  );
+
   await supabase
     .from("warehouse_products")
-    .update({
-      images: imagesToInsert.map((img) => ({ src: img.src, alt: img.alt, position: img.position })),
-    })
+    .update({ images: mergedImages, updated_at: new Date().toISOString() })
     .eq("id", productId);
 
   logger.info("Stored scraped images", {

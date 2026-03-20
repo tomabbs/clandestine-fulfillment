@@ -14,12 +14,12 @@ Status fields are intentionally explicit to prevent drift.
 
 | Integration | Route handler | Provider-side registration required | Signature header | Secret source | Current registration status | Owner | Last validated |
 |---|---|---|---|---|---|---|---|
-| Shopify (first-party) | `/api/webhooks/shopify` | Yes (Shopify admin -> webhooks) | `X-Shopify-Hmac-SHA256` | `SHOPIFY_WEBHOOK_SECRET` env | `UNKNOWN` | `TBD` | `TBD` |
-| ShipStation | `/api/webhooks/shipstation` | Yes (ShipStation webhook config) | `X-SS-Signature` | `SHIPSTATION_WEBHOOK_SECRET` env | `UNKNOWN` | `TBD` | `TBD` |
-| AfterShip | `/api/webhooks/aftership` | Yes (AfterShip webhook config) | `aftership-hmac-sha256` | `AFTERSHIP_WEBHOOK_SECRET` env | `UNKNOWN` | `TBD` | `TBD` |
-| Stripe | `/api/webhooks/stripe` | Yes (Stripe webhook endpoint) | `Stripe-Signature` | `STRIPE_WEBHOOK_SECRET` env | `UNKNOWN` | `TBD` | `TBD` |
-| Resend inbound | `/api/webhooks/resend-inbound` | Yes (Resend inbound/Svix endpoint) | `svix-signature` (+ `svix-id`, `svix-timestamp`) | `RESEND_INBOUND_WEBHOOK_SECRET` env | `UNKNOWN` | `TBD` | `TBD` |
-| Client store (Shopify/Woo) | `/api/webhooks/client-store?connection_id={id}&platform={platform}` | Yes (per client store) | Shopify: `X-Shopify-Hmac-SHA256`; Woo: `X-WC-Webhook-Signature` | `client_store_connections.webhook_secret` | `UNKNOWN` | `TBD` | `TBD` |
+| Shopify (first-party) | `/api/webhooks/shopify` | Yes (Shopify admin -> webhooks) | `X-Shopify-Hmac-SHA256` | `SHOPIFY_WEBHOOK_SECRET` env | `ACTIVE_TRAFFIC_SEEN (168 events/7d)` | `TBD` | `2026-03-20` |
+| ShipStation | `/api/webhooks/shipstation` | Yes (ShipStation webhook config) | `X-SS-Signature` | `SHIPSTATION_WEBHOOK_SECRET` env | `STALE_OR_UNREGISTERED (0 events/7d)` | `TBD` | `2026-03-20` |
+| AfterShip | `/api/webhooks/aftership` | Yes (AfterShip webhook config) | `aftership-hmac-sha256` | `AFTERSHIP_WEBHOOK_SECRET` env | `STALE_OR_UNREGISTERED (0 events/7d)` | `TBD` | `2026-03-20` |
+| Stripe | `/api/webhooks/stripe` | Yes (Stripe webhook endpoint) | `Stripe-Signature` | `STRIPE_WEBHOOK_SECRET` env | `STALE_OR_UNREGISTERED (0 events/7d)` | `TBD` | `2026-03-20` |
+| Resend inbound | `/api/webhooks/resend-inbound` | Yes (Resend inbound/Svix endpoint) | `svix-signature` (+ `svix-id`, `svix-timestamp`) | `RESEND_INBOUND_WEBHOOK_SECRET` env | `STALE_OR_UNREGISTERED (0 events/7d)` | `TBD` | `2026-03-20` |
+| Client store (Shopify/Woo) | `/api/webhooks/client-store?connection_id={id}&platform={platform}` | Yes (per client store) | Shopify: `X-Shopify-Hmac-SHA256`; Woo: `X-WC-Webhook-Signature` | `client_store_connections.webhook_secret` | `NO_ACTIVE_CONNECTIONS_OBSERVED` | `TBD` | `2026-03-20` |
 
 Notes:
 - Shopify support also exists in client-store webhook path for per-client connected stores.

@@ -2,6 +2,14 @@
 
 export { aftershipRegisterTask } from "./aftership-register";
 export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
+export {
+  bandcampMarkShippedSchedule,
+  bandcampMarkShippedTask,
+} from "./bandcamp-mark-shipped";
+export {
+  bandcampOrderSyncSchedule,
+  bandcampOrderSyncTask,
+} from "./bandcamp-order-sync";
 export { bandcampSalePollTask } from "./bandcamp-sale-poll";
 export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
 export { clientStoreOrderDetectTask } from "./client-store-order-detect";

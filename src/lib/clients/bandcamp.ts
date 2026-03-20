@@ -196,6 +196,142 @@ export async function getMerchDetails(
   return data.items;
 }
 
+// === Orders (get_orders) ===
+
+const bandcampOrderItemSchema = z.object({
+  sale_item_id: z.number(),
+  payment_id: z.number(),
+  order_date: z.string().nullish(),
+  paypal_id: z.string().nullish(),
+  sku: z.string().nullish(),
+  item_name: z.string().nullish(),
+  item_url: z.string().nullish(),
+  artist: z.string().nullish(),
+  option: z.string().nullish(),
+  quantity: z.number().nullish(),
+  sub_total: z.number().nullish(),
+  tax: z.number().nullish(),
+  shipping: z.number().nullish(),
+  currency: z.string().nullish(),
+  order_total: z.number().nullish(),
+  buyer_name: z.string().nullish(),
+  buyer_email: z.string().nullish(),
+  buyer_note: z.string().nullish(),
+  ship_notes: z.string().nullish(),
+  ship_to_name: z.string().nullish(),
+  ship_to_street: z.string().nullish(),
+  ship_to_street_2: z.string().nullish(),
+  ship_to_city: z.string().nullish(),
+  ship_to_state: z.string().nullish(),
+  ship_to_zip: z.string().nullish(),
+  ship_to_country: z.string().nullish(),
+  ship_to_country_code: z.string().nullish(),
+  ship_date: z.string().nullish(),
+  payment_state: z.string().nullish(),
+  ship_from_country_name: z.string().nullish(),
+});
+
+const getOrdersResponseSchema = z.object({
+  success: z.boolean().optional(),
+  items: z.preprocess((v) => v ?? [], z.array(bandcampOrderItemSchema)),
+});
+
+export type BandcampOrderItem = z.infer<typeof bandcampOrderItemSchema>;
+
+export interface GetOrdersParams {
+  bandId: number;
+  memberBandId?: number;
+  startTime?: string;
+  endTime?: string;
+  unshippedOnly?: boolean;
+}
+
+export async function getOrders(
+  params: GetOrdersParams,
+  accessToken: string,
+): Promise<BandcampOrderItem[]> {
+  const body: Record<string, unknown> = {
+    band_id: params.bandId,
+    start_time: params.startTime ?? "2000-01-01 00:00:00",
+  };
+  if (params.memberBandId != null) body.member_band_id = params.memberBandId;
+  if (params.endTime != null) body.end_time = params.endTime;
+  if (params.unshippedOnly === true) body.unshipped_only = true;
+
+  const response = await fetch("https://bandcamp.com/api/merchorders/4/get_orders", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`getOrders failed for band ${params.bandId}: ${response.status}`);
+  }
+
+  const json = await response.json();
+  if (json.error) {
+    throw new Error(
+      `getOrders API error for band ${params.bandId}: ${json.error_message ?? "unknown"}`,
+    );
+  }
+
+  const data = getOrdersResponseSchema.parse(json);
+  return data.items;
+}
+
+// === Mark shipped (update_shipped v2 — supports carrier + tracking) ===
+
+export interface UpdateShippedItem {
+  id: number;
+  idType: "p" | "s"; // 'p' = payment, 's' = sale item
+  shipped?: boolean;
+  notification?: boolean;
+  notificationMessage?: string;
+  shipDate?: string; // YYYY-MM-DD or YYYY-MM-DD HH:MM:SS
+  carrier?: string;
+  trackingCode?: string;
+}
+
+export async function updateShipped(
+  items: UpdateShippedItem[],
+  accessToken: string,
+): Promise<void> {
+  const body = {
+    items: items.map((item) => ({
+      id: item.id,
+      id_type: item.idType,
+      ...(item.shipped !== undefined && { shipped: item.shipped }),
+      ...(item.notification !== undefined && { notification: item.notification }),
+      ...(item.notificationMessage != null && { notification_message: item.notificationMessage }),
+      ...(item.shipDate != null && { ship_date: item.shipDate }),
+      ...(item.carrier != null && { carrier: item.carrier }),
+      ...(item.trackingCode != null && { tracking_code: item.trackingCode }),
+    })),
+  };
+
+  const response = await fetch("https://bandcamp.com/api/merchorders/2/update_shipped", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`updateShipped failed: ${response.status} ${text}`);
+  }
+
+  const json = (await response.json()) as { error?: boolean; error_message?: string };
+  if (json.error) {
+    throw new Error(`updateShipped API error: ${json.error_message ?? "unknown"}`);
+  }
+}
+
 export async function updateQuantities(
   items: Array<{
     item_id: number;

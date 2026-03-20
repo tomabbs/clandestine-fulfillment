@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { MonthlySales } from "@/actions/clients";
@@ -24,6 +25,7 @@ import {
   getClientSettings,
   getClientShipments,
   getClientStores,
+  getClientSupportHistory,
   getClientUsers,
   updateClient,
   updateOnboardingStep,
@@ -209,6 +211,7 @@ export default function ClientDetailPage() {
           <TabsTrigger value="sales">Sales</TabsTrigger>
           <TabsTrigger value="billing">Billing</TabsTrigger>
           <TabsTrigger value="stores">Stores</TabsTrigger>
+          <TabsTrigger value="messages">Messages</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
@@ -226,6 +229,9 @@ export default function ClientDetailPage() {
         </TabsContent>
         <TabsContent value="stores">
           <StoresTab orgId={orgId} />
+        </TabsContent>
+        <TabsContent value="messages">
+          <SupportHistoryTab orgId={orgId} />
         </TabsContent>
         <TabsContent value="settings">
           <SettingsTab orgId={orgId} />
@@ -552,7 +558,82 @@ function StoresTab({ orgId }: { orgId: string }) {
   );
 }
 
-// ─── Tab 6: Settings ─────────────────────────────────────────────────────────
+// ─── Tab 6: Messages ─────────────────────────────────────────────────────────
+
+function SupportHistoryTab({ orgId }: { orgId: string }) {
+  const { data: conversations, isLoading } = useAppQuery({
+    queryKey: queryKeys.clients.supportHistory(orgId),
+    queryFn: () => getClientSupportHistory(orgId),
+    tier: CACHE_TIERS.REALTIME,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading support history...
+      </div>
+    );
+  }
+
+  if (!conversations || conversations.length === 0) {
+    return <p className="py-8 pt-4 text-sm text-muted-foreground">No support conversations yet.</p>;
+  }
+
+  return (
+    <div className="space-y-4 pt-4">
+      <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        Message history combines in-app and email-threaded replies for this client.
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Subject</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Assigned</TableHead>
+            <TableHead className="text-center">Messages</TableHead>
+            <TableHead>Last Activity</TableHead>
+            <TableHead className="w-24 text-right">Open</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {conversations.map((conversation) => (
+            <TableRow key={conversation.id}>
+              <TableCell>
+                <div>
+                  <p className="font-medium">{conversation.subject}</p>
+                  {conversation.last_message_preview && (
+                    <p className="line-clamp-1 text-xs text-muted-foreground">
+                      {conversation.last_message_preview}
+                    </p>
+                  )}
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge variant={statusBadgeVariant(conversation.status)}>
+                  {conversation.status.replace(/_/g, " ")}
+                </Badge>
+              </TableCell>
+              <TableCell>{conversation.assigned_name ?? "-"}</TableCell>
+              <TableCell className="text-center">{conversation.message_count}</TableCell>
+              <TableCell>
+                {formatDate(conversation.last_message_at ?? conversation.updated_at)}
+              </TableCell>
+              <TableCell className="text-right">
+                <Link href={`/admin/support?conversation=${conversation.id}`}>
+                  <Button variant="outline" size="sm">
+                    View
+                  </Button>
+                </Link>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+// ─── Tab 7: Settings ─────────────────────────────────────────────────────────
 
 function SettingsTab({ orgId }: { orgId: string }) {
   const { data, isLoading, refetch } = useAppQuery({

@@ -175,7 +175,7 @@ function ConversationDetail({
 }) {
   const [replyBody, setReplyBody] = useState("");
 
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, refetch } = useAppQuery({
     queryKey: queryKeys.support.messages(conversationId),
     queryFn: () => getConversationDetail(conversationId),
     tier: CACHE_TIERS.REALTIME,
@@ -217,6 +217,7 @@ function ConversationDetail({
         },
         () => {
           void markConversationRead(conversationId);
+          void refetch();
         },
       )
       .subscribe();
@@ -224,7 +225,7 @@ function ConversationDetail({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId]);
+  }, [conversationId, refetch]);
 
   const sendMutation = useAppMutation({
     mutationFn: async (body: string) => {

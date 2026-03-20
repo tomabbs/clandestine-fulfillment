@@ -65,7 +65,7 @@ export async function getShipments(filters: GetShipmentsFilters) {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, org_id, shipstation_shipment_id, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, weight, label_data, voided, billed, created_at, organizations!inner(name), warehouse_orders(order_number), warehouse_shipment_items(id)",
+      "id, org_id, shipstation_shipment_id, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, weight, label_data, voided, billed, created_at, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number), warehouse_shipment_items(id)",
       { count: "exact" },
     );
 
