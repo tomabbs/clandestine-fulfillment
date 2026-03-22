@@ -72,8 +72,10 @@ function OrgSelector({
   }, []);
 
   const filtered = search
-    ? orgs.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
-    : orgs;
+    ? (orgs ?? []).filter((o) => o.name?.toLowerCase().includes(search.toLowerCase()))
+    : (orgs ?? []);
+
+  console.log("[OrgSelector] orgs prop:", orgs?.length, "filtered:", filtered.length);
 
   if (!open) {
     return (
