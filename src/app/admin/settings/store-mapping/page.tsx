@@ -120,10 +120,10 @@ function OrgSelector({
         placeholder="Search clients..."
         className="h-8 text-sm w-[220px]"
       />
-      <div className="absolute z-50 mt-1 w-[220px] max-h-64 overflow-y-auto bg-popover border border-red-500 rounded-md shadow-lg">
+      <div className="absolute z-50 mt-1 w-[220px] max-h-64 overflow-y-auto flex flex-col bg-popover border rounded-md shadow-lg">
         <button
           type="button"
-          className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent border-b"
+          className="w-full flex-shrink-0 text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent border-b"
           onClick={() => {
             onClear();
             setOpen(false);
@@ -140,7 +140,7 @@ function OrgSelector({
             <button
               key={org.id}
               type="button"
-              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${org.id === value ? "bg-accent font-medium" : ""}`}
+              className={`w-full flex-shrink-0 text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors ${org.id === value ? "bg-accent font-medium" : ""}`}
               onClick={() => {
                 onSelect(org.id);
                 setOpen(false);
