@@ -12,6 +12,11 @@ export interface StoreMappingRow extends WarehouseShipstationStore {
   org_name: string | null;
 }
 
+export interface StoreMappingData {
+  stores: StoreMappingRow[];
+  orgs: Array<{ id: string; name: string }>;
+}
+
 // === Server Actions ===
 
 async function requireAuth() {
@@ -21,19 +26,30 @@ async function requireAuth() {
   return userData.user;
 }
 
-export async function getStoreMappings(workspaceId: string): Promise<StoreMappingRow[]> {
+export async function getStoreMappings(workspaceId: string): Promise<StoreMappingData> {
   await requireAuth();
   const serviceClient = createServiceRoleClient();
 
-  const { data: stores, error } = await serviceClient
-    .from("warehouse_shipstation_stores")
-    .select("*, organizations(name)")
-    .eq("workspace_id", workspaceId)
-    .order("store_name", { ascending: true });
+  // Fetch stores and all organizations in parallel — single round-trip.
+  const [storesResult, orgsResult] = await Promise.all([
+    serviceClient
+      .from("warehouse_shipstation_stores")
+      .select("*, organizations(name)")
+      .eq("workspace_id", workspaceId)
+      .order("store_name", { ascending: true }),
+    serviceClient
+      .from("organizations")
+      .select("id, name")
+      .eq("workspace_id", workspaceId)
+      .order("name", { ascending: true }),
+  ]);
 
-  if (error) throw new Error(`Failed to fetch store mappings: ${error.message}`);
+  if (storesResult.error)
+    throw new Error(`Failed to fetch store mappings: ${storesResult.error.message}`);
+  if (orgsResult.error)
+    throw new Error(`Failed to fetch organizations: ${orgsResult.error.message}`);
 
-  return (stores ?? []).map((s) => {
+  const stores = (storesResult.data ?? []).map((s) => {
     const org = s.organizations as unknown as { name: string } | null;
     return {
       ...s,
@@ -41,6 +57,10 @@ export async function getStoreMappings(workspaceId: string): Promise<StoreMappin
       organizations: undefined,
     } as StoreMappingRow;
   });
+
+  const orgs = (orgsResult.data ?? []) as Array<{ id: string; name: string }>;
+
+  return { stores, orgs };
 }
 
 export async function syncStoresFromShipStation(workspaceId: string): Promise<{ synced: number }> {

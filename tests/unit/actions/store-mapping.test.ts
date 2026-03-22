@@ -154,9 +154,9 @@ describe("store mapping server actions", () => {
 
       const result = await getStoreMappings("ws-1");
 
-      expect(result).toHaveLength(1);
-      expect(result[0].store_name).toBe("Test Store");
-      expect(result[0].org_name).toBe("Test Org");
+      expect(result.stores).toHaveLength(1);
+      expect(result.stores[0].store_name).toBe("Test Store");
+      expect(result.stores[0].org_name).toBe("Test Org");
     });
 
     it("returns 'null' org_name for unmapped stores", async () => {
@@ -184,7 +184,7 @@ describe("store mapping server actions", () => {
 
       const result = await getStoreMappings("ws-1");
 
-      expect(result[0].org_name).toBeNull();
+      expect(result.stores[0].org_name).toBeNull();
     });
 
     it("throws when user is not authenticated", async () => {
