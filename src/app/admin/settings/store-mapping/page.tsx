@@ -208,7 +208,7 @@ export default function StoreMappingPage() {
   } = useAppQuery({
     queryKey: ["organizations-list"],
     queryFn: () => getOrganizations(),
-    tier: CACHE_TIERS.SESSION,
+    tier: CACHE_TIERS.REALTIME,
   });
 
   const syncMutation = useAppMutation({

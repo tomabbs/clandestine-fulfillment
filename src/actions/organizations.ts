@@ -15,7 +15,18 @@ const createOrgSchema = z.object({
 export async function getOrganizations(): Promise<
   Array<{ id: string; name: string; slug: string; parent_org_id: string | null }>
 > {
-  const { userRecord } = await requireAuth();
+  let userRecord: Awaited<ReturnType<typeof requireAuth>>["userRecord"];
+  try {
+    const auth = await requireAuth();
+    userRecord = auth.userRecord;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.toLowerCase().includes("unauthorized")) {
+      return [];
+    }
+    throw error;
+  }
+
   const serviceClient = createServiceRoleClient();
 
   const { data, error } = await serviceClient
