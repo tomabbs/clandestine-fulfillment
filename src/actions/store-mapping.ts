@@ -43,8 +43,10 @@ export async function getStoreMappings(workspaceId: string): Promise<StoreMappin
       .order("name", { ascending: true }),
   ]);
 
-  if (storesResult.error) throw new Error(`Failed to fetch store mappings: ${storesResult.error.message}`);
-  if (orgsResult.error) throw new Error(`Failed to fetch organizations: ${orgsResult.error.message}`);
+  if (storesResult.error)
+    throw new Error(`Failed to fetch store mappings: ${storesResult.error.message}`);
+  if (orgsResult.error)
+    throw new Error(`Failed to fetch organizations: ${orgsResult.error.message}`);
 
   const stores = (storesResult.data ?? []).map((s) => {
     const org = s.organizations as unknown as { name: string } | null;
