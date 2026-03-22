@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import { createOrganization, getOrganizations } from "@/actions/organizations";
+import { createClient, getClients } from "@/actions/clients";
 import {
   type AutoMatchSuggestion,
   autoMatchStores,
@@ -200,15 +200,16 @@ export default function StoreMappingPage() {
   });
 
   const {
-    data: orgs,
+    data: clientsData,
     isLoading: orgsLoading,
     isError: orgsError,
     refetch: refetchOrgs,
   } = useAppQuery({
-    queryKey: queryKeys.storeMappings.list(`orgs:${workspaceId}`),
-    queryFn: () => getOrganizations(),
+    queryKey: queryKeys.clients.list(),
+    queryFn: () => getClients({ pageSize: 500 }),
     tier: CACHE_TIERS.SESSION,
   });
+  const orgs = (clientsData?.clients ?? []).map((c) => ({ id: c.id, name: c.name }));
 
   const syncMutation = useAppMutation({
     mutationFn: () => syncStoresFromShipStation(workspaceId),
@@ -259,13 +260,18 @@ export default function StoreMappingPage() {
     if (!newClientName.trim()) return;
     setCreateError(null);
     try {
-      const org = await createOrganization({
+      const result = await createClient({
         name: newClientName.trim(),
+        slug: newClientName
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, ""),
         billingEmail: newClientEmail.trim() || undefined,
       });
       await refetchOrgs();
       if (pendingStoreId) {
-        assignMutation.mutate({ storeId: pendingStoreId, orgId: org.id });
+        assignMutation.mutate({ storeId: pendingStoreId, orgId: result.orgId });
       }
       setShowNewClientDialog(false);
     } catch (err) {
