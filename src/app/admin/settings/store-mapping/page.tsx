@@ -186,7 +186,19 @@ export default function StoreMappingPage() {
     tier: CACHE_TIERS.SESSION,
     enabled: !!workspaceId,
   });
-  const { stores, orgs } = data ?? { stores: [], orgs: [] };
+  // Handle both old cached format (array) and new format (object)
+  const mappingData = data;
+  const stores = Array.isArray(mappingData) ? mappingData : (mappingData?.stores ?? []);
+  const orgs = Array.isArray(mappingData) ? [] : (mappingData?.orgs ?? []);
+
+  useEffect(() => {
+    console.log(
+      "[StoreMappingPage] data received - stores:",
+      stores?.length,
+      "orgs:",
+      orgs?.length,
+    );
+  }, [stores, orgs]);
 
   const syncMutation = useAppMutation({
     mutationFn: () => syncStoresFromShipStation(workspaceId),
