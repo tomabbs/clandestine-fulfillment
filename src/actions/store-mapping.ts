@@ -55,9 +55,12 @@ export async function getStoreMappings(workspaceId: string): Promise<StoreMappin
     } as StoreMappingRow;
   });
 
+  const orgs = (orgsResult.data ?? []) as Array<{ id: string; name: string }>;
+  console.log("[getStoreMappings] orgs count:", orgs.length, orgs.slice(0, 3));
+
   return {
     stores,
-    orgs: (orgsResult.data ?? []) as Array<{ id: string; name: string }>,
+    orgs,
   };
 }
 
