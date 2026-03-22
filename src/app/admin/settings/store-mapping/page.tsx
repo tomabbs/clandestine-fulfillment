@@ -46,9 +46,6 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 function OrgSelector({
   value,
   orgName,
-  orgs,
-  orgsLoading,
-  orgsError,
   onSelect,
   onClear,
   onAddNew,
@@ -56,9 +53,6 @@ function OrgSelector({
 }: {
   value: string | null;
   orgName: string | null;
-  orgs: Array<{ id: string; name: string }>;
-  orgsLoading?: boolean;
-  orgsError?: boolean;
   onSelect: (orgId: string) => void;
   onClear: () => void;
   onAddNew: () => void;
@@ -66,6 +60,9 @@ function OrgSelector({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
+  const [orgsLoading, setOrgsLoading] = useState(false);
+  const [orgsError, setOrgsError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,6 +72,31 @@ function OrgSelector({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // Fetch orgs fresh every time the dropdown opens — same pattern as auto-match mutation.
+  // No React Query cache involved so stale/empty cached results can't block the list.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setOrgsLoading(true);
+    setOrgsError(false);
+    getOrganizations()
+      .then((data) => {
+        if (!cancelled) {
+          setOrgs(data);
+          setOrgsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOrgsError(true);
+          setOrgsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   const filtered = search
     ? orgs.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
@@ -200,17 +222,6 @@ export default function StoreMappingPage() {
     enabled: !!workspaceId,
   });
 
-  const {
-    data: orgs,
-    isLoading: orgsLoading,
-    isError: orgsError,
-    refetch: refetchOrgs,
-  } = useAppQuery({
-    queryKey: ["organizations-list"],
-    queryFn: () => getOrganizations(),
-    tier: CACHE_TIERS.REALTIME,
-  });
-
   const syncMutation = useAppMutation({
     mutationFn: () => syncStoresFromShipStation(workspaceId),
     invalidateKeys: [queryKeys.storeMappings.all],
@@ -269,7 +280,6 @@ export default function StoreMappingPage() {
           .replace(/^-|-$/g, ""),
         billingEmail: newClientEmail.trim() || undefined,
       });
-      await refetchOrgs();
       if (pendingStoreId) {
         assignMutation.mutate({ storeId: pendingStoreId, orgId: result.orgId });
       }
@@ -445,9 +455,6 @@ export default function StoreMappingPage() {
                     <OrgSelector
                       value={store.org_id ?? null}
                       orgName={store.org_name ?? null}
-                      orgs={orgs ?? []}
-                      orgsLoading={orgsLoading}
-                      orgsError={orgsError}
                       onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
                       onClear={() => unmapMutation.mutate(store.id)}
                       onAddNew={() => openNewClientDialog(store.id)}
