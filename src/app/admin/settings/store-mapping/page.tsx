@@ -120,7 +120,7 @@ function OrgSelector({
         placeholder="Search clients..."
         className="h-8 text-sm w-[220px]"
       />
-      <div className="absolute z-30 mt-1 w-[220px] max-h-48 overflow-y-auto bg-popover border rounded-md shadow-lg">
+      <div className="absolute z-50 mt-1 w-[220px] max-h-64 overflow-y-auto bg-popover border border-red-500 rounded-md shadow-lg">
         <button
           type="button"
           className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent border-b"
