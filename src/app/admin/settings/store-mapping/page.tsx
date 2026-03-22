@@ -181,7 +181,7 @@ export default function StoreMappingPage() {
   const workspaceId = ctx?.workspaceId ?? "";
 
   const { data, isLoading } = useAppQuery({
-    queryKey: queryKeys.storeMappings.list(workspaceId),
+    queryKey: [...queryKeys.storeMappings.list(workspaceId), "v2"],
     queryFn: () => getStoreMappings(workspaceId),
     tier: CACHE_TIERS.SESSION,
     enabled: !!workspaceId,
