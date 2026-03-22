@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import { createClient, getClients } from "@/actions/clients";
+import { createClient } from "@/actions/clients";
+import { getOrganizations } from "@/actions/organizations";
 import {
   type AutoMatchSuggestion,
   autoMatchStores,
@@ -200,16 +201,15 @@ export default function StoreMappingPage() {
   });
 
   const {
-    data: clientsData,
+    data: orgs,
     isLoading: orgsLoading,
     isError: orgsError,
     refetch: refetchOrgs,
   } = useAppQuery({
-    queryKey: queryKeys.clients.list(),
-    queryFn: () => getClients({ pageSize: 500 }),
+    queryKey: ["organizations-list"],
+    queryFn: () => getOrganizations(),
     tier: CACHE_TIERS.SESSION,
   });
-  const orgs = (clientsData?.clients ?? []).map((c) => ({ id: c.id, name: c.name }));
 
   const syncMutation = useAppMutation({
     mutationFn: () => syncStoresFromShipStation(workspaceId),
