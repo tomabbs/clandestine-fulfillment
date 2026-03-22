@@ -46,6 +46,8 @@ function OrgSelector({
   value,
   orgName,
   orgs,
+  orgsLoading,
+  orgsError,
   onSelect,
   onClear,
   onAddNew,
@@ -54,6 +56,8 @@ function OrgSelector({
   value: string | null;
   orgName: string | null;
   orgs: Array<{ id: string; name: string }>;
+  orgsLoading?: boolean;
+  orgsError?: boolean;
   onSelect: (orgId: string) => void;
   onClear: () => void;
   onAddNew: () => void;
@@ -129,8 +133,18 @@ function OrgSelector({
         >
           (Unassigned)
         </button>
-        {filtered.length === 0 && search ? (
+        {orgsLoading ? (
+          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3 w-3 animate-spin" /> Loading clients...
+          </div>
+        ) : orgsError ? (
+          <div className="px-3 py-2 text-xs text-destructive">
+            Failed to load clients. Refresh and try again.
+          </div>
+        ) : filtered.length === 0 && search ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">No clients match</div>
+        ) : filtered.length === 0 ? (
+          <div className="px-3 py-2 text-xs text-muted-foreground">No clients found.</div>
         ) : (
           filtered.map((org) => (
             <button
@@ -185,11 +199,15 @@ export default function StoreMappingPage() {
     enabled: !!workspaceId,
   });
 
-  const { data: orgs, refetch: refetchOrgs } = useAppQuery({
-    queryKey: ["organizations"],
+  const {
+    data: orgs,
+    isLoading: orgsLoading,
+    isError: orgsError,
+    refetch: refetchOrgs,
+  } = useAppQuery({
+    queryKey: queryKeys.storeMappings.list(`orgs:${workspaceId}`),
     queryFn: () => getOrganizations(),
     tier: CACHE_TIERS.SESSION,
-    enabled: !!ctx,
   });
 
   const syncMutation = useAppMutation({
@@ -422,6 +440,8 @@ export default function StoreMappingPage() {
                       value={store.org_id ?? null}
                       orgName={store.org_name ?? null}
                       orgs={orgs ?? []}
+                      orgsLoading={orgsLoading}
+                      orgsError={orgsError}
                       onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
                       onClear={() => unmapMutation.mutate(store.id)}
                       onAddNew={() => openNewClientDialog(store.id)}
