@@ -15,7 +15,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { getUserContext } from "@/actions/auth";
 import { createClient } from "@/actions/clients";
-import { getOrganizations } from "@/actions/organizations";
 import {
   type AutoMatchSuggestion,
   autoMatchStores,
@@ -46,6 +45,7 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 function OrgSelector({
   value,
   orgName,
+  orgs,
   onSelect,
   onClear,
   onAddNew,
@@ -53,6 +53,7 @@ function OrgSelector({
 }: {
   value: string | null;
   orgName: string | null;
+  orgs: Array<{ id: string; name: string }>;
   onSelect: (orgId: string) => void;
   onClear: () => void;
   onAddNew: () => void;
@@ -60,9 +61,6 @@ function OrgSelector({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [orgs, setOrgs] = useState<Array<{ id: string; name: string }>>([]);
-  const [orgsLoading, setOrgsLoading] = useState(false);
-  const [orgsError, setOrgsError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,31 +70,6 @@ function OrgSelector({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
-
-  // Fetch orgs fresh every time the dropdown opens — same pattern as auto-match mutation.
-  // No React Query cache involved so stale/empty cached results can't block the list.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setOrgsLoading(true);
-    setOrgsError(false);
-    getOrganizations()
-      .then((data) => {
-        if (!cancelled) {
-          setOrgs(data);
-          setOrgsLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setOrgsError(true);
-          setOrgsLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   const filtered = search
     ? orgs.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
@@ -156,15 +129,7 @@ function OrgSelector({
         >
           (Unassigned)
         </button>
-        {orgsLoading ? (
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" /> Loading clients...
-          </div>
-        ) : orgsError ? (
-          <div className="px-3 py-2 text-xs text-destructive">
-            Failed to load clients. Refresh and try again.
-          </div>
-        ) : filtered.length === 0 && search ? (
+        {filtered.length === 0 && search ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">No clients match</div>
         ) : filtered.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">No clients found.</div>
@@ -215,12 +180,13 @@ export default function StoreMappingPage() {
   });
   const workspaceId = ctx?.workspaceId ?? "";
 
-  const { data: stores, isLoading } = useAppQuery({
+  const { data, isLoading } = useAppQuery({
     queryKey: queryKeys.storeMappings.list(workspaceId),
     queryFn: () => getStoreMappings(workspaceId),
     tier: CACHE_TIERS.SESSION,
     enabled: !!workspaceId,
   });
+  const { stores, orgs } = data ?? { stores: [], orgs: [] };
 
   const syncMutation = useAppMutation({
     mutationFn: () => syncStoresFromShipStation(workspaceId),
@@ -249,8 +215,8 @@ export default function StoreMappingPage() {
     invalidateKeys: [queryKeys.storeMappings.all],
   });
 
-  const totalCount = (stores ?? []).length;
-  const mappedCount = (stores ?? []).filter((s) => s.org_id).length;
+  const totalCount = stores.length;
+  const mappedCount = stores.filter((s) => s.org_id).length;
   const unmappedCount = totalCount - mappedCount;
   const pct = totalCount > 0 ? Math.round((mappedCount / totalCount) * 100) : 0;
 
@@ -442,7 +408,7 @@ export default function StoreMappingPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(stores ?? []).map((store) => (
+              {stores.map((store) => (
                 <TableRow key={store.id}>
                   <TableCell className="font-medium">{store.store_name ?? "Unnamed"}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
@@ -455,6 +421,7 @@ export default function StoreMappingPage() {
                     <OrgSelector
                       value={store.org_id ?? null}
                       orgName={store.org_name ?? null}
+                      orgs={orgs}
                       onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
                       onClear={() => unmapMutation.mutate(store.id)}
                       onAddNew={() => openNewClientDialog(store.id)}

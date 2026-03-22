@@ -129,62 +129,86 @@ describe("store mapping server actions", () => {
   });
 
   describe("getStoreMappings", () => {
-    it("returns stores with org names", async () => {
-      mockServiceFrom.mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({
-              data: [
-                {
-                  id: "store-1",
-                  workspace_id: "ws-1",
-                  org_id: "org-1",
-                  store_id: 100,
-                  store_name: "Test Store",
-                  marketplace_name: "Shopify",
-                  created_at: "2026-01-01T00:00:00Z",
-                  organizations: { name: "Test Org" },
-                },
-              ],
-              error: null,
+    it("returns stores with org names and org list", async () => {
+      mockServiceFrom
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({
+                data: [
+                  {
+                    id: "store-1",
+                    workspace_id: "ws-1",
+                    org_id: "org-1",
+                    store_id: 100,
+                    store_name: "Test Store",
+                    marketplace_name: "Shopify",
+                    created_at: "2026-01-01T00:00:00Z",
+                    organizations: { name: "Test Org" },
+                  },
+                ],
+                error: null,
+              }),
             }),
           }),
-        }),
-      });
+        })
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({
+                data: [{ id: "org-1", name: "Test Org" }],
+                error: null,
+              }),
+            }),
+          }),
+        });
 
       const result = await getStoreMappings("ws-1");
 
-      expect(result).toHaveLength(1);
-      expect(result[0].store_name).toBe("Test Store");
-      expect(result[0].org_name).toBe("Test Org");
+      expect(result.stores).toHaveLength(1);
+      expect(result.stores[0].store_name).toBe("Test Store");
+      expect(result.stores[0].org_name).toBe("Test Org");
+      expect(result.orgs).toHaveLength(1);
+      expect(result.orgs[0]).toEqual({ id: "org-1", name: "Test Org" });
     });
 
     it("returns 'null' org_name for unmapped stores", async () => {
-      mockServiceFrom.mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({
-              data: [
-                {
-                  id: "store-1",
-                  workspace_id: "ws-1",
-                  org_id: null,
-                  store_id: 100,
-                  store_name: "Unmapped Store",
-                  marketplace_name: "eBay",
-                  created_at: "2026-01-01T00:00:00Z",
-                  organizations: null,
-                },
-              ],
-              error: null,
+      mockServiceFrom
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({
+                data: [
+                  {
+                    id: "store-1",
+                    workspace_id: "ws-1",
+                    org_id: null,
+                    store_id: 100,
+                    store_name: "Unmapped Store",
+                    marketplace_name: "eBay",
+                    created_at: "2026-01-01T00:00:00Z",
+                    organizations: null,
+                  },
+                ],
+                error: null,
+              }),
             }),
           }),
-        }),
-      });
+        })
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({
+                data: [],
+                error: null,
+              }),
+            }),
+          }),
+        });
 
       const result = await getStoreMappings("ws-1");
 
-      expect(result[0].org_name).toBeNull();
+      expect(result.stores[0].org_name).toBeNull();
     });
 
     it("throws when user is not authenticated", async () => {
