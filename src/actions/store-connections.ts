@@ -374,6 +374,44 @@ export async function autoDiscoverSkus(
         }));
       break;
     }
+    case "shopify": {
+      if (!conn.api_key) throw new Error("Missing API key");
+      const shopifyUrl = conn.store_url.replace(/\/$/, "");
+      const shopifyHeaders = { "X-Shopify-Access-Token": conn.api_key };
+
+      // Paginate through all products
+      let pageUrl: string | null =
+        `${shopifyUrl}/admin/api/2024-01/products.json?limit=250&fields=id,variants`;
+      while (pageUrl) {
+        const res: Response = await fetch(pageUrl, { headers: shopifyHeaders });
+        if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
+        const { products } = (await res.json()) as {
+          products: Array<{
+            id: number;
+            variants: Array<{ id: number; sku: string }>;
+          }>;
+        };
+
+        for (const product of products) {
+          for (const variant of product.variants ?? []) {
+            if (variant.sku) {
+              remoteSkus.push({
+                sku: variant.sku,
+                remoteProductId: String(product.id),
+                remoteVariantId: String(variant.id),
+              });
+            }
+          }
+        }
+
+        // Handle pagination via Link header
+        const linkHeader: string | null = res.headers.get("Link");
+        const nextMatch: RegExpMatchArray | null | undefined =
+          linkHeader?.match(/<([^>]+)>;\s*rel="next"/);
+        pageUrl = nextMatch?.[1] ?? null;
+      }
+      break;
+    }
     default:
       throw new Error(`Auto-discover not supported for platform: ${conn.platform}`);
   }

@@ -50,19 +50,116 @@ export function createStoreSyncClient(
 
 // === Shopify sync ===
 
-function createShopifySync(_connection: ClientStoreConnection): StoreSyncClient {
+function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
+  const apiKey = connection.api_key;
+  if (!apiKey) throw new Error("Shopify connection missing api_key");
+
+  const baseUrl = connection.store_url.replace(/\/$/, "");
+  const headers = {
+    "X-Shopify-Access-Token": apiKey,
+    "Content-Type": "application/json",
+  };
+
+  async function findVariantBySku(
+    sku: string,
+  ): Promise<{ variantId: number; inventoryItemId: number } | null> {
+    const res = await fetch(
+      `${baseUrl}/admin/api/2024-01/variants.json?sku=${encodeURIComponent(sku)}`,
+      { headers },
+    );
+    if (!res.ok) throw new Error(`Shopify variant lookup failed: HTTP ${res.status}`);
+    const { variants } = (await res.json()) as {
+      variants: Array<{ id: number; inventory_item_id: number; sku: string }>;
+    };
+    const match = variants.find((v) => v.sku === sku);
+    if (!match) return null;
+    return { variantId: match.id, inventoryItemId: match.inventory_item_id };
+  }
+
+  async function getLocationAndQuantity(
+    inventoryItemId: number,
+  ): Promise<{ locationId: number; available: number } | null> {
+    const res = await fetch(
+      `${baseUrl}/admin/api/2024-01/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
+      { headers },
+    );
+    if (!res.ok) throw new Error(`Shopify inventory levels fetch failed: HTTP ${res.status}`);
+    const { inventory_levels } = (await res.json()) as {
+      inventory_levels: Array<{ location_id: number; available: number }>;
+    };
+    const level = inventory_levels[0];
+    if (!level) return null;
+    return { locationId: level.location_id, available: level.available };
+  }
+
   return {
-    async pushInventory(_sku, _quantity, _idempotencyKey) {
-      // Shopify inventory is managed via the main shopify.ts client (GraphQL).
-      // This path is used for client-owned Shopify stores (not the warehouse Shopify).
-      // For now, delegate to the inventory_level/set REST endpoint.
-      throw new Error("Shopify client store push not yet implemented — use Trigger task");
+    async pushInventory(sku, quantity, _idempotencyKey) {
+      const variant = await findVariantBySku(sku);
+      if (!variant) {
+        console.warn(`[ShopifySync] SKU ${sku} not found in client store — skipping push`);
+        return;
+      }
+
+      const level = await getLocationAndQuantity(variant.inventoryItemId);
+      if (!level) {
+        console.warn(`[ShopifySync] No inventory level for SKU ${sku} — skipping push`);
+        return;
+      }
+
+      const res = await fetch(`${baseUrl}/admin/api/2024-01/inventory_levels/set.json`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          location_id: level.locationId,
+          inventory_item_id: variant.inventoryItemId,
+          available: quantity,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`Shopify inventory set failed: HTTP ${res.status} — ${body}`);
+      }
     },
-    async getRemoteQuantity(_sku) {
-      throw new Error("Shopify client store read not yet implemented — use Trigger task");
+
+    async getRemoteQuantity(sku) {
+      const variant = await findVariantBySku(sku);
+      if (!variant) return null;
+
+      const level = await getLocationAndQuantity(variant.inventoryItemId);
+      return level?.available ?? null;
     },
-    async getOrders(_since) {
-      throw new Error("Shopify client store orders not yet implemented — use Trigger task");
+
+    async getOrders(since) {
+      const res = await fetch(
+        `${baseUrl}/admin/api/2024-01/orders.json?created_at_min=${encodeURIComponent(since)}&status=any&limit=50`,
+        { headers },
+      );
+      if (!res.ok) throw new Error(`Shopify orders fetch failed: HTTP ${res.status}`);
+      const { orders } = (await res.json()) as {
+        orders: Array<{
+          id: number;
+          name: string;
+          created_at: string;
+          line_items: Array<{
+            sku: string;
+            quantity: number;
+            product_id: number;
+            variant_id: number;
+          }>;
+        }>;
+      };
+
+      return orders.map((o) => ({
+        remoteOrderId: String(o.id),
+        orderNumber: o.name,
+        createdAt: o.created_at,
+        lineItems: o.line_items.map((li) => ({
+          sku: li.sku ?? "",
+          quantity: li.quantity,
+          remoteProductId: String(li.product_id),
+          remoteVariantId: li.variant_id ? String(li.variant_id) : null,
+        })),
+      }));
     },
   };
 }
