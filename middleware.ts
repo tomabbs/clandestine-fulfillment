@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import type { UserRole } from "@/lib/shared/constants";
 import { STAFF_ROLES } from "@/lib/shared/constants";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health"];
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health", "/terms", "/privacy"];
 
 function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith("/api/webhooks/")) return true;
