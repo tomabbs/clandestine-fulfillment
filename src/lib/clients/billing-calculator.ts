@@ -1,6 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { detectFormat } from "./format-detector";
 
+// ── Consignment Payout Types (V7.2) ─────────────────────────────────────────
+
+export interface ConsignmentPayoutSummary {
+  org_id: string;
+  total_payout_amount: number;
+  order_count: number;
+  order_ids: string[];
+}
+
 interface BillingPeriod {
   start: string; // YYYY-MM-DD
   end: string; // YYYY-MM-DD
@@ -502,5 +511,49 @@ export async function calculateBillingForOrg(
       total_adjustments: totalAdjustments,
       grand_total: grandTotal,
     },
+  };
+}
+
+/**
+ * Calculate consignment payouts owed to a client org for a billing period.
+ *
+ * Queries mailorder_orders with client_payout_status = 'pending' for orders
+ * created within the billing period.
+ *
+ * Payout formula: client_payout_amount (= subtotal * 0.5, set at order insert).
+ * NEVER use total_price — shipping belongs 100% to Clandestine.
+ *
+ * Rule #22: math stays in TypeScript; DB updates happen in monthly-billing.ts.
+ */
+export async function calculateConsignmentPayouts(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  orgId: string,
+  billingPeriod: BillingPeriod,
+): Promise<ConsignmentPayoutSummary> {
+  const { data: pendingOrders } = await supabase
+    .from("mailorder_orders")
+    .select("id, client_payout_amount, subtotal")
+    .eq("workspace_id", workspaceId)
+    .eq("org_id", orgId)
+    .eq("client_payout_status", "pending")
+    .gte("created_at", `${billingPeriod.start}T00:00:00.000Z`)
+    .lte("created_at", `${billingPeriod.end}T23:59:59.999Z`);
+
+  const orders = pendingOrders ?? [];
+
+  // Use stored client_payout_amount; fall back to subtotal * 0.5 if somehow null
+  // CRITICAL: do NOT multiply subtotal by total_price — shipping is excluded
+  const total = orders.reduce((sum, o) => {
+    const payout =
+      o.client_payout_amount != null ? Number(o.client_payout_amount) : Number(o.subtotal) * 0.5;
+    return sum + payout;
+  }, 0);
+
+  return {
+    org_id: orgId,
+    total_payout_amount: total,
+    order_count: orders.length,
+    order_ids: orders.map((o) => o.id),
   };
 }

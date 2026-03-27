@@ -69,10 +69,17 @@ async function aftershipFetch<T>(
   return (await res.json()) as T;
 }
 
+export interface CreateTrackingOptions {
+  title?: string;
+  orderId?: string;
+  emails?: string[];
+  customerName?: string;
+}
+
 export async function createTracking(
   trackingNumber: string,
   carrier: string,
-  metadata?: Record<string, unknown>,
+  options?: CreateTrackingOptions,
 ): Promise<AfterShipTracking> {
   const response = await aftershipFetch<z.infer<typeof createTrackingResponseSchema>>(
     "/trackings",
@@ -82,8 +89,10 @@ export async function createTracking(
         tracking: {
           tracking_number: trackingNumber,
           slug: normalizeCarrierSlug(carrier),
-          ...(metadata?.title ? { title: metadata.title } : {}),
-          ...(metadata?.orderId ? { order_id: metadata.orderId } : {}),
+          ...(options?.title ? { title: options.title } : {}),
+          ...(options?.orderId ? { order_id: options.orderId } : {}),
+          ...(options?.emails?.length ? { emails: options.emails } : {}),
+          ...(options?.customerName ? { customer_name: options.customerName } : {}),
         },
       },
     },

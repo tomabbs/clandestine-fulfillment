@@ -55,6 +55,7 @@ const PLATFORM_LABELS: Record<StorePlatform, string> = {
   woocommerce: "WooCommerce",
   squarespace: "Squarespace",
   bigcommerce: "BigCommerce",
+  discogs: "Discogs",
 };
 
 function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {

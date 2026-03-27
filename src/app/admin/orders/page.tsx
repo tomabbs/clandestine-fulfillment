@@ -1,8 +1,24 @@
 "use client";
 
-import { Check, ChevronLeft, ChevronRight, Copy, Package } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Package,
+  Tag,
+} from "lucide-react";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
+import {
+  createOrderLabel,
+  getLabelTaskStatus,
+  getShippingRates,
+  type LabelResult,
+  type RateOption,
+} from "@/actions/shipping";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -27,6 +43,7 @@ const SOURCE_COLORS: Record<string, string> = {
   bandcamp: "bg-blue-100 text-blue-800",
   woocommerce: "bg-purple-100 text-purple-800",
   squarespace: "bg-yellow-100 text-yellow-800",
+  discogs: "bg-orange-100 text-orange-800",
   manual: "bg-gray-100 text-gray-800",
 };
 
@@ -77,6 +94,7 @@ export default function AdminOrdersPage() {
           <option value="bandcamp">Bandcamp</option>
           <option value="woocommerce">WooCommerce</option>
           <option value="squarespace">Squarespace</option>
+          <option value="discogs">Discogs</option>
           <option value="manual">Manual</option>
         </select>
         <select
@@ -221,8 +239,17 @@ export default function AdminOrdersPage() {
 
 function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof getOrderDetail>> }) {
   const [copied, setCopied] = useState(false);
-  const order = detail.order as { source?: string; bandcamp_payment_id?: number | null };
+  const orderId = detail.order?.id as string;
+  const order = detail.order as {
+    source?: string;
+    bandcamp_payment_id?: number | null;
+    fulfillment_status?: string | null;
+  };
   const showBandcamp = order.source === "bandcamp" && order.bandcamp_payment_id != null;
+  const isUnfulfilled =
+    !order.fulfillment_status ||
+    order.fulfillment_status === "unfulfilled" ||
+    order.fulfillment_status === "pending";
 
   const handleCopyPaymentId = async () => {
     const id = String(order.bandcamp_payment_id);
@@ -275,6 +302,10 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
           )}
         </div>
       </div>
+
+      {/* Create Label panel — only shown for unfulfilled orders */}
+      {isUnfulfilled && orderId && <CreateLabelPanel orderId={orderId} orderType="fulfillment" />}
+
       {showBandcamp && (
         <div className="border rounded-lg p-3 bg-muted/30">
           <h4 className="text-sm font-semibold mb-2">Bandcamp</h4>
@@ -292,6 +323,187 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
           <p className="text-xs text-muted-foreground mt-1">
             Use this ID when linking a shipment to Bandcamp on the Shipping page.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CreateLabelPanel({
+  orderId,
+  orderType,
+}: {
+  orderId: string;
+  orderType: "fulfillment" | "mailorder";
+}) {
+  const [showRates, setShowRates] = useState(false);
+  const [selectedRateId, setSelectedRateId] = useState<string | null>(null);
+  const [labelResult, setLabelResult] = useState<LabelResult | null>(null);
+  const [taskRunId, setTaskRunId] = useState<string | null>(null);
+  const [polling, setPolling] = useState(false);
+
+  const ratesQuery = useAppQuery({
+    queryKey: ["label-rates", orderId, orderType],
+    queryFn: () => getShippingRates(orderId, orderType),
+    tier: CACHE_TIERS.SESSION,
+    enabled: showRates,
+  });
+
+  const createMut = useAppMutation({
+    mutationFn: async () => {
+      if (!selectedRateId) throw new Error("Select a rate first");
+      return createOrderLabel(orderId, { orderType, selectedRateId });
+    },
+    onSuccess: async (result) => {
+      if (!result.success) {
+        setLabelResult(result);
+        return;
+      }
+      // result.shipmentId is the Trigger.dev run ID when using task path
+      if (result.shipmentId) {
+        setTaskRunId(result.shipmentId);
+        setPolling(true);
+        // Poll for task completion
+        const poll = async () => {
+          const status = await getLabelTaskStatus(result.shipmentId!);
+          if (status.status === "completed" || status.status === "failed") {
+            setPolling(false);
+            setLabelResult(status.result ?? { success: false, error: "Unknown status" });
+          } else {
+            setTimeout(poll, 2500);
+          }
+        };
+        setTimeout(poll, 2500);
+      } else {
+        setLabelResult(result);
+      }
+    },
+  });
+
+  const rates: RateOption[] = ratesQuery.data?.rates ?? [];
+
+  return (
+    <div className="border rounded-lg p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold flex items-center gap-1.5">
+          <Tag className="h-4 w-4" />
+          Create Shipping Label
+        </h4>
+        {!showRates && !labelResult && (
+          <Button size="sm" variant="outline" onClick={() => setShowRates(true)}>
+            Get Rates
+          </Button>
+        )}
+      </div>
+
+      {/* Rates loading */}
+      {showRates && ratesQuery.isLoading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Fetching rates…
+        </div>
+      )}
+
+      {/* Rate error */}
+      {ratesQuery.data?.error && (
+        <p className="text-sm text-destructive">{ratesQuery.data.error}</p>
+      )}
+
+      {/* Rate selector */}
+      {!ratesQuery.isLoading && rates.length > 0 && !labelResult && (
+        <div className="space-y-2">
+          <div className="grid gap-2">
+            {rates.map((rate) => (
+              <label
+                key={rate.id}
+                className={`flex items-center justify-between border rounded-md px-3 py-2 cursor-pointer text-sm transition-colors ${
+                  selectedRateId === rate.id
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name={`rate-${orderId}`}
+                    value={rate.id}
+                    checked={selectedRateId === rate.id}
+                    onChange={() => setSelectedRateId(rate.id)}
+                    className="sr-only"
+                  />
+                  <div>
+                    <span className="font-medium">{rate.displayName}</span>
+                    {rate.recommended && (
+                      <Badge variant="secondary" className="ml-2 text-xs">
+                        Recommended
+                      </Badge>
+                    )}
+                    {rate.isMediaMail && (
+                      <Badge variant="outline" className="ml-1 text-xs">
+                        Media Mail
+                      </Badge>
+                    )}
+                    {rate.deliveryDays && (
+                      <span className="text-muted-foreground ml-2 text-xs">
+                        ~{rate.deliveryDays}d
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className="font-mono font-semibold">${rate.rate.toFixed(2)}</span>
+              </label>
+            ))}
+          </div>
+          <Button
+            size="sm"
+            disabled={!selectedRateId || createMut.isPending || polling}
+            onClick={() => createMut.mutate()}
+          >
+            {createMut.isPending || polling ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                Creating…
+              </>
+            ) : (
+              "Buy Label"
+            )}
+          </Button>
+        </div>
+      )}
+
+      {/* Label result */}
+      {labelResult && (
+        <div
+          className={`rounded-md p-3 text-sm ${labelResult.success ? "bg-green-50 border border-green-200" : "bg-destructive/10 border border-destructive/20"}`}
+        >
+          {labelResult.success ? (
+            <div className="space-y-2">
+              <p className="font-medium text-green-800">Label created!</p>
+              <div className="text-green-700 space-y-1">
+                <p>
+                  Carrier: {labelResult.carrier} · {labelResult.service}
+                </p>
+                <p>
+                  Tracking: <span className="font-mono">{labelResult.trackingNumber}</span>
+                </p>
+                <p>
+                  Cost: <span className="font-mono">${labelResult.rate?.toFixed(2)}</span>
+                </p>
+              </div>
+              {labelResult.labelUrl && (
+                <a
+                  href={labelResult.labelUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-1"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open label (Cmd+P to print)
+                </a>
+              )}
+            </div>
+          ) : (
+            <p className="text-destructive">{labelResult.error ?? "Label creation failed"}</p>
+          )}
         </div>
       )}
     </div>

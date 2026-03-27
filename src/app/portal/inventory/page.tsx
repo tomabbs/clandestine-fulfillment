@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight, ExternalLink, Minus, Package, Plus } from "lucide-react";
 import { useState } from "react";
-import { getInventoryDetail, getInventoryLevels } from "@/actions/inventory";
+import { getClientInventoryLevels, getInventoryDetail } from "@/actions/inventory";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,10 +36,10 @@ export default function InventoryPage() {
     pageSize: filters.pageSize,
   };
 
-  // RLS filters to own org automatically via Supabase auth
+  // Explicitly scoped to client's own org via requireClient() in server action
   const { data, isLoading } = useAppQuery({
     queryKey: queryKeys.inventory.list({ ...queryFilters, portal: true }),
-    queryFn: () => getInventoryLevels(queryFilters),
+    queryFn: () => getClientInventoryLevels(queryFilters),
     tier: CACHE_TIERS.REALTIME,
   });
 

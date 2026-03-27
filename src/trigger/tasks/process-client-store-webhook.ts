@@ -128,7 +128,7 @@ async function handleOrderCreated(
     .from("warehouse_orders")
     .select("id")
     .eq("workspace_id", workspaceId)
-    .eq("shopify_order_id", remoteOrderId)
+    .eq("external_order_id", remoteOrderId)
     .single();
 
   if (existing) return { processed: true, reason: "duplicate_order" };
@@ -152,7 +152,7 @@ async function handleOrderCreated(
     .insert({
       workspace_id: workspaceId,
       org_id: orgId,
-      shopify_order_id: remoteOrderId,
+      external_order_id: remoteOrderId,
       order_number: (data.order_number as string) ?? (data.name as string) ?? null,
       source: platform,
       line_items: lineItems,

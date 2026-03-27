@@ -1,0 +1,26 @@
+name = "Clandestine Fulfillment Sync"
+client_id = "1a130c67b70382784614107d4ce0e933"
+application_url = "https://cpanel.clandestinedistro.com"
+embedded = false
+handle = "clandestine-fulfillment-sync"
+
+[access_scopes]
+scopes = "read_products,write_products,read_inventory,write_inventory,read_orders,write_orders,read_fulfillments,write_fulfillments"
+
+[auth]
+redirect_urls = [
+  "https://cpanel.clandestinedistro.com/api/oauth/shopify",
+]
+
+[webhooks]
+api_version = "2026-01"
+
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/redact", "customers/data_request", "shop/redact"]
+uri = "/api/webhooks/shopify/gdpr"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = false

@@ -3,6 +3,12 @@
  *
  * Polls each active client_store_connection for new orders.
  * Rule #65: Echo cancellation — if order quantities match last_pushed_quantity, it's our own push echoing.
+ *
+ * NOTE: Discogs connections are intentionally skipped here.
+ * They are handled by discogs-client-order-sync, which:
+ *   - Uses OAuth 1.0a auth with Redis-backed rate limiting
+ *   - Does not apply echo detection (we don't push inventory to client Discogs)
+ *   - Runs on its own 10-minute cron schedule
  */
 
 import { schedules } from "@trigger.dev/sdk";
@@ -43,6 +49,9 @@ export const clientStoreOrderDetectTask = schedules.task({
       if (!connections || connections.length === 0) continue;
 
       for (const connection of connections as ClientStoreConnection[]) {
+        // Discogs handled by discogs-client-order-sync (OAuth 1.0a + Redis rate limiter)
+        if (connection.platform === "discogs") continue;
+
         try {
           const since =
             connection.last_poll_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -67,7 +76,7 @@ export const clientStoreOrderDetectTask = schedules.task({
               .from("warehouse_orders")
               .select("id")
               .eq("workspace_id", workspaceId)
-              .eq("shopify_order_id", order.remoteOrderId)
+              .eq("external_order_id", order.remoteOrderId)
               .eq("source", connection.platform)
               .single();
 
@@ -85,7 +94,7 @@ export const clientStoreOrderDetectTask = schedules.task({
               .insert({
                 workspace_id: workspaceId,
                 org_id: connection.org_id,
-                shopify_order_id: order.remoteOrderId,
+                external_order_id: order.remoteOrderId,
                 order_number: order.orderNumber,
                 source: connection.platform,
                 line_items: order.lineItems,

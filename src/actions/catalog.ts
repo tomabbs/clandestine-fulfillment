@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod/v4";
+import { requireClient } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 // === Zod Schemas (Rule #5: Zod for all boundaries) ===
@@ -494,61 +495,50 @@ export async function updateVariants(
 }
 
 export async function getClientReleases(rawFilters?: { page?: number; pageSize?: 25 | 50 | 100 }) {
-  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
+  // Use service role client + explicit org filter — never rely on RLS alone
+  // because staff users who also have access to the portal would see all orgs.
+  let orgId: string;
   try {
-    const auth = await requireAuth();
-    supabase = auth.supabase;
+    const clientCtx = await requireClient();
+    orgId = clientCtx.orgId;
   } catch (error) {
-    if (isUnauthorizedError(error)) {
-      return { preorders: [], newReleases: [] };
-    }
+    if (isUnauthorizedError(error)) return { preorders: [], newReleases: [] };
     throw error;
   }
-  // Validate filters (pagination reserved for future use)
+
   clientReleasesFiltersSchema.parse(rawFilters ?? {});
 
-  // RLS automatically scopes to client's org via anon key
+  const supabase = createServiceRoleClient();
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  // Fetch pre-orders
+  const SELECT = `
+    id, sku, title, street_date, is_preorder,
+    warehouse_products!inner (id, title, status, org_id,
+      warehouse_product_images (id, src, alt, position)
+    ),
+    warehouse_inventory_levels (available, committed, incoming)
+  `;
+
   const { data: preorders, error: preorderError } = await supabase
     .from("warehouse_product_variants")
-    .select(
-      `
-      id, sku, title, street_date, is_preorder,
-      warehouse_products!inner (id, title, status, org_id,
-        warehouse_product_images (id, src, alt, position)
-      ),
-      warehouse_inventory_levels (available, committed, incoming)
-    `,
-    )
+    .select(SELECT)
     .eq("is_preorder", true)
+    .eq("warehouse_products.org_id", orgId)
     .order("street_date", { ascending: true });
 
   if (preorderError) throw new Error(`Failed to fetch pre-orders: ${preorderError.message}`);
 
-  // Fetch new releases (street_date within last 30 days)
   const { data: newReleases, error: releaseError } = await supabase
     .from("warehouse_product_variants")
-    .select(
-      `
-      id, sku, title, street_date, is_preorder,
-      warehouse_products!inner (id, title, status, org_id,
-        warehouse_product_images (id, src, alt, position)
-      ),
-      warehouse_inventory_levels (available, committed, incoming)
-    `,
-    )
+    .select(SELECT)
     .eq("is_preorder", false)
+    .eq("warehouse_products.org_id", orgId)
     .gte("street_date", thirtyDaysAgo)
     .lte("street_date", now.toISOString())
     .order("street_date", { ascending: false });
 
   if (releaseError) throw new Error(`Failed to fetch new releases: ${releaseError.message}`);
 
-  return {
-    preorders: preorders ?? [],
-    newReleases: newReleases ?? [],
-  };
+  return { preorders: preorders ?? [], newReleases: newReleases ?? [] };
 }

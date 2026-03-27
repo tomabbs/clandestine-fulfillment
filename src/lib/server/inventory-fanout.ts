@@ -46,7 +46,7 @@ export async function fanoutInventoryChange(
   // Check if SKU has a Bandcamp mapping
   const { data: bandcampMappings } = await supabase
     .from("bandcamp_product_mappings")
-    .select("id")
+    .select("id, variant_id")
     .eq("workspace_id", workspaceId);
 
   // Get the variant for this SKU to check Bandcamp mapping

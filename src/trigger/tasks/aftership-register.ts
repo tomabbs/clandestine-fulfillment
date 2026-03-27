@@ -20,7 +20,10 @@ export const aftershipRegisterTask = task({
 
     const { data: shipment } = await supabase
       .from("warehouse_shipments")
-      .select("id, tracking_number, carrier, order_id, org_id, workspace_id")
+      .select(`
+        id, tracking_number, carrier, order_id, org_id, workspace_id,
+        warehouse_orders!order_id(customer_email, customer_name)
+      `)
       .eq("id", payload.shipment_id)
       .single();
 
@@ -29,10 +32,18 @@ export const aftershipRegisterTask = task({
       return { skipped: true, reason: "no_tracking_info" };
     }
 
+    const orderRaw = shipment.warehouse_orders;
+    const order = (Array.isArray(orderRaw) ? (orderRaw[0] ?? null) : orderRaw) as {
+      customer_email: string | null;
+      customer_name: string | null;
+    } | null;
+
     try {
       const tracking = await createTracking(shipment.tracking_number, shipment.carrier, {
         title: `Shipment ${shipment.id}`,
-        orderId: shipment.order_id,
+        orderId: shipment.order_id ?? undefined,
+        emails: order?.customer_email ? [order.customer_email] : undefined,
+        customerName: order?.customer_name ?? undefined,
       });
 
       return { registered: true, aftershipId: tracking.id };

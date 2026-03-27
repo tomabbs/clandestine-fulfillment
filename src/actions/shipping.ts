@@ -3,8 +3,13 @@
 // Rule #4: Server Actions for mutations, React Query for reads
 // Rule #5: Zod for all boundaries
 
+import { runs, tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { createShipment, selectBestRate, WAREHOUSE_ADDRESS } from "@/lib/clients/easypost-client";
+import { getServiceDetails, normalizeService } from "@/lib/clients/easypost-service-map";
+import { requireStaff } from "@/lib/server/auth-context";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { normalizeAddress } from "@/lib/shared/address-normalize";
 
 // === Schemas ===
 
@@ -267,6 +272,188 @@ export async function getShipmentDetail(id: string) {
       total: totalCost,
     },
   };
+}
+
+// === Label Creation (Phase 5B) ===
+
+export type OrderType = "fulfillment" | "mailorder";
+
+export interface RateOption {
+  id: string;
+  carrier: string;
+  service: string;
+  displayName: string;
+  rate: number;
+  deliveryDays: number | null;
+  isMediaMail: boolean;
+  recommended: boolean;
+}
+
+export interface LabelResult {
+  success: boolean;
+  trackingNumber?: string;
+  labelUrl?: string;
+  labelPdfUrl?: string | null;
+  carrier?: string;
+  service?: string;
+  rate?: number;
+  shipmentId?: string;
+  error?: string;
+  needsManualShipping?: boolean;
+}
+
+/**
+ * Fetch shipping rate options from EasyPost without purchasing.
+ * Staff calls this to show the rate selector before buying.
+ */
+export async function getShippingRates(
+  orderId: string,
+  orderType: OrderType,
+): Promise<{ rates: RateOption[]; error?: string }> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  // Fetch the order
+  const table = orderType === "fulfillment" ? "warehouse_orders" : "mailorder_orders";
+  const { data: order } = await supabase
+    .from(table)
+    .select("id, shipping_address, customer_name, line_items")
+    .eq("id", orderId)
+    .single();
+
+  if (!order?.shipping_address) {
+    return { rates: [], error: "Order has no shipping address" };
+  }
+
+  // Determine media mail eligibility
+  const skus = (order.line_items as Array<{ sku?: string }>)
+    .map((li) => li.sku)
+    .filter((s): s is string => !!s);
+
+  let mediaMailEligible = false;
+  if (skus.length > 0) {
+    const { data: variants } = await supabase
+      .from("warehouse_product_variants")
+      .select("sku, media_mail_eligible")
+      .in("sku", skus);
+
+    const variantMap = new Map((variants ?? []).map((v) => [v.sku, v.media_mail_eligible ?? true]));
+    const found = skus.filter((s) => variantMap.has(s));
+    mediaMailEligible = found.length > 0 && found.every((s) => variantMap.get(s) === true);
+  }
+
+  const toAddr = normalizeAddress(order.shipping_address as Record<string, unknown>);
+  const bestRateResult = await (async () => {
+    try {
+      const shipment = await createShipment({
+        fromAddress: WAREHOUSE_ADDRESS,
+        toAddress: {
+          name: toAddr.name || (order.customer_name ?? ""),
+          street1: toAddr.street1,
+          street2: toAddr.street2,
+          city: toAddr.city,
+          state: toAddr.state,
+          zip: toAddr.zip,
+          country: toAddr.country,
+        },
+        parcel: { weight: 16 }, // default 1 lb for rate preview
+      });
+      return { shipment, error: null };
+    } catch (err) {
+      return { shipment: null, error: err instanceof Error ? err.message : String(err) };
+    }
+  })();
+
+  if (bestRateResult.error || !bestRateResult.shipment) {
+    return { rates: [], error: bestRateResult.error ?? "Failed to get rates" };
+  }
+
+  const recommended = selectBestRate(bestRateResult.shipment.rates, mediaMailEligible);
+
+  const rates: RateOption[] = bestRateResult.shipment.rates.map((r) => {
+    const serviceId = normalizeService(r.carrier, r.service);
+    const details = getServiceDetails(serviceId);
+    return {
+      id: r.id,
+      carrier: r.carrier,
+      service: r.service,
+      displayName: details?.displayName ?? `${r.carrier} ${r.service}`,
+      rate: parseFloat(r.rate),
+      deliveryDays: r.delivery_days ?? null,
+      isMediaMail: details?.isMediaMail ?? false,
+      recommended: r.id === recommended?.id,
+    };
+  });
+
+  // Sort: recommended first, then by price
+  rates.sort((a, b) => {
+    if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+    return a.rate - b.rate;
+  });
+
+  return { rates };
+}
+
+/**
+ * Create a shipping label for an order, storing all records and triggering
+ * downstream tasks (AfterShip, platform fulfillment marking).
+ *
+ * Uses requireStaff() for auth.
+ */
+export async function createOrderLabel(
+  orderId: string,
+  params: {
+    orderType: OrderType;
+    selectedRateId: string;
+    weight?: number;
+  },
+): Promise<LabelResult> {
+  await requireStaff();
+
+  // Delegate to the Trigger.dev task for full pipeline execution
+  try {
+    const run = await tasks.trigger("create-shipping-label", {
+      orderId,
+      orderType: params.orderType,
+      selectedRateId: params.selectedRateId,
+      weight: params.weight ?? 16,
+    });
+    // Task has been enqueued — return the run ID for polling
+    return { success: true, shipmentId: run.id };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to trigger label task: ${msg}` };
+  }
+}
+
+/**
+ * Poll task run status to get label creation result.
+ * Returns the label info once the task completes.
+ */
+export async function getLabelTaskStatus(runId: string): Promise<{
+  status: "pending" | "running" | "completed" | "failed";
+  result?: LabelResult;
+}> {
+  await requireStaff();
+
+  try {
+    const run = await runs.retrieve(runId);
+    const triggerStatus = run.status as string;
+
+    if (triggerStatus === "COMPLETED" || triggerStatus === "SUCCEEDED") {
+      return { status: "completed", result: run.output as LabelResult };
+    }
+    if (triggerStatus === "FAILED" || triggerStatus === "CANCELED") {
+      return { status: "failed", result: { success: false, error: "Task failed" } };
+    }
+    if (triggerStatus === "EXECUTING") {
+      return { status: "running" };
+    }
+    return { status: "pending" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: "failed", result: { success: false, error: msg } };
+  }
 }
 
 // === CSV Export ===

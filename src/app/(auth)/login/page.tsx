@@ -3,6 +3,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import Image from "next/image";
 import { useRef, useState } from "react";
+import { sendLoginMagicLink } from "@/actions/auth";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -46,33 +47,20 @@ export default function LoginPage() {
 
     setLoading(true);
 
-    const { error: magicError } = await getSupabase().auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-        shouldCreateUser: false,
-      },
-    });
+    // Use server action with admin.generateLink + Resend — same reliable path
+    // as the invite flow. Avoids Supabase's own email delivery (signInWithOtp)
+    // which has unreliable token delivery in newer Supabase versions.
+    const result = await sendLoginMagicLink(email);
 
     setLoading(false);
 
-    if (magicError) {
-      const msg = magicError.message.toLowerCase();
-      if (msg.includes("rate") || msg.includes("limit") || msg.includes("exceeded")) {
-        setError(
-          "Too many sign-in requests. Please check your inbox for an existing link, or wait a few minutes and try again.",
-        );
-        // Set 60-second client-side cooldown
+    if (!result.success) {
+      if (result.code === "RATE_LIMITED") {
         setCooldownUntil(Date.now() + 60_000);
-      } else if (msg.includes("signups not allowed") || msg.includes("not allowed")) {
-        // shouldCreateUser: false returns this when email doesn't exist
-        setError("No account found for this email. Please contact your label administrator.");
-      } else {
-        setError(magicError.message);
       }
+      setError(result.error);
     } else {
       setMagicLinkSent(true);
-      // Set cooldown after successful send too (prevent resend spam)
       setCooldownUntil(Date.now() + 30_000);
     }
   }

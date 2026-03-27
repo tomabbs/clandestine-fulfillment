@@ -358,7 +358,7 @@ export async function getClientProducts(orgId: string, filters?: { search?: stri
     .from("warehouse_products")
     .select("id, title, vendor, product_type, status, created_at")
     .eq("org_id", orgId)
-    .order("created_at", { ascending: false });
+    .order("title", { ascending: true });
 
   if (filters?.search) {
     query = query.or(`title.ilike.%${filters.search}%,vendor.ilike.%${filters.search}%`);
@@ -517,13 +517,24 @@ export async function getClientBilling(orgId: string) {
 export async function getClientStores(orgId: string) {
   const supabase = await createServerSupabaseClient();
 
-  const { data } = await supabase
+  // Legacy Bandcamp/ShipStation store entries
+  const { data: legacyStores } = await supabase
     .from("warehouse_shipstation_stores")
     .select("id, store_name, marketplace_name, store_id, created_at")
     .eq("org_id", orgId)
     .order("store_name");
 
-  return data ?? [];
+  // New OAuth store connections (Shopify, WooCommerce, Squarespace, Discogs)
+  const { data: clientConnections } = await supabase
+    .from("client_store_connections")
+    .select("id, platform, store_url, connection_status, created_at, last_poll_at")
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false });
+
+  return {
+    legacy: legacyStores ?? [],
+    connections: clientConnections ?? [],
+  };
 }
 
 // ─── Tab 6: Settings ─────────────────────────────────────────────────────────

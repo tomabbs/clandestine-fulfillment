@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-03-20T14:40:04.400Z",
+  "webhook_counts_by_platform_status": {
+    "shopify::pending": 136,
+    "shopify::sku_not_found": 31,
+    "shopify::parse_failed": 1
+  },
+  "last_event_at_by_platform": {
+    "shopify": "2026-03-20T14:39:58.834857+00:00"
+  },
+  "client_store_connections": [],
+  "platform_health": [
+    {
+      "platform": "shopify",
+      "events_last_7_days": 168,
+      "health_flag": "OK"
+    },
+    {
+      "platform": "shipstation",
+      "events_last_7_days": 0,
+      "health_flag": "STALE_OR_UNREGISTERED"
+    },
+    {
+      "platform": "aftership",
+      "events_last_7_days": 0,
+      "health_flag": "STALE_OR_UNREGISTERED"
+    },
+    {
+      "platform": "stripe",
+      "events_last_7_days": 0,
+      "health_flag": "STALE_OR_UNREGISTERED"
+    },
+    {
+      "platform": "resend",
+      "events_last_7_days": 0,
+      "health_flag": "STALE_OR_UNREGISTERED"
+    }
+  ]
+}

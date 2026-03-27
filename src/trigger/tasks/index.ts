@@ -1,5 +1,7 @@
 // Task registry — all task names exported from one place (Rule #58)
 
+// ── Existing tasks (alphabetical) ────────────────────────────────────────────
+
 export { aftershipRegisterTask } from "./aftership-register";
 export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
 export {
@@ -24,10 +26,52 @@ export { processClientStoreWebhookTask } from "./process-client-store-webhook";
 export { processShopifyWebhookTask } from "./process-shopify-webhook";
 export { redisBackfillTask } from "./redis-backfill";
 export { sensorCheckTask } from "./sensor-check";
-export { shipmentIngestTask } from "./shipment-ingest";
-export { shipstationPollTask } from "./shipstation-poll";
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
 export { shopifyOrderSyncTask } from "./shopify-order-sync";
 export { shopifySyncTask } from "./shopify-sync";
 export { storageCalcTask } from "./storage-calc";
 export { supportEscalationTask } from "./support-escalation";
+
+// ── NEW: EasyPost / Label tasks (Phase 5A) ────────────────────────────────────
+
+export { createShippingLabelTask } from "./create-shipping-label";
+export { dailyScanFormSchedule, generateDailyScanFormTask } from "./generate-daily-scan-form";
+export { markMailorderFulfilledTask } from "./mark-mailorder-fulfilled";
+export { markPlatformFulfilledTask } from "./mark-platform-fulfilled";
+
+// ── NEW: OAuth cleanup (Phase 4) ──────────────────────────────────────────────
+
+export { oauthStateCleanupSchedule, oauthStateCleanupTask } from "./oauth-state-cleanup";
+
+// ── NEW: Mail-order (Phase 7) ─────────────────────────────────────────────────
+
+export { mailorderShopifySyncTask } from "./mailorder-shopify-sync";
+
+// ── NEW: Discogs master catalog (Phase 9) ─────────────────────────────────────
+
+export { discogsCatalogMatchTask } from "./discogs-catalog-match";
+export { discogsInitialListingTask } from "./discogs-initial-listing";
+export {
+  discogsListingReplenishSchedule,
+  discogsListingReplenishTask,
+} from "./discogs-listing-replenish";
+export {
+  discogsMailorderSyncSchedule,
+  discogsMailorderSyncTask,
+} from "./discogs-mailorder-sync";
+export {
+  discogsMessagePollSchedule,
+  discogsMessagePollTask,
+} from "./discogs-message-poll";
+export { discogsMessageSendTask } from "./discogs-message-send";
+
+// ── NEW: Discogs client connections (Phase 10) ────────────────────────────────
+
+export {
+  discogsClientOrderSyncSchedule,
+  discogsClientOrderSyncTask,
+} from "./discogs-client-order-sync";
+
+// ── REMOVED: ShipStation (Phase 1A) ──────────────────────────────────────────
+// export { shipmentIngestTask } from "./shipment-ingest";   // file deleted
+// export { shipstationPollTask } from "./shipstation-poll"; // file deleted

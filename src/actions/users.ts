@@ -161,7 +161,12 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
     // type "invite" still sends the default Supabase invite email as a side effect,
     // even though the docs say it shouldn't. "magiclink" generates the link without
     // triggering any Supabase-hosted email. We send our own branded email via Resend.
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    //
+    // NOTE: .trim() is critical — if NEXT_PUBLIC_APP_URL has a trailing newline
+    // (common when copy-pasted into Vercel env vars), the redirect_to URL becomes
+    // "https://domain.com\n/auth/callback" which Supabase rejects as an invalid
+    // redirect URL (shows as %0A in the link). Always trim before use.
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
 
     // First, create the auth user if they don't exist yet
     let authUserId: string;
@@ -227,12 +232,18 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
     }
 
     // Supabase generateLink sometimes encodes redirect_to as just the Site URL,
-    // stripping the /auth/callback path. Force-fix the redirect_to in the link.
+    // stripping the /auth/callback path. Also strip any %0A (encoded newline)
+    // that may appear if NEXT_PUBLIC_APP_URL had a trailing newline in env.
+    // Always rewrite redirect_to to the clean canonical callback URL.
     try {
       const linkUrl = new URL(inviteLink);
       const currentRedirect = linkUrl.searchParams.get("redirect_to") ?? "";
-      if (currentRedirect && !currentRedirect.includes("/auth/callback")) {
-        linkUrl.searchParams.set("redirect_to", `${appUrl}/auth/callback`);
+      // Strip encoded newlines (%0A / %0a) from whatever Supabase generated
+      const cleanedRedirect = currentRedirect.replace(/%0[Aa]/g, "");
+      const expectedCallback = `${appUrl}/auth/callback`;
+      // Rewrite if missing /auth/callback OR if the cleaned value differs from expected
+      if (!cleanedRedirect.includes("/auth/callback") || cleanedRedirect !== expectedCallback) {
+        linkUrl.searchParams.set("redirect_to", expectedCallback);
         inviteLink = linkUrl.toString();
       }
     } catch {

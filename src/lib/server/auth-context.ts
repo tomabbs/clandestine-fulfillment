@@ -1,7 +1,7 @@
 import type { User as AuthUser } from "@supabase/supabase-js";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientRole, StaffRole } from "@/lib/shared/constants";
-import { STAFF_ROLES } from "@/lib/shared/constants";
+import { CLIENT_ROLES, STAFF_ROLES } from "@/lib/shared/constants";
 
 export interface AuthContext {
   supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>;
@@ -112,4 +112,103 @@ export async function getAllWorkspaceIds(
   const { data, error } = await supabase.from("workspaces").select("id");
   if (error) throw new Error(`Failed to fetch workspaces: ${error.message}`);
   return (data ?? []).map((w) => w.id);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Request-scoped helpers (C14 fix: use anon-key request client, NOT service role)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Return the authenticated user's basic info.
+ * Uses request-scoped cookie client — throws if unauthenticated.
+ */
+export async function getAuthUser(): Promise<{
+  userId: string;
+  authId: string;
+  email: string | undefined;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) throw new Error("Authentication required");
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .single();
+
+  if (!profile) throw new Error("User profile not found");
+
+  return { userId: profile.id, authId: user.id, email: user.email };
+}
+
+/**
+ * Require staff access.
+ * Uses request-scoped cookie client — throws if unauthenticated or non-staff.
+ */
+export async function requireStaff(): Promise<{
+  userId: string;
+  workspaceId: string;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) throw new Error("Authentication required");
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("id, role, workspace_id")
+    .eq("auth_user_id", user.id)
+    .single();
+
+  if (!profile) throw new Error("User profile not found");
+
+  if (!(STAFF_ROLES as readonly string[]).includes(profile.role)) {
+    throw new Error("Staff access required");
+  }
+
+  return { userId: profile.id, workspaceId: profile.workspace_id };
+}
+
+/**
+ * Require client (non-staff) access.
+ * Uses request-scoped cookie client — throws if unauthenticated or non-client.
+ */
+export async function requireClient(): Promise<{
+  userId: string;
+  orgId: string;
+  workspaceId: string;
+}> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) throw new Error("Authentication required");
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("id, role, org_id, workspace_id")
+    .eq("auth_user_id", user.id)
+    .single();
+
+  if (!profile) throw new Error("User profile not found");
+
+  if (!(CLIENT_ROLES as readonly string[]).includes(profile.role) || !profile.org_id) {
+    throw new Error("Client access required");
+  }
+
+  return {
+    userId: profile.id,
+    orgId: profile.org_id,
+    workspaceId: profile.workspace_id,
+  };
 }

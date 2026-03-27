@@ -7,6 +7,7 @@ const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health", "/terms", "/pri
 
 function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith("/api/webhooks/")) return true;
+  if (pathname.startsWith("/api/oauth/")) return true;
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 

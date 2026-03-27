@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-03-20T14:40:20.700Z",
+  "table_checks": [
+    {
+      "table": "users",
+      "status": "present",
+      "error": null
+    },
+    {
+      "table": "support_conversations",
+      "status": "present",
+      "error": null
+    },
+    {
+      "table": "support_messages",
+      "status": "present",
+      "error": null
+    },
+    {
+      "table": "support_email_mappings",
+      "status": "present",
+      "error": null
+    },
+    {
+      "table": "warehouse_inbound_shipments",
+      "status": "present",
+      "error": null
+    },
+    {
+      "table": "warehouse_inbound_items",
+      "status": "present",
+      "error": null
+    },
+    {
+      "table": "webhook_events",
+      "status": "present",
+      "error": null
+    }
+  ],
+  "rls_policy_checks": {
+    "status": "blocked",
+    "reason": "pg_catalog policy views are not exposed via Supabase REST; direct DB auth required"
+  },
+  "migration_checks": [
+    {
+      "status": "blocked",
+      "reason": "Could not find the table 'public.schema_migrations' in the schema cache"
+    }
+  ]
+}

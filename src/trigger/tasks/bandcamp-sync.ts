@@ -535,6 +535,30 @@ export const bandcampSyncTask = task({
               sku: merchItem.sku,
               error: String(shopifyError),
             });
+            // Silent failure gap (F7): alert staff so the Shopify product can
+            // be created manually and the SKU linked. Without this, the item
+            // exists in the warehouse but has no Shopify counterpart and will
+            // never be published to the Shopify storefront.
+            await supabase.from("warehouse_review_queue").upsert(
+              {
+                workspace_id: workspaceId,
+                org_id: connection.org_id ?? null,
+                category: "shopify_product_create",
+                severity: "medium" as const,
+                title: `Shopify product creation failed: ${title}`,
+                description: `SKU ${merchItem.sku} was created in the warehouse but productSetCreate failed. Create or link the Shopify product manually.`,
+                metadata: {
+                  sku: merchItem.sku,
+                  bandcamp_item_id: String(merchItem.package_id),
+                  band_id: String(connection.band_id),
+                  error: String(shopifyError),
+                },
+                status: "open" as const,
+                group_key: `shopify_create_failed_${merchItem.sku}`,
+                occurrence_count: 1,
+              },
+              { onConflict: "group_key", ignoreDuplicates: false },
+            );
           }
 
           // Create warehouse product as DRAFT

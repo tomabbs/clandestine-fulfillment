@@ -64,7 +64,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     sku: string,
   ): Promise<{ variantId: number; inventoryItemId: number } | null> {
     const res = await fetch(
-      `${baseUrl}/admin/api/2024-01/variants.json?sku=${encodeURIComponent(sku)}`,
+      `${baseUrl}/admin/api/2026-01/variants.json?sku=${encodeURIComponent(sku)}`,
       { headers },
     );
     if (!res.ok) throw new Error(`Shopify variant lookup failed: HTTP ${res.status}`);
@@ -80,7 +80,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     inventoryItemId: number,
   ): Promise<{ locationId: number; available: number } | null> {
     const res = await fetch(
-      `${baseUrl}/admin/api/2024-01/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
+      `${baseUrl}/admin/api/2026-01/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
       { headers },
     );
     if (!res.ok) throw new Error(`Shopify inventory levels fetch failed: HTTP ${res.status}`);
@@ -106,7 +106,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
         return;
       }
 
-      const res = await fetch(`${baseUrl}/admin/api/2024-01/inventory_levels/set.json`, {
+      const res = await fetch(`${baseUrl}/admin/api/2026-01/inventory_levels/set.json`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -131,7 +131,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
 
     async getOrders(since) {
       const res = await fetch(
-        `${baseUrl}/admin/api/2024-01/orders.json?created_at_min=${encodeURIComponent(since)}&status=any&limit=50`,
+        `${baseUrl}/admin/api/2026-01/orders.json?created_at_min=${encodeURIComponent(since)}&status=any&limit=50`,
         { headers },
       );
       if (!res.ok) throw new Error(`Shopify orders fetch failed: HTTP ${res.status}`);

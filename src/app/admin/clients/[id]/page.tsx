@@ -275,8 +275,7 @@ function ProductsTab({ orgId }: { orgId: string }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Title</TableHead>
-              <TableHead>Vendor</TableHead>
+              <TableHead>Artist — Title — Format</TableHead>
               <TableHead>Type</TableHead>
               <TableHead className="text-center">Variants</TableHead>
               <TableHead>Status</TableHead>
@@ -286,7 +285,6 @@ function ProductsTab({ orgId }: { orgId: string }) {
             {products.map((p) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.title}</TableCell>
-                <TableCell>{p.vendor ?? "-"}</TableCell>
                 <TableCell>{p.product_type ?? "-"}</TableCell>
                 <TableCell className="text-center">{p.variant_count}</TableCell>
                 <TableCell>
@@ -528,32 +526,73 @@ function StoresTab({ orgId }: { orgId: string }) {
     );
   }
 
-  if (!stores || stores.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 pt-4">No ShipStation stores found.</p>;
+  const legacy = stores?.legacy ?? [];
+  const connections = stores?.connections ?? [];
+  const hasAny = legacy.length > 0 || connections.length > 0;
+
+  if (!hasAny) {
+    return <p className="text-sm text-muted-foreground py-8 pt-4">No store connections found.</p>;
   }
 
   return (
-    <div className="pt-4">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Store Name</TableHead>
-            <TableHead>Marketplace</TableHead>
-            <TableHead>Store ID</TableHead>
-            <TableHead>Last Seen</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {stores.map((s) => (
-            <TableRow key={s.id}>
-              <TableCell className="font-medium">{s.store_name ?? "-"}</TableCell>
-              <TableCell>{s.marketplace_name ?? "-"}</TableCell>
-              <TableCell className="font-mono text-xs">{s.store_id}</TableCell>
-              <TableCell>{formatDate(s.created_at)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="pt-4 space-y-6">
+      {/* OAuth store connections */}
+      {connections.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold mb-2">Connected Stores</h4>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Platform</TableHead>
+                <TableHead>Store URL</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Connected</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {connections.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="font-medium capitalize">{c.platform}</TableCell>
+                  <TableCell className="font-mono text-xs">{c.store_url}</TableCell>
+                  <TableCell>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${c.connection_status === "active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                      {c.connection_status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{formatDate(c.created_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* Legacy Bandcamp stores */}
+      {legacy.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold mb-2">Bandcamp / Legacy</h4>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Store Name</TableHead>
+                <TableHead>Marketplace</TableHead>
+                <TableHead>Store ID</TableHead>
+                <TableHead>Last Seen</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {legacy.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell className="font-medium">{s.store_name ?? "-"}</TableCell>
+                  <TableCell>{s.marketplace_name ?? "-"}</TableCell>
+                  <TableCell className="font-mono text-xs">{s.store_id}</TableCell>
+                  <TableCell>{formatDate(s.created_at)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }

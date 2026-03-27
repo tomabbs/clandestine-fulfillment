@@ -3,7 +3,9 @@
 import { createBrowserClient } from "@supabase/ssr";
 import {
   Disc3,
+  DollarSign,
   Home,
+  LayoutDashboard,
   LogOut,
   MessageSquare,
   Package,
@@ -11,6 +13,7 @@ import {
   Receipt,
   Settings,
   ShoppingCart,
+  Store,
   TrendingUp,
   Truck,
 } from "lucide-react";
@@ -37,11 +40,13 @@ import {
 } from "@/components/ui/sidebar";
 
 const NAV_ITEMS = [
-  { title: "Home", href: "/portal", icon: Home },
+  { title: "Home", href: "/portal", icon: LayoutDashboard },
+  { title: "Connected Stores", href: "/portal/stores", icon: Store },
   { title: "Inventory", href: "/portal/inventory", icon: Package },
   { title: "Releases", href: "/portal/releases", icon: Disc3 },
   { title: "Inbound", href: "/portal/inbound", icon: PackagePlus },
-  { title: "Orders", href: "/portal/orders", icon: ShoppingCart },
+  { title: "Fulfillment", href: "/portal/fulfillment", icon: ShoppingCart },
+  { title: "Mail-Order", href: "/portal/mail-order", icon: DollarSign },
   { title: "Shipping", href: "/portal/shipping", icon: Truck },
   { title: "Sales", href: "/portal/sales", icon: TrendingUp },
   { title: "Billing", href: "/portal/billing", icon: Receipt },

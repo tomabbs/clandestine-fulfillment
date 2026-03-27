@@ -10,7 +10,10 @@
  */
 
 import { schedules } from "@trigger.dev/sdk";
-import { calculateBillingForOrg } from "@/lib/clients/billing-calculator";
+import {
+  calculateBillingForOrg,
+  calculateConsignmentPayouts,
+} from "@/lib/clients/billing-calculator";
 import { createInvoice } from "@/lib/clients/stripe-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -19,6 +22,8 @@ export interface MonthlyBillingResult {
   orgsProcessed: number;
   orgsFailed: number;
   totalRevenue: number;
+  totalConsignmentPayouts: number;
+  consignmentOrdersProcessed: number;
 }
 
 export function getPreviousMonthPeriod(now: Date) {
@@ -49,6 +54,8 @@ export const monthlyBillingTask = schedules.task({
     let orgsProcessed = 0;
     let orgsFailed = 0;
     let totalRevenue = 0;
+    let totalConsignmentPayouts = 0;
+    let consignmentOrdersProcessed = 0;
 
     for (const workspaceId of workspaceIds) {
       // Get all orgs in workspace
@@ -123,6 +130,31 @@ export const monthlyBillingTask = schedules.task({
           }
 
           totalRevenue += snapshot.totals.grand_total;
+
+          // ── Consignment payouts (Rule #7.3: subtotal * 0.5) ────────────────
+          // Processed AFTER the fulfillment snapshot so we can link to snapshotId.
+          // Formula invariant: use client_payout_amount (set at order insert as subtotal * 0.5).
+          // NEVER use total_price — shipping is Clandestine's revenue.
+          const payouts = await calculateConsignmentPayouts(supabase, workspaceId, org.id, period);
+
+          if (payouts.order_count > 0) {
+            await supabase
+              .from("mailorder_orders")
+              .update({
+                client_payout_status: "included_in_snapshot",
+                client_payout_snapshot_id: String(snapshotId),
+                updated_at: new Date().toISOString(),
+              })
+              .in("id", payouts.order_ids);
+
+            totalConsignmentPayouts += payouts.total_payout_amount;
+            consignmentOrdersProcessed += payouts.order_count;
+
+            console.log(
+              `[monthly-billing] Org ${org.id}: ${payouts.order_count} consignment orders, $${payouts.total_payout_amount.toFixed(2)} payout`,
+            );
+          }
+
           orgsProcessed++;
         } catch (error) {
           orgsFailed++;
@@ -160,7 +192,13 @@ export const monthlyBillingTask = schedules.task({
       });
     }
 
-    return { orgsProcessed, orgsFailed, totalRevenue };
+    return {
+      orgsProcessed,
+      orgsFailed,
+      totalRevenue,
+      totalConsignmentPayouts,
+      consignmentOrdersProcessed,
+    };
   },
 });
 

@@ -14,7 +14,7 @@ import type {
 const connectionFiltersSchema = z.object({
   workspaceId: z.string().uuid().optional(),
   orgId: z.string().optional(),
-  platform: z.enum(["shopify", "woocommerce", "squarespace", "bigcommerce"]).optional(),
+  platform: z.enum(["shopify", "woocommerce", "squarespace", "bigcommerce", "discogs"]).optional(),
   status: z.enum(["pending", "active", "disabled_auth_failure", "error"]).optional(),
 });
 
@@ -22,7 +22,7 @@ export type ConnectionFilters = z.infer<typeof connectionFiltersSchema>;
 
 const createConnectionSchema = z.object({
   orgId: z.string().min(1),
-  platform: z.enum(["shopify", "woocommerce", "squarespace", "bigcommerce"]),
+  platform: z.enum(["shopify", "woocommerce", "squarespace", "bigcommerce", "discogs"]),
   storeUrl: z.string().url(),
 });
 
@@ -230,7 +230,7 @@ export async function testStoreConnection(
       case "shopify": {
         // Shopify client store test — simple REST call
         if (!conn.api_key) throw new Error("Missing API key");
-        const res = await fetch(`${conn.store_url}/admin/api/2024-01/shop.json`, {
+        const res = await fetch(`${conn.store_url}/admin/api/2026-01/shop.json`, {
           headers: { "X-Shopify-Access-Token": conn.api_key },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -381,7 +381,7 @@ export async function autoDiscoverSkus(
 
       // Paginate through all products
       let pageUrl: string | null =
-        `${shopifyUrl}/admin/api/2024-01/products.json?limit=250&fields=id,variants`;
+        `${shopifyUrl}/admin/api/2026-01/products.json?limit=250&fields=id,variants`;
       while (pageUrl) {
         const res: Response = await fetch(pageUrl, { headers: shopifyHeaders });
         if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);

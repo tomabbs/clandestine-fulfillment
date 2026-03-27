@@ -12,19 +12,29 @@ Canonical catalog of request boundaries used for planning/build/audit.
 | Method | Route | File | Purpose |
 |---|---|---|---|
 | `GET` | `/api/health` | `src/app/api/health/route.ts` | Runtime health endpoint |
-| `POST` | `/api/webhooks/shopify` | `src/app/api/webhooks/shopify/route.ts` | Shopify webhook ingest |
-| `POST` | `/api/webhooks/shipstation` | `src/app/api/webhooks/shipstation/route.ts` | ShipStation webhook ingest |
+| `POST` | `/api/webhooks/shopify` | `src/app/api/webhooks/shopify/route.ts` | Shopify webhook ingest (inventory, orders) |
+| `POST` | `/api/webhooks/shopify/gdpr` | `src/app/api/webhooks/shopify/gdpr/route.ts` | Combined Shopify GDPR compliance handler (HMAC verified) |
 | `POST` | `/api/webhooks/aftership` | `src/app/api/webhooks/aftership/route.ts` | AfterShip webhook ingest |
 | `POST` | `/api/webhooks/stripe` | `src/app/api/webhooks/stripe/route.ts` | Stripe billing webhooks |
 | `POST` | `/api/webhooks/resend-inbound` | `src/app/api/webhooks/resend-inbound/route.ts` | Resend inbound email hooks |
 | `POST` | `/api/webhooks/client-store` | `src/app/api/webhooks/client-store/route.ts` | Generic client store webhook ingress |
+| `GET` | `/api/oauth/shopify` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth initiation (client store connect) |
+| `GET` | `/api/oauth/shopify/callback` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth callback |
+| `GET` | `/api/oauth/woocommerce` | `src/app/api/oauth/woocommerce/route.ts` | WooCommerce OAuth initiation |
+| `POST` | `/api/oauth/woocommerce/callback` | `src/app/api/oauth/woocommerce/callback/route.ts` | WooCommerce OAuth 1.0a key delivery |
+| `GET` | `/api/oauth/squarespace` | `src/app/api/oauth/squarespace/route.ts` | Squarespace OAuth initiation |
+| `GET` | `/api/oauth/discogs` | `src/app/api/oauth/discogs/route.ts` | Discogs OAuth 1.0a initiation (client store connect) |
+
+> All `/api/oauth/*` routes are public paths (no auth middleware) — clients arrive from external OAuth providers.
+> GDPR routes verified with HMAC signature using `SHOPIFY_CLIENT_SECRET`.
 
 ## Server Actions by Domain
 
 ### Auth + Identity
 
 - File: `src/actions/auth.ts`
-- Exports: `getUserContext`, `heartbeatPresence`
+- Exports: `getUserContext`, `heartbeatPresence`, `sendLoginMagicLink`
+  - `sendLoginMagicLink`: server-side magic link generation via `auth.admin.generateLink` + Resend delivery. Replaces client-side `signInWithOtp`.
 
 ### Admin Dashboard + Settings
 
@@ -47,6 +57,8 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - client presence + support history: `getClientPresenceSummary`, `getClientSupportHistory`
   - user lifecycle: `getUsers`, `inviteUser`, `updateUserRole`, `deactivateUser`, `removeClientUser`
   - org lifecycle: `getOrganizations`, `createOrganization`, `mergeOrganizations`, alias management
+  - `getClientStores` → returns `{ legacy: [], connections: [] }` combining legacy + `client_store_connections`
+  - `getClientProducts` → returns client products sorted by title (Artist — Title — Format)
 
 ### Inventory + Catalog + Product Images
 
@@ -56,6 +68,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/product-images.ts`
 - Key exports:
   - inventory read/write: `getInventoryLevels`, `adjustInventory`, `getInventoryDetail`, `updateVariantFormat`
+  - portal inventory: `getClientInventoryLevels` — starts from `warehouse_product_variants` (LEFT JOIN `warehouse_inventory_levels`) so zero-stock items are visible. Uses service role, filters by `org_id` explicitly.
   - catalog read/write: `getProducts`, `getCatalogStats`, `getProductDetail`, `updateProduct`, `updateVariants`, `searchProductVariants`, `getClientReleases`
   - images: `uploadProductImage`, `reorderProductImages`, `deleteProductImage`, `setFeaturedImage`
 
@@ -66,11 +79,13 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/shipping.ts`
   - `src/actions/orders.ts`
   - `src/actions/scanning.ts`
+  - `src/actions/mail-orders.ts`
 - Key exports:
   - inbound: `getInboundShipments`, `getInboundDetail`, `createInbound`, `markArrived`, `beginCheckIn`, `checkInItem`, `completeCheckIn`
-  - shipping: `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`
+  - shipping: `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`, `getShippingRates`, `createOrderLabel`, `getLabelTaskStatus`
   - orders: `getOrders`, `getOrderDetail`, `getTrackingEvents`, `getClientShipments`, `getShipmentItems`
   - scan: `lookupLocation`, `lookupBarcode`, `submitCount`, `recordReceivingScan`
+  - mail orders: `getMailOrders` (admin), `getClientMailOrders` (portal), `getMailOrderPayoutSummary`
 
 ### Billing + Reports + Review Queue
 
@@ -89,10 +104,18 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/portal-dashboard.ts`
   - `src/actions/portal-sales.ts`
   - `src/actions/portal-settings.ts`
+  - `src/actions/portal-stores.ts`
   - `src/actions/support.ts`
 - Key exports:
   - `getPortalDashboard`, `getSalesData`, `getPortalSettings`, `updateNotificationPreferences`
+  - portal stores: `getMyStoreConnections`, `getWooCommerceAuthUrl`, `deleteStoreConnection`
   - support: `getConversations`, `getConversationDetail`, `getSupportViewerContext`, `createConversation`, `sendMessage`, `markConversationRead`, `resolveConversation`, `assignConversation`, `suggestSupportReply`
+
+### Discogs Master Catalog (Admin)
+
+- File: `src/actions/discogs-admin.ts`
+- Key exports: `getDiscogsOverview`, `getDiscogsCredentials`, `saveDiscogsCredentials`, `getProductMappings`, `confirmMapping`, `rejectMapping`
+- All require `requireStaff()`.
 
 ### Integrations + Store Mapping
 

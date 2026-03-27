@@ -197,14 +197,14 @@ async function upsertOrder(
       .from("warehouse_orders")
       .select("id")
       .eq("workspace_id", workspaceId)
-      .eq("shopify_order_id", order.id)
+      .eq("external_order_id", order.id)
       .eq("org_id", group.orgId)
       .single();
 
     const orderData = {
       workspace_id: workspaceId,
       org_id: group.orgId,
-      shopify_order_id: order.id,
+      external_order_id: order.id,
       order_number: order.name,
       customer_name: order.shippingAddress
         ? `${(order.shippingAddress as Record<string, unknown>).firstName ?? ""} ${(order.shippingAddress as Record<string, unknown>).lastName ?? ""}`.trim()

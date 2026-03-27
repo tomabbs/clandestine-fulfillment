@@ -14,7 +14,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 |---|---|---|
 | `bandcamp-api` | `src/trigger/lib/bandcamp-queue.ts` | `1` |
 | `bandcamp-scrape` | `src/trigger/lib/bandcamp-scrape-queue.ts` | `3` |
-| shipment-ingest inline queue | `src/trigger/tasks/shipment-ingest.ts` | `5` |
+
+> Note: ShipStation queues removed in V7.2 (ShipStation integration fully removed).
 
 ## Scheduled Tasks (Cron)
 
@@ -23,7 +24,6 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `support-escalation` | `src/trigger/tasks/support-escalation.ts` | `*/5 * * * *` |
 | `shopify-sync` | `src/trigger/tasks/shopify-sync.ts` | `*/15 * * * *` |
 | `shopify-order-sync` | `src/trigger/tasks/shopify-order-sync.ts` | `*/30 * * * *` |
-| `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` |
 | `bandcamp-sale-poll` | `src/trigger/tasks/bandcamp-sale-poll.ts` | `*/5 * * * *` |
 | `bandcamp-inventory-push` | `src/trigger/tasks/bandcamp-inventory-push.ts` | `*/15 * * * *` |
 | `bandcamp-sync-cron` | `src/trigger/tasks/bandcamp-sync.ts` | `*/30 * * * *` |
@@ -36,6 +36,12 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `monthly-billing` | `src/trigger/tasks/monthly-billing.ts` | `0 2 1 * *` (America/New_York) |
 | `storage-calc` | `src/trigger/tasks/storage-calc.ts` | `0 1 1 * *` (America/New_York) |
 | `redis-backfill` | `src/trigger/tasks/redis-backfill.ts` | `0 3 * * 2` (America/New_York) |
+| `daily-scan-form` | `src/trigger/tasks/generate-daily-scan-form.ts` | `0 17 * * 1-6` (America/New_York) |
+| `oauth-state-cleanup` | `src/trigger/tasks/oauth-state-cleanup.ts` | `0 3 * * *` |
+| `discogs-listing-replenish` | `src/trigger/tasks/discogs-listing-replenish.ts` | `0 * * * *` (hourly) |
+| `discogs-mailorder-sync` | `src/trigger/tasks/discogs-mailorder-sync.ts` | `*/10 * * * *` |
+| `discogs-client-order-sync` | `src/trigger/tasks/discogs-client-order-sync.ts` | `*/10 * * * *` |
+| `discogs-message-poll` | `src/trigger/tasks/discogs-message-poll.ts` | `*/5 * * * *` |
 
 ## Event/On-Demand Tasks
 
@@ -43,8 +49,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 |---|---|---|
 | `process-shopify-webhook` | `src/trigger/tasks/process-shopify-webhook.ts` | `/api/webhooks/shopify` |
 | `process-client-store-webhook` | `src/trigger/tasks/process-client-store-webhook.ts` | `/api/webhooks/client-store` |
-| `shipment-ingest` | `src/trigger/tasks/shipment-ingest.ts` | `/api/webhooks/shipstation` |
-| `aftership-register` | `src/trigger/tasks/aftership-register.ts` | `shipment-ingest` |
+| `aftership-register` | `src/trigger/tasks/aftership-register.ts` | `create-shipping-label` |
 | `shopify-full-backfill` | `src/trigger/tasks/shopify-full-backfill.ts` | `src/actions/shopify.ts` |
 | `bandcamp-sync` | `src/trigger/tasks/bandcamp-sync.ts` | `src/actions/bandcamp.ts`, `bandcamp-sync-cron` |
 | `bandcamp-scrape-page` | `src/trigger/tasks/bandcamp-sync.ts` | `bandcamp-sync` |
@@ -56,15 +61,30 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `tag-cleanup-backfill` | `src/trigger/tasks/tag-cleanup-backfill.ts` | `src/actions/admin-settings.ts` |
 | `preorder-setup` | `src/trigger/tasks/preorder-setup.ts` | `bandcamp-sync` / scraper paths |
 | `debug-env` | `src/trigger/tasks/debug-env.ts` | manual diagnostics |
+| `create-shipping-label` | `src/trigger/tasks/create-shipping-label.ts` | `src/actions/shipping.ts` (createOrderLabel) |
+| `mark-platform-fulfilled` | `src/trigger/tasks/mark-platform-fulfilled.ts` | `create-shipping-label` |
+| `mark-mailorder-fulfilled` | `src/trigger/tasks/mark-mailorder-fulfilled.ts` | `create-shipping-label` |
+| `discogs-catalog-match` | `src/trigger/tasks/discogs-catalog-match.ts` | `src/actions/discogs-admin.ts` |
+| `discogs-initial-listing` | `src/trigger/tasks/discogs-initial-listing.ts` | `src/actions/discogs-admin.ts` (confirmMapping) |
+| `discogs-message-send` | `src/trigger/tasks/discogs-message-send.ts` | Support UI / staff |
 
 ## Domain Touchpoints
 
-- Inventory: `process-shopify-webhook`, `process-client-store-webhook`, `multi-store-inventory-push`, `bandcamp-inventory-push`, `redis-backfill`
-- Orders/shipments: `shipstation-poll`, `shipment-ingest`, `aftership-register`, `client-store-order-detect`, `bandcamp-order-sync`, `bandcamp-mark-shipped`
-- Catalog/release readiness: `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
-- Billing/storage: `monthly-billing`, `storage-calc`
-- Support/reliability: `support-escalation`, `sensor-check`, `tag-cleanup-backfill`
+- **Inventory:** `process-shopify-webhook`, `process-client-store-webhook`, `multi-store-inventory-push`, `bandcamp-inventory-push`, `redis-backfill`
+- **Orders/shipments:** `client-store-order-detect`, `bandcamp-order-sync`, `bandcamp-mark-shipped`, `create-shipping-label`, `mark-platform-fulfilled`, `mark-mailorder-fulfilled`, `daily-scan-form`
+- **Mail-order (consignment):** `discogs-mailorder-sync`, `discogs-client-order-sync`, `mark-mailorder-fulfilled`
+- **Discogs master catalog:** `discogs-catalog-match`, `discogs-initial-listing`, `discogs-listing-replenish`, `discogs-message-poll`, `discogs-message-send`
+- **Catalog/release readiness:** `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
+- **Billing/storage:** `monthly-billing`, `storage-calc`
+- **Support/reliability:** `support-escalation`, `sensor-check`, `tag-cleanup-backfill`
   - `support-escalation` uses conversation status + read markers (`staff_last_read_at`, `client_last_read_at`) and cooldown timestamps (`last_staff_escalated_at`, `last_client_reminded_at`) to prevent reminder spam during active chat sessions
+- **OAuth hygiene:** `oauth-state-cleanup`
+
+## Design Notes
+
+- **Bulk inventory bypass (Rule #59):** `shopify-sync` writes directly to Redis (bypasses `recordInventoryChange`) for performance during bulk pulls. Downstream fanout to client stores relies on the `multi-store-inventory-push` cron (≤5 min lag). This is intentional — not a bug.
+- **Discogs client orders:** `client-store-order-detect` explicitly skips Discogs connections; `discogs-client-order-sync` handles them separately due to OAuth 1.0a auth + different SKU/fanout requirements.
+- **Bandcamp sale → inventory chain:** `bandcamp-sale-poll` → `recordInventoryChange()` → Redis fanout → Postgres. Chain is fully instrumented. OQ3 verified 2026-03-28.
 
 ## Audit Requirement
 

@@ -27,10 +27,26 @@ const serverEnvSchema = z.object({
   SHOPIFY_API_VERSION: z.string().min(1),
   SHOPIFY_WEBHOOK_SECRET: z.string().default(""),
 
-  // ShipStation
-  SHIPSTATION_API_KEY: z.string().min(1),
-  SHIPSTATION_API_SECRET: z.string().min(1),
-  SHIPSTATION_WEBHOOK_SECRET: z.string().default(""), // TODO: Add real value once ShipStation webhook is configured
+  // ShipStation (legacy — kept for historical inventory data, not actively used)
+  SHIPSTATION_API_KEY: z.string().default(""),
+  SHIPSTATION_API_SECRET: z.string().default(""),
+  SHIPSTATION_WEBHOOK_SECRET: z.string().default(""),
+
+  // EasyPost
+  EASYPOST_API_KEY: z.string().default(""),
+
+  // Shopify OAuth (client store connections — NOT main Clandestine Shopify)
+  SHOPIFY_CLIENT_ID: z.string().default(""),
+  SHOPIFY_CLIENT_SECRET: z.string().default(""),
+
+  // Squarespace OAuth
+  SQUARESPACE_CLIENT_ID: z.string().default(""),
+  SQUARESPACE_CLIENT_SECRET: z.string().default(""),
+
+  // Discogs OAuth (client store connections + master catalog)
+  DISCOGS_CONSUMER_KEY: z.string().default(""),
+  DISCOGS_CONSUMER_SECRET: z.string().default(""),
+  DISCOGS_MASTER_ACCESS_TOKEN: z.string().default(""),
 
   // AfterShip
   AFTERSHIP_API_KEY: z.string().min(1),

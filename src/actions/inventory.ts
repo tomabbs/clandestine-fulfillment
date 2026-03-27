@@ -1,7 +1,8 @@
 "use server";
 
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireClient } from "@/lib/server/auth-context";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 // === Types ===
 
@@ -70,8 +71,9 @@ interface InventoryDetailResult {
  */
 export async function getInventoryLevels(
   filters: InventoryFilters = {},
+  options: { bypassRls?: boolean } = {},
 ): Promise<InventoryListResult> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = options.bypassRls ? createServiceRoleClient() : await createServerSupabaseClient();
   const page = filters.page ?? 1;
   const pageSize = filters.pageSize ?? 25;
   const offset = (page - 1) * pageSize;
@@ -358,4 +360,110 @@ export async function updateVariantFormat(
 
   if (error) throw new Error(`Failed to update variant format: ${error.message}`);
   return { success: true };
+}
+
+/**
+ * Portal-scoped inventory levels.
+ *
+ * Starts from warehouse_product_variants (NOT warehouse_inventory_levels) so
+ * that zero-stock variants without an inventory_levels row are still visible.
+ * warehouse_inventory_levels is LEFT-JOINed (no !inner) — available/committed/
+ * incoming are coalesced to 0 when the row is absent.
+ *
+ * Uses service role to bypass RLS — explicit org_id filter on warehouse_products
+ * provides data isolation safely. Never leaks cross-org data.
+ */
+export async function getClientInventoryLevels(
+  filters: Omit<InventoryFilters, "orgId"> = {},
+): Promise<InventoryListResult> {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 25;
+  const offset = (page - 1) * pageSize;
+
+  // Start from variants so zero-stock items are included.
+  // warehouse_inventory_levels uses regular embedding (no !inner) = LEFT JOIN.
+  let query = supabase.from("warehouse_product_variants").select(
+    `
+      id,
+      sku,
+      title,
+      format_name,
+      bandcamp_url,
+      warehouse_products!inner (
+        id,
+        title,
+        status,
+        org_id,
+        images,
+        organizations!inner (
+          id,
+          name
+        )
+      ),
+      warehouse_inventory_levels (
+        available,
+        committed,
+        incoming
+      )
+    `,
+    { count: "exact" },
+  );
+
+  // Data isolation: only this client's products.
+  query = query.eq("warehouse_products.org_id", orgId);
+
+  if (filters.format) {
+    query = query.eq("format_name", filters.format);
+  }
+  if (filters.status) {
+    query = query.eq("warehouse_products.status", filters.status);
+  }
+  if (filters.search) {
+    query = query.or(
+      `sku.ilike.%${filters.search}%,warehouse_products.title.ilike.%${filters.search}%`,
+    );
+  }
+
+  query = query.range(offset, offset + pageSize - 1).order("sku", { ascending: true });
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    throw new Error(`Failed to fetch client inventory levels: ${error.message}`);
+  }
+
+  const rows: InventoryRow[] = (data ?? []).map((row: Record<string, unknown>) => {
+    const product = row.warehouse_products as Record<string, unknown>;
+    const org = product.organizations as Record<string, unknown>;
+    const images = product.images as Array<Record<string, unknown>>;
+    const firstImage = images?.[0];
+    // LEFT JOIN result: array of 0 or 1 rows
+    const levels = row.warehouse_inventory_levels as Array<Record<string, unknown>>;
+    const level = levels?.[0] ?? null;
+
+    return {
+      variantId: row.id as string,
+      sku: row.sku as string,
+      productTitle: product.title as string,
+      variantTitle: row.title as string | null,
+      orgId: product.org_id as string | null,
+      orgName: org?.name as string | null,
+      formatName: row.format_name as string | null,
+      available: (level?.available as number) ?? 0,
+      committed: (level?.committed as number) ?? 0,
+      incoming: (level?.incoming as number) ?? 0,
+      imageSrc: (firstImage?.src as string) ?? null,
+      bandcampUrl: row.bandcamp_url as string | null,
+      status: product.status as string,
+    };
+  });
+
+  return {
+    rows,
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
 }

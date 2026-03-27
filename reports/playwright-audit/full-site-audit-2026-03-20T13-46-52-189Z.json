@@ -1,0 +1,1032 @@
+{
+  "startedAt": "2026-03-20T13:46:11.309Z",
+  "baseUrl": "http://localhost:3000",
+  "routes": [
+    {
+      "role": "staff",
+      "path": "/admin",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inventory",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014374443",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inbound",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014375186",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/orders",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014375615",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/catalog",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014376052",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/clients",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014376510",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014377117",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipping/pirate-ship",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014377585",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/billing",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014378142",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/channels",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014378655",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/review-queue",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014379158",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/support",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014379685",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/scan",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014380386",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014381054",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/admin/settings",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/admin/settings",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/users",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/bandcamp",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014384961",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/store-connections",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014385904",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/store-mapping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014386614",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/integrations",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014387303",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/health",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/reports/top-sellers",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014391269",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "staff",
+      "path": "/admin/clients/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in clients list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/catalog/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in catalog list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inbound/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in inbound list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal",
+      "ok": false,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal"
+        }
+      ],
+      "pageErrors": [
+        "Unauthorized",
+        "Unauthorized"
+      ],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "https://cpanel.clandestinedistro.com/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/inventory",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal/releases",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014398149",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/inbound",
+      "ok": false,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/releases"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/releases"
+        }
+      ],
+      "pageErrors": [
+        "Unauthorized",
+        "Unauthorized"
+      ],
+      "networkIssues": [
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/releases",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/releases",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fdev%2Fnext-dev-server.js&methodName=async&arguments=&lineNumber=339&column=20",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fnext-server.js&methodName=async+NextNodeServer.handleCatchallRenderRequest&arguments=&lineNumber=272&column=17",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Ftrace%2Ftrace.js&methodName=async+Span.traceAsyncFn&arguments=&lineNumber=154&column=20",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fcompiled%2Fnext-server%2Fapp-page.runtime.dev.js&methodName=async+ne&arguments=&lineNumber=42&column=1256",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fdev%2Fnext-dev-server.js&methodName=async+DevServer.handleRequest&arguments=&lineNumber=336&column=24",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.handleRequestImpl&arguments=&lineNumber=818&column=17",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Frouter-server.js&methodName=async+invokeRender&arguments=&lineNumber=179&column=21",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=webpack-internal%3A%2F%2F%2F%28action-browser%29%2F.%2Fsrc%2Factions%2Fauth.ts&methodName=async+heartbeatPresence&arguments=&lineNumber=31&column=28",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.pipeImpl&arguments=&lineNumber=922&column=25",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Frouter-server.js&methodName=async+requestHandlerImpl&arguments=&lineNumber=383&column=13",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=webpack-internal%3A%2F%2F%2F%28action-browser%29%2F.%2Fsrc%2Flib%2Fserver%2Fauth-context.ts&methodName=requireAuth&arguments=&lineNumber=19&column=22",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Frouter-server.js&methodName=async+handleRequest&arguments=&lineNumber=359&column=24",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Ftrace%2Ftrace.js&methodName=async+Span.traceAsyncFn&arguments=&lineNumber=154&column=20",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fdev%2Fnext-dev-server.js&methodName=async&arguments=&lineNumber=339&column=20",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Fstart-server.js&methodName=async+Server.requestListener&arguments=&lineNumber=141&column=13",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.handleRequestImpl&arguments=&lineNumber=818&column=17",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/releases",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+cacheEntry.responseCache.get.routeKind&arguments=&lineNumber=1588&column=28",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fcompiled%2Fnext-server%2Fapp-page.runtime.dev.js&methodName=async+rk&arguments=&lineNumber=38&column=8297",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Fstart-server.js&methodName=async+Server.requestListener&arguments=&lineNumber=141&column=13",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fdev%2Fnext-dev-server.js&methodName=async+DevServer.handleRequest&arguments=&lineNumber=336&column=24",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fcompiled%2Fnext-server%2Fapp-page.runtime.dev.js&methodName=async&arguments=&lineNumber=40&column=286",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+doRender&arguments=&lineNumber=1427&column=30",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.renderPageComponent&arguments=&lineNumber=1924&column=24",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.renderToResponseImpl&arguments=&lineNumber=1962&column=32",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.renderToResponseImpl&arguments=&lineNumber=1962&column=32",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.pipeImpl&arguments=&lineNumber=922&column=25",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fbase-server.js&methodName=async+DevServer.renderToResponseWithComponentsImpl&arguments=&lineNumber=1496&column=28",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Frouter-server.js&methodName=async+handleRequest&arguments=&lineNumber=359&column=24",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Frouter-server.js&methodName=async+invokeRender&arguments=&lineNumber=179&column=21",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Flib%2Frouter-server.js&methodName=async+requestHandlerImpl&arguments=&lineNumber=383&column=13",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/__nextjs_original-stack-frame?isServer=false&isEdgeServer=false&isAppDirectory=true&errorMessage=Error%3A+Unauthorized&file=%2FUsers%2FShared%2FWorkShared%2FProject%2Fclandestine-fulfillment%2Fnode_modules%2F.pnpm%2Fnext%4014.2.35_%40babel%2Bcore%407.29.0_%40opentelemetry%2Bapi%401.9.0_%40playwright%2Btest%401.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb%2Fnode_modules%2Fnext%2Fdist%2Fserver%2Fnext-server.js&methodName=async+NextNodeServer.handleCatchallRenderRequest&arguments=&lineNumber=272&column=17",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/inbound/new",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014401231",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/orders",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014402112",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/shipping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014403184",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/sales",
+      "ok": false,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/sales"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/sales"
+        }
+      ],
+      "pageErrors": [
+        "Unauthorized",
+        "Unauthorized"
+      ],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014404002",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/sales",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/sales",
+          "resourceType": "fetch"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/billing",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    },
+    {
+      "role": "client",
+      "path": "/portal/support",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014407632",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ]
+    },
+    {
+      "role": "client",
+      "path": "/portal/settings",
+      "ok": false,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/settings"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/settings"
+        }
+      ],
+      "pageErrors": [
+        "Unauthorized",
+        "Unauthorized"
+      ],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1774014408875",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/settings",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/settings",
+          "resourceType": "fetch"
+        }
+      ]
+    },
+    {
+      "role": "public",
+      "path": "/login",
+      "ok": true,
+      "headingCheck": "not_checked",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": []
+    }
+  ],
+  "finishedAt": "2026-03-20T13:46:52.189Z"
+}

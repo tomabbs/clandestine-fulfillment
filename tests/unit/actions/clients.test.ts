@@ -637,14 +637,15 @@ describe("clients server actions", () => {
       ]);
 
       const result = await getClientStores("org-1");
-      expect(result).toHaveLength(1);
-      expect(result[0].store_name).toBe("Main Store");
+      expect(result.legacy).toHaveLength(1);
+      expect(result.legacy[0].store_name).toBe("Main Store");
     });
 
-    it("returns empty array when no stores", async () => {
-      setupFromSequence([{ data: null }]);
+    it("returns empty arrays when no stores", async () => {
+      setupFromSequence([{ data: null }, { data: null }]);
       const result = await getClientStores("org-1");
-      expect(result).toEqual([]);
+      expect(result.legacy).toEqual([]);
+      expect(result.connections).toEqual([]);
     });
   });
 

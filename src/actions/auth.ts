@@ -1,5 +1,6 @@
 "use server";
 
+import { sendPortalInviteEmail } from "@/lib/clients/resend-client";
 import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
@@ -56,4 +57,100 @@ export async function heartbeatPresence(currentPage: string): Promise<void> {
     }
     throw new Error(`Failed to update user presence heartbeat: ${error.message}`);
   }
+}
+
+// ── Magic link for login page ──────────────────────────────────────────────
+
+export type SendLoginLinkResult =
+  | { success: true }
+  | { success: false; code: string; error: string };
+
+/**
+ * Send a branded magic link to an existing client user.
+ *
+ * Uses admin.generateLink (same reliable path as the invite flow) so the
+ * link is sent via Resend — not Supabase's own delivery. The client-side
+ * signInWithOtp approach was unreliable because Supabase's newer PKCE flow
+ * doesn't append tokens to the redirect URL in the expected format, and the
+ * Supabase email is unbranded.
+ */
+export async function sendLoginMagicLink(email: string): Promise<SendLoginLinkResult> {
+  const serviceClient = createServiceRoleClient();
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
+
+  // Only allow sign-in for users that already exist in this workspace.
+  const { data: existingUser } = await serviceClient
+    .from("users")
+    .select("id, name, email")
+    .eq("email", email.toLowerCase().trim())
+    .maybeSingle();
+
+  if (!existingUser) {
+    return {
+      success: false,
+      code: "USER_NOT_FOUND",
+      error: "No account found for this email. Please contact your label administrator.",
+    };
+  }
+
+  const linkResult = await serviceClient.auth.admin.generateLink({
+    type: "magiclink",
+    email: email.toLowerCase().trim(),
+    options: {
+      redirectTo: `${appUrl}/auth/callback`,
+    },
+  });
+
+  if (linkResult.error) {
+    const msg = linkResult.error.message;
+    if (msg.toLowerCase().includes("rate")) {
+      return {
+        success: false,
+        code: "RATE_LIMITED",
+        error: "Too many sign-in requests. Please wait a few minutes and try again.",
+      };
+    }
+    return {
+      success: false,
+      code: "LINK_FAILED",
+      error: "Failed to generate sign-in link. Please try again.",
+    };
+  }
+
+  let inviteLink = linkResult.data.properties?.action_link;
+  if (!inviteLink) {
+    return { success: false, code: "LINK_MISSING", error: "Failed to generate sign-in link." };
+  }
+
+  // Sanitize: strip %0A (encoded newline) and ensure correct redirect_to
+  try {
+    const linkUrl = new URL(inviteLink);
+    const currentRedirect = linkUrl.searchParams.get("redirect_to") ?? "";
+    const cleanedRedirect = currentRedirect.replace(/%0[Aa]/g, "");
+    const expectedCallback = `${appUrl}/auth/callback`;
+    if (!cleanedRedirect.includes("/auth/callback") || cleanedRedirect !== expectedCallback) {
+      linkUrl.searchParams.set("redirect_to", expectedCallback);
+      inviteLink = linkUrl.toString();
+    }
+  } catch {
+    // URL parse failed — use as-is
+  }
+
+  try {
+    await sendPortalInviteEmail({
+      to: email,
+      inviteLink,
+      inviteeName: existingUser.name ?? undefined,
+      inviterName: null,
+    });
+  } catch (emailError) {
+    const msg = emailError instanceof Error ? emailError.message : String(emailError);
+    return {
+      success: false,
+      code: "EMAIL_FAILED",
+      error: `Failed to send sign-in email: ${msg}`,
+    };
+  }
+
+  return { success: true };
 }

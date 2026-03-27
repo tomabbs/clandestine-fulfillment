@@ -1,16 +1,20 @@
 /**
  * Auth callback handler.
  *
- * Two auth flows land here:
+ * Three auth flows land here:
  *
  * 1. PKCE / OAuth (Google login): Supabase redirects with ?code=...
  *    → Server-side: exchange code for session, look up role, redirect.
  *
- * 2. Email invite / magic link (implicit flow): Supabase redirects with
+ * 2. Token hash (signInWithOtp PKCE / newer magic links): Supabase redirects
+ *    with ?token_hash=...&type=magiclink (or email).
+ *    → Server-side: verifyOtp, establish session, look up role, redirect.
+ *
+ * 3. Email invite / magic link (implicit flow): Supabase redirects with
  *    #access_token=...&type=invite (hash fragment, invisible to server).
- *    → Server sees no ?code, so we return an HTML page with inline JS
- *      that extracts the hash, calls supabase.auth.getSession(), and
- *      redirects to /auth/callback/complete?ready=1 to finalize server-side.
+ *    → Server sees no ?code or ?token_hash, so we return an HTML page with
+ *      inline JS that extracts the hash, calls supabase.auth.setSession(),
+ *      and redirects to /auth/callback/complete to finalize server-side.
  */
 
 import { createServerClient } from "@supabase/ssr";
@@ -24,6 +28,8 @@ import { STAFF_ROLES } from "@/lib/shared/constants";
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
   const code = searchParams.get("code");
+  const tokenHash = searchParams.get("token_hash");
+  const type = searchParams.get("type");
   const next = searchParams.get("next") ?? "/";
 
   // ── Flow 1: PKCE / OAuth code exchange ──────────────────────────────
@@ -31,63 +37,72 @@ export async function GET(request: NextRequest) {
     return handleCodeExchange(request, code, next, origin);
   }
 
-  // ── Flow 2: Hash fragment (email invite / magic link) ───────────────
-  // Return a lightweight HTML page that processes the hash client-side.
-  // The Supabase JS client in the browser will read #access_token from the
-  // URL hash and establish the session automatically.
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  // ── Flow 2: Token hash (signInWithOtp PKCE, newer Supabase magic links)
+  // signInWithOtp with PKCE enabled sends ?token_hash=...&type=magiclink
+  if (tokenHash && type) {
+    return handleTokenHash(request, tokenHash, type, origin);
+  }
 
+  // ── Flow 3: Hash fragment (email invite / magic link implicit) ───────
+  // The hash fragment (#access_token=...) is invisible to the server, so
+  // we redirect to a client component page that:
+  //   1. Reads the hash with window.location.hash
+  //   2. Calls createBrowserClient (from @supabase/ssr) — writes to cookies
+  //   3. Redirects to /auth/callback/complete (server reads cookies)
+  //
+  // JavaScript window.location assignments preserve the hash, so the
+  // redirect from route handler → client page keeps the hash intact.
   const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Signing in...</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-</head><body>
+<html><head><meta charset="utf-8"><title>Signing in...</title></head>
+<body>
 <p style="font-family:sans-serif;text-align:center;margin-top:40vh">Signing you in...</p>
 <script>
-(async function() {
-  try {
-    var sb = supabase.createClient("${supabaseUrl}", "${supabaseAnonKey}");
-
-    // Hash fragment: #access_token=...&refresh_token=...&type=invite
-    var hash = window.location.hash.substring(1);
-    if (!hash) {
-      window.location.href = "/login?error=missing_token";
-      return;
-    }
-
-    var params = new URLSearchParams(hash);
-    var accessToken = params.get("access_token");
-    var refreshToken = params.get("refresh_token");
-
-    if (!accessToken || !refreshToken) {
-      window.location.href = "/login?error=missing_token";
-      return;
-    }
-
-    var { error } = await sb.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (error) {
-      window.location.href = "/login?error=session_failed";
-      return;
-    }
-
-    // Session is now in cookies. Hit the complete endpoint to do
-    // server-side role lookup and redirect.
-    window.location.href = "/auth/callback/complete";
-  } catch(e) {
-    console.error("Auth callback error:", e);
-    window.location.href = "/login?error=callback_exception";
-  }
-})();
+// Redirect to the client component that handles hash fragments properly.
+// window.location.hash is preserved in JavaScript-initiated navigations.
+window.location.replace("/auth/callback-hash" + window.location.hash);
 </script>
 </body></html>`;
 
   return new NextResponse(html, {
     headers: { "Content-Type": "text/html" },
   });
+}
+
+// ── Token hash exchange (signInWithOtp PKCE / newer magic links) ───────
+
+async function handleTokenHash(
+  _request: NextRequest,
+  tokenHash: string,
+  type: string,
+  origin: string,
+) {
+  const cookieStore = await cookies();
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        for (const { name, value, options } of cookiesToSet) {
+          cookieStore.set(name, value, options);
+        }
+      },
+    },
+  });
+
+  const { error } = await supabase.auth.verifyOtp({
+    token_hash: tokenHash,
+    type: type as "signup" | "invite" | "magiclink" | "recovery" | "email_change" | "email",
+  });
+
+  if (error) {
+    return NextResponse.redirect(`${origin}/login?error=verify_failed`);
+  }
+
+  return finalizeSession(supabase, origin, "/");
 }
 
 // ── PKCE code exchange (Google OAuth, magic link w/ PKCE) ──────────────

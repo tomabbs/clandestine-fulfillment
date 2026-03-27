@@ -27,7 +27,19 @@ export type IntegrationHealthState =
   | "manual_review"
   | "disconnected";
 
-export type OrderSource = "shopify" | "bandcamp" | "woocommerce" | "squarespace" | "manual";
+export type OrderSource =
+  | "shopify"
+  | "bandcamp"
+  | "woocommerce"
+  | "squarespace"
+  | "discogs"
+  | "manual";
+
+export type MailOrderSource = "clandestine_shopify" | "clandestine_discogs";
+
+export type PlatformFulfillmentStatus = "pending" | "sent" | "confirmed" | "failed";
+
+export type ClientPayoutStatus = "pending" | "included_in_snapshot" | "paid";
 
 export type InboundStatus = "expected" | "arrived" | "checking_in" | "checked_in" | "issue";
 
@@ -38,7 +50,7 @@ export type ConversationStatus =
   | "resolved"
   | "closed";
 
-export type StorePlatform = "shopify" | "woocommerce" | "squarespace" | "bigcommerce";
+export type StorePlatform = "shopify" | "woocommerce" | "squarespace" | "bigcommerce" | "discogs";
 
 // === Core ===
 
@@ -197,7 +209,7 @@ export interface WarehouseOrder {
   id: string;
   workspace_id: string;
   org_id: string;
-  shopify_order_id: string | null;
+  external_order_id: string | null;
   order_number: string | null;
   bandcamp_payment_id: number | null;
   customer_name: string | null;

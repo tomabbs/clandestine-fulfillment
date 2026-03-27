@@ -66,31 +66,9 @@ export async function getStoreMappings(workspaceId: string): Promise<StoreMappin
   };
 }
 
-export async function syncStoresFromShipStation(workspaceId: string): Promise<{ synced: number }> {
-  await requireAuth();
-
-  const { fetchStores } = await import("@/lib/clients/shipstation");
-  const apiStores = await fetchStores();
-
-  const serviceClient = createServiceRoleClient();
-
-  let synced = 0;
-  for (const store of apiStores) {
-    const { error } = await serviceClient.from("warehouse_shipstation_stores").upsert(
-      {
-        workspace_id: workspaceId,
-        store_id: store.storeId,
-        store_name: store.storeName,
-        marketplace_name: store.marketplaceName,
-      },
-      { onConflict: "workspace_id,store_id" },
-    );
-
-    if (error) throw new Error(`Failed to upsert store ${store.storeId}: ${error.message}`);
-    synced++;
-  }
-
-  return { synced };
+/** ShipStation removed — function preserved for API compatibility only. */
+export async function syncStoresFromShipStation(_workspaceId: string): Promise<{ synced: number }> {
+  return { synced: 0 };
 }
 
 export async function autoMatchStores(workspaceId: string): Promise<AutoMatchSuggestion[]> {
