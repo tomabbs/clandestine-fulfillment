@@ -494,7 +494,7 @@ export async function updateVariants(
   return { success: true };
 }
 
-export async function getClientReleases(rawFilters?: { page?: number; pageSize?: 25 | 50 | 100 }) {
+export async function getClientReleases(filters?: { page?: number; pageSize?: number }) {
   // Use service role client + explicit org filter — never rely on RLS alone
   // because staff users who also have access to the portal would see all orgs.
   let orgId: string;
@@ -502,11 +502,13 @@ export async function getClientReleases(rawFilters?: { page?: number; pageSize?:
     const clientCtx = await requireClient();
     orgId = clientCtx.orgId;
   } catch (error) {
-    if (isUnauthorizedError(error)) return { preorders: [], newReleases: [] };
+    if (isUnauthorizedError(error)) return { preorders: [], newReleases: [], catalog: [], total: 0 };
     throw error;
   }
 
-  clientReleasesFiltersSchema.parse(rawFilters ?? {});
+  const page = filters?.page ?? 1;
+  const pageSize = filters?.pageSize ?? 50;
+  const offset = (page - 1) * pageSize;
 
   const supabase = createServiceRoleClient();
   const now = new Date();
@@ -540,5 +542,24 @@ export async function getClientReleases(rawFilters?: { page?: number; pageSize?:
 
   if (releaseError) throw new Error(`Failed to fetch new releases: ${releaseError.message}`);
 
-  return { preorders: preorders ?? [], newReleases: newReleases ?? [] };
+  // Full paginated catalog — all variants for this org, sorted by product title then SKU.
+  // This is the primary view; preorders and newReleases are special callouts at the top.
+  const { data: catalog, error: catalogError, count } = await supabase
+    .from("warehouse_product_variants")
+    .select(SELECT, { count: "exact" })
+    .eq("warehouse_products.org_id", orgId)
+    .order("warehouse_products(title)", { ascending: true })
+    .order("sku", { ascending: true })
+    .range(offset, offset + pageSize - 1);
+
+  if (catalogError) throw new Error(`Failed to fetch catalog: ${catalogError.message}`);
+
+  return {
+    preorders: preorders ?? [],
+    newReleases: newReleases ?? [],
+    catalog: catalog ?? [],
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
 }

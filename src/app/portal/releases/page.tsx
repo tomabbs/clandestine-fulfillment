@@ -1,10 +1,11 @@
 "use client";
 
-import { Calendar, Disc3, Loader2, Package } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, Disc3, Loader2, Package } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { getClientReleases } from "@/actions/catalog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -50,11 +51,36 @@ function formatDateUTC(value: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
+function VariantThumbnail({ variant }: { variant: ReleaseVariant }) {
+  const images = variant.warehouse_products?.warehouse_product_images ?? [];
+  const primary = [...images].sort((a, b) => a.position - b.position)[0];
+  if (primary) {
+    return (
+      <Image
+        src={primary.src}
+        alt={primary.alt ?? variant.warehouse_products.title}
+        width={32}
+        height={32}
+        className="h-8 w-8 rounded object-cover"
+      />
+    );
+  }
+  return (
+    <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
+      <Package className="text-muted-foreground h-4 w-4" />
+    </div>
+  );
+}
+
+const PAGE_SIZE = 50;
+
 export default function ReleasesPage() {
   const [hydrated, setHydrated] = useState(false);
+  const [page, setPage] = useState(1);
+
   const { data, isLoading, error } = useAppQuery({
-    queryKey: queryKeys.clientReleases.list(),
-    queryFn: () => getClientReleases(),
+    queryKey: [...queryKeys.clientReleases.list(), page],
+    queryFn: () => getClientReleases({ page, pageSize: PAGE_SIZE }),
     tier: CACHE_TIERS.SESSION,
   });
 
@@ -64,6 +90,9 @@ export default function ReleasesPage() {
 
   const preorders = (data?.preorders ?? []) as unknown as ReleaseVariant[];
   const newReleases = (data?.newReleases ?? []) as unknown as ReleaseVariant[];
+  const catalog = (data?.catalog ?? []) as unknown as ReleaseVariant[];
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   if (!hydrated || isLoading) {
     return (
@@ -114,12 +143,10 @@ export default function ReleasesPage() {
         </Card>
       </div>
 
-      {/* Pre-orders section */}
-      <div className="space-y-2">
-        <h2 className="text-lg font-medium">Upcoming Pre-Orders</h2>
-        {preorders.length === 0 ? (
-          <p className="text-muted-foreground text-sm py-4">No upcoming pre-orders.</p>
-        ) : (
+      {/* Pre-orders callout — only shown when there are preorders */}
+      {preorders.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-lg font-medium">Upcoming Pre-Orders</h2>
           <Table>
             <TableHeader>
               <TableRow>
@@ -133,38 +160,14 @@ export default function ReleasesPage() {
             </TableHeader>
             <TableBody>
               {preorders.map((v) => {
-                const product = v.warehouse_products;
-                const images = product?.warehouse_product_images ?? [];
-                const primaryImage = [...images].sort((a, b) => a.position - b.position)[0];
                 const inv = v.warehouse_inventory_levels?.[0];
-
                 return (
                   <TableRow key={v.id}>
+                    <TableCell><VariantThumbnail variant={v} /></TableCell>
+                    <TableCell className="font-medium">{v.warehouse_products?.title ?? "—"}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{v.sku}</TableCell>
                     <TableCell>
-                      {primaryImage ? (
-                        <Image
-                          src={primaryImage.src}
-                          alt={primaryImage.alt ?? product.title}
-                          width={32}
-                          height={32}
-                          className="h-8 w-8 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
-                          <Package className="text-muted-foreground h-4 w-4" />
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">{product?.title ?? "—"}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {v.sku}
-                    </TableCell>
-                    <TableCell>
-                      {v.street_date ? (
-                        <Badge variant="secondary">{formatDateUTC(v.street_date)}</Badge>
-                      ) : (
-                        <span className="text-muted-foreground">TBD</span>
-                      )}
+                      <Badge variant="secondary">{formatDateUTC(v.street_date)}</Badge>
                     </TableCell>
                     <TableCell className="text-right font-mono">{inv?.committed ?? 0}</TableCell>
                     <TableCell className="text-right font-mono">{inv?.incoming ?? 0}</TableCell>
@@ -173,15 +176,13 @@ export default function ReleasesPage() {
               })}
             </TableBody>
           </Table>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Recent releases section */}
-      <div className="space-y-2">
-        <h2 className="text-lg font-medium">Recent Releases</h2>
-        {newReleases.length === 0 ? (
-          <p className="text-muted-foreground text-sm py-4">No releases in the past 30 days.</p>
-        ) : (
+      {/* Recent releases callout — only shown when there are recent releases */}
+      {newReleases.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-lg font-medium">Recent Releases (30 days)</h2>
           <Table>
             <TableHeader>
               <TableRow>
@@ -195,39 +196,13 @@ export default function ReleasesPage() {
             </TableHeader>
             <TableBody>
               {newReleases.map((v) => {
-                const product = v.warehouse_products;
-                const images = product?.warehouse_product_images ?? [];
-                const primaryImage = [...images].sort((a, b) => a.position - b.position)[0];
                 const inv = v.warehouse_inventory_levels?.[0];
-
                 return (
                   <TableRow key={v.id}>
-                    <TableCell>
-                      {primaryImage ? (
-                        <Image
-                          src={primaryImage.src}
-                          alt={primaryImage.alt ?? product.title}
-                          width={32}
-                          height={32}
-                          className="h-8 w-8 rounded object-cover"
-                        />
-                      ) : (
-                        <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
-                          <Package className="text-muted-foreground h-4 w-4" />
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="font-medium">{product?.title ?? "—"}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {v.sku}
-                    </TableCell>
-                    <TableCell>
-                      {v.street_date ? (
-                        <span className="text-sm">{formatDateUTC(v.street_date)}</span>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
+                    <TableCell><VariantThumbnail variant={v} /></TableCell>
+                    <TableCell className="font-medium">{v.warehouse_products?.title ?? "—"}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{v.sku}</TableCell>
+                    <TableCell className="text-sm">{formatDateUTC(v.street_date)}</TableCell>
                     <TableCell className="text-right font-mono">{inv?.available ?? 0}</TableCell>
                     <TableCell className="text-right font-mono">{inv?.committed ?? 0}</TableCell>
                   </TableRow>
@@ -235,6 +210,84 @@ export default function ReleasesPage() {
               })}
             </TableBody>
           </Table>
+        </div>
+      )}
+
+      {/* Full catalog — always shown, paginated */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium">Full Catalog</h2>
+          <span className="text-sm text-muted-foreground">{total} titles</span>
+        </div>
+
+        {catalog.length === 0 ? (
+          <p className="text-muted-foreground text-sm py-4">No catalog items found.</p>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12" />
+                  <TableHead>Title</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Release Date</TableHead>
+                  <TableHead className="text-right">Available</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {catalog.map((v) => {
+                  const inv = v.warehouse_inventory_levels?.[0];
+                  const isRecent = v.street_date && new Date(v.street_date) >= new Date(Date.now() - 30*24*60*60*1000);
+                  return (
+                    <TableRow key={v.id}>
+                      <TableCell><VariantThumbnail variant={v} /></TableCell>
+                      <TableCell className="font-medium">
+                        {v.warehouse_products?.title ?? "—"}
+                        {v.is_preorder && (
+                          <Badge variant="outline" className="ml-2 text-xs">Pre-Order</Badge>
+                        )}
+                        {isRecent && !v.is_preorder && (
+                          <Badge variant="secondary" className="ml-2 text-xs">New</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{v.sku}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatDateUTC(v.street_date)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {inv?.available ?? 0}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                >
+                  Next <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
