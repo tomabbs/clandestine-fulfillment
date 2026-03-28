@@ -15,7 +15,7 @@ const filtersSchema = z.object({
 
 export type MailOrderFilters = z.infer<typeof filtersSchema>;
 
-/** Admin: list all mail orders with client name */
+/** Admin: list all mail orders with client name and order detail */
 export async function getMailOrders(rawFilters?: Partial<MailOrderFilters>) {
   const filters = filtersSchema.parse(rawFilters ?? {});
   const supabase = await createServerSupabaseClient();
@@ -25,7 +25,10 @@ export async function getMailOrders(rawFilters?: Partial<MailOrderFilters>) {
 
   let query = supabase
     .from("mailorder_orders")
-    .select("*, organizations(name)", { count: "exact" })
+    .select(
+      "id, source, external_order_id, order_number, customer_name, customer_email, fulfillment_status, platform_fulfillment_status, financial_status, subtotal, shipping_amount, total_price, currency, client_payout_amount, client_payout_status, line_items, shipping_address, created_at, synced_at, organizations(name)",
+      { count: "exact" },
+    )
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -57,7 +60,7 @@ export async function getClientMailOrders(rawFilters?: Partial<MailOrderFilters>
   let query = supabase
     .from("mailorder_orders")
     .select(
-      "id, source, external_order_id, order_number, customer_name, fulfillment_status, subtotal, shipping_amount, total_price, currency, client_payout_amount, client_payout_status, created_at, synced_at",
+      "id, source, external_order_id, order_number, customer_name, customer_email, fulfillment_status, platform_fulfillment_status, subtotal, shipping_amount, total_price, currency, client_payout_amount, client_payout_status, line_items, shipping_address, created_at, synced_at",
       { count: "exact" },
     )
     .order("created_at", { ascending: false })
