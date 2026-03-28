@@ -1,6 +1,7 @@
 "use server";
 
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireStaff } from "@/lib/server/auth-context";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { CLIENT_ROLES } from "@/lib/shared/constants";
 import { parseOnboardingState } from "@/lib/shared/onboarding";
 
@@ -38,7 +39,11 @@ export async function getClients(filters?: {
   page?: number;
   pageSize?: number;
 }): Promise<GetClientsResult> {
-  const supabase = await createServerSupabaseClient();
+  // Staff-only — service role bypasses RLS so all orgs are always visible
+  // regardless of which session's JWT is present. Admin middleware already
+  // gates unauthenticated access; requireStaff() enforces role.
+  await requireStaff();
+  const supabase = createServiceRoleClient();
   const page = filters?.page ?? 1;
   const pageSize = filters?.pageSize ?? 50;
   const offset = (page - 1) * pageSize;
