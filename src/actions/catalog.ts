@@ -563,3 +563,105 @@ export async function getClientReleases(filters?: { page?: number; pageSize?: nu
     pageSize,
   };
 }
+
+// ─── Client-scoped catalog editing ────────────────────────────────────────────
+//
+// Clients may edit their own products' title, description, tags, product_type,
+// and status. Org ownership is verified before any write. Clients CANNOT edit
+// vendor (label name), cost (set by Clandestine), weight, or barcode.
+
+const clientUpdateProductSchema = z.object({
+  title: z.string().min(1).optional(),
+  descriptionHtml: z.string().optional(),
+  productType: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  status: z.enum(["active", "draft", "archived"]).optional(),
+});
+
+/**
+ * Fetch a single product detail for the portal, scoped to the logged-in client's org.
+ * Returns null if the product doesn't belong to their org.
+ */
+export async function getClientProductDetail(productId: string) {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const { data, error } = await supabase
+    .from("warehouse_products")
+    .select(`
+      id, title, vendor, product_type, tags, status, description_html,
+      shopify_product_id, org_id, updated_at,
+      warehouse_product_images (id, src, alt, position),
+      warehouse_product_variants (
+        id, sku, title, price, cost, compare_at_price,
+        weight, weight_unit, barcode, format_name,
+        street_date, is_preorder,
+        warehouse_inventory_levels (available, committed, incoming)
+      )
+    `)
+    .eq("id", productId)
+    .eq("org_id", orgId)
+    .single();
+
+  if (error || !data) return null;
+  return data;
+}
+
+/**
+ * Update a product's editable fields from the client portal.
+ * Verifies the product belongs to the logged-in client's org before writing.
+ */
+export async function updateClientProduct(
+  productId: string,
+  rawData: {
+    title?: string;
+    descriptionHtml?: string;
+    productType?: string;
+    tags?: string[];
+    status?: "active" | "draft" | "archived";
+  },
+) {
+  const { orgId } = await requireClient();
+  const data = clientUpdateProductSchema.parse(rawData);
+  const supabase = createServiceRoleClient();
+
+  // Ownership check
+  const { data: product, error: fetchError } = await supabase
+    .from("warehouse_products")
+    .select("id, shopify_product_id, org_id")
+    .eq("id", productId)
+    .eq("org_id", orgId)
+    .single();
+
+  if (fetchError || !product) throw new Error("Product not found or access denied");
+
+  // Sync to Shopify if connected
+  if (product.shopify_product_id) {
+    const { productUpdate } = await import("@/lib/clients/shopify");
+    await productUpdate({
+      id: product.shopify_product_id,
+      ...(data.title !== undefined && { title: data.title }),
+      ...(data.descriptionHtml !== undefined && { descriptionHtml: data.descriptionHtml }),
+      ...(data.productType !== undefined && { productType: data.productType }),
+      ...(data.tags !== undefined && { tags: data.tags }),
+      ...(data.status !== undefined && {
+        status: data.status.toUpperCase() as "ACTIVE" | "DRAFT" | "ARCHIVED",
+      }),
+    });
+  }
+
+  const dbUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (data.title !== undefined) dbUpdate.title = data.title;
+  if (data.productType !== undefined) dbUpdate.product_type = data.productType;
+  if (data.tags !== undefined) dbUpdate.tags = data.tags;
+  if (data.status !== undefined) dbUpdate.status = data.status;
+
+  const { error } = await supabase
+    .from("warehouse_products")
+    .update(dbUpdate)
+    .eq("id", productId)
+    .eq("org_id", orgId);
+
+  if (error) throw new Error(`Failed to update product: ${error.message}`);
+  return { success: true };
+}

@@ -129,18 +129,18 @@ export function EditableTextCell({
 
   return (
     <td
-      className={`px-3 py-2 text-sm cursor-pointer group whitespace-nowrap transition-colors ${flashBg(flash)} ${className}`}
+      className={`px-3 py-2 text-sm cursor-pointer group overflow-hidden transition-colors ${flashBg(flash)} ${className}`}
       onClick={startEdit}
       onKeyDown={cellKeyHandler(beginEdit)}
     >
-      <span className="inline-flex items-center gap-1">
+      <span className="flex items-center gap-1 min-w-0">
         {saving ? (
-          <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-amber-500" />
         ) : flash === "success" ? (
-          <Check className="h-3 w-3 text-green-500" />
+          <Check className="h-3 w-3 shrink-0 text-green-500" />
         ) : null}
-        <span className="text-muted-foreground">{value || placeholder}</span>
-        <Pencil className="h-3 w-3 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <span className="truncate">{value || placeholder}</span>
+        <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
       </span>
     </td>
   );

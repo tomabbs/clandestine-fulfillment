@@ -43,7 +43,7 @@ const NAV_ITEMS = [
   { title: "Home", href: "/portal", icon: LayoutDashboard },
   { title: "Connected Stores", href: "/portal/stores", icon: Store },
   { title: "Inventory", href: "/portal/inventory", icon: Package },
-  { title: "Releases", href: "/portal/releases", icon: Disc3 },
+  { title: "Catalog", href: "/portal/catalog", icon: Disc3 },
   { title: "Inbound", href: "/portal/inbound", icon: PackagePlus },
   { title: "Fulfillment", href: "/portal/fulfillment", icon: ShoppingCart },
   { title: "Mail-Order", href: "/portal/mail-order", icon: DollarSign },
