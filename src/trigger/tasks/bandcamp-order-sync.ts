@@ -78,9 +78,28 @@ export const bandcampOrderSyncTask = task({
               price: i.sub_total,
             }));
 
+            // Derive org_id from the SKUs in this order rather than using conn.org_id
+            // (all bandcamp_connections use Clandestine Distribution's org_id, not the
+            // individual label's org). Look up the first SKU that resolves to a product org.
+            const skus = orderItems.map((i) => i.sku).filter((s): s is string => !!s);
+            let resolvedOrgId: string = conn.org_id;
+            if (skus.length > 0) {
+              const { data: variants } = await supabase
+                .from("warehouse_product_variants")
+                .select("sku, warehouse_products!inner(org_id)")
+                .eq("workspace_id", workspaceId)
+                .in("sku", skus)
+                .limit(1);
+              const firstVariant = variants?.[0];
+              if (firstVariant) {
+                const product = firstVariant.warehouse_products as unknown as { org_id: string };
+                if (product.org_id) resolvedOrgId = product.org_id;
+              }
+            }
+
             const { error } = await supabase.from("warehouse_orders").insert({
               workspace_id: workspaceId,
-              org_id: conn.org_id,
+              org_id: resolvedOrgId,
               bandcamp_payment_id: paymentId,
               order_number: `BC-${paymentId}`,
               customer_name: first.buyer_name,

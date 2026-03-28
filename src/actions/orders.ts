@@ -53,7 +53,33 @@ export async function getOrderDetail(orderId: string) {
     .select("id, tracking_number, carrier, status, ship_date")
     .eq("order_id", orderId);
 
-  return { order, items: items ?? [], shipments: shipments ?? [] };
+  // Parse line_items JSONB from the order row as a fallback when warehouse_order_items
+  // has no rows (e.g. Bandcamp orders which store line items inline as JSONB).
+  const lineItemsJson = (order?.line_items as Array<{
+    sku?: string;
+    title?: string;
+    quantity?: number;
+    price?: number;
+  }> | null) ?? [];
+
+  // Merge: prefer normalised warehouse_order_items rows; fall back to JSONB
+  const resolvedItems =
+    (items ?? []).length > 0
+      ? items ?? []
+      : lineItemsJson.map((li, i) => ({
+          id: `jsonb-${i}`,
+          order_id: orderId,
+          sku: li.sku ?? null,
+          title: li.title ?? null,
+          quantity: li.quantity ?? 1,
+          price: li.price ?? null,
+        }));
+
+  return {
+    order,
+    items: resolvedItems,
+    shipments: shipments ?? [],
+  };
 }
 
 export async function getTrackingEvents(shipmentId: string) {

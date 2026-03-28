@@ -132,6 +132,8 @@ export interface CreateShipmentInput {
     description: string;
     value: number;
   };
+  /** When true, requests USPS Media Mail rates via special_rates_eligibility. */
+  mediaMailEligible?: boolean;
 }
 
 // ── API methods ───────────────────────────────────────────────────────────────
@@ -144,6 +146,13 @@ export async function createShipment(input: CreateShipmentInput): Promise<EasyPo
     to_address: input.toAddress,
     parcel: input.parcel,
   };
+
+  // EasyPost does not include Media Mail in the standard rates response.
+  // Passing special_rates_eligibility causes USPS to return a MediaMail rate
+  // when the shipment is domestic and the parcel is within weight limits.
+  if (input.mediaMailEligible) {
+    params.options = { special_rates_eligibility: "USPS.MEDIAMAIL" };
+  }
 
   if (!isDomesticShipment(input.toAddress.country)) {
     params.customs_info = {

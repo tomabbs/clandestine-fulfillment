@@ -237,25 +237,57 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
     }
   };
 
+  const shippingAddr = detail.order?.shipping_address as Record<string, string | undefined> | null;
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-6">
-        <div>
-          <h4 className="text-sm font-semibold mb-2">Line Items</h4>
-          <div className="space-y-1 text-sm">
-            {detail.items.map((item) => (
-              <div key={item.id} className="flex justify-between">
-                <span>
-                  <span className="font-mono text-xs text-muted-foreground">{item.sku}</span>{" "}
-                  {item.title ?? ""}
-                </span>
-                <span className="font-mono">
-                  x{item.quantity}
-                  {item.price != null && ` · $${Number(item.price).toFixed(2)}`}
-                </span>
-              </div>
-            ))}
+        <div className="space-y-4">
+          <div>
+            <h4 className="text-sm font-semibold mb-2">Line Items</h4>
+            <div className="space-y-1 text-sm">
+              {detail.items.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No items</p>
+              ) : (
+                detail.items.map((item) => (
+                  <div key={item.id} className="flex justify-between">
+                    <span>
+                      {item.sku && (
+                        <span className="font-mono text-xs text-muted-foreground mr-1">{item.sku}</span>
+                      )}
+                      {item.title ?? ""}
+                    </span>
+                    <span className="font-mono">
+                      x{item.quantity}
+                      {item.price != null && ` · $${Number(item.price).toFixed(2)}`}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
+          {shippingAddr && (
+            <div>
+              <h4 className="text-sm font-semibold mb-1">Ship To</h4>
+              <address className="text-sm text-muted-foreground not-italic space-y-0.5">
+                {(shippingAddr.name || shippingAddr.firstName) && (
+                  <div className="font-medium text-foreground">
+                    {shippingAddr.name ?? `${shippingAddr.firstName ?? ""} ${shippingAddr.lastName ?? ""}`.trim()}
+                  </div>
+                )}
+                {shippingAddr.street1 && <div>{shippingAddr.street1}</div>}
+                {shippingAddr.street2 && <div>{shippingAddr.street2}</div>}
+                {(shippingAddr.city || shippingAddr.state || shippingAddr.zip) && (
+                  <div>
+                    {[shippingAddr.city, shippingAddr.state, shippingAddr.zip].filter(Boolean).join(", ")}
+                  </div>
+                )}
+                {shippingAddr.country && shippingAddr.country !== "US" && (
+                  <div>{shippingAddr.country}</div>
+                )}
+              </address>
+            </div>
+          )}
         </div>
         <div>
           <h4 className="text-sm font-semibold mb-2">Shipments</h4>

@@ -357,6 +357,7 @@ export async function getShippingRates(
           country: toAddr.country,
         },
         parcel: { weight: 16 }, // default 1 lb for rate preview
+        mediaMailEligible,
       });
       return { shipment, error: null };
     } catch (err) {
