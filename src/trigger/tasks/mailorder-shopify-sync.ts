@@ -212,46 +212,53 @@ async function upsertMailOrder(
         ? (subtotal / orderTotalSubtotal) * orderShipping
         : 0;
 
-    const { error } = await supabase.from("mailorder_orders").upsert(
-      {
-        workspace_id: workspaceId,
-        org_id: orgId,
-        source: "clandestine_shopify",
-        external_order_id: order.id,
-        order_number: order.name,
-        customer_name: customerName || order.email,
-        customer_email: order.email,
-        financial_status: order.displayFinancialStatus?.toLowerCase() ?? "paid",
-        fulfillment_status: "unfulfilled",
-        platform_fulfillment_status: "pending",
-        subtotal,
-        shipping_amount: shippingShare,
-        total_price: subtotal + shippingShare,
-        currency,
-        line_items: items.map((li: ShopifyLineItem) => ({
-          sku: li.sku,
-          title: li.title,
-          variant_title: li.variantTitle,
-          quantity: li.quantity,
-          price: li.originalUnitPriceSet?.shopMoney?.amount
-            ? parseFloat(li.originalUnitPriceSet.shopMoney.amount)
-            : null,
-        })),
-        shipping_address: shippingAddr ?? null,
-        // INVARIANT: payout = this org's subtotal * 0.5 (NOT total order price)
-        client_payout_amount: subtotal * 0.5,
-        client_payout_status: "pending",
-        metadata: {
-          platform_order_id: order.id,
-          platform_order_number: order.name,
-          order_total_items: lineItems.length,
-          org_item_count: items.length,
-        },
-        synced_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "workspace_id,source,external_order_id,org_id", ignoreDuplicates: true },
-    );
+        // Fulfillment status from Shopify — "FULFILLED" → "fulfilled", anything else → "unfulfilled"
+        const fulfillmentStatus =
+          order.displayFulfillmentStatus?.toUpperCase() === "FULFILLED" ? "fulfilled" : "unfulfilled";
+
+        const { error } = await supabase.from("mailorder_orders").upsert(
+          {
+            workspace_id: workspaceId,
+            org_id: orgId,
+            source: "clandestine_shopify",
+            external_order_id: order.id,
+            order_number: order.name,
+            customer_name: customerName || order.email,
+            customer_email: order.email,
+            financial_status: order.displayFinancialStatus?.toLowerCase() ?? "paid",
+            fulfillment_status: fulfillmentStatus,
+            platform_fulfillment_status: fulfillmentStatus === "fulfilled" ? "confirmed" : "pending",
+            subtotal,
+            shipping_amount: shippingShare,
+            total_price: subtotal + shippingShare,
+            currency,
+            line_items: items.map((li: ShopifyLineItem) => ({
+              sku: li.sku,
+              title: li.title,
+              variant_title: li.variantTitle,
+              quantity: li.quantity,
+              price: li.originalUnitPriceSet?.shopMoney?.amount
+                ? parseFloat(li.originalUnitPriceSet.shopMoney.amount)
+                : null,
+            })),
+            shipping_address: shippingAddr ?? null,
+            // INVARIANT: payout = this org's subtotal * 0.5 (NOT total order price)
+            client_payout_amount: subtotal * 0.5,
+            client_payout_status: "pending",
+            metadata: {
+              platform_order_id: order.id,
+              platform_order_number: order.name,
+              order_total_items: lineItems.length,
+              org_item_count: items.length,
+            },
+            // Use the actual Shopify order creation date, not the import timestamp
+            created_at: order.createdAt,
+            synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          // ignoreDuplicates: false so re-syncs can update fulfillment status
+          { onConflict: "workspace_id,source,external_order_id,org_id", ignoreDuplicates: false },
+        );
 
     if (error) {
       console.error(
