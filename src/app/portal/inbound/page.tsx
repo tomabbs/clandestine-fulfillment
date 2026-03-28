@@ -4,6 +4,7 @@ import { Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { getInboundShipments, type InboundShipmentWithOrg } from "@/actions/inbound";
+import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
@@ -29,16 +30,16 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function PortalInboundPage() {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(25);
 
   const { data, isLoading } = useAppQuery<{ data: InboundShipmentWithOrg[]; count: number }>({
-    queryKey: queryKeys.inbound.list({ page, portal: true } as Record<string, unknown>),
-    queryFn: () => getInboundShipments({ page, pageSize: 25 }),
+    queryKey: queryKeys.inbound.list({ page, pageSize, portal: true } as Record<string, unknown>),
+    queryFn: () => getInboundShipments({ page, pageSize }),
     tier: CACHE_TIERS.SESSION,
   });
 
   const shipments = data?.data ?? [];
   const totalCount = data?.count ?? 0;
-  const totalPages = Math.ceil(totalCount / 25);
 
   return (
     <div className="p-6 space-y-6">
@@ -75,31 +76,13 @@ export default function PortalInboundPage() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={totalCount}
+        onPageChange={setPage}
+        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { Calendar, ChevronLeft, ChevronRight, Disc3, Loader2, Package } from "lucide-react";
+import { Calendar, Disc3, Loader2, Package } from "lucide-react";
+import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -73,16 +74,15 @@ function VariantThumbnail({ variant }: { variant: ReleaseVariant }) {
   );
 }
 
-const PAGE_SIZE = 50;
-
 export default function CatalogPage() {
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(25);
 
   const { data, isLoading, error } = useAppQuery({
-    queryKey: [...queryKeys.clientReleases.list(), page],
-    queryFn: () => getClientReleases({ page, pageSize: PAGE_SIZE }),
+    queryKey: [...queryKeys.clientReleases.list(), page, pageSize],
+    queryFn: () => getClientReleases({ page, pageSize }),
     tier: CACHE_TIERS.SESSION,
   });
 
@@ -94,7 +94,6 @@ export default function CatalogPage() {
   const newReleases = (data?.newReleases ?? []) as unknown as ReleaseVariant[];
   const catalog = (data?.catalog ?? []) as unknown as ReleaseVariant[];
   const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / PAGE_SIZE);
 
   if (!hydrated || isLoading) {
     return (
@@ -272,29 +271,14 @@ export default function CatalogPage() {
               </TableBody>
             </Table>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" /> Previous
-                </Button>
-                <span className="text-sm text-muted-foreground">
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                >
-                  Next <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
+            {total > 0 && (
+              <PaginationBar
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={setPage}
+                onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+              />
             )}
           </>
         )}

@@ -8,6 +8,7 @@ import {
   type InboundFilters,
   type InboundShipmentWithOrg,
 } from "@/actions/inbound";
+import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,13 +42,14 @@ export default function AdminInboundPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(25);
 
   const filters: InboundFilters = {
     status: activeTab === "all" ? undefined : (activeTab as InboundFilters["status"]),
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     page,
-    pageSize: 25,
+    pageSize,
   };
 
   const { data, isLoading } = useAppQuery<{ data: InboundShipmentWithOrg[]; count: number }>({
@@ -58,7 +60,6 @@ export default function AdminInboundPage() {
 
   const shipments = data?.data ?? [];
   const totalCount = data?.count ?? 0;
-  const totalPages = Math.ceil(totalCount / 25);
 
   return (
     <div className="p-6 space-y-6">
@@ -209,32 +210,13 @@ export default function AdminInboundPage() {
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {page} of {totalPages} ({totalCount} total)
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={totalCount}
+        onPageChange={setPage}
+        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+      />
     </div>
   );
 }

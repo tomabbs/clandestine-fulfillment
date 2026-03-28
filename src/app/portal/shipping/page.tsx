@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Package } from "lucide-react";
+import { Package } from "lucide-react";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getClientShipments, getShipmentItems, getTrackingEvents } from "@/actions/orders";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
@@ -39,7 +40,6 @@ export default function PortalShippingPage() {
     enabled: !!expandedId,
   });
 
-  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
 
   return (
     <div className="p-6 space-y-4">
@@ -171,30 +171,14 @@ export default function PortalShippingPage() {
         </Table>
       )}
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">
-            Page {filters.page} of {totalPages}
-          </span>
-          <div className="flex gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page <= 1}
-              onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page >= totalPages}
-              onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
     </div>
   );

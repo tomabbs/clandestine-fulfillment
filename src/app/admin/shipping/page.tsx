@@ -1,6 +1,7 @@
 "use client";
 
 import { Download, ExternalLink, Loader2, Package, Search, Send } from "lucide-react";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { setBandcampPaymentId, triggerBandcampMarkShipped } from "@/actions/bandcamp-shipping";
 import type { GetShipmentsFilters } from "@/actions/shipping";
@@ -143,7 +144,6 @@ export default function ShippingPage() {
     }
   }, [filters.orgId, filters.dateFrom, filters.dateTo]);
 
-  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -262,31 +262,14 @@ export default function ShippingPage() {
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {filters.page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page === 1}
-              onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) - 1 }))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page === totalPages}
-              onClick={() => setFilters((prev) => ({ ...prev, page: (prev.page ?? 1) + 1 }))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page ?? 1}
+          pageSize={filters.pageSize ?? 25}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
     </div>
   );

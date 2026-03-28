@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, ExternalLink, Minus, Package, Plus } from "lucide-react";
+import { ExternalLink, Minus, Package, Plus } from "lucide-react";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getClientInventoryLevels, getInventoryDetail } from "@/actions/inventory";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,6 @@ import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
-const PAGE_SIZES = [10, 25, 50, 100];
 
 export default function InventoryPage() {
   const [filters, setFilters] = useState({
@@ -50,7 +50,6 @@ export default function InventoryPage() {
     enabled: !!expandedSku,
   });
 
-  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
 
   return (
     <div className="p-6 space-y-4">
@@ -212,48 +211,14 @@ export default function InventoryPage() {
         </Table>
       )}
 
-      {/* Pagination */}
       {data && data.total > 0 && (
-        <div className="flex items-center justify-between">
-          <div className="text-muted-foreground flex items-center gap-2 text-sm">
-            <span>Rows per page:</span>
-            <select
-              value={filters.pageSize}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, pageSize: Number(e.target.value), page: 1 }))
-              }
-              className="border-input bg-background rounded border px-2 py-1 text-sm"
-            >
-              {PAGE_SIZES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-            <span>
-              {(data.page - 1) * data.pageSize + 1}–
-              {Math.min(data.page * data.pageSize, data.total)} of {data.total}
-            </span>
-          </div>
-          <div className="flex gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page <= 1}
-              onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page >= totalPages}
-              onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
     </div>
   );

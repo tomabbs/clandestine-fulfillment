@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Pencil } from "lucide-react";
+import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 import { useCallback, useEffect, useState } from "react";
 import {
   createBillingAdjustment,
@@ -151,12 +152,13 @@ function StatusBadge({ status }: { status: string }) {
 
 function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(25);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.billing.snapshots({ page }),
-    queryFn: () => getBillingSnapshots({ workspaceId, page }),
+    queryKey: queryKeys.billing.snapshots({ page, pageSize }),
+    queryFn: () => getBillingSnapshots({ workspaceId, page, pageSize }),
   });
 
   if (selectedId) {
@@ -204,29 +206,13 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
             </table>
           </div>
 
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              {data.total} snapshot{data.total !== 1 ? "s" : ""} total
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page * (data.pageSize ?? 20) >= data.total}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Button>
-            </div>
-          </div>
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={data.total}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+          />
         </>
       )}
     </div>

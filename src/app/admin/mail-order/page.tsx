@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Store } from "lucide-react";
+import { Store } from "lucide-react";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getMailOrders } from "@/actions/mail-orders";
 import { Badge } from "@/components/ui/badge";
@@ -52,7 +53,6 @@ export default function AdminMailOrderPage() {
     tier: CACHE_TIERS.SESSION,
   });
 
-  const totalPages = data ? Math.ceil(data.total / data.pageSize) : 0;
 
   return (
     <div className="p-6 space-y-4">
@@ -160,30 +160,14 @@ export default function AdminMailOrderPage() {
         </Table>
       )}
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">
-            Page {filters.page} of {totalPages} ({data?.total ?? 0} total)
-          </span>
-          <div className="flex gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page <= 1}
-              onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={filters.page >= totalPages}
-              onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
     </div>
   );
