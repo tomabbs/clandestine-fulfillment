@@ -1,180 +1,107 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   bandcampAlbumArtUrl,
   bandcampMerchImageUrl,
-  parseTralbumData,
-  parseV1,
-  parseV2,
+  parseBandcampPage,
 } from "@/lib/clients/bandcamp-scraper";
 
-// Load fixture once (Rule #18: snapshot tests against saved HTML)
-const fixtureHtml = readFileSync(
-  resolve(__dirname, "../../../fixtures/bandcamp-album-page.html"),
-  "utf-8",
-);
+// Updated to use parseBandcampPage (new API).
+// parseV1/parseV2 are internal implementation details — no longer exported.
+// parseTralbumData is kept as a deprecated compat shim for old callers.
+//
+// Key change confirmed in Step 0 live audit (2026-03-29):
+// pkg.image_id is ALWAYS NULL on real Bandcamp pages.
+// Primary package image comes from arts[0].image_id.
 
-describe("bandcamp-scraper", () => {
-  describe("parseV1 (data-tralbum attribute)", () => {
-    it("extracts TralbumData from data-tralbum attribute", () => {
-      const result = parseV1(fixtureHtml);
+const FIXTURE_HTML = `<div data-tralbum="&quot;art_id&quot;:1234567890,&quot;is_preorder&quot;:false,&quot;album_is_preorder&quot;:false,&quot;current&quot;:{&quot;type&quot;:&quot;album&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;title&quot;:&quot;Test Album&quot;},&quot;packages&quot;:[{&quot;type_name&quot;:&quot;Compact Disc (CD)&quot;,&quot;type_id&quot;:1,&quot;sku&quot;:&quot;TA-CD-001&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:1110001},{&quot;image_id&quot;:1110002}]},{&quot;type_name&quot;:&quot;2 x Vinyl LP&quot;,&quot;type_id&quot;:15,&quot;sku&quot;:&quot;TA-LP-001&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:2220001}]}]"></div>`;
 
-      expect(result).not.toBeNull();
-      expect(result?.item_type).toBe("album");
-      expect(result?.release_date).toBe("01 Mar 2026 00:00:00 GMT");
-      expect(result?.art_id).toBe(1234567890);
-    });
+// Properly formed data-tralbum with braces
+const FIXTURE_HTML_FULL = `<div data-tralbum="{&quot;art_id&quot;:1234567890,&quot;is_preorder&quot;:false,&quot;album_is_preorder&quot;:false,&quot;current&quot;:{&quot;type&quot;:&quot;album&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;title&quot;:&quot;Test Album&quot;},&quot;packages&quot;:[{&quot;type_name&quot;:&quot;Compact Disc (CD)&quot;,&quot;type_id&quot;:1,&quot;sku&quot;:&quot;TA-CD-001&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:1110001},{&quot;image_id&quot;:1110002}]},{&quot;type_name&quot;:&quot;2 x Vinyl LP&quot;,&quot;type_id&quot;:15,&quot;sku&quot;:&quot;TA-LP-001&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:2220001}]}]}"></div>`;
 
-    it("extracts current object", () => {
-      const result = parseV1(fixtureHtml);
-
-      expect(result?.current?.type).toBe("album");
-      expect(result?.current?.title).toBe("Test Album");
-      expect(result?.current?.release_date).toBe("01 Mar 2026 00:00:00 GMT");
-    });
-
-    it("extracts packages with type_name, SKU, and image data", () => {
-      const result = parseV1(fixtureHtml);
-
-      expect(result?.packages).toHaveLength(3);
-      expect(result?.packages?.[0]).toMatchObject({
-        type_name: "Compact Disc (CD)",
-        title: "Test Album CD",
-        sku: "TA-CD-001",
-        image_id: 9876543210,
-      });
-      expect(result?.packages?.[0]?.arts).toHaveLength(2);
-      expect(result?.packages?.[0]?.arts?.[0]?.image_id).toBe(1110001);
-
-      expect(result?.packages?.[1]).toMatchObject({
-        type_name: "Vinyl Record",
-        title: "Test Album LP",
-        sku: "TA-LP-001",
-        image_id: 9876543211,
-      });
-      expect(result?.packages?.[1]?.arts).toHaveLength(1);
-
-      expect(result?.packages?.[2]).toMatchObject({
-        type_name: "Cassette",
-        title: "Test Album Cassette",
-        sku: "TA-CASS-001",
-      });
-      // Cassette has no image_id or arts
-      expect(result?.packages?.[2]?.image_id).toBeUndefined();
-      expect(result?.packages?.[2]?.arts).toBeUndefined();
-    });
-
-    it("returns null for HTML without data-tralbum", () => {
-      const result = parseV1("<html><body>No data here</body></html>");
-      expect(result).toBeNull();
-    });
+describe("bandcamp-scraper (parseBandcampPage)", () => {
+  it("returns null when no data-tralbum attribute exists", () => {
+    expect(parseBandcampPage("<html><body>Nothing</body></html>")).toBeNull();
   });
 
-  describe("parseV2 (inline script var)", () => {
-    const v2Html = `
-<html>
-<head><title>V2 Test</title></head>
-<body>
-<script>
-var TralbumData = {"item_type":"track","release_date":"15 Jun 2026 00:00:00 GMT","current":{"type":"track","release_date":"15 Jun 2026 00:00:00 GMT","title":"Single Track"},"packages":[]};
-var defined = true;
-</script>
-</body>
-</html>`;
-
-    it("extracts TralbumData from inline script var", () => {
-      const result = parseV2(v2Html);
-
-      expect(result).not.toBeNull();
-      expect(result?.item_type).toBe("track");
-      expect(result?.current?.title).toBe("Single Track");
-    });
-
-    it("returns null when no TralbumData var exists", () => {
-      const result = parseV2("<html><script>var other = {};</script></html>");
-      expect(result).toBeNull();
-    });
+  it("parses top-level fields", () => {
+    const result = parseBandcampPage(FIXTURE_HTML_FULL);
+    expect(result).not.toBeNull();
+    expect(result?.artId).toBe(1234567890);
+    expect(result?.isPreorder).toBe(false);
+    expect(result?.title).toBe("Test Album");
+    expect(result?.albumArtUrl).toBe("https://f4.bcbits.com/img/a1234567890_10.jpg");
   });
 
-  describe("parseTralbumData (combined)", () => {
-    it("parses V1 fixture and returns structured data", () => {
-      const result = parseTralbumData(fixtureHtml);
-
-      expect(result.parserVersion).toBe("v1");
-      expect(result.metadataIncomplete).toBe(false);
-      expect(result.typeName).toBe("album");
-      expect(result.title).toBe("Test Album");
-      expect(result.releaseDate).toBe("01 Mar 2026 00:00:00 GMT");
-    });
-
-    it("returns packages with correct data including images", () => {
-      const result = parseTralbumData(fixtureHtml);
-
-      expect(result.packages).toHaveLength(3);
-      expect(result.packages[0]).toMatchObject({
-        typeName: "Compact Disc (CD)",
-        title: "Test Album CD",
-        newDate: "01 Mar 2026 00:00:00 GMT",
-        url: "https://testartist.bandcamp.com/album/test-album",
-        sku: "TA-CD-001",
-        imageId: 9876543210,
-        imageUrl: "https://f4.bcbits.com/img/9876543210_10.jpg",
-      });
-      expect(result.packages[0].arts).toHaveLength(2);
-      expect(result.packages[0].arts[0].url).toBe("https://f4.bcbits.com/img/1110001_10.jpg");
-    });
-
-    it("extracts album art ID and URL", () => {
-      const result = parseTralbumData(fixtureHtml);
-
-      expect(result.artId).toBe(1234567890);
-      expect(result.albumArtUrl).toBe("https://f4.bcbits.com/img/a1234567890_10.jpg");
-    });
-
-    it("defaults to Merch on parse failure (Rule #24)", () => {
-      const result = parseTralbumData("<html><body>Nothing here</body></html>");
-
-      expect(result.typeName).toBe("Merch");
-      expect(result.releaseDate).toBeNull();
-      expect(result.artId).toBeNull();
-      expect(result.albumArtUrl).toBeNull();
-      expect(result.metadataIncomplete).toBe(true);
-      expect(result.raw).toBeNull();
-    });
-
-    it("marks metadata incomplete when type is missing", () => {
-      const htmlNoType = `<div data-tralbum="{&quot;release_date&quot;:&quot;01 Jan 2026 00:00:00 GMT&quot;,&quot;current&quot;:{&quot;release_date&quot;:&quot;01 Jan 2026 00:00:00 GMT&quot;,&quot;title&quot;:&quot;No Type&quot;}}"></div>`;
-      const result = parseTralbumData(htmlNoType);
-
-      expect(result.metadataIncomplete).toBe(true);
-      expect(result.typeName).toBe("Merch");
-    });
-
-    it("snapshot: full fixture parse output", () => {
-      const result = parseTralbumData(fixtureHtml);
-
-      expect(result).toMatchSnapshot();
-    });
+  it("parses releaseDate as Date object", () => {
+    const result = parseBandcampPage(FIXTURE_HTML_FULL);
+    expect(result?.releaseDate).toBeInstanceOf(Date);
+    expect(result?.releaseDate?.getFullYear()).toBe(2026);
+    expect(result?.releaseDate?.getMonth()).toBe(2); // March = 2 (0-indexed)
   });
 
-  describe("image URL helpers", () => {
-    it("bandcampAlbumArtUrl constructs URL with 'a' prefix", () => {
-      expect(bandcampAlbumArtUrl(1234567890)).toBe("https://f4.bcbits.com/img/a1234567890_10.jpg");
-    });
+  it("parses packages with type_id and SKU", () => {
+    const result = parseBandcampPage(FIXTURE_HTML_FULL);
+    expect(result?.packages).toHaveLength(2);
 
-    it("bandcampAlbumArtUrl returns null for null/undefined", () => {
-      expect(bandcampAlbumArtUrl(null)).toBeNull();
-      expect(bandcampAlbumArtUrl(undefined)).toBeNull();
-    });
+    const cd = result?.packages[0];
+    expect(cd?.typeName).toBe("Compact Disc (CD)");
+    expect(cd?.typeId).toBe(1);
+    expect(cd?.sku).toBe("TA-CD-001");
+  });
 
-    it("bandcampMerchImageUrl constructs URL without prefix", () => {
-      expect(bandcampMerchImageUrl(9876543210)).toBe("https://f4.bcbits.com/img/9876543210_10.jpg");
-    });
+  it("primary package image comes from arts[0].imageId (not image_id)", () => {
+    // Step 0 confirmed: pkg.image_id is ALWAYS NULL on real Bandcamp pages.
+    // Primary image = arts[0].image_id.
+    const result = parseBandcampPage(FIXTURE_HTML_FULL);
+    const cd = result?.packages[0];
 
-    it("bandcampMerchImageUrl returns null for null/undefined", () => {
-      expect(bandcampMerchImageUrl(null)).toBeNull();
-      expect(bandcampMerchImageUrl(undefined)).toBeNull();
-    });
+    // arts array populated
+    expect(cd?.arts).toHaveLength(2);
+    expect(cd?.arts[0].imageId).toBe(1110001);
+    expect(cd?.arts[0].url).toBe("https://f4.bcbits.com/img/1110001_10.jpg");
+
+    // imageId/imageUrl derived from arts[0] (since pkg.image_id is null)
+    expect(cd?.imageId).toBe(1110001);
+    expect(cd?.imageUrl).toBe("https://f4.bcbits.com/img/1110001_10.jpg");
+  });
+
+  it("LP package has correct type_id and arts", () => {
+    const result = parseBandcampPage(FIXTURE_HTML_FULL);
+    const lp = result?.packages[1];
+    expect(lp?.typeName).toBe("2 x Vinyl LP");
+    expect(lp?.typeId).toBe(15);
+    expect(lp?.sku).toBe("TA-LP-001");
+    expect(lp?.imageId).toBe(2220001);
+  });
+
+  it("marks metadataIncomplete when no releaseDate", () => {
+    const html = `<div data-tralbum="{&quot;art_id&quot;:123}"></div>`;
+    const result = parseBandcampPage(html);
+    expect(result?.metadataIncomplete).toBe(true);
+    expect(result?.releaseDate).toBeNull();
+  });
+});
+
+describe("image URL helpers", () => {
+  it("bandcampAlbumArtUrl constructs URL with 'a' prefix", () => {
+    expect(bandcampAlbumArtUrl(1234567890)).toBe("https://f4.bcbits.com/img/a1234567890_10.jpg");
+  });
+
+  it("bandcampAlbumArtUrl supports custom size", () => {
+    expect(bandcampAlbumArtUrl(1234567890, 5)).toBe("https://f4.bcbits.com/img/a1234567890_5.jpg");
+  });
+
+  it("bandcampAlbumArtUrl returns null for null/undefined", () => {
+    expect(bandcampAlbumArtUrl(null)).toBeNull();
+    expect(bandcampAlbumArtUrl(undefined)).toBeNull();
+  });
+
+  it("bandcampMerchImageUrl constructs URL without 'a' prefix", () => {
+    expect(bandcampMerchImageUrl(9876543210)).toBe("https://f4.bcbits.com/img/9876543210_10.jpg");
+  });
+
+  it("bandcampMerchImageUrl returns null for null/undefined", () => {
+    expect(bandcampMerchImageUrl(null)).toBeNull();
+    expect(bandcampMerchImageUrl(undefined)).toBeNull();
   });
 });

@@ -8,36 +8,116 @@ import {
   matchSkuToVariants,
   refreshBandcampToken,
 } from "@/lib/clients/bandcamp";
-import { fetchAlbumPage, parseTralbumData } from "@/lib/clients/bandcamp-scraper";
+import type { ScrapedAlbumData } from "@/lib/clients/bandcamp-scraper";
+import {
+  BandcampFetchError,
+  bandcampAlbumArtUrl,
+  bandcampMerchImageUrl,
+  buildBandcampAlbumUrl,
+  fetchBandcampPage,
+  parseBandcampPage,
+} from "@/lib/clients/bandcamp-scraper";
 import { productSetCreate } from "@/lib/clients/shopify-client";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { preorderSetupTask } from "@/trigger/tasks/preorder-setup";
 
-// === Scrape task (Rule #60 — separate queue, concurrency 3) ===
+// ─── Package matching ─────────────────────────────────────────────────────────
+// Priority: exact SKU → format keyword on typeName → no match.
+// Step 0 confirmed: SKUs in packages match warehouse SKUs (LP-NS-167, CD-NS-167).
+// type_id is available (1=CD, 3=Cassette, 15=2xLP) but typeName string matching
+// is more readable. Single-package fallback removed — risked wrong package match.
+
+const FORMAT_KEYWORDS = [
+  // Music formats
+  "lp", "vinyl", "cd", "cassette", "tape", '7"', '10"', '12"',
+  // Apparel and merch
+  "shirt", "t-shirt", "tee", "hoodie", "hat", "beanie", "poster", "print",
+];
+
+function findMatchingPackage(
+  packages: ScrapedAlbumData["packages"],
+  variantSku: string | null,
+  variantTitle: string | null,
+): ScrapedAlbumData["packages"][number] | null {
+  // 1. Exact SKU match — most reliable (confirmed working in Step 0)
+  if (variantSku) {
+    const bySku = packages.find((p) => p.sku === variantSku);
+    if (bySku) return bySku;
+  }
+
+  // 2. Format keyword match on variant title vs package typeName
+  if (variantTitle) {
+    const vtLower = variantTitle.toLowerCase();
+    const keyword = FORMAT_KEYWORDS.find((k) => vtLower.includes(k));
+    if (keyword) {
+      const byKeyword = packages.find((p) => p.typeName?.toLowerCase().includes(keyword));
+      if (byKeyword) return byKeyword;
+    }
+  }
+
+  return null;
+}
+
+// === Scraper task ===
+// Rule #60 — separate queue with concurrency 3 + rate limit 1 req/sec
 
 export const bandcampScrapePageTask = task({
   id: "bandcamp-scrape-page",
   queue: bandcampScrapeQueue,
-  run: async (payload: { url: string; mappingId: string; workspaceId: string }) => {
+  run: async (payload: {
+    url: string;
+    mappingId: string;
+    workspaceId: string;
+    urlIsConstructed?: boolean;
+    albumTitle?: string;
+    urlSource?: "orders_api" | "constructed" | "manual";
+  }) => {
     const supabase = createServiceRoleClient();
     try {
-      const html = await fetchAlbumPage(payload.url);
-      const scraped = parseTralbumData(html);
+      const html = await fetchBandcampPage(payload.url);
+      const scraped = parseBandcampPage(html);
 
+      if (!scraped) {
+        // data-tralbum attribute not found — may not be an album page
+        await supabase.from("warehouse_review_queue").upsert(
+          {
+            workspace_id: payload.workspaceId,
+            org_id: null,
+            category: "bandcamp_scraper",
+            severity: "medium" as const,
+            title: "data-tralbum attribute not found",
+            description: `Could not parse data-tralbum from ${payload.url}. Page may not be an album page.`,
+            metadata: { url: payload.url, mappingId: payload.mappingId },
+            status: "open" as const,
+            group_key: `bc_no_tralbum_${payload.mappingId}`,
+            occurrence_count: 1,
+          },
+          { onConflict: "group_key", ignoreDuplicates: false },
+        );
+        return { success: false, reason: "no_tralbum" };
+      }
+
+      // Write scraped metadata — update mapping with all data-tralbum fields
       await supabase
         .from("bandcamp_product_mappings")
         .update({
-          bandcamp_type_name: scraped.typeName,
-          bandcamp_new_date: scraped.releaseDate,
-          bandcamp_url: payload.url,
-          last_synced_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          bandcamp_url:          payload.url,
+          bandcamp_url_source:   "scraper_verified",
+          bandcamp_type_name:    scraped.packages[0]?.typeName ?? null,
+          bandcamp_new_date:     scraped.releaseDate
+            ? scraped.releaseDate.toISOString().slice(0, 10)
+            : null,
+          bandcamp_release_date: scraped.releaseDate?.toISOString() ?? null,
+          bandcamp_is_preorder:  scraped.isPreorder,
+          bandcamp_art_url:      scraped.albumArtUrl,
+          last_synced_at:        new Date().toISOString(),
+          updated_at:            new Date().toISOString(),
         })
         .eq("id", payload.mappingId);
 
-      // Propagate scraped release date to the linked variant
+      // Propagate to linked variant
       const { data: mapping } = await supabase
         .from("bandcamp_product_mappings")
         .select("variant_id")
@@ -47,24 +127,26 @@ export const bandcampScrapePageTask = task({
       if (mapping?.variant_id) {
         const { data: variant } = await supabase
           .from("warehouse_product_variants")
-          .select("id, street_date, is_preorder, product_id")
+          .select("id, street_date, is_preorder, product_id, title")
           .eq("id", mapping.variant_id)
           .single();
 
         if (variant) {
-          // Backfill street_date if missing
+          const updates: Record<string, unknown> = {};
+
           if (scraped.releaseDate && !variant.street_date) {
-            const updates: Record<string, unknown> = {
-              street_date: scraped.releaseDate,
-              updated_at: new Date().toISOString(),
-            };
+            updates.street_date = scraped.releaseDate.toISOString().slice(0, 10);
+          }
+          if (scraped.isPreorder && !variant.is_preorder) {
+            updates.is_preorder = true;
+          }
 
-            const streetDate = new Date(scraped.releaseDate);
-            if (streetDate > new Date() && !variant.is_preorder) {
-              updates.is_preorder = true;
-            }
-
-            await supabase.from("warehouse_product_variants").update(updates).eq("id", variant.id);
+          if (Object.keys(updates).length > 0) {
+            updates.updated_at = new Date().toISOString();
+            await supabase
+              .from("warehouse_product_variants")
+              .update(updates)
+              .eq("id", variant.id);
 
             if (updates.is_preorder === true) {
               await preorderSetupTask.trigger({
@@ -78,7 +160,7 @@ export const bandcampScrapePageTask = task({
             }
           }
 
-          // Store album art + merch images in warehouse_product_images
+          // Store album art + primary merch image
           if (variant.product_id) {
             await storeScrapedImages(
               supabase,
@@ -86,6 +168,7 @@ export const bandcampScrapePageTask = task({
               payload.workspaceId,
               scraped,
               variant.id,
+              variant.title,
             );
           }
         }
@@ -99,8 +182,8 @@ export const bandcampScrapePageTask = task({
             category: "bandcamp_scraper",
             severity: "low" as const,
             title: "Incomplete Bandcamp metadata",
-            description: `Scraper could not extract full metadata from ${payload.url}. Type defaulted to "Merch".`,
-            metadata: { url: payload.url, parser_version: scraped.parserVersion },
+            description: `Scraper could not extract release_date or packages from ${payload.url}.`,
+            metadata: { url: payload.url, mappingId: payload.mappingId },
             status: "open" as const,
             group_key: `bandcamp_metadata_incomplete_${payload.mappingId}`,
             occurrence_count: 1,
@@ -111,29 +194,58 @@ export const bandcampScrapePageTask = task({
 
       return { success: true, metadataIncomplete: scraped.metadataIncomplete };
     } catch (error) {
-      logger.error("Scrape failed", { url: payload.url, error: String(error) });
-      return { success: false, error: String(error) };
+      // Typed check — no String(error).includes("404")
+      const is404 = error instanceof BandcampFetchError && error.status === 404;
+
+      logger.error("Scrape failed", {
+        url: payload.url,
+        urlIsConstructed: payload.urlIsConstructed,
+        status: error instanceof BandcampFetchError ? error.status : undefined,
+        error: String(error),
+      });
+
+      if (is404 && payload.urlIsConstructed) {
+        // Constructed slug was wrong — log for manual correction, don't retry
+        await supabase.from("warehouse_review_queue").upsert(
+          {
+            workspace_id: payload.workspaceId,
+            org_id: null,
+            category: "bandcamp_scraper",
+            severity: "low" as const,
+            title: "Constructed Bandcamp URL returned 404",
+            description: `URL: ${payload.url}. Album slug may not match. Set bandcamp_url manually.`,
+            metadata: {
+              url: payload.url,
+              mappingId: payload.mappingId,
+              album_title: payload.albumTitle,
+            },
+            status: "open" as const,
+            group_key: `bc_scrape_404_${payload.mappingId}`,
+            occurrence_count: 1,
+          },
+          { onConflict: "group_key", ignoreDuplicates: false },
+        );
+        return { success: false, reason: "404_constructed_url" };
+      }
+
+      // Non-404 or API-sourced URL failures → throw so Trigger.dev retries
+      throw error;
     }
   },
 });
 
 // === Image storage helper ===
+// Stores album art (1200px) and primary merch image.
+// Step 0 confirmed: pkg.image_id is always NULL; primary image = arts[0].imageId.
 
-import type { ScrapedAlbumData } from "@/lib/clients/bandcamp-scraper";
-
-/**
- * Store album art as position=0 and merch product photos as position=1,2,3...
- * in warehouse_product_images. Matches the correct package by variant_id → SKU.
- * Merges with existing images — only adds scraped images whose src is not already present.
- */
 async function storeScrapedImages(
   supabase: ReturnType<typeof createServiceRoleClient>,
   productId: string,
   workspaceId: string,
   scraped: ScrapedAlbumData,
   variantId: string,
+  variantTitle: string | null,
 ) {
-  // Fetch existing image srcs so we don't duplicate
   const { data: existingImages } = await supabase
     .from("warehouse_product_images")
     .select("src, position")
@@ -141,7 +253,7 @@ async function storeScrapedImages(
     .order("position", { ascending: true });
 
   const existingSrcs = new Set((existingImages ?? []).map((i) => i.src));
-  const nextPosition =
+  let position =
     (existingImages?.length ?? 0) > 0
       ? Math.max(...(existingImages ?? []).map((i) => i.position), -1) + 1
       : 0;
@@ -154,9 +266,7 @@ async function storeScrapedImages(
     position: number;
   }> = [];
 
-  let position = nextPosition;
-
-  // Album art (cover image shared across all packages) — only if not already present
+  // Album art (1200px via "a" prefix URL)
   if (scraped.albumArtUrl && !existingSrcs.has(scraped.albumArtUrl)) {
     imagesToInsert.push({
       product_id: productId,
@@ -167,41 +277,27 @@ async function storeScrapedImages(
     });
   }
 
-  // Find the matching package for this variant by looking up the variant's SKU
+  // Primary merch image from matched package
   const { data: variantData } = await supabase
     .from("warehouse_product_variants")
     .select("sku")
     .eq("id", variantId)
     .single();
 
-  const variantSku = variantData?.sku;
-  const matchedPkg = variantSku ? scraped.packages.find((p) => p.sku === variantSku) : null;
+  const matchedPkg = findMatchingPackage(
+    scraped.packages,
+    variantData?.sku ?? null,
+    variantTitle,
+  );
 
-  if (matchedPkg) {
-    // Primary merch image (the main package photo) — only if not already present
-    if (matchedPkg.imageUrl && !existingSrcs.has(matchedPkg.imageUrl)) {
-      imagesToInsert.push({
-        product_id: productId,
-        workspace_id: workspaceId,
-        src: matchedPkg.imageUrl,
-        alt: matchedPkg.title ? `${matchedPkg.title} - Product Photo` : "Product Photo",
-        position: position++,
-      });
-    }
-
-    // Additional merch arts (extra product photos)
-    for (const art of matchedPkg.arts) {
-      if (art.imageId === matchedPkg.imageId) continue;
-      if (existingSrcs.has(art.url)) continue;
-
-      imagesToInsert.push({
-        product_id: productId,
-        workspace_id: workspaceId,
-        src: art.url,
-        alt: matchedPkg.title ? `${matchedPkg.title} - Photo` : "Product Photo",
-        position: position++,
-      });
-    }
+  if (matchedPkg?.imageUrl && !existingSrcs.has(matchedPkg.imageUrl)) {
+    imagesToInsert.push({
+      product_id: productId,
+      workspace_id: workspaceId,
+      src: matchedPkg.imageUrl,
+      alt: matchedPkg.typeName ? `${matchedPkg.typeName} - Product Photo` : "Product Photo",
+      position: position++,
+    });
   }
 
   if (imagesToInsert.length === 0) return;
@@ -217,23 +313,19 @@ async function storeScrapedImages(
     return;
   }
 
-  // Update product.images JSONB for legacy compatibility — merge with existing
+  // Sync to product.images JSONB for legacy compatibility
   const { data: product } = await supabase
     .from("warehouse_products")
     .select("images")
     .eq("id", productId)
     .single();
 
-  const existingImagesJson =
+  const existingJson =
     (product?.images as Array<{ src: string; alt?: string; position?: number }> | null) ?? [];
-  const newImagesJson = imagesToInsert.map((img) => ({
-    src: img.src,
-    alt: img.alt,
-    position: img.position,
-  }));
-  const mergedImages = [...existingImagesJson, ...newImagesJson].sort(
-    (a, b) => (a.position ?? 0) - (b.position ?? 0),
-  );
+  const mergedImages = [
+    ...existingJson,
+    ...imagesToInsert.map((img) => ({ src: img.src, alt: img.alt, position: img.position })),
+  ].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
   await supabase
     .from("warehouse_products")
@@ -244,11 +336,82 @@ async function storeScrapedImages(
     productId,
     imageCount: imagesToInsert.length,
     hasAlbumArt: !!scraped.albumArtUrl,
-    hasMerchImages: (matchedPkg?.arts.length ?? 0) > 0,
+    packageMatched: !!matchedPkg,
   });
 }
 
-// === Main sync task (Rule #9 — serialized API access via bandcampQueue) ===
+// === Scrape trigger helper ===
+// Used in both matched and unmatched paths to avoid code duplication.
+
+async function triggerScrapeIfNeeded(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  variantId: string,
+  workspaceId: string,
+  band: BandcampBand | undefined,
+  connection: { band_url?: string | null },
+  merchItem: { url?: string | null; album_title?: string | null },
+) {
+  // Idempotency: only trigger if missing url or type_name
+  const { data: mapping } = await supabase
+    .from("bandcamp_product_mappings")
+    .select("id, bandcamp_url, bandcamp_type_name")
+    .eq("variant_id", variantId)
+    .single();
+
+  if (!mapping) return;
+
+  const needsScrape = !mapping.bandcamp_url || !mapping.bandcamp_type_name;
+  if (!needsScrape) return;
+
+  const bandSubdomain =
+    band?.subdomain ??
+    (connection.band_url ?? "").replace("https://", "").split(".")[0] ??
+    null;
+
+  const apiUrl = (merchItem.url as string | null | undefined) ?? null;
+  const existingUrl = mapping.bandcamp_url ?? null;
+  const constructedUrl =
+    bandSubdomain && merchItem.album_title
+      ? buildBandcampAlbumUrl(bandSubdomain, merchItem.album_title)
+      : null;
+
+  const scrapeUrl = apiUrl ?? existingUrl ?? constructedUrl;
+  if (!scrapeUrl) {
+    logger.warn("No scrape URL available for variant", {
+      variantId,
+      album_title: merchItem.album_title,
+      bandSubdomain,
+    });
+    return;
+  }
+
+  const urlSource: "orders_api" | "constructed" = apiUrl ? "orders_api" : "constructed";
+  const urlIsConstructed = !apiUrl && !existingUrl;
+
+  // Record url source before triggering (so review queue 404 items have context)
+  if (!existingUrl) {
+    await supabase
+      .from("bandcamp_product_mappings")
+      .update({
+        bandcamp_url:        scrapeUrl,
+        bandcamp_url_source: urlSource,
+        updated_at:          new Date().toISOString(),
+      })
+      .eq("id", mapping.id);
+  }
+
+  await bandcampScrapePageTask.trigger({
+    url: scrapeUrl,
+    mappingId: mapping.id,
+    workspaceId,
+    urlIsConstructed,
+    albumTitle: merchItem.album_title ?? undefined,
+    urlSource,
+  });
+}
+
+// === Main sync task ===
+// Rule #9 — serialized API access via bandcampQueue
 
 export const bandcampSyncTask = task({
   id: "bandcamp-sync",
@@ -258,7 +421,6 @@ export const bandcampSyncTask = task({
     const supabase = createServiceRoleClient();
     const { workspaceId } = payload;
 
-    // Log sync start
     const { data: syncLog } = await supabase
       .from("channel_sync_log")
       .insert({
@@ -278,15 +440,12 @@ export const bandcampSyncTask = task({
     let itemsFailed = 0;
 
     try {
-      // Step 1: Refresh token
       const accessToken = await refreshBandcampToken(workspaceId);
       logger.info("Token refreshed", { workspaceId });
 
-      // Step 2: Get bands and cache
       const bands = await getMyBands(accessToken);
       logger.info("Got bands", { count: bands.length });
 
-      // Build band lookup from member_bands
       const bandLookup = new Map<number, BandcampBand>();
       for (const band of bands) {
         bandLookup.set(band.band_id, band);
@@ -297,7 +456,6 @@ export const bandcampSyncTask = task({
         }
       }
 
-      // Step 3: Get all connections for this workspace
       const { data: connections } = await supabase
         .from("bandcamp_connections")
         .select("*")
@@ -310,20 +468,24 @@ export const bandcampSyncTask = task({
       }
 
       for (const connection of connections) {
-        // Update member_bands_cache
         const band = bandLookup.get(connection.band_id);
+
+        // Persist subdomain to band_url if not already set
         if (band) {
+          const updatePayload: Record<string, unknown> = {
+            member_bands_cache: band as unknown as Record<string, unknown>,
+            band_name: band.name,
+            updated_at: new Date().toISOString(),
+          };
+          if (band.subdomain && !connection.band_url) {
+            updatePayload.band_url = `https://${band.subdomain}.bandcamp.com`;
+          }
           await supabase
             .from("bandcamp_connections")
-            .update({
-              member_bands_cache: band as unknown as Record<string, unknown>,
-              band_name: band.name,
-              updated_at: new Date().toISOString(),
-            })
+            .update(updatePayload)
             .eq("id", connection.id);
         }
 
-        // Get merch details for this band
         let merchItems: BandcampMerchItem[];
         try {
           merchItems = await getMerchDetails(connection.band_id, accessToken);
@@ -336,7 +498,6 @@ export const bandcampSyncTask = task({
           continue;
         }
 
-        // Get existing variants for SKU matching
         const { data: variants } = await supabase
           .from("warehouse_product_variants")
           .select("id, sku")
@@ -344,151 +505,121 @@ export const bandcampSyncTask = task({
 
         const { matched, unmatched } = matchSkuToVariants(merchItems, variants ?? []);
 
-        // Process matched items — update mappings + backfill price/images
+        // ── Matched items ──────────────────────────────────────────────────────
+
         for (const { merchItem, variantId } of matched) {
           await supabase.from("bandcamp_product_mappings").upsert(
             {
-              workspace_id: workspaceId,
-              variant_id: variantId,
-              bandcamp_item_id: merchItem.package_id,
-              bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album")
+              workspace_id:            workspaceId,
+              variant_id:              variantId,
+              bandcamp_item_id:        merchItem.package_id,
+              bandcamp_item_type:      merchItem.item_type?.toLowerCase().includes("album")
                 ? "album"
                 : "package",
               bandcamp_member_band_id: merchItem.member_band_id,
-              bandcamp_url: merchItem.url,
-              bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
-              last_quantity_sold: merchItem.quantity_sold,
-              last_synced_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
+              bandcamp_image_url:      bandcampImageUrl(merchItem.image_url) ?? null,
+              last_quantity_sold:      merchItem.quantity_sold,
+              last_synced_at:          new Date().toISOString(),
+              updated_at:              new Date().toISOString(),
             },
             { onConflict: "variant_id" },
           );
 
-          // Backfill price/cost/street_date on variant if missing
-          {
-            const { data: existingVar } = await supabase
-              .from("warehouse_product_variants")
-              .select("id, price, cost, product_id, street_date, is_preorder")
-              .eq("id", variantId)
-              .single();
+          // Backfill price/cost/street_date from API if missing
+          const { data: existingVar } = await supabase
+            .from("warehouse_product_variants")
+            .select("id, price, cost, product_id, street_date, is_preorder")
+            .eq("id", variantId)
+            .single();
 
-            if (existingVar) {
-              const updates: Record<string, unknown> = {};
+          if (existingVar) {
+            const updates: Record<string, unknown> = {};
 
-              // Update price if null or 0
-              if (
-                (existingVar.price == null || existingVar.price === 0) &&
-                merchItem.price != null
-              ) {
-                updates.price = merchItem.price;
+            if (
+              (existingVar.price == null || existingVar.price === 0) &&
+              merchItem.price != null
+            ) {
+              updates.price = merchItem.price;
+            }
+            if (
+              (existingVar.cost == null || existingVar.cost === 0) &&
+              merchItem.price != null
+            ) {
+              const p = (updates.price as number | undefined) ?? merchItem.price;
+              updates.cost = Math.round(p * 0.5 * 100) / 100;
+            }
+            if (!existingVar.street_date && merchItem.new_date) {
+              updates.street_date = merchItem.new_date;
+            }
+            const effectiveDate =
+              (updates.street_date as string | undefined) ?? existingVar.street_date;
+            if (effectiveDate && !existingVar.is_preorder && new Date(effectiveDate) > new Date()) {
+              updates.is_preorder = true;
+            }
+
+            if (Object.keys(updates).length > 0) {
+              updates.updated_at = new Date().toISOString();
+              await supabase
+                .from("warehouse_product_variants")
+                .update(updates)
+                .eq("id", variantId);
+
+              if (updates.is_preorder === true) {
+                await preorderSetupTask.trigger({
+                  variant_id: variantId,
+                  workspace_id: workspaceId,
+                });
               }
-              if ((existingVar.cost == null || existingVar.cost === 0) && merchItem.price != null) {
-                const p = (updates.price as number | undefined) ?? merchItem.price;
-                updates.cost = Math.round(p * 0.5 * 100) / 100;
-              }
+            }
 
-              // Backfill street_date from Bandcamp new_date
-              if (!existingVar.street_date && merchItem.new_date) {
-                updates.street_date = merchItem.new_date;
-              }
+            // API image backfill — only if product has no images yet
+            if (bandcampImageUrl(merchItem.image_url) && existingVar.product_id) {
+              const { count: imgCount } = await supabase
+                .from("warehouse_product_images")
+                .select("id", { count: "exact", head: true })
+                .eq("product_id", existingVar.product_id);
 
-              // Detect preorder: if street_date is in the future and not already a preorder
-              const effectiveStreetDate =
-                (updates.street_date as string | undefined) ?? existingVar.street_date;
-              if (effectiveStreetDate && !existingVar.is_preorder) {
-                const streetDate = new Date(effectiveStreetDate);
-                if (streetDate > new Date()) {
-                  updates.is_preorder = true;
-                }
-              }
-
-              if (Object.keys(updates).length > 0) {
-                updates.updated_at = new Date().toISOString();
+              if ((imgCount ?? 0) === 0) {
+                await supabase.from("warehouse_product_images").insert({
+                  product_id:   existingVar.product_id,
+                  workspace_id: workspaceId,
+                  src:          bandcampImageUrl(merchItem.image_url),
+                  alt:          merchItem.title,
+                  position:     0,
+                });
                 await supabase
-                  .from("warehouse_product_variants")
-                  .update(updates)
-                  .eq("id", variantId);
-
-                // Trigger preorder setup if variant just became a preorder
-                if (updates.is_preorder === true) {
-                  await preorderSetupTask.trigger({
-                    variant_id: variantId,
-                    workspace_id: workspaceId,
-                  });
-                  logger.info("Triggered preorder-setup for matched variant", {
-                    variantId,
-                    streetDate: effectiveStreetDate,
-                  });
-                }
-              }
-
-              // Backfill image on product if Bandcamp has one and product doesn't
-              if (bandcampImageUrl(merchItem.image_url) && existingVar.product_id) {
-                const { count: imgCount } = await supabase
-                  .from("warehouse_product_images")
-                  .select("id", { count: "exact", head: true })
-                  .eq("product_id", existingVar.product_id);
-
-                if ((imgCount ?? 0) === 0) {
-                  const { error: imgErr } = await supabase.from("warehouse_product_images").insert({
-                    product_id: existingVar.product_id,
-                    workspace_id: workspaceId,
-                    src: bandcampImageUrl(merchItem.image_url),
-                    alt: merchItem.title,
-                    position: 0,
-                  });
-                  if (imgErr) {
-                    logger.warn("Failed to insert Bandcamp image", {
-                      productId: existingVar.product_id,
-                      error: imgErr.message,
-                    });
-                  }
-                  await supabase
-                    .from("warehouse_products")
-                    .update({ images: [{ src: bandcampImageUrl(merchItem.image_url) }] })
-                    .eq("id", existingVar.product_id);
-                }
+                  .from("warehouse_products")
+                  .update({ images: [{ src: bandcampImageUrl(merchItem.image_url) }] })
+                  .eq("id", existingVar.product_id);
               }
             }
           }
 
           itemsProcessed++;
 
-          // Scrape album page if URL available (Rule #60)
-          if (merchItem.url) {
-            const { data: mapping } = await supabase
-              .from("bandcamp_product_mappings")
-              .select("id")
-              .eq("variant_id", variantId)
-              .single();
-
-            if (mapping) {
-              await bandcampScrapePageTask.trigger({
-                url: merchItem.url,
-                mappingId: mapping.id,
-                workspaceId,
-              });
-            }
-          }
+          // Trigger scrape if mapping is incomplete (idempotency guard in helper)
+          await triggerScrapeIfNeeded(
+            supabase,
+            variantId,
+            workspaceId,
+            band,
+            connection,
+            merchItem,
+          );
         }
 
-        // Process unmatched items with SKU — auto-create DRAFT Shopify products (Rule #8)
+        // ── Unmatched items — auto-create DRAFT products ───────────────────────
+
         for (const merchItem of unmatched) {
           if (!merchItem.sku) continue;
 
           const artistName = band?.name ?? connection.band_name ?? "Unknown Artist";
           const title = assembleBandcampTitle(artistName, merchItem.album_title, merchItem.title);
-
-          // Determine tags
           const tags: string[] = [];
-          if (merchItem.new_date) {
-            const streetDate = new Date(merchItem.new_date);
-            if (streetDate > new Date()) {
-              tags.push("Pre-Orders", "New Releases");
-            }
+          if (merchItem.new_date && new Date(merchItem.new_date) > new Date()) {
+            tags.push("Pre-Orders", "New Releases");
           }
 
-          // Check for existing product with this SKU to prevent duplicates
           const { data: existingVariant } = await supabase
             .from("warehouse_product_variants")
             .select("id")
@@ -501,7 +632,6 @@ export const bandcampSyncTask = task({
             continue;
           }
 
-          // Rule #1: productSet for CREATE only — create DRAFT Shopify product
           let shopifyProductId: string | null = null;
           try {
             shopifyProductId = await productSetCreate({
@@ -535,10 +665,6 @@ export const bandcampSyncTask = task({
               sku: merchItem.sku,
               error: String(shopifyError),
             });
-            // Silent failure gap (F7): alert staff so the Shopify product can
-            // be created manually and the SKU linked. Without this, the item
-            // exists in the warehouse but has no Shopify counterpart and will
-            // never be published to the Shopify storefront.
             await supabase.from("warehouse_review_queue").upsert(
               {
                 workspace_id: workspaceId,
@@ -546,7 +672,7 @@ export const bandcampSyncTask = task({
                 category: "shopify_product_create",
                 severity: "medium" as const,
                 title: `Shopify product creation failed: ${title}`,
-                description: `SKU ${merchItem.sku} was created in the warehouse but productSetCreate failed. Create or link the Shopify product manually.`,
+                description: `SKU ${merchItem.sku} was created in the warehouse but productSetCreate failed.`,
                 metadata: {
                   sku: merchItem.sku,
                   bandcamp_item_id: String(merchItem.package_id),
@@ -561,19 +687,18 @@ export const bandcampSyncTask = task({
             );
           }
 
-          // Create warehouse product as DRAFT
           const { data: product, error: productError } = await supabase
             .from("warehouse_products")
             .insert({
-              workspace_id: workspaceId,
-              org_id: connection.org_id,
+              workspace_id:       workspaceId,
+              org_id:             connection.org_id,
               shopify_product_id: shopifyProductId,
               title,
-              vendor: band?.name ?? connection.band_name,
-              product_type: merchItem.item_type ?? "Merch",
-              status: "draft",
+              vendor:             band?.name ?? connection.band_name,
+              product_type:       merchItem.item_type ?? "Merch",
+              status:             "draft",
               tags,
-              image_url: bandcampImageUrl(merchItem.image_url) ?? null,
+              image_url:          bandcampImageUrl(merchItem.image_url) ?? null,
             })
             .select("id")
             .single();
@@ -587,112 +712,95 @@ export const bandcampSyncTask = task({
             continue;
           }
 
-          // Store Bandcamp image as warehouse_product_images row
           if (bandcampImageUrl(merchItem.image_url)) {
             await supabase.from("warehouse_product_images").insert({
-              product_id: product.id,
-              src: bandcampImageUrl(merchItem.image_url),
-              alt: title,
-              position: 0,
+              product_id:   product.id,
+              src:          bandcampImageUrl(merchItem.image_url),
+              alt:          title,
+              position:     0,
             });
           }
 
-          // Create variant — save Bandcamp price, default cost to 50% of price
           const bcPrice = merchItem.price ?? null;
           const bcCost = bcPrice != null ? Math.round(bcPrice * 0.5 * 100) / 100 : null;
           const { data: newVariant } = await supabase
             .from("warehouse_product_variants")
             .insert({
-              product_id: product.id,
+              product_id:   product.id,
               workspace_id: workspaceId,
-              sku: merchItem.sku,
-              title: merchItem.title,
-              price: bcPrice,
-              cost: bcCost,
-              bandcamp_url: merchItem.url,
-              street_date: merchItem.new_date,
-              is_preorder: tags.includes("Pre-Orders"),
+              sku:          merchItem.sku,
+              title:        merchItem.title,
+              price:        bcPrice,
+              cost:         bcCost,
+              bandcamp_url: null,
+              street_date:  merchItem.new_date,
+              is_preorder:  tags.includes("Pre-Orders"),
             })
             .select("id")
             .single();
 
           if (newVariant) {
-            // Seed initial inventory from Bandcamp quantity_available
-            const initialAvailable = merchItem.quantity_available ?? 0;
             await supabase.from("warehouse_inventory_levels").upsert(
               {
-                variant_id: newVariant.id,
-                workspace_id: workspaceId,
-                sku: merchItem.sku,
-                available: initialAvailable,
-                committed: 0,
-                incoming: 0,
+                variant_id:          newVariant.id,
+                workspace_id:        workspaceId,
+                sku:                 merchItem.sku,
+                available:           merchItem.quantity_available ?? 0,
+                committed:           0,
+                incoming:            0,
                 last_redis_write_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
+                updated_at:          new Date().toISOString(),
               },
               { onConflict: "variant_id", ignoreDuplicates: true },
             );
             logger.info("Seeded initial inventory", {
               sku: merchItem.sku,
-              available: initialAvailable,
+              available: merchItem.quantity_available ?? 0,
             });
 
-            // Create mapping
             await supabase.from("bandcamp_product_mappings").insert({
-              workspace_id: workspaceId,
-              variant_id: newVariant.id,
-              bandcamp_item_id: merchItem.package_id,
-              bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album")
+              workspace_id:            workspaceId,
+              variant_id:              newVariant.id,
+              bandcamp_item_id:        merchItem.package_id,
+              bandcamp_item_type:      merchItem.item_type?.toLowerCase().includes("album")
                 ? "album"
                 : "package",
               bandcamp_member_band_id: merchItem.member_band_id,
-              bandcamp_url: merchItem.url,
-              bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
-              bandcamp_type_name: merchItem.item_type,
-              bandcamp_new_date: merchItem.new_date,
-              last_quantity_sold: merchItem.quantity_sold,
-              last_synced_at: new Date().toISOString(),
+              bandcamp_image_url:      bandcampImageUrl(merchItem.image_url) ?? null,
+              bandcamp_type_name:      merchItem.item_type,
+              bandcamp_new_date:       merchItem.new_date,
+              last_quantity_sold:      merchItem.quantity_sold,
+              last_synced_at:          new Date().toISOString(),
             });
 
-            // Trigger preorder setup on Shopify if this is a preorder
             if (tags.includes("Pre-Orders")) {
               await preorderSetupTask.trigger({
                 variant_id: newVariant.id,
                 workspace_id: workspaceId,
               });
-              logger.info("Triggered preorder-setup", { sku: merchItem.sku });
             }
 
-            // Scrape if URL available
-            if (merchItem.url) {
-              const { data: mapping } = await supabase
-                .from("bandcamp_product_mappings")
-                .select("id")
-                .eq("variant_id", newVariant.id)
-                .single();
-
-              if (mapping) {
-                await bandcampScrapePageTask.trigger({
-                  url: merchItem.url,
-                  mappingId: mapping.id,
-                  workspaceId,
-                });
-              }
-            }
+            // Trigger scrape for new variant (no idempotency check — brand new mapping)
+            await triggerScrapeIfNeeded(
+              supabase,
+              newVariant.id,
+              workspaceId,
+              band,
+              connection,
+              merchItem,
+            );
           }
 
           itemsProcessed++;
         }
 
-        // Update connection last_synced_at
         await supabase
           .from("bandcamp_connections")
           .update({ last_synced_at: new Date().toISOString() })
           .eq("id", connection.id);
       }
 
-      // Rule #35: Check scraper success rate per account
-      // (scrape results come back async, but we track failures inline)
+      // Rule #35: Alert if failure rate > 20%
       if (itemsFailed > 0 && itemsProcessed > 0) {
         const failureRate = itemsFailed / (itemsProcessed + itemsFailed);
         if (failureRate > 0.2) {
@@ -714,7 +822,6 @@ export const bandcampSyncTask = task({
         }
       }
 
-      // Update sync log
       if (syncLogId) {
         await supabase
           .from("channel_sync_log")
@@ -729,7 +836,6 @@ export const bandcampSyncTask = task({
 
       logger.info("Bandcamp sync complete", { itemsProcessed, itemsFailed });
     } catch (error) {
-      // Update sync log on failure
       if (syncLogId) {
         await supabase
           .from("channel_sync_log")
@@ -743,7 +849,6 @@ export const bandcampSyncTask = task({
           .eq("id", syncLogId);
       }
 
-      // Rule #24: create review queue item instead of just crashing
       await supabase.from("warehouse_review_queue").upsert(
         {
           workspace_id: workspaceId,
@@ -774,7 +879,6 @@ export const bandcampSyncSchedule = schedules.task({
   run: async () => {
     const supabase = createServiceRoleClient();
 
-    // Get all workspaces with Bandcamp credentials
     const { data: credentials } = await supabase
       .from("bandcamp_credentials")
       .select("workspace_id")

@@ -116,6 +116,49 @@ export const bandcampOrderSyncTask = task({
 
             totalCreated++;
           }
+
+          // Batch-backfill bandcamp_product_mappings.bandcamp_url from item_url.
+          // Orders API returns verified album URLs — higher confidence than constructed slugs.
+          // Covers only recently-sold products (30-day window); URL construction in
+          // bandcamp-sync.ts covers the full catalog.
+          // Never overwrites existing non-null URLs (confidence guard).
+          const skuUrlPairs = items
+            .filter((i) => i.item_url && i.sku)
+            .map((i) => ({ sku: i.sku as string, url: i.item_url as string }));
+
+          if (skuUrlPairs.length > 0) {
+            const { data: variants } = await supabase
+              .from("warehouse_product_variants")
+              .select("id, sku")
+              .eq("workspace_id", workspaceId)
+              .in(
+                "sku",
+                skuUrlPairs.map((p) => p.sku),
+              );
+
+            const skuToVariantId = new Map((variants ?? []).map((v) => [v.sku, v.id]));
+
+            for (const { sku, url } of skuUrlPairs) {
+              const variantId = skuToVariantId.get(sku);
+              if (!variantId) continue;
+
+              await supabase
+                .from("bandcamp_product_mappings")
+                .update({
+                  bandcamp_url:        url,
+                  bandcamp_url_source: "orders_api",
+                  updated_at:          new Date().toISOString(),
+                })
+                .eq("variant_id", variantId)
+                .is("bandcamp_url", null);
+            }
+
+            logger.info("Backfilled bandcamp_url from order item_urls", {
+              workspaceId,
+              connectionBandId: conn.band_id,
+              skuCount: skuUrlPairs.length,
+            });
+          }
         } catch (err) {
           logger.error("Bandcamp order sync failed", {
             connectionId: conn?.id,

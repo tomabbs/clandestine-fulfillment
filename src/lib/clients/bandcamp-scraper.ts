@@ -1,34 +1,80 @@
+import he from "he";
 import { z } from "zod";
 
-// === Zod schema for parsed TralbumData ===
+// ─── URL construction helper ──────────────────────────────────────────────────
+// Exported here so bandcamp-sync.ts imports it and unit tests validate the real
+// implementation (not a local copy).
+//
+// Step 0 confirmed: "Birds & Beasts" → "birds-beasts" → live Bandcamp page. ✓
+// NFD normalization handles accented Latin chars (é → e) without external deps.
+// Non-ASCII slugs that can't be normalized will 404 and get logged to the
+// review queue — intentional, expected behavior.
+
+export function buildBandcampAlbumUrl(subdomain: string, albumTitle: string): string | null {
+  const trimmed = albumTitle.trim();
+  if (!trimmed) return null;
+  const slug = trimmed
+    .toLowerCase()
+    .normalize("NFD")                 // decompose é → e + combining accent
+    .replace(/[\u0300-\u036f]/g, "")  // strip combining diacritics
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (!slug) return null;
+  return `https://${subdomain}.bandcamp.com/album/${slug}`;
+}
+
+// ─── Typed fetch error ────────────────────────────────────────────────────────
+// Carries HTTP status so callers can do `err instanceof BandcampFetchError &&
+// err.status === 404` instead of `String(err).includes("404")`, which misfires
+// on proxy errors or any message that happens to contain "404".
+
+export class BandcampFetchError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly url: string,
+  ) {
+    super(message);
+    this.name = "BandcampFetchError";
+  }
+}
+
+// ─── Zod schema for data-tralbum JSON ────────────────────────────────────────
+// Targets the data-tralbum HTML attribute — stable for 7-10 years (powers
+// Bandcamp's player, embeds, and purchase flow).
+//
+// Step 0 audit (2026-03-29) confirmed:
+// - pkg.image_id is ALWAYS NULL on real pages
+// - pkg.arts[0].image_id is the real primary image source (4 arts per package typical)
+// - packages[].sku matches warehouse SKUs (e.g. LP-NS-167, CD-NS-167)
+// - packages[].type_id is present (1=CD, 3=Cassette, 15=2xLP)
 
 const packageArtSchema = z.object({
   image_id: z.number().nullish(),
-  width: z.number().nullish(),
-  height: z.number().nullish(),
 });
 
 const tralbumDataSchema = z.object({
-  art_id: z.number().nullish(),
-  item_type: z.string().nullish(),
-  release_date: z.string().nullish(),
+  art_id:            z.number().nullish(),
+  is_preorder:       z.boolean().nullish(),
+  album_is_preorder: z.boolean().nullish(),
   current: z
     .object({
-      type: z.string().nullish(),
+      title:        z.string().nullish(),
       release_date: z.string().nullish(),
-      title: z.string().nullish(),
+      art_id:       z.number().nullish(),
     })
     .nullish(),
   packages: z
     .array(
       z.object({
-        type_name: z.string().nullish(),
-        title: z.string().nullish(),
-        new_date: z.string().nullish(),
-        url: z.string().nullish(),
-        sku: z.string().nullish(),
-        image_id: z.number().nullish(),
-        arts: z.array(packageArtSchema).nullish(),
+        type_name:    z.string().nullish(),
+        type_id:      z.number().nullish(),     // 1=CD, 3=Cassette, 15=2xLP — confirmed present
+        title:        z.string().nullish(),
+        sku:          z.string().nullish(),     // matches warehouse variant SKU
+        release_date: z.string().nullish(),     // package ship date (may differ from album)
+        new_date:     z.string().nullish(),     // legacy — fall back if release_date absent
+        image_id:     z.number().nullish(),     // ALWAYS NULL on real pages — use arts[0]
+        arts:         z.array(packageArtSchema).nullish(),  // real image source
       }),
     )
     .nullish(),
@@ -36,55 +82,66 @@ const tralbumDataSchema = z.object({
 
 export type TralbumData = z.infer<typeof tralbumDataSchema>;
 
+// ─── Output types ─────────────────────────────────────────────────────────────
+
 export interface ScrapedPackageImage {
   imageId: number;
   url: string;
 }
 
-export interface ScrapedAlbumData {
-  releaseDate: string | null;
+export interface ScrapedPackage {
   typeName: string | null;
+  typeId: number | null;
   title: string | null;
-  artId: number | null;
-  albumArtUrl: string | null;
-  packages: Array<{
-    typeName: string | null;
-    title: string | null;
-    newDate: string | null;
-    url: string | null;
-    sku: string | null;
-    imageId: number | null;
-    imageUrl: string | null;
-    arts: ScrapedPackageImage[];
-  }>;
-  raw: TralbumData | null;
-  parserVersion: "v1" | "v2";
-  metadataIncomplete: boolean;
+  sku: string | null;
+  releaseDate: Date | null;    // parsed from release_date or new_date GMT string
+  imageId: number | null;      // arts[0].image_id (pkg.image_id is always NULL)
+  imageUrl: string | null;     // 1200px image from arts[0]
+  arts: ScrapedPackageImage[]; // all arts entries (typically 4 per package)
 }
 
-// === Image URL construction ===
+export interface ScrapedAlbumData {
+  releaseDate: Date | null;    // from current.release_date
+  isPreorder: boolean;         // from is_preorder || album_is_preorder
+  artId: number | null;        // top-level album art_id
+  albumArtUrl: string | null;  // 1200px from https://f4.bcbits.com/img/a{art_id}_10.jpg
+  title: string | null;
+  packages: ScrapedPackage[];
+  metadataIncomplete: boolean; // true when release_date or packages absent
+}
+
+// ─── Image URL construction ───────────────────────────────────────────────────
 
 /**
- * Construct a 700px Bandcamp image URL from an art_id.
- * Album art uses the "a" prefix: https://f4.bcbits.com/img/a{art_id}_10.jpg
+ * Album art URL (uses "a" prefix): https://f4.bcbits.com/img/a{art_id}_{size}.jpg
+ * Sizes: 10=1200px, 5=700px, 2=350px. Default 10 (highest quality).
  */
-export function bandcampAlbumArtUrl(artId: number | null | undefined): string | null {
+export function bandcampAlbumArtUrl(artId: number | null | undefined, size = 10): string | null {
   if (artId == null) return null;
-  return `https://f4.bcbits.com/img/a${artId}_10.jpg`;
+  return `https://f4.bcbits.com/img/a${artId}_${size}.jpg`;
 }
 
 /**
- * Construct a 700px Bandcamp image URL from a package/merch image_id.
- * Merch images omit the "a" prefix: https://f4.bcbits.com/img/{image_id}_10.jpg
+ * Package/merch image URL (no "a" prefix): https://f4.bcbits.com/img/{image_id}_{size}.jpg
+ * Source: pkg.arts[].image_id (NOT pkg.image_id — confirmed always NULL on real pages).
  */
-export function bandcampMerchImageUrl(imageId: number | null | undefined): string | null {
+export function bandcampMerchImageUrl(imageId: number | null | undefined, size = 10): string | null {
   if (imageId == null) return null;
-  return `https://f4.bcbits.com/img/${imageId}_10.jpg`;
+  return `https://f4.bcbits.com/img/${imageId}_${size}.jpg`;
 }
 
-// === HTML fetching ===
+// ─── GMT date parsing ─────────────────────────────────────────────────────────
+// Bandcamp format: "20 Mar 2026 00:00:00 GMT" — JS Date handles this natively.
 
-export async function fetchAlbumPage(url: string): Promise<string> {
+function parseGMTDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// ─── HTML fetching ────────────────────────────────────────────────────────────
+
+export async function fetchBandcampPage(url: string): Promise<string> {
   const response = await fetch(url, {
     headers: {
       "User-Agent":
@@ -94,113 +151,99 @@ export async function fetchAlbumPage(url: string): Promise<string> {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch album page ${url}: ${response.status}`);
+    throw new BandcampFetchError(
+      `Failed to fetch album page: ${response.status}`,
+      response.status,
+      url,
+    );
   }
 
   return response.text();
 }
 
-// === V1 parser: data-tralbum attribute on <script> tag ===
+// ─── Main parser ──────────────────────────────────────────────────────────────
+// Uses `he` for robust HTML entity decoding (replaces fragile manual .replace chain).
 
-export function parseV1(html: string): TralbumData | null {
-  // V1: TralbumData is embedded as a data-tralbum attribute on a script or div element
-  const attrMatch = html.match(/data-tralbum="([^"]*)"/);
+export function parseBandcampPage(html: string): ScrapedAlbumData | null {
+  const attrMatch = html.match(/data-tralbum="([^"]+)"/);
   if (!attrMatch) return null;
 
+  let data: TralbumData;
   try {
-    const decoded = attrMatch[1]
-      .replace(/&quot;/g, '"')
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&#39;/g, "'");
-    const parsed = JSON.parse(decoded);
-    return tralbumDataSchema.parse(parsed);
+    const decoded = he.decode(attrMatch[1]);
+    data = tralbumDataSchema.parse(JSON.parse(decoded));
   } catch {
     return null;
   }
-}
 
-// === V2 parser: TralbumData in inline <script> var assignment ===
+  const artId = data.art_id ?? data.current?.art_id ?? null;
+  const releaseDate = parseGMTDate(data.current?.release_date ?? null);
+  const isPreorder = data.is_preorder === true || data.album_is_preorder === true;
 
-export function parseV2(html: string): TralbumData | null {
-  // V2: var TralbumData = { ... }; in an inline script
-  const scriptMatch = html.match(/var\s+TralbumData\s*=\s*(\{[\s\S]*?\});\s*(?:\n|var\s)/);
-  if (!scriptMatch) return null;
-
-  try {
-    const parsed = JSON.parse(scriptMatch[1]);
-    return tralbumDataSchema.parse(parsed);
-  } catch {
-    return null;
-  }
-}
-
-// === Version heuristic (Rule #25) ===
-
-function selectParser(html: string): "v1" | "v2" {
-  // If the page has data-tralbum attribute, prefer V1
-  if (html.includes("data-tralbum=")) return "v1";
-  // If the page has inline TralbumData var, use V2
-  if (html.includes("var TralbumData")) return "v2";
-  // Default to V2 as a fallback (newer pages)
-  return "v2";
-}
-
-// === Main parser (Rule #24: never crash, default gracefully) ===
-
-export function parseTralbumData(html: string): ScrapedAlbumData {
-  const version = selectParser(html);
-  const parser = version === "v1" ? parseV1 : parseV2;
-  const data = parser(html);
-
-  if (!data) {
-    // Rule #24: On parse failure, default type to "Merch", leave street_date blank
-    return {
-      releaseDate: null,
-      typeName: "Merch",
-      title: null,
-      artId: null,
-      albumArtUrl: null,
-      packages: [],
-      raw: null,
-      parserVersion: version,
-      metadataIncomplete: true,
-    };
-  }
-
-  const releaseDate = data.current?.release_date ?? data.release_date ?? null;
-  const typeName = data.current?.type ?? data.item_type ?? null;
-  const title = data.current?.title ?? null;
-  const artId = data.art_id ?? null;
-
-  const packages = (data.packages ?? []).map((pkg) => ({
-    typeName: pkg.type_name ?? null,
-    title: pkg.title ?? null,
-    newDate: pkg.new_date ?? null,
-    url: pkg.url ?? null,
-    sku: pkg.sku ?? null,
-    imageId: pkg.image_id ?? null,
-    imageUrl: bandcampMerchImageUrl(pkg.image_id),
-    arts: (pkg.arts ?? [])
+  const packages: ScrapedPackage[] = (data.packages ?? []).map((pkg) => {
+    const arts: ScrapedPackageImage[] = (pkg.arts ?? [])
       .filter((a) => a.image_id != null)
       .map((a) => ({
         imageId: a.image_id as number,
         url: bandcampMerchImageUrl(a.image_id) as string,
-      })),
-  }));
+      }));
 
-  const metadataIncomplete = !typeName || !releaseDate;
+    // CRITICAL: pkg.image_id is ALWAYS NULL on real pages (confirmed Step 0).
+    // Primary image comes from arts[0].image_id.
+    const primaryImageId = arts[0]?.imageId ?? null;
+
+    return {
+      typeName:    pkg.type_name ?? null,
+      typeId:      pkg.type_id ?? null,
+      title:       pkg.title ?? null,
+      sku:         pkg.sku ?? null,
+      releaseDate: parseGMTDate(pkg.release_date ?? pkg.new_date ?? null),
+      imageId:     primaryImageId,
+      imageUrl:    bandcampMerchImageUrl(primaryImageId),
+      arts,
+    };
+  });
+
+  const metadataIncomplete = !releaseDate || packages.length === 0;
 
   return {
     releaseDate,
-    typeName: typeName || "Merch",
-    title,
+    isPreorder,
     artId,
     albumArtUrl: bandcampAlbumArtUrl(artId),
+    title: data.current?.title ?? null,
     packages,
-    raw: data,
-    parserVersion: version,
     metadataIncomplete,
+  };
+}
+
+// ─── Legacy compatibility exports ─────────────────────────────────────────────
+// Keep old function names working so existing code doesn't break during migration.
+// bandcamp-sync.ts will be updated to use parseBandcampPage directly.
+
+/** @deprecated Use fetchBandcampPage instead */
+export const fetchAlbumPage = fetchBandcampPage;
+
+/** @deprecated Use parseBandcampPage instead */
+export function parseTralbumData(html: string): ScrapedAlbumData & {
+  parserVersion: "v1" | "v2";
+  typeName: string;
+  raw: null;
+} {
+  const result = parseBandcampPage(html);
+  const base = result ?? {
+    releaseDate: null,
+    isPreorder: false,
+    artId: null,
+    albumArtUrl: null,
+    title: null,
+    packages: [],
+    metadataIncomplete: true,
+  };
+  return {
+    ...base,
+    parserVersion: "v1" as const,
+    typeName: base.packages[0]?.typeName ?? "Merch",
+    raw: null,
   };
 }
