@@ -243,6 +243,22 @@ export default function ProductDetailPage() {
                   </a>
                 </>
               )}
+              {(() => {
+                const bcUrl = bcMappings.find((m) => m.bandcamp_url)?.bandcamp_url;
+                return bcUrl ? (
+                  <>
+                    {" · "}
+                    <a
+                      href={bcUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-orange-600 hover:underline"
+                    >
+                      Bandcamp <ExternalLinkIcon className="size-3" />
+                    </a>
+                  </>
+                ) : null;
+              })()}
               {product.synced_at && (
                 <>
                   {" · "}
