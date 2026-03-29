@@ -154,6 +154,8 @@ interface EditableNumberCellProps {
   prefix?: string;
   placeholder?: string;
   className?: string;
+  /** Decimal places for display. Default 2 (for prices). Use 0 for integer quantities. */
+  precision?: number;
 }
 
 export function EditableNumberCell({
@@ -162,6 +164,7 @@ export function EditableNumberCell({
   prefix = "$",
   placeholder = "—",
   className = "",
+  precision = 2,
 }: EditableNumberCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -249,7 +252,7 @@ export function EditableNumberCell({
     );
   }
 
-  const display = value != null ? `${prefix}${value.toFixed(2)}` : placeholder;
+  const display = value != null ? `${prefix}${value.toFixed(precision)}` : placeholder;
 
   return (
     <td

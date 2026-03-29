@@ -143,16 +143,17 @@ export default function InventoryPage() {
           ))}
         </div>
       ) : (
-        <Table>
+        <div className="overflow-x-auto">
+        <Table className="min-w-[600px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-12" />
               <TableHead>Product / SKU</TableHead>
-              <TableHead>Label</TableHead>
-              <TableHead className="text-right">Available</TableHead>
-              <TableHead className="text-right">Committed</TableHead>
-              <TableHead className="text-right">Incoming</TableHead>
-              <TableHead>Format</TableHead>
+              <TableHead className="hidden sm:table-cell">Label</TableHead>
+              <TableHead className="text-right">Avail</TableHead>
+              <TableHead className="hidden md:table-cell text-right">Committed</TableHead>
+              <TableHead className="hidden md:table-cell text-right">Incoming</TableHead>
+              <TableHead className="hidden lg:table-cell">Format</TableHead>
               <TableHead className="w-20" />
             </TableRow>
           </TableHeader>
@@ -182,13 +183,14 @@ export default function InventoryPage() {
                     <div className="font-medium">{row.productTitle}</div>
                     <div className="text-muted-foreground text-xs">{row.sku}</div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
+                  <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
                     {row.orgName ?? "—"}
                   </TableCell>
                   <EditableNumberCell
                     value={row.available}
                     prefix=""
                     placeholder="0"
+                    precision={0}
                     className="text-right font-mono"
                     onSave={async (newValue) => {
                       const target = newValue ?? 0;
@@ -198,12 +200,12 @@ export default function InventoryPage() {
                       invalidateInventory();
                     }}
                   />
-                  <TableCell className="text-right font-mono">{row.committed}</TableCell>
-                  <TableCell className="text-right font-mono">{row.incoming}</TableCell>
+                  <TableCell className="hidden md:table-cell text-right font-mono">{row.committed}</TableCell>
+                  <TableCell className="hidden md:table-cell text-right font-mono">{row.incoming}</TableCell>
                   <EditableSelectCell
                     value={row.formatName ?? ""}
                     options={FORMAT_OPTIONS}
-                    className="text-sm"
+                    className="hidden lg:table-cell text-sm"
                     onSave={async (newValue) => {
                       await updateVariantFormat(row.variantId, newValue);
                       invalidateInventory();
@@ -308,6 +310,7 @@ export default function InventoryPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       )}
 
       {/* Pagination */}
