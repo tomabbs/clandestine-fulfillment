@@ -5,7 +5,13 @@
 
 import { runs, tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
-import { createShipment, selectBestRate, WAREHOUSE_ADDRESS } from "@/lib/clients/easypost-client";
+import {
+  createShipment,
+  selectBestRate,
+  WAREHOUSE_ADDRESS,
+  ASENDIA_CARRIER_ACCOUNT_ID,
+  isDomesticShipment,
+} from "@/lib/clients/easypost-client";
 import { getServiceDetails, normalizeService } from "@/lib/clients/easypost-service-map";
 import { requireStaff } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -343,20 +349,23 @@ export async function getShippingRates(
   }
 
   const toAddr = normalizeAddress(order.shipping_address as Record<string, unknown>);
+  const toAddressParams = {
+    name: toAddr.name || (order.customer_name ?? ""),
+    street1: toAddr.street1,
+    street2: toAddr.street2,
+    city: toAddr.city,
+    state: toAddr.state,
+    zip: toAddr.zip,
+    country: toAddr.country,
+  };
+  const isInternational = !isDomesticShipment(toAddr.country ?? "US");
+
   const bestRateResult = await (async () => {
     try {
       const shipment = await createShipment({
         fromAddress: WAREHOUSE_ADDRESS,
-        toAddress: {
-          name: toAddr.name || (order.customer_name ?? ""),
-          street1: toAddr.street1,
-          street2: toAddr.street2,
-          city: toAddr.city,
-          state: toAddr.state,
-          zip: toAddr.zip,
-          country: toAddr.country,
-        },
-        parcel: { weight: 16 }, // default 1 lb for rate preview
+        toAddress: toAddressParams,
+        parcel: { weight: 16 }, // default 1 lb for rate preview; dimensions defaulted in createShipment
         mediaMailEligible,
       });
       return { shipment, error: null };
@@ -365,19 +374,40 @@ export async function getShippingRates(
     }
   })();
 
+  // For international shipments, fetch Asendia rates separately.
+  // EasyPost does not include the USAExportPBA carrier in default rate shopping.
+  // Asendia rates are significantly cheaper: ~$13-16 vs $30+ for UK via USPS.
+  let asendiaRates: import("@/lib/clients/easypost-client").EasyPostRate[] = [];
+  if (isInternational) {
+    try {
+      const asendiaShipment = await createShipment(
+        {
+          fromAddress: WAREHOUSE_ADDRESS,
+          toAddress: toAddressParams,
+          parcel: { weight: 16 },
+        },
+        [ASENDIA_CARRIER_ACCOUNT_ID],
+      );
+      asendiaRates = asendiaShipment.rates;
+    } catch {
+      // Asendia unavailable for this destination — not an error, just skip
+    }
+  }
+
   if (bestRateResult.error || !bestRateResult.shipment) {
     return { rates: [], error: bestRateResult.error ?? "Failed to get rates" };
   }
 
-  // Log raw carrier+service names so we can confirm Asendia mapping is correct
+  const allRates = [...bestRateResult.shipment.rates, ...asendiaRates];
+
   console.log(
     "[shipping] Raw EasyPost rates:",
-    bestRateResult.shipment.rates.map((r) => `${r.carrier}:${r.service}=$${r.rate}`).join(", "),
+    allRates.map((r) => `${r.carrier}:${r.service}=$${r.rate}`).join(", "),
   );
 
-  const recommended = selectBestRate(bestRateResult.shipment.rates, mediaMailEligible);
+  const recommended = selectBestRate(allRates, mediaMailEligible);
 
-  const rates: RateOption[] = bestRateResult.shipment.rates.map((r) => {
+  const rates: RateOption[] = allRates.map((r) => {
     const serviceId = normalizeService(r.carrier, r.service);
     const details = getServiceDetails(serviceId);
     return {

@@ -33,7 +33,7 @@ export const SERVICE_MAP: Record<string, NormalizedService> = {
     isMediaMail: true,
   },
 
-  // ── USPS Ground (priority 10) ───────────────────────────────────────────────
+  // ── USPS Ground Domestic ────────────────────────────────────────────────────
   "usps:groundadvantage": {
     carrier: "USPS",
     serviceId: "usps:groundadvantage",
@@ -49,7 +49,7 @@ export const SERVICE_MAP: Record<string, NormalizedService> = {
     isMediaMail: false,
   },
 
-  // ── UPS ────────────────────────────────────────────────────────────────────
+  // ── UPS Domestic ───────────────────────────────────────────────────────────
   "ups:ground": {
     carrier: "UPS",
     serviceId: "ups:ground",
@@ -58,7 +58,7 @@ export const SERVICE_MAP: Record<string, NormalizedService> = {
     isMediaMail: false,
   },
 
-  // ── USPS Priority (priority 20) ─────────────────────────────────────────────
+  // ── USPS Priority Domestic ──────────────────────────────────────────────────
   "usps:priority": {
     carrier: "USPS",
     serviceId: "usps:priority",
@@ -74,59 +74,78 @@ export const SERVICE_MAP: Record<string, NormalizedService> = {
     isMediaMail: false,
   },
 
-  // ── Asendia / USA Export (international — preferred over USPS international)
-  // EasyPost returns these with carrier "AsendiaPowerofUS", "USAExport", or
-  // "Asendia". Priority < USPS international because Asendia is typically cheaper.
-
-  "asendia:epacket": {
-    carrier: "Asendia",
-    serviceId: "asendia:epacket",
-    displayName: "Asendia ePacket",
-    priority: 80,
-    isMediaMail: false,
-  },
-  "asendia:economyairmail": {
-    carrier: "Asendia",
-    serviceId: "asendia:economyairmail",
-    displayName: "Asendia Economy Airmail",
-    priority: 82,
-    isMediaMail: false,
-  },
-  "asendia:priorityairmail": {
-    carrier: "Asendia",
-    serviceId: "asendia:priorityairmail",
-    displayName: "Asendia Priority Airmail",
+  // ── DHL eCommerce (negotiated USPS international rates — typically cheaper) ─
+  // DhlEcsAccount in EasyPost resells USPS international services at lower rates.
+  // Carrier in API: "DHLEcs" or "DhlEcs" or "DHLeCS"
+  "dhlecs:prioritymailinternational": {
+    carrier: "DHL eCommerce",
+    serviceId: "dhlecs:prioritymailinternational",
+    displayName: "DHL eCommerce Priority Mail International",
     priority: 85,
     isMediaMail: false,
   },
-  "asendia:prioritymailinternational": {
-    carrier: "Asendia",
-    serviceId: "asendia:prioritymailinternational",
-    displayName: "Asendia Priority Mail International",
-    priority: 88,
+  "dhlecs:firstclasspackageinternationalservice": {
+    carrier: "DHL eCommerce",
+    serviceId: "dhlecs:firstclasspackageinternationalservice",
+    displayName: "DHL eCommerce First Class International",
+    priority: 87,
     isMediaMail: false,
   },
-  "asendia:firstclasspackageinternationalservice": {
-    carrier: "Asendia",
-    serviceId: "asendia:firstclasspackageinternationalservice",
-    displayName: "Asendia First Class Package International",
-    priority: 90,
-    isMediaMail: false,
-  },
-  "asendia:prioritymailexpressinternational": {
-    carrier: "Asendia",
-    serviceId: "asendia:prioritymailexpressinternational",
-    displayName: "Asendia Priority Mail Express International",
-    priority: 95,
+  "dhlecs:expressmailinternational": {
+    carrier: "DHL eCommerce",
+    serviceId: "dhlecs:expressmailinternational",
+    displayName: "DHL eCommerce Express Mail International",
+    priority: 92,
     isMediaMail: false,
   },
 
-  // ── USPS International (priority 100+) — fallback when Asendia not available ─
+  // ── USA Export - Powered by Asendia (international) ──────────────────────────
+  // EasyPost carrier account type: UsaExportPbaAccount
+  // Carrier string in API responses: "USAExportPBA" (confirmed via live API test)
+  // Requires parcel dimensions + explicit carrier_account_id in shipment creation.
+  // Dramatically cheaper than USPS for international: ~$13-16 vs $30+ for UK.
+  "usaexportpba:usaexportstandard": {
+    carrier: "USAExportPBA",
+    serviceId: "usaexportpba:usaexportstandard",
+    displayName: "USA Export Standard (Asendia)",
+    priority: 78,
+    isMediaMail: false,
+  },
+  "usaexportpba:usaexportplus": {
+    carrier: "USAExportPBA",
+    serviceId: "usaexportpba:usaexportplus",
+    displayName: "USA Export Plus (Asendia)",
+    priority: 79,
+    isMediaMail: false,
+  },
+  "usaexportpba:usaexportselect": {
+    carrier: "USAExportPBA",
+    serviceId: "usaexportpba:usaexportselect",
+    displayName: "USA Export Select (Asendia)",
+    priority: 93,
+    isMediaMail: false,
+  },
+
+  // ── USPS International ──────────────────────────────────────────────────────
+  "usps:firstclasspackageinternationalservice": {
+    carrier: "USPS",
+    serviceId: "usps:firstclasspackageinternationalservice",
+    displayName: "USPS First Class International",
+    priority: 100,
+    isMediaMail: false,
+  },
   "usps:firstclassinternational": {
     carrier: "USPS",
     serviceId: "usps:firstclassinternational",
     displayName: "USPS First Class International",
     priority: 100,
+    isMediaMail: false,
+  },
+  "usps:prioritymailinternational": {
+    carrier: "USPS",
+    serviceId: "usps:prioritymailinternational",
+    displayName: "USPS Priority Mail International",
+    priority: 110,
     isMediaMail: false,
   },
   "usps:priorityinternational": {
@@ -136,83 +155,218 @@ export const SERVICE_MAP: Record<string, NormalizedService> = {
     priority: 110,
     isMediaMail: false,
   },
-  "usps:expressinternatinal": {
+  "usps:expressmailinternational": {
     carrier: "USPS",
-    serviceId: "usps:expressinternational",
+    serviceId: "usps:expressmailinternational",
+    displayName: "USPS Express Mail International",
+    priority: 120,
+    isMediaMail: false,
+  },
+  "usps:prioritymailexpressinternational": {
+    carrier: "USPS",
+    serviceId: "usps:prioritymailexpressinternational",
     displayName: "USPS Priority Mail Express International",
     priority: 120,
+    isMediaMail: false,
+  },
+
+  // ── DHL Express International ───────────────────────────────────────────────
+  "dhlexpress:expressworldwide": {
+    carrier: "DHL Express",
+    serviceId: "dhlexpress:expressworldwide",
+    displayName: "DHL Express Worldwide",
+    priority: 95,
+    isMediaMail: false,
+  },
+  "dhlexpress:expressworldwidenondoc": {
+    carrier: "DHL Express",
+    serviceId: "dhlexpress:expressworldwidenondoc",
+    displayName: "DHL Express Worldwide",
+    priority: 95,
+    isMediaMail: false,
+  },
+  "dhlexpress:expressenvelope": {
+    carrier: "DHL Express",
+    serviceId: "dhlexpress:expressenvelope",
+    displayName: "DHL Express Envelope",
+    priority: 96,
+    isMediaMail: false,
+  },
+
+  // ── FedEx International ─────────────────────────────────────────────────────
+  "fedex:internationalconnectplus": {
+    carrier: "FedEx",
+    serviceId: "fedex:internationalconnectplus",
+    displayName: "FedEx International Connect Plus",
+    priority: 97,
+    isMediaMail: false,
+  },
+  "fedex:internationaleconomy": {
+    carrier: "FedEx",
+    serviceId: "fedex:internationaleconomy",
+    displayName: "FedEx International Economy",
+    priority: 98,
+    isMediaMail: false,
+  },
+  "fedex:internationalpriorityexpress": {
+    carrier: "FedEx",
+    serviceId: "fedex:internationalpriorityexpress",
+    displayName: "FedEx International Priority Express",
+    priority: 105,
+    isMediaMail: false,
+  },
+  "fedex:internationalpriority": {
+    carrier: "FedEx",
+    serviceId: "fedex:internationalpriority",
+    displayName: "FedEx International Priority",
+    priority: 106,
+    isMediaMail: false,
+  },
+
+  // ── Canada Post ─────────────────────────────────────────────────────────────
+  "canadapost:priorityworldwide": {
+    carrier: "Canada Post",
+    serviceId: "canadapost:priorityworldwide",
+    displayName: "Canada Post Priority Worldwide",
+    priority: 115,
+    isMediaMail: false,
+  },
+  "canadapost:expeditedinternational": {
+    carrier: "Canada Post",
+    serviceId: "canadapost:expeditedinternational",
+    displayName: "Canada Post Expedited International",
+    priority: 116,
     isMediaMail: false,
   },
 };
 
 /**
  * Normalize an EasyPost carrier+service combination to our canonical serviceId.
- * EasyPost returns Asendia/USA Export rates with varying carrier names:
- * "AsendiaPowerofUS", "USAExport", "Asendia", etc.
  */
 export function normalizeService(carrier: string, service: string): string {
-  const key = `${carrier.toLowerCase()}:${service.toLowerCase().replace(/[\s\-_]/g, "")}`;
+  // Strip spaces/hyphens/underscores for key lookup
+  const carrierClean = carrier.toLowerCase().replace(/[\s\-_]/g, "");
+  const serviceClean = service.toLowerCase().replace(/[\s\-_]/g, "");
+  const key = `${carrierClean}:${serviceClean}`;
 
   if (SERVICE_MAP[key]) return key;
 
-  const lowerService = service.toLowerCase().replace(/[\s\-_]/g, "");
-  const lowerCarrier = carrier.toLowerCase().replace(/[\s\-_]/g, "");
-
-  // ── Asendia / USA Export fuzzy matching ────────────────────────────────────
+  // ── USA Export / Asendia (UsaExportPbaAccount) ─────────────────────────────
+  // Confirmed carrier name from live EasyPost API: "USAExportPBA"
   const isAsendia =
-    lowerCarrier.includes("asendia") ||
-    lowerCarrier.includes("usaexport") ||
-    lowerCarrier.includes("asendiapower");
+    carrierClean.includes("usaexportpba") ||
+    carrierClean.includes("usaexport") ||
+    carrierClean.includes("asendia") ||
+    carrierClean.includes("asendiapower");
 
   if (isAsendia) {
-    if (lowerService.includes("epacket")) return "asendia:epacket";
-    if (lowerService.includes("economy")) return "asendia:economyairmail";
-    if (lowerService.includes("express")) return "asendia:prioritymailexpressinternational";
-    if (lowerService.includes("priority") && lowerService.includes("airmail"))
-      return "asendia:priorityairmail";
-    if (lowerService.includes("priority")) return "asendia:prioritymailinternational";
-    if (lowerService.includes("firstclass") || lowerService.includes("first"))
-      return "asendia:firstclasspackageinternationalservice";
-    // Generic Asendia fallback — still gets "Asendia" display prefix
-    return `asendia:${lowerService}`;
+    // Map confirmed live service names first
+    if (serviceClean.includes("usaexportstandard") || serviceClean === "standard")
+      return "usaexportpba:usaexportstandard";
+    if (serviceClean.includes("usaexportplus") || serviceClean === "plus")
+      return "usaexportpba:usaexportplus";
+    if (serviceClean.includes("usaexportselect") || serviceClean === "select")
+      return "usaexportpba:usaexportselect";
+    // Fallback generic Asendia key — still gets a display name via synthetic entry
+    return `usaexportpba:${serviceClean}`;
   }
 
-  // ── USPS fuzzy matching ────────────────────────────────────────────────────
-  if (lowerService.includes("media")) return "usps:mediamail";
-  if (lowerService.includes("library")) return "usps:librarymail";
-  if (lowerService.includes("ground") && lowerService.includes("advantage"))
-    return "usps:groundadvantage";
-  if (lowerService.includes("ground") && lowerCarrier === "usps") return "usps:ground";
-  if (lowerService.includes("ground") && lowerCarrier === "ups") return "ups:ground";
-  if (lowerService.includes("priority") && lowerService.includes("express") && lowerService.includes("international"))
-    return "usps:expressinternational";
-  if (lowerService.includes("priority") && lowerService.includes("express")) return "usps:express";
-  if (lowerService.includes("priority") && lowerService.includes("international"))
-    return "usps:priorityinternational";
-  if (lowerService.includes("priority")) return "usps:priority";
-  if (lowerService.includes("first") && lowerService.includes("international"))
-    return "usps:firstclassinternational";
+  // ── DHL eCommerce (DhlEcsAccount — resells USPS at negotiated rates) ────────
+  const isDhlEcs =
+    carrierClean === "dhlecs" ||
+    carrierClean.includes("dhlecs") ||
+    carrierClean.includes("dhlecs");
+
+  if (isDhlEcs) {
+    if (serviceClean.includes("firstclass") || serviceClean.includes("first"))
+      return "dhlecs:firstclasspackageinternationalservice";
+    if (serviceClean.includes("express")) return "dhlecs:expressmailinternational";
+    if (serviceClean.includes("priority")) return "dhlecs:prioritymailinternational";
+    return `dhlecs:${serviceClean}`;
+  }
+
+  // ── DHL Express ─────────────────────────────────────────────────────────────
+  const isDhlExpress =
+    carrierClean === "dhlexpress" || (carrierClean.includes("dhl") && !carrierClean.includes("ecs"));
+
+  if (isDhlExpress) {
+    if (serviceClean.includes("envelope")) return "dhlexpress:expressenvelope";
+    if (serviceClean.includes("worldwide")) return "dhlexpress:expressworldwide";
+    return `dhlexpress:${serviceClean}`;
+  }
+
+  // ── FedEx ────────────────────────────────────────────────────────────────────
+  const isFedEx = carrierClean.includes("fedex");
+
+  if (isFedEx) {
+    if (serviceClean.includes("connectplus") || serviceClean.includes("connect"))
+      return "fedex:internationalconnectplus";
+    if (serviceClean.includes("priorityexpress"))
+      return "fedex:internationalpriorityexpress";
+    if (serviceClean.includes("priority") && serviceClean.includes("international"))
+      return "fedex:internationalpriority";
+    if (serviceClean.includes("economy") && serviceClean.includes("international"))
+      return "fedex:internationaleconomy";
+    // Domestic FedEx
+    if (serviceClean.includes("ground")) return "ups:ground"; // map to generic ground
+    return `fedex:${serviceClean}`;
+  }
+
+  // ── Canada Post ──────────────────────────────────────────────────────────────
+  if (carrierClean.includes("canadapost") || carrierClean.includes("canada")) {
+    if (serviceClean.includes("priority")) return "canadapost:priorityworldwide";
+    if (serviceClean.includes("expedited")) return "canadapost:expeditedinternational";
+    return `canadapost:${serviceClean}`;
+  }
+
+  // ── USPS ─────────────────────────────────────────────────────────────────────
+  if (serviceClean.includes("mediamail") || serviceClean.includes("media"))
+    return "usps:mediamail";
+  if (serviceClean.includes("librarymail") || serviceClean.includes("library"))
+    return "usps:librarymail";
+  if (serviceClean.includes("groundadvantage")) return "usps:groundadvantage";
+  if (serviceClean.includes("ground") && carrierClean === "usps") return "usps:ground";
+  if (serviceClean.includes("expressmailinternational")) return "usps:expressmailinternational";
+  if (serviceClean.includes("prioritymailexpressinternational")) return "usps:prioritymailexpressinternational";
+  if (serviceClean.includes("prioritymailinternational")) return "usps:prioritymailinternational";
+  if (serviceClean.includes("firstclasspackageinternational") || serviceClean.includes("firstclass"))
+    return "usps:firstclasspackageinternationalservice";
+  if (serviceClean.includes("prioritymailexpress") || (serviceClean.includes("priority") && serviceClean.includes("express")))
+    return "usps:express";
+  if (serviceClean.includes("priority") && serviceClean.includes("international"))
+    return "usps:prioritymailinternational";
+  if (serviceClean.includes("priority")) return "usps:priority";
 
   return key;
 }
 
 /**
- * Get service details by normalized ID. Returns null for unknown services.
- * Unknown Asendia services get a synthetic display name with the Asendia prefix.
+ * Get service details by normalized ID. Returns null for unknown services,
+ * with synthetic display names for known carrier prefixes.
  */
 export function getServiceDetails(serviceId: string): NormalizedService | null {
   if (SERVICE_MAP[serviceId]) return SERVICE_MAP[serviceId];
 
-  // Synthetic entry for unknown Asendia services so they still display legibly
-  if (serviceId.startsWith("asendia:")) {
-    const svc = serviceId.replace("asendia:", "").replace(/([a-z])([A-Z])/g, "$1 $2");
-    return {
-      carrier: "Asendia",
-      serviceId,
-      displayName: `Asendia ${svc.charAt(0).toUpperCase() + svc.slice(1)}`,
-      priority: 91,
-      isMediaMail: false,
-    };
+  // Synthetic entries for unmapped services — keep them readable
+  if (serviceId.startsWith("usaexportpba:")) {
+    const svc = serviceId.replace("usaexportpba:", "");
+    return { carrier: "USAExportPBA", serviceId, displayName: `USA Export ${svc} (Asendia)`, priority: 91, isMediaMail: false };
+  }
+  if (serviceId.startsWith("dhlecs:")) {
+    const svc = serviceId.replace("dhlecs:", "");
+    return { carrier: "DHL eCommerce", serviceId, displayName: `DHL eCommerce ${svc}`, priority: 89, isMediaMail: false };
+  }
+  if (serviceId.startsWith("dhlexpress:")) {
+    const svc = serviceId.replace("dhlexpress:", "");
+    return { carrier: "DHL Express", serviceId, displayName: `DHL Express ${svc}`, priority: 96, isMediaMail: false };
+  }
+  if (serviceId.startsWith("fedex:")) {
+    const svc = serviceId.replace("fedex:", "");
+    return { carrier: "FedEx", serviceId, displayName: `FedEx ${svc}`, priority: 99, isMediaMail: false };
+  }
+  if (serviceId.startsWith("canadapost:")) {
+    const svc = serviceId.replace("canadapost:", "");
+    return { carrier: "Canada Post", serviceId, displayName: `Canada Post ${svc}`, priority: 116, isMediaMail: false };
   }
 
   return null;

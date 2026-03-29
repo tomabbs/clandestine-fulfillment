@@ -138,14 +138,38 @@ export interface CreateShipmentInput {
 
 // ── API methods ───────────────────────────────────────────────────────────────
 
-export async function createShipment(input: CreateShipmentInput): Promise<EasyPostShipment> {
+// Asendia/USA Export carrier account ID — requires explicit inclusion in
+// international shipment requests (not included in EasyPost default rate shopping).
+// Also requires parcel dimensions (not just weight) to return rates.
+export const ASENDIA_CARRIER_ACCOUNT_ID = "ca_0f7e073887204bd491a6230936baf754";
+
+// Default parcel dimensions for music packages.
+// Asendia requires all three dimensions; these work for standard LP mailers.
+const DEFAULT_PARCEL_DIMENSIONS = { length: 13, width: 13, height: 2 };
+
+export async function createShipment(
+  input: CreateShipmentInput,
+  carrierAccountIds?: string[],
+): Promise<EasyPostShipment> {
   const api = getClient();
+
+  // Always include dimensions — Asendia requires them, and they improve rate accuracy.
+  const parcel = {
+    weight: input.parcel.weight,
+    length: input.parcel.length ?? DEFAULT_PARCEL_DIMENSIONS.length,
+    width: input.parcel.width ?? DEFAULT_PARCEL_DIMENSIONS.width,
+    height: input.parcel.height ?? DEFAULT_PARCEL_DIMENSIONS.height,
+  };
 
   const params: Record<string, unknown> = {
     from_address: input.fromAddress,
     to_address: input.toAddress,
-    parcel: input.parcel,
+    parcel,
   };
+
+  if (carrierAccountIds?.length) {
+    params.carrier_accounts = carrierAccountIds.map((id) => ({ id }));
+  }
 
   // EasyPost does not include Media Mail in the standard rates response.
   // Passing special_rates_eligibility causes USPS to return a MediaMail rate
@@ -161,7 +185,7 @@ export async function createShipment(input: CreateShipmentInput): Promise<EasyPo
         {
           description: input.customsInfo?.description ?? "Vinyl Records",
           quantity: 1,
-          weight: input.parcel.weight,
+          weight: parcel.weight,
           value: input.customsInfo?.value ?? 25,
           hs_tariff_number: input.customsInfo?.hsCode ?? "8523.80",
           origin_country: "US",
