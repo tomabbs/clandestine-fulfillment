@@ -398,7 +398,18 @@ export async function getShippingRates(
     return { rates: [], error: bestRateResult.error ?? "Failed to get rates" };
   }
 
-  const allRates = [...bestRateResult.shipment.rates, ...asendiaRates];
+  // Deduplicate by carrier+service — adding dimensions to the main shipment now
+  // causes EasyPost to return Asendia rates there too, so the explicit Asendia
+  // request would double them. Keep cheapest price when same carrier+service appears.
+  const rateMap = new Map<string, (typeof bestRateResult.shipment.rates)[number]>();
+  for (const r of [...bestRateResult.shipment.rates, ...asendiaRates]) {
+    const key = `${r.carrier}:${r.service}`;
+    const existing = rateMap.get(key);
+    if (!existing || parseFloat(r.rate) < parseFloat(existing.rate)) {
+      rateMap.set(key, r);
+    }
+  }
+  const allRates = Array.from(rateMap.values());
 
   console.log(
     "[shipping] Raw EasyPost rates:",
