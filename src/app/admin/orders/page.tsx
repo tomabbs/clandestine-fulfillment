@@ -212,6 +212,23 @@ export default function AdminOrdersPage() {
   );
 }
 
+/**
+ * Bandcamp formats item_name as "{Album}: {Item} by {Artist}".
+ * When the album title matches the start of the item title, the album name
+ * appears twice (e.g. "Seeing Is Forgetting: Seeing Is Forgetting (Black 12" LP)").
+ * Strip the redundant prefix so we only show "{Item} by {Artist}".
+ */
+function cleanItemTitle(title: string | null): string | null {
+  if (!title) return null;
+  const colonIdx = title.indexOf(": ");
+  if (colonIdx <= 0) return title;
+  const albumPrefix = title.substring(0, colonIdx);
+  const rest = title.substring(colonIdx + 2);
+  // If the rest of the string starts with the album prefix, it's duplicated — drop it
+  if (rest.startsWith(albumPrefix)) return rest;
+  return title;
+}
+
 function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof getOrderDetail>> }) {
   const [copied, setCopied] = useState(false);
   const orderId = detail.order?.id as string;
@@ -243,84 +260,79 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
     order.fulfillment_status === "fulfilled" && detail.shipments.length === 0;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-4 min-w-0">
-          <div>
-            <h4 className="text-sm font-semibold mb-2">Line Items</h4>
-            <div className="space-y-2 text-sm">
-              {detail.items.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No items</p>
-              ) : (
-                detail.items.map((item) => (
-                  <div key={item.id} className="flex items-start justify-between gap-3 min-w-0">
-                    {/* Title block — takes remaining space, truncates if needed */}
-                    <div className="min-w-0 flex-1">
-                      {item.sku && (
-                        <div className="font-mono text-xs text-muted-foreground truncate">
-                          {item.sku}
-                        </div>
-                      )}
-                      <div className="truncate">{item.title ?? "—"}</div>
-                    </div>
-                    {/* Qty + price — fixed width, always right-aligned */}
-                    <div className="font-mono text-xs shrink-0 text-right whitespace-nowrap">
-                      <div>x{item.quantity}</div>
-                      {item.price != null && (
-                        <div className="text-muted-foreground">${Number(item.price).toFixed(2)}</div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-          {shippingAddr && (
-            <div>
-              <h4 className="text-sm font-semibold mb-1">Ship To</h4>
-              <address className="text-sm text-muted-foreground not-italic space-y-0.5">
-                {(shippingAddr.name || shippingAddr.firstName) && (
-                  <div className="font-medium text-foreground">
-                    {shippingAddr.name ?? `${shippingAddr.firstName ?? ""} ${shippingAddr.lastName ?? ""}`.trim()}
-                  </div>
-                )}
-                {shippingAddr.street1 && <div>{shippingAddr.street1}</div>}
-                {shippingAddr.street2 && <div>{shippingAddr.street2}</div>}
-                {(shippingAddr.city || shippingAddr.state || shippingAddr.zip) && (
-                  <div>
-                    {[shippingAddr.city, shippingAddr.state, shippingAddr.zip].filter(Boolean).join(", ")}
-                  </div>
-                )}
-                {shippingAddr.country && shippingAddr.country !== "US" && (
-                  <div>{shippingAddr.country}</div>
-                )}
-              </address>
-            </div>
-          )}
-        </div>
-        <div>
-          <h4 className="text-sm font-semibold mb-2">Shipments</h4>
-          {detail.shipments.length > 0 ? (
-            <div className="space-y-3">
-              {detail.shipments.map((s) => (
-                <div key={s.id} className="border rounded-lg p-3">
-                  <TrackingTimeline
-                    shipmentId={s.id}
-                    trackingNumber={s.tracking_number}
-                    carrier={s.carrier}
-                    fetchEvents={getTrackingEvents}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : isFulfilledExternally ? (
-            <p className="text-sm text-muted-foreground">
-              Marked fulfilled on {order.source === "bandcamp" ? "Bandcamp" : "source platform"} — no label created in this system.
-            </p>
+    <div className="space-y-4">
+      {/* Line Items — full width */}
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Line Items</h4>
+        <div className="space-y-1.5 text-sm">
+          {detail.items.length === 0 ? (
+            <p className="text-muted-foreground">No items</p>
           ) : (
-            <p className="text-muted-foreground text-sm">No shipments yet</p>
+            detail.items.map((item) => (
+              <div key={item.id} className="flex items-baseline justify-between gap-4">
+                <div className="min-w-0">
+                  {item.sku && (
+                    <span className="font-mono text-xs text-muted-foreground mr-1.5">{item.sku}</span>
+                  )}
+                  <span>{cleanItemTitle(item.title) ?? "—"}</span>
+                </div>
+                <span className="font-mono text-xs shrink-0 text-right whitespace-nowrap">
+                  x{item.quantity}
+                  {item.price != null && <span className="text-muted-foreground ml-1">· ${Number(item.price).toFixed(2)}</span>}
+                </span>
+              </div>
+            ))
           )}
         </div>
+      </div>
+
+      {/* Ship To — full width */}
+      {shippingAddr && (
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ship To</h4>
+          <address className="text-sm not-italic space-y-0.5">
+            {(shippingAddr.name || shippingAddr.firstName) && (
+              <div className="font-medium">
+                {shippingAddr.name ?? `${shippingAddr.firstName ?? ""} ${shippingAddr.lastName ?? ""}`.trim()}
+              </div>
+            )}
+            {shippingAddr.street1 && <div className="text-muted-foreground">{shippingAddr.street1}</div>}
+            {shippingAddr.street2 && <div className="text-muted-foreground">{shippingAddr.street2}</div>}
+            {(shippingAddr.city || shippingAddr.state || shippingAddr.zip) && (
+              <div className="text-muted-foreground">
+                {[shippingAddr.city, shippingAddr.state, shippingAddr.zip].filter(Boolean).join(", ")}
+              </div>
+            )}
+            {shippingAddr.country && shippingAddr.country !== "US" && (
+              <div className="text-muted-foreground">{shippingAddr.country}</div>
+            )}
+          </address>
+        </div>
+      )}
+
+      {/* Shipments — full width */}
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Shipments</h4>
+        {detail.shipments.length > 0 ? (
+          <div className="space-y-3">
+            {detail.shipments.map((s) => (
+              <div key={s.id} className="border rounded-lg p-3">
+                <TrackingTimeline
+                  shipmentId={s.id}
+                  trackingNumber={s.tracking_number}
+                  carrier={s.carrier}
+                  fetchEvents={getTrackingEvents}
+                />
+              </div>
+            ))}
+          </div>
+        ) : isFulfilledExternally ? (
+          <p className="text-sm text-muted-foreground">
+            Marked fulfilled on {order.source === "bandcamp" ? "Bandcamp" : "source platform"} — no label created in this system.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">No shipments yet</p>
+        )}
       </div>
 
       {/* Create Label panel — only shown for unfulfilled orders */}
