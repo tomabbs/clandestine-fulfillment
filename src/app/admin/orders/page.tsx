@@ -239,28 +239,37 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
 
   const shippingAddr = detail.order?.shipping_address as Record<string, string | undefined> | null;
 
+  const isFulfilledExternally =
+    order.fulfillment_status === "fulfilled" && detail.shipments.length === 0;
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-4">
+        <div className="space-y-4 min-w-0">
           <div>
             <h4 className="text-sm font-semibold mb-2">Line Items</h4>
-            <div className="space-y-1 text-sm">
+            <div className="space-y-2 text-sm">
               {detail.items.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No items</p>
               ) : (
                 detail.items.map((item) => (
-                  <div key={item.id} className="flex justify-between">
-                    <span>
+                  <div key={item.id} className="flex items-start justify-between gap-3 min-w-0">
+                    {/* Title block — takes remaining space, truncates if needed */}
+                    <div className="min-w-0 flex-1">
                       {item.sku && (
-                        <span className="font-mono text-xs text-muted-foreground mr-1">{item.sku}</span>
+                        <div className="font-mono text-xs text-muted-foreground truncate">
+                          {item.sku}
+                        </div>
                       )}
-                      {item.title ?? ""}
-                    </span>
-                    <span className="font-mono">
-                      x{item.quantity}
-                      {item.price != null && ` · $${Number(item.price).toFixed(2)}`}
-                    </span>
+                      <div className="truncate">{item.title ?? "—"}</div>
+                    </div>
+                    {/* Qty + price — fixed width, always right-aligned */}
+                    <div className="font-mono text-xs shrink-0 text-right whitespace-nowrap">
+                      <div>x{item.quantity}</div>
+                      {item.price != null && (
+                        <div className="text-muted-foreground">${Number(item.price).toFixed(2)}</div>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -291,9 +300,7 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
         </div>
         <div>
           <h4 className="text-sm font-semibold mb-2">Shipments</h4>
-          {detail.shipments.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No shipments yet</p>
-          ) : (
+          {detail.shipments.length > 0 ? (
             <div className="space-y-3">
               {detail.shipments.map((s) => (
                 <div key={s.id} className="border rounded-lg p-3">
@@ -306,6 +313,12 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
                 </div>
               ))}
             </div>
+          ) : isFulfilledExternally ? (
+            <p className="text-sm text-muted-foreground">
+              Marked fulfilled on {order.source === "bandcamp" ? "Bandcamp" : "source platform"} — no label created in this system.
+            </p>
+          ) : (
+            <p className="text-muted-foreground text-sm">No shipments yet</p>
           )}
         </div>
       </div>
