@@ -369,6 +369,12 @@ export async function getShippingRates(
     return { rates: [], error: bestRateResult.error ?? "Failed to get rates" };
   }
 
+  // Log raw carrier+service names so we can confirm Asendia mapping is correct
+  console.log(
+    "[shipping] Raw EasyPost rates:",
+    bestRateResult.shipment.rates.map((r) => `${r.carrier}:${r.service}=$${r.rate}`).join(", "),
+  );
+
   const recommended = selectBestRate(bestRateResult.shipment.rates, mediaMailEligible);
 
   const rates: RateOption[] = bestRateResult.shipment.rates.map((r) => {
