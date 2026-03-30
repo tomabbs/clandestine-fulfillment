@@ -76,14 +76,14 @@ export const bandcampScrapePageTask = task({
   }) => {
     const supabase = createServiceRoleClient();
     // #region agent log
-    await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_entry", status: "started", items_processed: 0, items_failed: 0, started_at: new Date().toISOString(), metadata: { url: payload.url, mappingId: payload.mappingId, urlIsConstructed: payload.urlIsConstructed ?? false, urlSource: payload.urlSource ?? "unknown" } } as never);
+    await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_entry", status: "started", items_processed: 0, items_failed: 0, started_at: new Date().toISOString(), error_message: JSON.stringify({ url: payload.url.slice(-40), mappingId: payload.mappingId?.slice(0,8), urlIsConstructed: payload.urlIsConstructed ?? false, urlSource: payload.urlSource ?? "unknown" }) });
     // #endregion
     try {
       const html = await fetchBandcampPage(payload.url);
       const scraped = parseBandcampPage(html);
 
       // #region agent log
-      await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_parsed", status: scraped ? "completed" : "failed", items_processed: scraped?.packages?.length ?? 0, items_failed: 0, started_at: new Date().toISOString(), metadata: { url: payload.url, scrapedNull: scraped === null, albumArtUrl: scraped?.albumArtUrl ?? null, packagesCount: scraped?.packages?.length ?? 0, pkg0TypeName: scraped?.packages?.[0]?.typeName ?? null } } as never);
+      await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_parsed", status: scraped ? "completed" : "failed", items_processed: scraped?.packages?.length ?? 0, items_failed: 0, started_at: new Date().toISOString(), error_message: JSON.stringify({ url: payload.url.slice(-40), scrapedNull: scraped === null, albumArtUrl: scraped?.albumArtUrl?.slice(-20) ?? null, packagesCount: scraped?.packages?.length ?? 0, pkg0TypeName: scraped?.packages?.[0]?.typeName ?? null }) });
       // #endregion
       if (!scraped) {
         // data-tralbum attribute not found — may not be an album page
@@ -123,7 +123,7 @@ export const bandcampScrapePageTask = task({
         })
         .eq("id", payload.mappingId);
       // #region agent log
-      await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_updated", status: updateErr ? "failed" : "completed", items_processed: 1, items_failed: updateErr ? 1 : 0, started_at: new Date().toISOString(), error_message: updateErr?.message ?? null, metadata: { mappingId: payload.mappingId, updateError: updateErr?.message ?? null, typeName: scraped.packages[0]?.typeName ?? null, artUrl: scraped.albumArtUrl } } as never);
+      await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_updated", status: updateErr ? "failed" : "completed", items_processed: 1, items_failed: updateErr ? 1 : 0, started_at: new Date().toISOString(), error_message: JSON.stringify({ mappingId: payload.mappingId?.slice(0,8), updateError: updateErr?.message ?? null, typeName: scraped.packages[0]?.typeName ?? null, hasArtUrl: !!scraped.albumArtUrl }) });
       // #endregion
 
       // Propagate to linked variant
@@ -407,7 +407,7 @@ async function triggerScrapeIfNeeded(
   const needsScrape = !mapping.bandcamp_url || !mapping.bandcamp_type_name;
   // #region agent log — only log when needsScrape=true to avoid flooding
   if (needsScrape) {
-    supabase.from("channel_sync_log").insert({ workspace_id: workspaceId, channel: "bandcamp", sync_type: "debug_scrape_needed", status: "started", items_processed: 0, items_failed: 0, started_at: new Date().toISOString(), metadata: { variantId: variantId.slice(0,8), mappingId: mapping.id.slice(0,8), hasUrl: !!mapping.bandcamp_url, hasTypeName: !!mapping.bandcamp_type_name } } as never).then(() => {}).catch(() => {});
+    supabase.from("channel_sync_log").insert({ workspace_id: workspaceId, channel: "bandcamp", sync_type: "debug_scrape_needed", status: "started", items_processed: 0, items_failed: 0, started_at: new Date().toISOString(), error_message: JSON.stringify({ variantId: variantId.slice(0,8), mappingId: mapping.id.slice(0,8), hasUrl: !!mapping.bandcamp_url, hasTypeName: !!mapping.bandcamp_type_name }) }).then(() => {}).catch(() => {});
   }
   // #endregion
   if (!needsScrape) return;
