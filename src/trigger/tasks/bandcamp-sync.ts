@@ -884,6 +884,33 @@ export const bandcampSyncTask = task({
       }
 
       logger.info("Bandcamp sync complete", { itemsProcessed, itemsFailed });
+
+      // Sweep for any mappings that have bandcamp_url set but no bandcamp_type_name.
+      // These are variants that were previously in the Bandcamp catalog (and had their URL
+      // populated via orders_api or construction) but are now out of stock / not returned
+      // by getMerchDetails, so they're never in the matched set and triggerScrapeIfNeeded
+      // is never called for them during normal sync processing.
+      // Limit to 50 per sync run to avoid overloading the scrape queue.
+      const { data: pendingScrapes } = await supabase
+        .from("bandcamp_product_mappings")
+        .select("id, bandcamp_url")
+        .eq("workspace_id", workspaceId)
+        .not("bandcamp_url", "is", null)
+        .is("bandcamp_type_name", null)
+        .limit(50);
+
+      if (pendingScrapes && pendingScrapes.length > 0) {
+        logger.info(`Sweeping ${pendingScrapes.length} mappings with URL but no type_name`);
+        for (const pm of pendingScrapes) {
+          await bandcampScrapePageTask.trigger({
+            url: pm.bandcamp_url as string,
+            mappingId: pm.id,
+            workspaceId,
+            urlIsConstructed: false,
+            urlSource: "orders_api",
+          });
+        }
+      }
     } catch (error) {
       if (syncLogId) {
         await supabase
