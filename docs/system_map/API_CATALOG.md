@@ -72,7 +72,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - catalog read/write: `getProducts`, `getCatalogStats`, `getProductDetail`, `updateProduct`, `updateVariants`, `searchProductVariants`, `getClientReleases`
   - images: `uploadProductImage`, `reorderProductImages`, `deleteProductImage`, `setFeaturedImage`
 
-### Inbound + Shipping + Orders + Scanning
+### Inbound + Shipping Log + Orders + Scanning
 
 - Files:
   - `src/actions/inbound.ts`
@@ -82,10 +82,18 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/mail-orders.ts`
 - Key exports:
   - inbound: `getInboundShipments`, `getInboundDetail`, `createInbound`, `markArrived`, `beginCheckIn`, `checkInItem`, `completeCheckIn`
-  - shipping: `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`, `getShippingRates`, `createOrderLabel`, `getLabelTaskStatus`
+  - shipping log (renamed from "Shipping", route `/admin/shipping`): `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`, `getShippingRates`, `createOrderLabel`, `getLabelTaskStatus`
   - orders: `getOrders`, `getOrderDetail`, `getTrackingEvents`, `getClientShipments`, `getShipmentItems`
   - scan: `lookupLocation`, `lookupBarcode`, `submitCount`, `recordReceivingScan`
   - mail orders: `getMailOrders` (admin), `getClientMailOrders` (portal), `getMailOrderPayoutSummary`
+
+### ShipStation Bridge (active during Shopify app approval period)
+
+- File: `src/actions/shipstation-orders.ts`
+- Key exports:
+  - `getShipStationOrders({ status?, page?, pageSize? })` — live read from ShipStation `/orders` API, no DB write; staff-only
+- Admin page: `/admin/shipstation-orders` — team's working order queue during bridge period
+- Pirate Ship import surfaced from Shipping Log header → `/admin/shipping/pirate-ship`
 
 ### Billing + Reports + Review Queue
 

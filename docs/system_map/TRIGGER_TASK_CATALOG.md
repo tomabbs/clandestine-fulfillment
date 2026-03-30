@@ -14,8 +14,9 @@ Canonical Trigger.dev task map for planning/build/audit.
 |---|---|---|
 | `bandcamp-api` | `src/trigger/lib/bandcamp-queue.ts` | `1` |
 | `bandcamp-scrape` | `src/trigger/lib/bandcamp-scrape-queue.ts` | `3` |
+| `shipstation` | `src/trigger/lib/shipstation-queue.ts` | `1` |
 
-> Note: ShipStation queues removed in V7.2 (ShipStation integration fully removed).
+> ShipStation integration restored in bridge period (2026-03-30) for transition until Shopify app approval. Shipment poll runs every 30 min, deduplicates via `shipstation_shipment_id`.
 
 ## Scheduled Tasks (Cron)
 
@@ -42,6 +43,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `discogs-mailorder-sync` | `src/trigger/tasks/discogs-mailorder-sync.ts` | `*/10 * * * *` |
 | `discogs-client-order-sync` | `src/trigger/tasks/discogs-client-order-sync.ts` | `*/10 * * * *` |
 | `discogs-message-poll` | `src/trigger/tasks/discogs-message-poll.ts` | `*/5 * * * *` |
+| `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` |
 
 ## Event/On-Demand Tasks
 
