@@ -76,14 +76,14 @@ export const bandcampScrapePageTask = task({
   }) => {
     const supabase = createServiceRoleClient();
     // #region agent log
-    fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-entry',message:'scrape task started',data:{url:payload.url,mappingId:payload.mappingId,urlIsConstructed:payload.urlIsConstructed,urlSource:payload.urlSource},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+    await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_entry", status: "started", items_processed: 0, items_failed: 0, started_at: new Date().toISOString(), metadata: { url: payload.url, mappingId: payload.mappingId, urlIsConstructed: payload.urlIsConstructed ?? false, urlSource: payload.urlSource ?? "unknown" } } as never);
     // #endregion
     try {
       const html = await fetchBandcampPage(payload.url);
       const scraped = parseBandcampPage(html);
 
       // #region agent log
-      fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-parsed',message:'page fetched and parsed',data:{url:payload.url,scrapedNull:scraped===null,albumArtUrl:scraped?.albumArtUrl,packagesCount:scraped?.packages?.length??0,pkg0TypeName:scraped?.packages?.[0]?.typeName??null,metadataIncomplete:scraped?.metadataIncomplete},hypothesisId:'B',timestamp:Date.now()})}).catch(()=>{});
+      await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_parsed", status: scraped ? "completed" : "failed", items_processed: scraped?.packages?.length ?? 0, items_failed: 0, started_at: new Date().toISOString(), metadata: { url: payload.url, scrapedNull: scraped === null, albumArtUrl: scraped?.albumArtUrl ?? null, packagesCount: scraped?.packages?.length ?? 0, pkg0TypeName: scraped?.packages?.[0]?.typeName ?? null } } as never);
       // #endregion
       if (!scraped) {
         // data-tralbum attribute not found — may not be an album page
@@ -123,7 +123,7 @@ export const bandcampScrapePageTask = task({
         })
         .eq("id", payload.mappingId);
       // #region agent log
-      fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-updated',message:'mapping update result',data:{mappingId:payload.mappingId,updateError:updateErr?.message??null,typeName:scraped.packages[0]?.typeName??null,artUrl:scraped.albumArtUrl},hypothesisId:'C',timestamp:Date.now()})}).catch(()=>{});
+      await supabase.from("channel_sync_log").insert({ workspace_id: payload.workspaceId, channel: "bandcamp", sync_type: "debug_scrape_updated", status: updateErr ? "failed" : "completed", items_processed: 1, items_failed: updateErr ? 1 : 0, started_at: new Date().toISOString(), error_message: updateErr?.message ?? null, metadata: { mappingId: payload.mappingId, updateError: updateErr?.message ?? null, typeName: scraped.packages[0]?.typeName ?? null, artUrl: scraped.albumArtUrl } } as never);
       // #endregion
 
       // Propagate to linked variant
@@ -238,9 +238,41 @@ export const bandcampScrapePageTask = task({
       }
 
       // Non-404 or API-sourced URL failures → throw so Trigger.dev retries
-      // #region agent log
-      fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-throw',message:'scrape task throwing for retry',data:{url:payload.url,is404,urlIsConstructed:payload.urlIsConstructed,error:String(error).slice(0,200)},hypothesisId:'B',timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+      // For all BandcampFetchError (any HTTP error from Bandcamp including 403/429 blocking
+      // from cloud server IPs), log to review queue instead of silently retrying forever.
+      // This provides visibility + stops the retry loop for known permanent failures.
+      if (error instanceof BandcampFetchError) {
+        const httpStatus = error.status;
+        const isBlockedByCloudflare = httpStatus === 403 || httpStatus === 429 || httpStatus === 503;
+
+        await supabase.from("warehouse_review_queue").upsert(
+          {
+            workspace_id: payload.workspaceId,
+            org_id: null,
+            category: "bandcamp_scraper",
+            severity: isBlockedByCloudflare ? "medium" as const : "low" as const,
+            title: `Bandcamp fetch error HTTP ${httpStatus}: ${payload.url.slice(0, 60)}`,
+            description: `${isBlockedByCloudflare ? "Bandcamp may be blocking cloud IPs. " : ""}URL: ${payload.url}. Error: ${String(error).slice(0, 200)}`,
+            metadata: {
+              url: payload.url,
+              mappingId: payload.mappingId,
+              httpStatus,
+              urlIsConstructed: payload.urlIsConstructed,
+              urlSource: payload.urlSource,
+            },
+            status: "open" as const,
+            group_key: `bc_scrape_http_${httpStatus}_${payload.mappingId}`,
+            occurrence_count: 1,
+          },
+          { onConflict: "group_key", ignoreDuplicates: false },
+        );
+
+        // Don't retry cloud-blocking errors — they won't resolve on retry
+        if (isBlockedByCloudflare) {
+          return { success: false, reason: `blocked_http_${httpStatus}` };
+        }
+      }
+
       throw error;
     }
   },
@@ -373,8 +405,10 @@ async function triggerScrapeIfNeeded(
   if (!mapping) return;
 
   const needsScrape = !mapping.bandcamp_url || !mapping.bandcamp_type_name;
-  // #region agent log
-  fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:triggerScrapeIfNeeded',message:'scrape check',data:{variantId:variantId.slice(0,8),mappingId:mapping.id.slice(0,8),hasUrl:!!mapping.bandcamp_url,hasTypeName:!!mapping.bandcamp_type_name,needsScrape},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+  // #region agent log — only log when needsScrape=true to avoid flooding
+  if (needsScrape) {
+    supabase.from("channel_sync_log").insert({ workspace_id: workspaceId, channel: "bandcamp", sync_type: "debug_scrape_needed", status: "started", items_processed: 0, items_failed: 0, started_at: new Date().toISOString(), metadata: { variantId: variantId.slice(0,8), mappingId: mapping.id.slice(0,8), hasUrl: !!mapping.bandcamp_url, hasTypeName: !!mapping.bandcamp_type_name } } as never).then(() => {}).catch(() => {});
+  }
   // #endregion
   if (!needsScrape) return;
 
@@ -415,9 +449,6 @@ async function triggerScrapeIfNeeded(
       .eq("id", mapping.id);
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:triggerScrapeIfNeeded-firing',message:'triggering scrape task',data:{variantId:variantId.slice(0,8),scrapeUrl,urlIsConstructed,urlSource},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   await bandcampScrapePageTask.trigger({
     url: scrapeUrl,
     mappingId: mapping.id,
