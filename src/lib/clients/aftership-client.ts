@@ -36,7 +36,7 @@ const trackingSchema = z.object({
 // Use passthrough so Zod doesn't strip unknown keys; we extract what we need manually.
 const createTrackingResponseSchema = z.object({
   meta: z.object({ code: z.number() }),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 });
 
 const getTrackingResponseSchema = z.object({
@@ -116,7 +116,7 @@ export async function createTracking(
     return trackingSchema.parse(data.tracking);
   }
   // Fallback: return a minimal tracking shape for 4003/duplicate cases
-  return { id: "", tracking_number: "", slug: "", checkpoints: [] } as AfterShipTracking;
+  return { id: "", tracking_number: "", slug: "", checkpoints: [] } as unknown as AfterShipTracking;
 }
 
 export async function getTracking(
@@ -131,9 +131,12 @@ export async function getTracking(
   // Response is a list — take first match
   const trackings = (response as unknown as { data: { trackings?: AfterShipTracking[] } })?.data?.trackings;
   if (trackings?.length) {
-    return trackings[0];
+    return trackings[0] as AfterShipTracking;
   }
-  return getTrackingResponseSchema.parse(response).data.tracking;
+  const parsed = getTrackingResponseSchema.parse(response);
+  const t = parsed?.data?.tracking;
+  if (!t) throw new Error(`Tracking not found: ${trackingNumber}`);
+  return t;
 }
 
 /**
