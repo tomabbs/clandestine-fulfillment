@@ -52,10 +52,11 @@ async function aftershipFetch<T>(
   options: { method?: string; body?: unknown } = {},
 ): Promise<T> {
   const apiKey = getApiKey();
-  const res = await fetch(`https://api.aftership.com/v4${path}`, {
+  // AfterShip migrated to versioned API — asat_ keys require the new endpoint + as-api-key header
+  const res = await fetch(`https://api.aftership.com/tracking/2024-07${path}`, {
     method: options.method ?? "GET",
     headers: {
-      "aftership-api-key": apiKey,
+      "as-api-key": apiKey,
       "Content-Type": "application/json",
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
