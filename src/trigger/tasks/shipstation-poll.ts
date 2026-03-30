@@ -48,6 +48,7 @@ export const shipstationPollTask = schedules.task({
         pageSize: 100,
         sortBy: "ShipDate",
         sortDir: "ASC",
+        includeShipmentItems: true,
       });
 
       logger.info("Fetched shipments page", {

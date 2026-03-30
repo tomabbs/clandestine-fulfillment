@@ -243,6 +243,7 @@ export interface FetchShipmentsParams {
   storeId?: number;
   sortBy?: string;
   sortDir?: "ASC" | "DESC";
+  includeShipmentItems?: boolean;
 }
 
 /**
@@ -267,6 +268,7 @@ export async function fetchShipments(params: FetchShipmentsParams = {}) {
   if (params.storeId) searchParams.set("storeId", String(params.storeId));
   if (params.sortBy) searchParams.set("sortBy", params.sortBy);
   if (params.sortDir) searchParams.set("sortDir", params.sortDir);
+  if (params.includeShipmentItems) searchParams.set("includeShipmentItems", "True");
 
   const query = searchParams.toString();
   const path = `/shipments${query ? `?${query}` : ""}`;
