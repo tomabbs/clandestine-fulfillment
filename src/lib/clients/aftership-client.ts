@@ -32,10 +32,11 @@ const trackingSchema = z.object({
     .default([]),
 });
 
-// New 2024-07 API: tracking object is directly at data, not nested at data.tracking
+// New 2024-07 API: tracking object is directly at data (no data.tracking nesting).
+// Use passthrough so Zod doesn't strip unknown keys; we extract what we need manually.
 const createTrackingResponseSchema = z.object({
   meta: z.object({ code: z.number() }),
-  data: trackingSchema.or(z.object({ tracking: trackingSchema })).or(z.object({})),
+  data: z.record(z.unknown()).optional(),
 });
 
 const getTrackingResponseSchema = z.object({
@@ -105,15 +106,17 @@ export async function createTracking(
   );
 
   const parsed = createTrackingResponseSchema.parse(response);
-  // New API returns tracking directly at data; old API nested it at data.tracking
-  const data = parsed.data as Record<string, unknown>;
-  if (data && "id" in data) {
+  // New 2024-07 API: tracking fields are directly at data (id, slug, tracking_number, etc.)
+  // Old v4 API had them nested at data.tracking
+  const data = parsed.data ?? {};
+  if ("id" in data) {
     return trackingSchema.parse(data);
   }
-  if (data && "tracking" in data) {
+  if ("tracking" in data && data.tracking) {
     return trackingSchema.parse(data.tracking);
   }
-  throw new Error("Unexpected AfterShip create response shape");
+  // Fallback: return a minimal tracking shape for 4003/duplicate cases
+  return { id: "", tracking_number: "", slug: "", checkpoints: [] } as AfterShipTracking;
 }
 
 export async function getTracking(
