@@ -75,10 +75,16 @@ export const bandcampScrapePageTask = task({
     urlSource?: "orders_api" | "constructed" | "manual";
   }) => {
     const supabase = createServiceRoleClient();
+    // #region agent log
+    fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-entry',message:'scrape task started',data:{url:payload.url,mappingId:payload.mappingId,urlIsConstructed:payload.urlIsConstructed,urlSource:payload.urlSource},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     try {
       const html = await fetchBandcampPage(payload.url);
       const scraped = parseBandcampPage(html);
 
+      // #region agent log
+      fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-parsed',message:'page fetched and parsed',data:{url:payload.url,scrapedNull:scraped===null,albumArtUrl:scraped?.albumArtUrl,packagesCount:scraped?.packages?.length??0,pkg0TypeName:scraped?.packages?.[0]?.typeName??null,metadataIncomplete:scraped?.metadataIncomplete},hypothesisId:'B',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!scraped) {
         // data-tralbum attribute not found — may not be an album page
         await supabase.from("warehouse_review_queue").upsert(
@@ -100,7 +106,7 @@ export const bandcampScrapePageTask = task({
       }
 
       // Write scraped metadata — update mapping with all data-tralbum fields
-      await supabase
+      const { error: updateErr } = await supabase
         .from("bandcamp_product_mappings")
         .update({
           bandcamp_url:          payload.url,
@@ -116,6 +122,9 @@ export const bandcampScrapePageTask = task({
           updated_at:            new Date().toISOString(),
         })
         .eq("id", payload.mappingId);
+      // #region agent log
+      fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-updated',message:'mapping update result',data:{mappingId:payload.mappingId,updateError:updateErr?.message??null,typeName:scraped.packages[0]?.typeName??null,artUrl:scraped.albumArtUrl},hypothesisId:'C',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       // Propagate to linked variant
       const { data: mapping } = await supabase
@@ -229,6 +238,9 @@ export const bandcampScrapePageTask = task({
       }
 
       // Non-404 or API-sourced URL failures → throw so Trigger.dev retries
+      // #region agent log
+      fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:scrapeTask-throw',message:'scrape task throwing for retry',data:{url:payload.url,is404,urlIsConstructed:payload.urlIsConstructed,error:String(error).slice(0,200)},hypothesisId:'B',timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       throw error;
     }
   },
@@ -361,6 +373,9 @@ async function triggerScrapeIfNeeded(
   if (!mapping) return;
 
   const needsScrape = !mapping.bandcamp_url || !mapping.bandcamp_type_name;
+  // #region agent log
+  fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:triggerScrapeIfNeeded',message:'scrape check',data:{variantId:variantId.slice(0,8),mappingId:mapping.id.slice(0,8),hasUrl:!!mapping.bandcamp_url,hasTypeName:!!mapping.bandcamp_type_name,needsScrape},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (!needsScrape) return;
 
   const bandSubdomain =
@@ -400,6 +415,9 @@ async function triggerScrapeIfNeeded(
       .eq("id", mapping.id);
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7560/ingest/3d96d155-6373-4f6c-ae8b-7832e025e092',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'3151ee'},body:JSON.stringify({sessionId:'3151ee',location:'bandcamp-sync.ts:triggerScrapeIfNeeded-firing',message:'triggering scrape task',data:{variantId:variantId.slice(0,8),scrapeUrl,urlIsConstructed,urlSource},hypothesisId:'A',timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   await bandcampScrapePageTask.trigger({
     url: scrapeUrl,
     mappingId: mapping.id,
