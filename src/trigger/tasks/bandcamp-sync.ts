@@ -885,13 +885,17 @@ export const bandcampSyncTask = task({
 
       logger.info("Bandcamp sync complete", { itemsProcessed, itemsFailed });
 
-      // Sweep for any mappings that have bandcamp_url set but no bandcamp_type_name.
-      // These are variants that were previously in the Bandcamp catalog (and had their URL
-      // populated via orders_api or construction) but are now out of stock / not returned
-      // by getMerchDetails, so they're never in the matched set and triggerScrapeIfNeeded
-      // is never called for them during normal sync processing.
-      // Limit to 50 per sync run to avoid overloading the scrape queue.
-      const { data: pendingScrapes } = await supabase
+      // ── Sweep: trigger scraper for ALL mappings that need it ─────────────────
+      // This covers variants that are out of stock / removed from active Bandcamp
+      // catalog (not returned by getMerchDetails), so triggerScrapeIfNeeded is
+      // never called for them during normal matched-variant processing.
+      //
+      // Group 1: mappings with bandcamp_url but no bandcamp_type_name (49 items)
+      // Group 2: mappings with no URL at all — construct from band subdomain +
+      //          warehouse product title (501 items, processed 50/run to pace queue)
+
+      // Group 1: already have URL, just need scraping
+      const { data: withUrlNoType } = await supabase
         .from("bandcamp_product_mappings")
         .select("id, bandcamp_url")
         .eq("workspace_id", workspaceId)
@@ -899,9 +903,9 @@ export const bandcampSyncTask = task({
         .is("bandcamp_type_name", null)
         .limit(50);
 
-      if (pendingScrapes && pendingScrapes.length > 0) {
-        logger.info(`Sweeping ${pendingScrapes.length} mappings with URL but no type_name`);
-        for (const pm of pendingScrapes) {
+      if (withUrlNoType && withUrlNoType.length > 0) {
+        logger.info(`Sweep group 1: ${withUrlNoType.length} mappings with URL but no type_name`);
+        for (const pm of withUrlNoType) {
           await bandcampScrapePageTask.trigger({
             url: pm.bandcamp_url as string,
             mappingId: pm.id,
@@ -910,6 +914,89 @@ export const bandcampSyncTask = task({
             urlSource: "orders_api",
           });
         }
+      }
+
+      // Group 2: no URL — construct from band subdomain + product title
+      // Fetch up to 50 at a time; they cycle out as type_name gets populated
+      const { data: noUrlNoType } = await supabase
+        .from("bandcamp_product_mappings")
+        .select("id, variant_id")
+        .eq("workspace_id", workspaceId)
+        .is("bandcamp_url", null)
+        .is("bandcamp_type_name", null)
+        .limit(50);
+
+      if (noUrlNoType && noUrlNoType.length > 0) {
+        // Resolve variant → product → title + connection → band subdomain
+        const variantIds = noUrlNoType.map((m) => m.variant_id);
+        const { data: variants } = await supabase
+          .from("warehouse_product_variants")
+          .select("id, sku, warehouse_products!inner(title, org_id)")
+          .in("id", variantIds);
+
+        const variantMap = new Map(
+          (variants ?? []).map((v) => [
+            v.id,
+            {
+              sku: v.sku,
+              productTitle: (v.warehouse_products as unknown as { title: string }).title,
+              orgId: (v.warehouse_products as unknown as { org_id: string }).org_id,
+            },
+          ]),
+        );
+
+        // Build a map of org → connection band_url (subdomain)
+        const { data: orgConnections } = await supabase
+          .from("bandcamp_connections")
+          .select("org_id, band_url")
+          .eq("workspace_id", workspaceId)
+          .not("band_url", "is", null);
+        const orgToSubdomain = new Map(
+          (orgConnections ?? []).map((c) => [
+            c.org_id,
+            (c.band_url ?? "").replace("https://", "").split(".")[0],
+          ]),
+        );
+
+        let group2Triggered = 0;
+        for (const pm of noUrlNoType) {
+          const vInfo = variantMap.get(pm.variant_id);
+          if (!vInfo?.productTitle) continue;
+
+          const subdomain = orgToSubdomain.get(vInfo.orgId) ?? null;
+          if (!subdomain) continue;
+
+          // Extract album title from product title ("Artist - Album Format" → "Album")
+          // Remove leading "Artist - " and trailing format suffix
+          const rawTitle = vInfo.productTitle;
+          const withoutArtist = rawTitle.includes(" - ") ? rawTitle.split(" - ").slice(1).join(" - ") : rawTitle;
+          // Strip format suffix (LP, CD, Cassette, etc. at end)
+          const albumTitle = withoutArtist.replace(/\s+(LP|2xLP|CD|Cassette|Tape|7"|10"|12"|Box Set|Vinyl|Limited Edition|Standard Edition|Deluxe Edition)[^a-zA-Z0-9]*$/i, "").trim();
+
+          const scrapeUrl = buildBandcampAlbumUrl(subdomain, albumTitle);
+          if (!scrapeUrl) continue;
+
+          // Record URL before triggering
+          await supabase
+            .from("bandcamp_product_mappings")
+            .update({
+              bandcamp_url: scrapeUrl,
+              bandcamp_url_source: "constructed",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", pm.id);
+
+          await bandcampScrapePageTask.trigger({
+            url: scrapeUrl,
+            mappingId: pm.id,
+            workspaceId,
+            urlIsConstructed: true,
+            albumTitle,
+            urlSource: "constructed",
+          });
+          group2Triggered++;
+        }
+        logger.info(`Sweep group 2: triggered ${group2Triggered}/${noUrlNoType.length} scrapes for no-URL mappings`);
       }
     } catch (error) {
       if (syncLogId) {
