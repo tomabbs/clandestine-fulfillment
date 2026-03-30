@@ -32,12 +32,18 @@ const trackingSchema = z.object({
     .default([]),
 });
 
+// New 2024-07 API: tracking object is directly at data, not nested at data.tracking
 const createTrackingResponseSchema = z.object({
-  data: z.object({ tracking: trackingSchema }),
+  meta: z.object({ code: z.number() }),
+  data: trackingSchema.or(z.object({ tracking: trackingSchema })).or(z.object({})),
 });
 
 const getTrackingResponseSchema = z.object({
-  data: z.object({ tracking: trackingSchema }),
+  meta: z.object({ code: z.number() }).optional(),
+  data: z.object({
+    tracking: trackingSchema.optional(),
+    trackings: z.array(trackingSchema).optional(),
+  }).optional(),
 });
 
 export type AfterShipTracking = z.infer<typeof trackingSchema>;
@@ -82,24 +88,32 @@ export async function createTracking(
   carrier: string,
   options?: CreateTrackingOptions,
 ): Promise<AfterShipTracking> {
+  // New 2024-07 API: body is flat (no nested "tracking" wrapper)
   const response = await aftershipFetch<z.infer<typeof createTrackingResponseSchema>>(
     "/trackings",
     {
       method: "POST",
       body: {
-        tracking: {
-          tracking_number: trackingNumber,
-          slug: normalizeCarrierSlug(carrier),
-          ...(options?.title ? { title: options.title } : {}),
-          ...(options?.orderId ? { order_id: options.orderId } : {}),
-          ...(options?.emails?.length ? { emails: options.emails } : {}),
-          ...(options?.customerName ? { customer_name: options.customerName } : {}),
-        },
+        tracking_number: trackingNumber,
+        slug: normalizeCarrierSlug(carrier),
+        ...(options?.title ? { title: options.title } : {}),
+        ...(options?.orderId ? { order_id: options.orderId } : {}),
+        ...(options?.emails?.length ? { emails: options.emails } : {}),
+        ...(options?.customerName ? { customer_name: options.customerName } : {}),
       },
     },
   );
 
-  return createTrackingResponseSchema.parse(response).data.tracking;
+  const parsed = createTrackingResponseSchema.parse(response);
+  // New API returns tracking directly at data; old API nested it at data.tracking
+  const data = parsed.data as Record<string, unknown>;
+  if (data && "id" in data) {
+    return trackingSchema.parse(data);
+  }
+  if (data && "tracking" in data) {
+    return trackingSchema.parse(data.tracking);
+  }
+  throw new Error("Unexpected AfterShip create response shape");
 }
 
 export async function getTracking(
@@ -107,10 +121,15 @@ export async function getTracking(
   carrier: string,
 ): Promise<AfterShipTracking> {
   const slug = normalizeCarrierSlug(carrier);
+  // New 2024-07 API: use query params instead of slug/number path
   const response = await aftershipFetch<z.infer<typeof getTrackingResponseSchema>>(
-    `/trackings/${slug}/${trackingNumber}`,
+    `/trackings?tracking_number=${encodeURIComponent(trackingNumber)}&slug=${encodeURIComponent(slug)}&limit=1`,
   );
-
+  // Response is a list — take first match
+  const trackings = (response as unknown as { data: { trackings?: AfterShipTracking[] } })?.data?.trackings;
+  if (trackings?.length) {
+    return trackings[0];
+  }
   return getTrackingResponseSchema.parse(response).data.tracking;
 }
 
