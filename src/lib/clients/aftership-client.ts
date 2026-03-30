@@ -130,6 +130,10 @@ export function normalizeCarrierSlug(carrier: string): string {
     "australia post": "australia-post",
     pirateship: "usps",
     "pirate ship": "usps",
+    // Stamps.com ships via USPS — all ShipStation Stamps.com labels are USPS
+    stamps_com: "usps",
+    "stamps.com": "usps",
+    stamps: "usps",
   };
   return slugMap[normalized] ?? normalized;
 }

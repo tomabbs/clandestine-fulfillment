@@ -239,6 +239,7 @@ export default function ShippingPage() {
             <tr className="border-b bg-muted/50">
               <th className="px-4 py-3 text-left font-medium">Ship Date</th>
               <th className="px-4 py-3 text-left font-medium">Order #</th>
+              <th className="px-4 py-3 text-left font-medium">Client</th>
               <th className="px-4 py-3 text-left font-medium">Recipient</th>
               <th className="px-4 py-3 text-left font-medium">Tracking</th>
               <th className="px-4 py-3 text-center font-medium">Items</th>
@@ -262,7 +263,7 @@ export default function ShippingPage() {
             ))}
             {data && data.shipments.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                   No shipments found.
                 </td>
               </tr>
@@ -303,6 +304,11 @@ function ShipmentTableRow({
   const orderNumber =
     (shipment.warehouse_orders as unknown as { order_number: string | null } | null)
       ?.order_number ?? null;
+  // Fall back to SS-{shipstation_shipment_id} so staff can cross-reference in ShipStation
+  const displayOrderRef = orderNumber
+    ?? (shipment.shipstation_shipment_id ? `SS-${shipment.shipstation_shipment_id}` : null);
+  const clientName =
+    (shipment.organizations as unknown as { name: string } | null)?.name ?? null;
   const itemCount = Array.isArray(shipment.warehouse_shipment_items)
     ? shipment.warehouse_shipment_items.length
     : 0;
@@ -318,7 +324,8 @@ function ShipmentTableRow({
         <td className="px-4 py-3">
           {shipment.ship_date ? new Date(shipment.ship_date).toLocaleDateString() : "---"}
         </td>
-        <td className="px-4 py-3 font-mono text-xs">{orderNumber ?? "---"}</td>
+        <td className="px-4 py-3 font-mono text-xs">{displayOrderRef ?? "---"}</td>
+        <td className="px-4 py-3 text-sm text-muted-foreground">{clientName ?? "—"}</td>
         <td className="px-4 py-3">
           <div className="min-w-0">
             <p className="truncate text-sm">{recipient?.name ?? "---"}</p>
@@ -333,7 +340,7 @@ function ShipmentTableRow({
         <td className="px-4 py-3">
           <div className="flex items-center gap-1.5">
             {carrierLabel && <Badge variant="secondary">{carrierLabel}</Badge>}
-            <span className="font-mono text-xs truncate max-w-[140px]">
+            <span className="font-mono text-xs">
               {shipment.tracking_number ?? "---"}
             </span>
             {trackingUrl && (
