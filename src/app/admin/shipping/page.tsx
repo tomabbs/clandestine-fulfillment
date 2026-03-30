@@ -1,6 +1,7 @@
 "use client";
 
-import { Download, ExternalLink, Loader2, Package, Search, Send } from "lucide-react";
+import { Download, ExternalLink, Loader2, Package, Search, Send, Upload } from "lucide-react";
+import Link from "next/link";
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { setBandcampPaymentId, triggerBandcampMarkShipped } from "@/actions/bandcamp-shipping";
@@ -149,15 +150,23 @@ export default function ShippingPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Shipping</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Shipping Log</h1>
           <p className="text-muted-foreground mt-1">
             {data ? `${data.total} shipment${data.total !== 1 ? "s" : ""}` : "Loading..."}
           </p>
         </div>
-        <Button variant="outline" size="sm" disabled={exporting} onClick={handleExport}>
-          <Download className="h-4 w-4 mr-1.5" />
-          {exporting ? "Exporting..." : "Export CSV"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link href="/admin/shipping/pirate-ship">
+            <Button variant="outline" size="sm">
+              <Upload className="h-4 w-4 mr-1.5" />
+              Import Pirate Ship
+            </Button>
+          </Link>
+          <Button variant="outline" size="sm" disabled={exporting} onClick={handleExport}>
+            <Download className="h-4 w-4 mr-1.5" />
+            {exporting ? "Exporting..." : "Export CSV"}
+          </Button>
+        </div>
       </div>
 
       {/* Summary Stat Cards */}

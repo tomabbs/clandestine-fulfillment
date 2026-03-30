@@ -72,6 +72,5 @@ export {
   discogsClientOrderSyncTask,
 } from "./discogs-client-order-sync";
 
-// ── REMOVED: ShipStation (Phase 1A) ──────────────────────────────────────────
-// export { shipmentIngestTask } from "./shipment-ingest";   // file deleted
-// export { shipstationPollTask } from "./shipstation-poll"; // file deleted
+// ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
+export { shipstationPollTask } from "./shipstation-poll";

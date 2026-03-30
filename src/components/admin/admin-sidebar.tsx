@@ -22,6 +22,7 @@ import {
   TrendingUp,
   Truck,
   Users,
+  Warehouse,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -56,11 +57,12 @@ const NAV_ITEMS = [
   { title: "Scan", href: "/admin/scan", icon: ScanBarcode },
   { title: "Inventory", href: "/admin/inventory", icon: Package },
   { title: "Inbound", href: "/admin/inbound", icon: PackagePlus },
+  { title: "ShipStation Orders", href: "/admin/shipstation-orders", icon: Warehouse },
   { title: "Orders", href: "/admin/orders", icon: ShoppingCart },
   { title: "Mail-Order", href: "/admin/mail-order", icon: Store },
   { title: "Catalog", href: "/admin/catalog", icon: Library },
   { title: "Clients", href: "/admin/clients", icon: Users },
-  { title: "Shipping", href: "/admin/shipping", icon: Truck },
+  { title: "Shipping Log", href: "/admin/shipping", icon: Truck },
   { title: "SCAN Forms", href: "/admin/shipping/scan-forms", icon: FileBarChart },
   { title: "Billing", href: "/admin/billing", icon: Receipt },
   { title: "Top Sellers", href: "/admin/reports/top-sellers", icon: TrendingUp },
