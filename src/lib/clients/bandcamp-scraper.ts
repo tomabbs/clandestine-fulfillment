@@ -62,6 +62,10 @@ const tralbumDataSchema = z.object({
       title:        z.string().nullish(),
       release_date: z.string().nullish(),
       art_id:       z.number().nullish(),
+      // Album metadata — confirmed present in data-tralbum.current (live test 2026-03-31)
+      about:        z.string().nullish(),
+      credits:      z.string().nullish(),
+      upc:          z.string().nullish(),
     })
     .nullish(),
   packages: z
@@ -75,6 +79,16 @@ const tralbumDataSchema = z.object({
         new_date:     z.string().nullish(),     // legacy — fall back if release_date absent
         image_id:     z.number().nullish(),     // ALWAYS NULL on real pages — use arts[0]
         arts:         z.array(packageArtSchema).nullish(),  // real image source
+      }),
+    )
+    .nullish(),
+  // Track listing — data-tralbum.trackinfo (live test: track_num, title, duration in seconds)
+  trackinfo: z
+    .array(
+      z.object({
+        track_num: z.number().nullish(),
+        title:     z.string().nullish(),
+        duration:  z.number().nullish(),   // float seconds, e.g. 345.621
       }),
     )
     .nullish(),
@@ -100,6 +114,13 @@ export interface ScrapedPackage {
   arts: ScrapedPackageImage[]; // all arts entries (typically 4 per package)
 }
 
+export interface ScrapedTrack {
+  trackNum: number;
+  title: string;
+  durationSec: number;   // raw float seconds from Bandcamp
+  durationFormatted: string; // "M:SS" display string
+}
+
 export interface ScrapedAlbumData {
   releaseDate: Date | null;    // from current.release_date
   isPreorder: boolean;         // from is_preorder || album_is_preorder
@@ -108,6 +129,11 @@ export interface ScrapedAlbumData {
   title: string | null;
   packages: ScrapedPackage[];
   metadataIncomplete: boolean; // true when release_date or packages absent
+  // Album metadata — from data-tralbum.current (confirmed 2026-03-31)
+  about: string | null;        // album description / "about this album"
+  credits: string | null;      // recording / production credits
+  upc: string | null;          // album UPC/EAN code
+  tracks: ScrapedTrack[];      // tracklist from data-tralbum.trackinfo
 }
 
 // ─── Image URL construction ───────────────────────────────────────────────────
@@ -128,6 +154,17 @@ export function bandcampAlbumArtUrl(artId: number | null | undefined, size = 10)
 export function bandcampMerchImageUrl(imageId: number | null | undefined, size = 10): string | null {
   if (imageId == null) return null;
   return `https://f4.bcbits.com/img/${imageId}_${size}.jpg`;
+}
+
+// ─── Track duration formatting ────────────────────────────────────────────────
+// Bandcamp returns duration as a float in seconds (e.g. 345.621).
+// Convert to "M:SS" display format (e.g. "5:45").
+
+function formatDuration(seconds: number): string {
+  const totalSec = Math.round(seconds);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 // ─── GMT date parsing ─────────────────────────────────────────────────────────
@@ -206,6 +243,16 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
 
   const metadataIncomplete = !releaseDate || packages.length === 0;
 
+  const tracks: ScrapedTrack[] = (data.trackinfo ?? [])
+    .filter((t) => t.title != null && t.duration != null)
+    .map((t) => ({
+      trackNum:          t.track_num ?? 0,
+      title:             t.title as string,
+      durationSec:       t.duration as number,
+      durationFormatted: formatDuration(t.duration as number),
+    }))
+    .sort((a, b) => a.trackNum - b.trackNum);
+
   return {
     releaseDate,
     isPreorder,
@@ -214,6 +261,11 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
     title: data.current?.title ?? null,
     packages,
     metadataIncomplete,
+    // Album metadata — trim whitespace; Bandcamp often has leading/trailing newlines
+    about:   data.current?.about?.trim()   ?? null,
+    credits: data.current?.credits?.trim() ?? null,
+    upc:     data.current?.upc?.trim()     ?? null,
+    tracks,
   };
 }
 
@@ -239,6 +291,10 @@ export function parseTralbumData(html: string): ScrapedAlbumData & {
     title: null,
     packages: [],
     metadataIncomplete: true,
+    about: null,
+    credits: null,
+    upc: null,
+    tracks: [],
   };
   return {
     ...base,
