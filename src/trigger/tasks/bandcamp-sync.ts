@@ -786,20 +786,36 @@ export const bandcampSyncTask = task({
         // ── Matched items ──────────────────────────────────────────────────────
 
         for (const { merchItem, variantId } of matched) {
+          const upsertPayload: Record<string, unknown> = {
+            workspace_id:            workspaceId,
+            variant_id:              variantId,
+            bandcamp_item_id:        merchItem.package_id,
+            bandcamp_item_type:      merchItem.item_type?.toLowerCase().includes("album")
+              ? "album"
+              : "package",
+            bandcamp_member_band_id: merchItem.member_band_id,
+            bandcamp_image_url:      bandcampImageUrl(merchItem.image_url) ?? null,
+            last_quantity_sold:      merchItem.quantity_sold,
+            last_synced_at:          new Date().toISOString(),
+            updated_at:              new Date().toISOString(),
+          };
+
+          // Store the API-provided album/merch page URL if we don't already have a verified one
+          if (merchItem.url) {
+            const { data: existing } = await supabase
+              .from("bandcamp_product_mappings")
+              .select("bandcamp_url, bandcamp_url_source")
+              .eq("variant_id", variantId)
+              .single();
+
+            if (!existing?.bandcamp_url || existing.bandcamp_url_source !== "scraper_verified") {
+              upsertPayload.bandcamp_url = merchItem.url;
+              upsertPayload.bandcamp_url_source = "orders_api";
+            }
+          }
+
           await supabase.from("bandcamp_product_mappings").upsert(
-            {
-              workspace_id:            workspaceId,
-              variant_id:              variantId,
-              bandcamp_item_id:        merchItem.package_id,
-              bandcamp_item_type:      merchItem.item_type?.toLowerCase().includes("album")
-                ? "album"
-                : "package",
-              bandcamp_member_band_id: merchItem.member_band_id,
-              bandcamp_image_url:      bandcampImageUrl(merchItem.image_url) ?? null,
-              last_quantity_sold:      merchItem.quantity_sold,
-              last_synced_at:          new Date().toISOString(),
-              updated_at:              new Date().toISOString(),
-            },
+            upsertPayload,
             { onConflict: "variant_id" },
           );
 
@@ -1066,6 +1082,8 @@ export const bandcampSyncTask = task({
               bandcamp_new_date:       merchItem.new_date,
               last_quantity_sold:      merchItem.quantity_sold,
               last_synced_at:          new Date().toISOString(),
+              bandcamp_url:            merchItem.url ?? null,
+              bandcamp_url_source:     merchItem.url ? "orders_api" : null,
             });
 
             if (tags.includes("Pre-Orders")) {
