@@ -660,3 +660,33 @@ export async function updateOnboardingStep(orgId: string, step: string, complete
   await supabase.from("organizations").update({ onboarding_state: state }).eq("id", orgId);
   return { success: true };
 }
+
+// === Support email mappings per client ===
+
+export async function getClientSupportEmails(orgId: string) {
+  const supabase = createServiceRoleClient();
+  const { data } = await supabase
+    .from("support_email_mappings")
+    .select("id, email_address, is_active, created_at")
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: true });
+  return data ?? [];
+}
+
+export async function addClientSupportEmail(orgId: string, email: string) {
+  const { workspaceId } = await requireStaff();
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase.from("support_email_mappings").upsert(
+    { workspace_id: workspaceId, email_address: email.toLowerCase().trim(), org_id: orgId, is_active: true },
+    { onConflict: "workspace_id,email_address" },
+  );
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+export async function removeClientSupportEmail(mappingId: string) {
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase.from("support_email_mappings").delete().eq("id", mappingId);
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}

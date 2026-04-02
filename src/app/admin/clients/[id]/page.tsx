@@ -18,6 +18,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { MonthlySales } from "@/actions/clients";
 import {
+  addClientSupportEmail,
   getClientBilling,
   getClientDetail,
   getClientProducts,
@@ -25,8 +26,10 @@ import {
   getClientSettings,
   getClientShipments,
   getClientStores,
+  getClientSupportEmails,
   getClientSupportHistory,
   getClientUsers,
+  removeClientSupportEmail,
   updateClient,
   updateOnboardingStep,
 } from "@/actions/clients";
@@ -889,6 +892,9 @@ function SettingsTab({ orgId }: { orgId: string }) {
         </CardContent>
       </Card>
 
+      {/* Support email routing */}
+      <SupportEmailsCard orgId={orgId} />
+
       {/* Billing rates */}
       <Card>
         <CardHeader>
@@ -939,6 +945,76 @@ function SettingsField({
         {value ?? <span className="text-muted-foreground italic">Not set</span>}
       </dd>
     </div>
+  );
+}
+
+function SupportEmailsCard({ orgId }: { orgId: string }) {
+  const { data: emails, isLoading, refetch } = useAppQuery({
+    queryKey: ["client-support-emails", orgId],
+    queryFn: () => getClientSupportEmails(orgId),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  const [newEmail, setNewEmail] = useState("");
+  const addMut = useAppMutation({
+    mutationFn: () => addClientSupportEmail(orgId, newEmail),
+    invalidateKeys: [["client-support-emails", orgId]],
+    onSuccess: () => { setNewEmail(""); refetch(); },
+  });
+  const removeMut = useAppMutation({
+    mutationFn: (id: string) => removeClientSupportEmail(id),
+    invalidateKeys: [["client-support-emails", orgId]],
+    onSuccess: () => refetch(),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Support Email Routing</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Emails from these addresses to the fulfillment inbox will automatically create support conversations for this client.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {isLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+          </div>
+        ) : (
+          <>
+            {(emails ?? []).length > 0 && (
+              <div className="space-y-1">
+                {(emails ?? []).map((m) => (
+                  <div key={m.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-muted/50">
+                    <span className="text-sm font-mono">{m.email_address}</span>
+                    <Button variant="ghost" size="sm" onClick={() => removeMut.mutate(m.id)} disabled={removeMut.isPending}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="email"
+                placeholder="Add email address..."
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && newEmail.includes("@")) addMut.mutate(); }}
+                className="border-input bg-background flex-1 h-8 rounded-md border px-3 text-sm"
+              />
+              <Button
+                size="sm"
+                disabled={!newEmail.includes("@") || addMut.isPending}
+                onClick={() => addMut.mutate()}
+              >
+                <Plus className="h-3 w-3 mr-1" /> Add
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -272,6 +272,14 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
       };
     }
 
+    // Auto-add client emails to support routing
+    if (parsed.orgId && (CLIENT_ROLES as readonly string[]).includes(parsed.role)) {
+      await serviceClient.from("support_email_mappings").upsert(
+        { workspace_id: userRecord.workspace_id, email_address: parsed.email.toLowerCase(), org_id: parsed.orgId, is_active: true },
+        { onConflict: "workspace_id,email_address", ignoreDuplicates: true },
+      );
+    }
+
     try {
       await sendPortalInviteEmail({
         to: parsed.email,
