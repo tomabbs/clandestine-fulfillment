@@ -482,3 +482,125 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     },
   };
 }
+
+// === Sales history + backfill status ===
+
+export async function getBandcampSalesOverview(workspaceId: string) {
+  const supabase = createServiceRoleClient();
+
+  // Per-connection summary
+  const { data: connections } = await supabase
+    .from("bandcamp_connections")
+    .select("id, band_name, band_url")
+    .eq("workspace_id", workspaceId)
+    .eq("is_active", true);
+
+  const connectionStats = [];
+  for (const conn of connections ?? []) {
+    const { count: totalSales } = await supabase
+      .from("bandcamp_sales")
+      .select("id", { count: "exact", head: true })
+      .eq("connection_id", conn.id);
+
+    const { data: revenueRow } = await supabase
+      .from("bandcamp_sales")
+      .select("net_amount, currency")
+      .eq("connection_id", conn.id)
+      .not("net_amount", "is", null)
+      .limit(1000);
+
+    const totalRevenue = (revenueRow ?? []).reduce((sum, r) => sum + (Number(r.net_amount) || 0), 0);
+    const currency = revenueRow?.[0]?.currency ?? "USD";
+
+    const { count: refundCount } = await supabase
+      .from("bandcamp_sales")
+      .select("id", { count: "exact", head: true })
+      .eq("connection_id", conn.id)
+      .eq("payment_state", "refunded");
+
+    const { data: backfillState } = await supabase
+      .from("bandcamp_sales_backfill_state")
+      .select("status, total_transactions, last_processed_date, completed_at, last_error")
+      .eq("connection_id", conn.id)
+      .single();
+
+    connectionStats.push({
+      connectionId: conn.id,
+      bandName: conn.band_name,
+      bandUrl: conn.band_url,
+      totalSales: totalSales ?? 0,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      currency,
+      refundCount: refundCount ?? 0,
+      backfillStatus: backfillState?.status ?? "pending",
+      backfillTransactions: backfillState?.total_transactions ?? 0,
+      backfillLastDate: backfillState?.last_processed_date ?? null,
+      backfillCompletedAt: backfillState?.completed_at ?? null,
+      backfillError: backfillState?.last_error ?? null,
+    });
+  }
+
+  // Overall totals
+  const { count: grandTotal } = await supabase
+    .from("bandcamp_sales")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId);
+
+  return { connections: connectionStats, grandTotalSales: grandTotal ?? 0 };
+}
+
+export async function getBandcampFullItemData(variantId: string) {
+  const supabase = createServiceRoleClient();
+
+  const { data: mapping } = await supabase
+    .from("bandcamp_product_mappings")
+    .select("*")
+    .eq("variant_id", variantId)
+    .single();
+
+  if (!mapping) return null;
+
+  // Sales summary for this item
+  const { data: salesRows } = await supabase
+    .from("bandcamp_sales")
+    .select("sale_date, quantity, net_amount, currency, payment_state, item_name, package, catalog_number, upc")
+    .eq("workspace_id", mapping.workspace_id)
+    .eq("sku", mapping.bandcamp_item_id ? undefined : undefined)
+    .order("sale_date", { ascending: false })
+    .limit(50);
+
+  // Try matching by SKU from the variant
+  const { data: variant } = await supabase
+    .from("warehouse_product_variants")
+    .select("sku")
+    .eq("id", variantId)
+    .single();
+
+  let salesByVariant = null;
+  if (variant?.sku) {
+    const { data: skuSales } = await supabase
+      .from("bandcamp_sales")
+      .select("sale_date, quantity, net_amount, currency, payment_state, catalog_number, upc, isrc")
+      .eq("workspace_id", mapping.workspace_id)
+      .eq("sku", variant.sku)
+      .order("sale_date", { ascending: false })
+      .limit(100);
+
+    const totalUnits = (skuSales ?? []).reduce((s, r) => s + (r.quantity ?? 0), 0);
+    const totalRevenue = (skuSales ?? []).reduce((s, r) => s + (Number(r.net_amount) || 0), 0);
+    const refunds = (skuSales ?? []).filter(r => r.payment_state === "refunded").length;
+
+    salesByVariant = {
+      totalUnits,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      refunds,
+      lastSaleDate: skuSales?.[0]?.sale_date ?? null,
+      catalogNumber: skuSales?.find(r => r.catalog_number)?.catalog_number ?? null,
+      upc: skuSales?.find(r => r.upc)?.upc ?? null,
+      isrc: skuSales?.find(r => r.isrc)?.isrc ?? null,
+      recentSales: (skuSales ?? []).slice(0, 10),
+    };
+  }
+
+  return { mapping, salesByVariant };
+}

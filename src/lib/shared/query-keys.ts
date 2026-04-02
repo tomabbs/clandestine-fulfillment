@@ -81,6 +81,8 @@ export const queryKeys = {
     accounts: (workspaceId: string) => ["bandcamp", "accounts", workspaceId] as const,
     mappings: (orgId: string) => ["bandcamp", "mappings", orgId] as const,
     scraperHealth: (workspaceId: string) => ["bandcamp", "scraper-health", workspaceId] as const,
+    salesOverview: (workspaceId: string) => ["bandcamp", "sales-overview", workspaceId] as const,
+    fullItemData: (variantId: string) => ["bandcamp", "full-item-data", variantId] as const,
   },
   storeMappings: {
     all: ["store-mappings"] as const,

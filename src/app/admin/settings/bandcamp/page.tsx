@@ -22,6 +22,7 @@ import {
   deleteBandcampConnection,
   getBandcampAccounts,
   getBandcampScraperHealth,
+  getBandcampSalesOverview,
   getOrganizationsForWorkspace,
   triggerBandcampSync,
 } from "@/actions/bandcamp";
@@ -321,6 +322,96 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+// ─── Sales History Tab ────────────────────────────────────────────────────────
+
+function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
+  const { data, isLoading, refetch, isFetching } = useAppQuery({
+    queryKey: queryKeys.bandcamp.salesOverview(workspaceId),
+    queryFn: () => getBandcampSalesOverview(workspaceId),
+    tier: CACHE_TIERS.SESSION,
+    enabled: !!workspaceId,
+  });
+
+  if (isLoading || !data) {
+    return (
+      <div className="flex justify-center py-12 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            All-time sales data from Bandcamp Sales Report API.
+            {data.grandTotalSales > 0 ? ` ${data.grandTotalSales.toLocaleString()} transactions loaded.` : " No sales data yet — run a backfill."}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
+          <RefreshCw className={`h-3 w-3 mr-1 ${isFetching ? "animate-spin" : ""}`} /> Refresh
+        </Button>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Connection</TableHead>
+            <TableHead className="text-right">Sales</TableHead>
+            <TableHead className="text-right">Revenue</TableHead>
+            <TableHead className="text-right">Refunds</TableHead>
+            <TableHead>Backfill</TableHead>
+            <TableHead>Last Date</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {data.connections.map((conn) => (
+            <TableRow key={conn.connectionId}>
+              <TableCell className="font-medium">
+                {conn.bandName}
+                {conn.bandUrl && (
+                  <a href={conn.bandUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 text-xs hover:underline">
+                    (link)
+                  </a>
+                )}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">{conn.totalSales.toLocaleString()}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {conn.totalRevenue > 0 ? `$${conn.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">{conn.refundCount || "—"}</TableCell>
+              <TableCell>
+                <Badge variant={
+                  conn.backfillStatus === "completed" ? "default" :
+                  conn.backfillStatus === "running" ? "secondary" :
+                  conn.backfillStatus === "failed" ? "destructive" : "outline"
+                }>
+                  {conn.backfillStatus}
+                </Badge>
+                {conn.backfillError && (
+                  <p className="text-xs text-red-500 mt-1 truncate max-w-[200px]">{conn.backfillError}</p>
+                )}
+              </TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {conn.backfillLastDate ? new Date(conn.backfillLastDate).toLocaleDateString() : "—"}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+
+      {data.connections.length === 0 && (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            No connections found. Add Bandcamp accounts on the Accounts tab first.
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function BandcampSettingsPage() {
@@ -411,6 +502,7 @@ export default function BandcampSettingsPage() {
         <TabsList>
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
           <TabsTrigger value="health">Scraper &amp; Catalog Health</TabsTrigger>
+          <TabsTrigger value="sales">Sales History</TabsTrigger>
         </TabsList>
 
         <TabsContent value="accounts" className="mt-4">
@@ -540,6 +632,16 @@ export default function BandcampSettingsPage() {
         <TabsContent value="health" className="mt-4">
           {workspaceId ? (
             <ScraperHealthTab workspaceId={workspaceId} />
+          ) : (
+            <div className="flex justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="sales" className="mt-4">
+          {workspaceId ? (
+            <SalesHistoryTab workspaceId={workspaceId} />
           ) : (
             <div className="flex justify-center py-8 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
