@@ -31,6 +31,8 @@ const FORMAT_PATTERNS = [
   /\bJewel\s*Case\b/i, /\bSlipcase\b/i, /\bCompact\s*Disc\b/i,
   /\bLimited\s*Edition\b/i, /\bStandard\s*Edition\b/i, /\bDeluxe\s*Edition\b/i,
   /\bDeluxe\b/i, /\bLTD\b/i, /\bColou?red\b/i, /\bSplatter\b/i,
+  /\bReissue\b/i, /\bSplit\b/i, /\bTriple\b/i, /\bDouble\b/i, /\bSingle\b/i,
+  /\bw\/\s*Alt\.?\s*Artwork\b/i, /\bAlt\.?\s*Artwork\b/i,
   /\bTranslucent\b/i, /\bBlack\s*Variant\b/i, /\bNatural\b.*\bSplatter\b/i,
   /\bin\s+(Digipack|Digisleeve|Digipak|Jacket|Gatefold)\b/i,
 ];
@@ -59,50 +61,57 @@ export function extractAlbumTitle(productTitle: string): string | null {
   // Reject pure merch items — no album page exists
   if (MERCH_PATTERNS.some(p => p.test(raw))) return null;
 
-  // Split on " - " to separate artist from rest
-  const withoutArtist = raw.includes(" - ")
-    ? raw.split(" - ").slice(1).join(" - ")
-    : raw;
+  // Reject PACKAGE bundle listings — no single album page
+  if (/PACKAGE\s*:/i.test(raw)) return null;
 
-  // Strip all format/variant descriptors
-  let cleaned = withoutArtist;
-  for (const pat of FORMAT_PATTERNS) {
-    cleaned = cleaned.replace(new RegExp(pat, "gi"), "");
-  }
-  // Strip trailing punctuation, parens with color descriptions, stray prepositions, and whitespace
-  cleaned = cleaned
-    .replace(/\(.*\)/g, "")
-    .replace(/[.\s]+$/g, "")
-    .replace(/^\s+/g, "")
-    .trim();
+  const parts = raw.split(" - ").map(s => s.trim()).filter(Boolean);
 
-  // Strip stray prepositions/articles and dangling quotes left after format removal
-  cleaned = cleaned.replace(/^(in|on|with|w\/)\s+/i, "").trim();
-  cleaned = cleaned.replace(/\s+(in|on|with|w\/)$/i, "").trim();
-  cleaned = cleaned.replace(/\s*[""\u201C\u201D\u2033']+\s*$/g, "").trim();
-
-  // If nothing meaningful remains (or just short noise), skip
-  if (!cleaned || cleaned.length < 3) return null;
-
-  // Reject if remaining text is just numbers/punctuation/quotes
-  if (/^[\d\u201C\u201D\u2033""'"\s.\-!?]+$/.test(cleaned)) return null;
-
-  // Reject color/variant-only descriptors that slipped through
-  if (/^(Standard|Double|Single|Special|Original|Limited)?\s*(Black|White|Clear|Red|Blue|Green|Orange|Pink|Natural)?\s*[""\u201C\u201D\u2033']?\s*$/i.test(cleaned)) return null;
-
-  // (color/variant-only check is handled after the quote-noise check below)
-
-  // If "Artist - AlbumName AlbumName Format", the album name is duplicated.
-  // Check if cleaned matches the part before " - " (the artist segment was actually album name)
-  if (raw.includes(" - ")) {
-    const firstPart = raw.split(" - ")[0].trim();
-    // If cleaned equals the first part, it's a "Album - Album Format" pattern — use it
-    if (cleaned.toLowerCase() === firstPart.toLowerCase()) {
-      return cleaned;
+  // Try to extract a clean album title from each candidate
+  function stripFormats(text: string): string | null {
+    let cleaned = text;
+    for (const pat of FORMAT_PATTERNS) {
+      cleaned = cleaned.replace(new RegExp(pat, "gi"), "");
     }
+    cleaned = cleaned
+      .replace(/\(.*\)/g, "")
+      .replace(/[.\s]+$/g, "")
+      .replace(/^\s+/g, "")
+      .trim();
+
+    // Strip stray prepositions/articles and dangling quotes
+    cleaned = cleaned.replace(/^(in|on|with|w\/|&)\s+/i, "").trim();
+    cleaned = cleaned.replace(/\s+(in|on|with|w\/)$/i, "").trim();
+    cleaned = cleaned.replace(/\s*[""\u201C\u201D\u2033']+\s*$/g, "").trim();
+    // Strip leading punctuation residue
+    cleaned = cleaned.replace(/^[&:,\-\s]+/, "").trim();
+
+    if (!cleaned || cleaned.length < 3) return null;
+    if (/^[\d\u201C\u201D\u2033""'"\s.\-!?&]+$/.test(cleaned)) return null;
+    if (/^(Standard|Double|Single|Special|Original|Limited|Triple|Alt|Split|Reissue)?\s*(Black|White|Clear|Red|Blue|Green|Orange|Pink|Natural|Colored|Colou?red)?\s*[""\u201C\u201D\u2033']?\s*$/i.test(cleaned)) return null;
+    // Reject residue that's still just packaging/bundle descriptors
+    if (/^(Artwork|Art\s*Print|Sleeve|Jacket|Insert|Booklet|Batch|Series|Sigil)\s*$/i.test(cleaned)) return null;
+    if (/^\d+\s*(CD|LP)$/i.test(cleaned)) return null;
+    // Reject PACKAGE: prefixed bundle items
+    if (/^PACKAGE\s*:/i.test(cleaned)) return null;
+    // Reject if it's mostly uppercase noise with numbers (e.g. "WITH 16 COLORFUL INSERTS")
+    if (/^WITH\s+\d/i.test(cleaned)) return null;
+    return cleaned;
   }
 
-  return cleaned;
+  if (parts.length === 1) {
+    return stripFormats(parts[0]);
+  }
+
+  // Multi-part: "Artist - Title Format" or "Title - Format Description"
+  // Strategy: try the LAST non-format segment first (most likely the album title),
+  // then fall back to the first segment (when the rest is pure format)
+  const afterFirst = parts.slice(1).join(" - ");
+  const candidateAfter = stripFormats(afterFirst);
+  if (candidateAfter) return candidateAfter;
+
+  // The part(s) after the first dash were all format noise — try the first segment as album
+  const candidateFirst = stripFormats(parts[0]);
+  return candidateFirst;
 }
 
 // ─── Typed fetch error ────────────────────────────────────────────────────────
