@@ -142,6 +142,8 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - trigger kickoffs/status: `triggerShopifySync`, `triggerFullBackfill`, `getShopifySyncStatus`, `triggerBandcampSync`, `getBandcampSyncStatus`, `triggerBandcampConnectionBackfill`
   - Bandcamp connection management: `createBandcampConnection`, `deleteBandcampConnection`, `getBandcampAccounts`, `getBandcampMappings`, `getOrganizationsForWorkspace`
   - scraper observability: `getBandcampScraperHealth` (log-backed activity, catalog completeness, sensor readings, block rate, review queue)
+  - Sales Report API: `salesReport`, `generateSalesReport`, `fetchSalesReport` (v4, all-time transaction history with catalog_number/upc/isrc)
+  - SKU management: `updateSku` (push SKUs to Bandcamp, behind feature flag)
   - store connections and mappings: connection CRUD/test + mapping and reprocess ops
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`
   - preorder tools: `getPreorderProducts`, `manualRelease`, `getPreorderAllocationPreview`

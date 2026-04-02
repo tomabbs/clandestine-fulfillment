@@ -84,3 +84,7 @@ export { bandcampScrapeSweepTask } from "./bandcamp-scrape-sweep";
 
 // ── Catalog stats snapshot refresh (nightly + on-demand) ──────────────────────
 export { catalogStatsRefreshSchedule, catalogStatsRefreshTask } from "./catalog-stats-refresh";
+
+// ── Bandcamp sales (backfill + daily sync) ────────────────────────────────────
+export { bandcampSalesBackfillTask } from "./bandcamp-sales-backfill";
+export { bandcampSalesSyncSchedule } from "./bandcamp-sales-sync";

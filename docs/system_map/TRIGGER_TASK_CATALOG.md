@@ -50,6 +50,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` — **hardened 2026-04-02**: upsert ON CONFLICT `(workspace_id, shipstation_shipment_id)`, pre-fetches `/orders` for `shippingAmount` → `customer_shipping_charged`, two-phase order auto-link (exact normalized order number → auto-assign; probabilistic → review queue only), ghost item pruning, `label_source='shipstation'` |
 | `bundle-availability-sweep` | `src/trigger/tasks/bundle-availability-sweep.ts` | `0 6 * * *` (daily 6am UTC) |
 | `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
+| `bandcamp-sales-sync` | `src/trigger/tasks/bandcamp-sales-sync.ts` | `0 5 * * *` (daily 5am UTC) |
 
 ## Event/On-Demand Tasks
 
@@ -76,6 +77,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `discogs-initial-listing` | `src/trigger/tasks/discogs-initial-listing.ts` | `src/actions/discogs-admin.ts` (confirmMapping) |
 | `discogs-message-send` | `src/trigger/tasks/discogs-message-send.ts` | Support UI / staff |
 | `catalog-stats-refresh-demand` | `src/trigger/tasks/catalog-stats-refresh.ts` | Staff admin UI (on-demand) |
+| `bandcamp-sales-backfill` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | Staff admin UI (on-demand); self-triggers in yearly chunks |
 | `bundle-component-fanout` | `src/trigger/tasks/bundle-component-fanout.ts` | `bandcamp-sale-poll` (when bundle variant sold) |
 
 ## Domain Touchpoints

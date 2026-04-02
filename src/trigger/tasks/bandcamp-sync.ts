@@ -786,84 +786,148 @@ export const bandcampSyncTask = task({
         // ── Matched items ──────────────────────────────────────────────────────
 
         for (const { merchItem, variantId } of matched) {
+          // Extract option SKUs for GIN-indexed lookups
+          const optionSkus = (merchItem.options ?? [])
+            .map(o => o.sku).filter((s): s is string => !!s);
+
+          // Bandcamp-permanent fields: always updated from API regardless of authority_status
           const upsertPayload: Record<string, unknown> = {
-            workspace_id:            workspaceId,
-            variant_id:              variantId,
-            bandcamp_item_id:        merchItem.package_id,
-            bandcamp_item_type:      merchItem.item_type?.toLowerCase().includes("album")
+            workspace_id:                workspaceId,
+            variant_id:                  variantId,
+            bandcamp_item_id:            merchItem.package_id,
+            bandcamp_item_type:          merchItem.item_type?.toLowerCase().includes("album")
               ? "album"
               : "package",
-            bandcamp_member_band_id: merchItem.member_band_id,
-            bandcamp_image_url:      bandcampImageUrl(merchItem.image_url) ?? null,
-            last_quantity_sold:      merchItem.quantity_sold,
-            last_synced_at:          new Date().toISOString(),
-            updated_at:              new Date().toISOString(),
+            bandcamp_member_band_id:     merchItem.member_band_id,
+            bandcamp_image_url:          bandcampImageUrl(merchItem.image_url) ?? null,
+            bandcamp_url:                merchItem.url ?? null,
+            bandcamp_url_source:         merchItem.url ? "orders_api" : null,
+            bandcamp_subdomain:          merchItem.subdomain ?? null,
+            bandcamp_album_title:        merchItem.album_title ?? null,
+            bandcamp_price:              merchItem.price ?? null,
+            bandcamp_currency:           merchItem.currency ?? null,
+            bandcamp_is_set_price:       merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : null,
+            bandcamp_options:            merchItem.options ?? null,
+            bandcamp_origin_quantities:  merchItem.origin_quantities ?? null,
+            bandcamp_new_date:           merchItem.new_date ?? null,
+            bandcamp_option_skus:        optionSkus.length > 0 ? optionSkus : null,
+            last_quantity_sold:          merchItem.quantity_sold,
+            last_synced_at:              new Date().toISOString(),
+            updated_at:                  new Date().toISOString(),
+            raw_api_data:                merchItem,
           };
-
-          // Store the API-provided album/merch page URL if we don't already have a verified one
-          if (merchItem.url) {
-            const { data: existing } = await supabase
-              .from("bandcamp_product_mappings")
-              .select("bandcamp_url, bandcamp_url_source")
-              .eq("variant_id", variantId)
-              .single();
-
-            if (!existing?.bandcamp_url || existing.bandcamp_url_source !== "scraper_verified") {
-              upsertPayload.bandcamp_url = merchItem.url;
-              upsertPayload.bandcamp_url_source = "orders_api";
-            }
-          }
 
           await supabase.from("bandcamp_product_mappings").upsert(
             upsertPayload,
             { onConflict: "variant_id" },
           );
 
-          // Backfill price/cost/street_date from API if missing
+          // Read current mapping authority and variant state for conditional updates
+          const { data: mapping } = await supabase
+            .from("bandcamp_product_mappings")
+            .select("authority_status")
+            .eq("variant_id", variantId)
+            .single();
+
+          const authorityStatus = mapping?.authority_status ?? "bandcamp_initial";
+
           const { data: existingVar } = await supabase
             .from("warehouse_product_variants")
-            .select("id, price, cost, product_id, street_date, is_preorder")
+            .select("id, sku, price, cost, product_id, street_date, is_preorder")
             .eq("id", variantId)
             .single();
 
-          if (existingVar) {
+          if (existingVar && authorityStatus === "bandcamp_initial") {
+            // Bandcamp owns operational fields during initial ingest
             const updates: Record<string, unknown> = {};
 
-            if (
-              (existingVar.price == null || existingVar.price === 0) &&
-              merchItem.price != null
-            ) {
+            // SKU overwrite with audit trail
+            if (merchItem.sku && existingVar.sku !== merchItem.sku) {
+              const { data: collision } = await supabase
+                .from("warehouse_product_variants")
+                .select("id")
+                .eq("workspace_id", workspaceId)
+                .eq("sku", merchItem.sku)
+                .neq("id", variantId)
+                .limit(1);
+
+              if (!collision?.length) {
+                await supabase.from("channel_sync_log").insert({
+                  workspace_id: workspaceId,
+                  channel: "bandcamp",
+                  sync_type: "sku_overwrite",
+                  status: "completed",
+                  items_processed: 1,
+                  started_at: new Date().toISOString(),
+                  completed_at: new Date().toISOString(),
+                  metadata: { variant_id: variantId, old_sku: existingVar.sku, new_sku: merchItem.sku, bandcamp_item_id: merchItem.package_id },
+                }).then(() => {}, () => {});
+                updates.sku = merchItem.sku;
+              } else {
+                logger.warn("SKU collision — skipping overwrite", { old: existingVar.sku, new: merchItem.sku, collidesWithVariant: collision[0].id });
+              }
+            }
+
+            // Price
+            if (merchItem.price != null && (existingVar.price == null || existingVar.price === 0)) {
               updates.price = merchItem.price;
             }
-            if (
-              (existingVar.cost == null || existingVar.cost === 0) &&
-              merchItem.price != null
-            ) {
-              const p = (updates.price as number | undefined) ?? merchItem.price;
-              updates.cost = Math.round(p * 0.5 * 100) / 100;
+            if (merchItem.price != null && (existingVar.cost == null || existingVar.cost === 0)) {
+              updates.cost = Math.round(((updates.price as number | undefined) ?? merchItem.price) * 0.5 * 100) / 100;
             }
-            if (!existingVar.street_date && merchItem.new_date) {
+
+            // Street date — always set from API during bandcamp_initial
+            if (merchItem.new_date) {
               updates.street_date = merchItem.new_date;
             }
-            const effectiveDate =
-              (updates.street_date as string | undefined) ?? existingVar.street_date;
-            if (effectiveDate && !existingVar.is_preorder && new Date(effectiveDate) > new Date()) {
+
+            // Pre-order flag
+            const effectiveDate = (updates.street_date as string | undefined) ?? existingVar.street_date;
+            if (effectiveDate && new Date(effectiveDate) > new Date()) {
               updates.is_preorder = true;
+            } else if (existingVar.is_preorder && effectiveDate && new Date(effectiveDate) <= new Date()) {
+              updates.is_preorder = false;
             }
 
             if (Object.keys(updates).length > 0) {
               updates.updated_at = new Date().toISOString();
-              await supabase
-                .from("warehouse_product_variants")
-                .update(updates)
-                .eq("id", variantId);
+              await supabase.from("warehouse_product_variants").update(updates).eq("id", variantId);
 
               if (updates.is_preorder === true) {
-                await preorderSetupTask.trigger({
-                  variant_id: variantId,
-                  workspace_id: workspaceId,
-                });
+                await preorderSetupTask.trigger({ variant_id: variantId, workspace_id: workspaceId });
               }
+            }
+
+            // Inventory seeding: if warehouse is 0 and Bandcamp has stock, seed once
+            if (merchItem.quantity_available != null && merchItem.quantity_available > 0) {
+              const { data: inv } = await supabase
+                .from("warehouse_inventory_levels")
+                .select("available")
+                .eq("variant_id", variantId)
+                .single();
+
+              if (inv && inv.available === 0) {
+                const seedSku = (updates.sku as string | undefined) ?? existingVar.sku;
+                if (seedSku) {
+                  await recordInventoryChange({
+                    workspaceId,
+                    sku: seedSku,
+                    delta: merchItem.quantity_available,
+                    source: "backfill",
+                    correlationId: `bandcamp-seed:${connection.band_id}:${merchItem.package_id}:initial`,
+                    metadata: { band_id: connection.band_id, bandcamp_item_id: merchItem.package_id, quantity_available: merchItem.quantity_available },
+                  });
+                  logger.info("Seeded inventory from Bandcamp", { sku: seedSku, quantity: merchItem.quantity_available });
+                }
+              }
+            }
+          } else if (existingVar) {
+            // warehouse_reviewed or warehouse_locked: only update cost if missing (non-destructive)
+            if (merchItem.price != null && (existingVar.cost == null || existingVar.cost === 0)) {
+              await supabase.from("warehouse_product_variants").update({
+                cost: Math.round(merchItem.price * 0.5 * 100) / 100,
+                updated_at: new Date().toISOString(),
+              }).eq("id", variantId);
             }
 
             // API image backfill — only if product has no images yet
@@ -1069,21 +1133,30 @@ export const bandcampSyncTask = task({
               available: initialQty,
             });
 
+            const newOptionSkus = (merchItem.options ?? []).map(o => o.sku).filter((s): s is string => !!s);
             await supabase.from("bandcamp_product_mappings").insert({
-              workspace_id:            workspaceId,
-              variant_id:              newVariant.id,
-              bandcamp_item_id:        merchItem.package_id,
-              bandcamp_item_type:      merchItem.item_type?.toLowerCase().includes("album")
-                ? "album"
-                : "package",
-              bandcamp_member_band_id: merchItem.member_band_id,
-              bandcamp_image_url:      bandcampImageUrl(merchItem.image_url) ?? null,
-              bandcamp_type_name:      merchItem.item_type,
-              bandcamp_new_date:       merchItem.new_date,
-              last_quantity_sold:      merchItem.quantity_sold,
-              last_synced_at:          new Date().toISOString(),
-              bandcamp_url:            merchItem.url ?? null,
-              bandcamp_url_source:     merchItem.url ? "orders_api" : null,
+              workspace_id:                workspaceId,
+              variant_id:                  newVariant.id,
+              bandcamp_item_id:            merchItem.package_id,
+              bandcamp_item_type:          merchItem.item_type?.toLowerCase().includes("album") ? "album" : "package",
+              bandcamp_member_band_id:     merchItem.member_band_id,
+              bandcamp_image_url:          bandcampImageUrl(merchItem.image_url) ?? null,
+              bandcamp_type_name:          merchItem.item_type,
+              bandcamp_new_date:           merchItem.new_date,
+              bandcamp_url:                merchItem.url ?? null,
+              bandcamp_url_source:         merchItem.url ? "orders_api" : null,
+              bandcamp_subdomain:          merchItem.subdomain ?? null,
+              bandcamp_album_title:        merchItem.album_title ?? null,
+              bandcamp_price:              merchItem.price ?? null,
+              bandcamp_currency:           merchItem.currency ?? null,
+              bandcamp_is_set_price:       merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : null,
+              bandcamp_options:            merchItem.options ?? null,
+              bandcamp_origin_quantities:  merchItem.origin_quantities ?? null,
+              bandcamp_option_skus:        newOptionSkus.length > 0 ? newOptionSkus : null,
+              last_quantity_sold:          merchItem.quantity_sold,
+              last_synced_at:              new Date().toISOString(),
+              authority_status:            "bandcamp_initial",
+              raw_api_data:                merchItem,
             });
 
             if (tags.includes("Pre-Orders")) {

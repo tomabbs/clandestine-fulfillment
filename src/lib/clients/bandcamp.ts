@@ -20,14 +20,34 @@ const bandSchema = z.object({
       z.object({
         band_id: z.number(),
         name: z.string(),
-      }),
+        subdomain: z.string().optional(),
+      }).passthrough(),
     )
     .optional(),
-});
+}).passthrough();
 
 const myBandsResponseSchema = z.object({
   bands: z.preprocess((v) => v ?? [], z.array(bandSchema)),
 });
+
+const merchOptionSchema = z.object({
+  option_id: z.number(),
+  title: z.string().nullish(),
+  sku: z.string().nullish(),
+  quantity_available: z.number().nullish(),
+  quantity_sold: z.number().nullish(),
+}).passthrough();
+
+const originQuantitySchema = z.object({
+  origin_id: z.number(),
+  quantity_available: z.number().nullish(),
+  quantity_sold: z.number().nullish(),
+  option_quantities: z.array(z.object({
+    option_id: z.number(),
+    quantity_available: z.number().nullish(),
+    quantity_sold: z.number().nullish(),
+  }).passthrough()).nullish(),
+}).passthrough();
 
 const merchItemSchema = z.object({
   package_id: z.number(),
@@ -44,7 +64,11 @@ const merchItemSchema = z.object({
   origin_quantity: z.number().nullish(),
   url: z.string().nullish(),
   image_url: z.string().nullish(),
-});
+  subdomain: z.string().nullish(),
+  is_set_price: z.union([z.boolean(), z.number()]).nullish(),
+  options: z.array(merchOptionSchema).nullish(),
+  origin_quantities: z.array(originQuantitySchema).nullish(),
+}).passthrough();
 
 const merchDetailsResponseSchema = z.object({
   items: z.preprocess((v) => v ?? [], z.array(merchItemSchema)),
@@ -396,23 +420,226 @@ export function matchSkuToVariants(
   merchItems: BandcampMerchItem[],
   variants: Array<{ id: string; sku: string }>,
 ): {
-  matched: Array<{ merchItem: BandcampMerchItem; variantId: string }>;
+  matched: Array<{ merchItem: BandcampMerchItem; variantId: string; matchedVia: "item_sku" | "option_sku" }>;
   unmatched: BandcampMerchItem[];
 } {
   const skuMap = new Map(variants.map((v) => [v.sku, v.id]));
-  const matched: Array<{ merchItem: BandcampMerchItem; variantId: string }> = [];
+  const matched: Array<{ merchItem: BandcampMerchItem; variantId: string; matchedVia: "item_sku" | "option_sku" }> = [];
   const unmatched: BandcampMerchItem[] = [];
 
   for (const item of merchItems) {
+    // Try item-level SKU first
     if (item.sku) {
       const variantId = skuMap.get(item.sku);
       if (variantId) {
-        matched.push({ merchItem: item, variantId });
-      } else {
+        matched.push({ merchItem: item, variantId, matchedVia: "item_sku" });
+        continue;
+      }
+    }
+
+    // Try option-level SKUs (color/size variants)
+    let optionMatched = false;
+    if (item.options?.length) {
+      for (const opt of item.options) {
+        if (opt.sku) {
+          const variantId = skuMap.get(opt.sku);
+          if (variantId) {
+            matched.push({ merchItem: item, variantId, matchedVia: "option_sku" });
+            optionMatched = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!optionMatched) {
+      if (item.sku || item.options?.some(o => o.sku)) {
         unmatched.push(item);
       }
     }
   }
 
   return { matched, unmatched };
+}
+
+// === Sales Report API (v4) ===
+
+export interface SalesReportItem {
+  bandcamp_transaction_id: number;
+  bandcamp_transaction_item_id: number;
+  bandcamp_related_transaction_id?: number | null;
+  date: string;
+  paid_to: string;
+  item_type: string;
+  item_name: string;
+  artist: string;
+  currency: string;
+  item_price: number;
+  quantity: number;
+  discount_code?: string | null;
+  sub_total: number;
+  additional_fan_contribution?: number | null;
+  seller_tax?: number | null;
+  marketplace_tax?: number | null;
+  tax_rate?: number | null;
+  collection_society_share?: number | null;
+  shipping?: number | null;
+  ship_from_country_name?: string | null;
+  transaction_fee: number;
+  fee_type: string;
+  item_total: number;
+  amount_you_received: number;
+  paypal_transaction_id?: string | null;
+  net_amount: number;
+  package?: string | null;
+  option?: string | null;
+  item_url?: string | null;
+  catalog_number?: string | null;
+  upc?: string | null;
+  isrc?: string | null;
+  sku?: string | null;
+  buyer_name?: string | null;
+  buyer_email?: string | null;
+  buyer_phone?: string | null;
+  buyer_note?: string | null;
+  ship_to_name?: string | null;
+  ship_to_street?: string | null;
+  ship_to_street_2?: string | null;
+  ship_to_city?: string | null;
+  ship_to_state?: string | null;
+  ship_to_zip?: string | null;
+  ship_to_country?: string | null;
+  ship_to_country_code?: string | null;
+  ship_date?: string | null;
+  ship_notes?: string | null;
+  country?: string | null;
+  country_code?: string | null;
+  region_or_state?: string | null;
+  city?: string | null;
+  referer?: string | null;
+  referer_url?: string | null;
+  payment_state?: string | null;
+}
+
+export async function salesReport(
+  bandId: number,
+  accessToken: string,
+  startTime: string,
+  endTime?: string,
+  memberBandId?: number,
+): Promise<SalesReportItem[]> {
+  const body: Record<string, unknown> = {
+    band_id: bandId,
+    start_time: startTime,
+  };
+  if (endTime) body.end_time = endTime;
+  if (memberBandId) body.member_band_id = memberBandId;
+
+  const response = await fetch("https://bandcamp.com/api/sales/4/sales_report", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`salesReport failed for band ${bandId}: ${response.status}`);
+  }
+
+  const json = await response.json();
+  if (json.error) {
+    throw new Error(`salesReport API error: ${json.error_message ?? "unknown"}`);
+  }
+
+  return json.report ?? [];
+}
+
+export async function generateSalesReport(
+  bandId: number,
+  accessToken: string,
+  startTime: string,
+  endTime?: string,
+  format: "json" | "csv" = "json",
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    band_id: bandId,
+    start_time: startTime,
+    format,
+  };
+  if (endTime) body.end_time = endTime;
+
+  const response = await fetch("https://bandcamp.com/api/sales/4/generate_sales_report", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`generateSalesReport failed: ${response.status}`);
+  }
+
+  const json = await response.json();
+  if (json.error) {
+    throw new Error(`generateSalesReport error: ${json.error_message ?? "unknown"}`);
+  }
+
+  return json.token;
+}
+
+export async function fetchSalesReport(
+  token: string,
+  accessToken: string,
+): Promise<{ ready: true; url: string } | { ready: false }> {
+  const response = await fetch("https://bandcamp.com/api/sales/4/fetch_sales_report", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ token }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`fetchSalesReport failed: ${response.status}`);
+  }
+
+  const json = await response.json();
+
+  if (json.error && json.error_message === "Report hasn't generated yet") {
+    return { ready: false };
+  }
+
+  if (json.error) {
+    throw new Error(`fetchSalesReport error: ${json.error_message ?? "unknown"}`);
+  }
+
+  return { ready: true, url: json.url };
+}
+
+export async function updateSku(
+  items: Array<{ id: number; id_type: "p" | "o"; sku: string }>,
+  accessToken: string,
+): Promise<void> {
+  const response = await fetch("https://bandcamp.com/api/merchorders/1/update_sku", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ items }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`updateSku failed: ${response.status}`);
+  }
+
+  const json = (await response.json()) as { error?: boolean; error_message?: string };
+  if (json.error) {
+    throw new Error(`updateSku error: ${json.error_message ?? "unknown"}`);
+  }
 }

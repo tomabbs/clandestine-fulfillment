@@ -31,7 +31,7 @@ If any required file is missing or stale for the requested scope, return `BLOCKE
 - Trigger.dev handles background and asynchronous workflows; debugging must include related tasks.
 - Webhook handlers must preserve idempotency and bounded retries.
 - Release confidence is enforced by `release-gate` checks and full-site audit criteria.
-- Bandcamp release ingestion is **API-first** (`getMerchDetails` + SKU match); HTML scraping (`data-tralbum`) is **enrichment**, not primary discovery. Automation is **bounded** (caps, DLQ to `warehouse_review_queue`, no unbounded retry).
+- Bandcamp follows an **authority lifecycle**: Bandcamp API is authoritative for **initial ingest** (new titles, SKU/quantity/date/price bootstrap). After staff review or physical count, the warehouse app becomes authoritative for **operational fields** (SKU, quantity, price, dates). Bandcamp remains authoritative for **descriptive/external fields** (URL, subdomain, album_title, options, sales data) permanently. Governed by `authority_status` on `bandcamp_product_mappings` (`bandcamp_initial` → `warehouse_reviewed` → `warehouse_locked`). HTML scraping (`data-tralbum`) is **enrichment only** (about, credits, tracks, package photos). Automation is **bounded** (caps, DLQ to `warehouse_review_queue`, no unbounded retry).
 
 ## Preflight Commands
 
