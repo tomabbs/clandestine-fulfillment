@@ -79,6 +79,8 @@ domains:
       - shopify/bandcamp/store sync
       - shipstation/aftership/stripe/resend wiring
       - credential and connection health
+      - bandcamp scraper health dashboard (getBandcampScraperHealth)
+      - workspace_catalog_stats snapshot refresh
 
   - name: database_and_rls
     paths:

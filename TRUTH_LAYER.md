@@ -31,6 +31,7 @@ If any required file is missing or stale for the requested scope, return `BLOCKE
 - Trigger.dev handles background and asynchronous workflows; debugging must include related tasks.
 - Webhook handlers must preserve idempotency and bounded retries.
 - Release confidence is enforced by `release-gate` checks and full-site audit criteria.
+- Bandcamp release ingestion is **API-first** (`getMerchDetails` + SKU match); HTML scraping (`data-tralbum`) is **enrichment**, not primary discovery. Automation is **bounded** (caps, DLQ to `warehouse_review_queue`, no unbounded retry).
 
 ## Preflight Commands
 

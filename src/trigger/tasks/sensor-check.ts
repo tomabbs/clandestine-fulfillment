@@ -10,7 +10,7 @@
  */
 
 import { schedules } from "@trigger.dev/sdk";
-import { getInventory } from "@/lib/clients/redis-inventory";
+import { getInventory, setInventory } from "@/lib/clients/redis-inventory";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import {
@@ -36,28 +36,43 @@ export const sensorCheckTask = schedules.task({
     for (const workspaceId of workspaceIds) {
       const readings: SensorReading[] = [];
 
-      // 1. inv.redis_postgres_drift
+      // 1. inv.redis_postgres_drift — detect and auto-heal up to 50 drifted SKUs per run
       try {
+        // Load full row (available + committed + incoming) to heal all fields accurately.
+        // Healing only `available` while setting committed/incoming to 0 would create
+        // false zeros for consumers that treat those fields as authoritative.
         const { data: sample } = await supabase
           .from("warehouse_inventory_levels")
-          .select("sku, available")
+          .select("sku, available, committed, incoming")
           .eq("workspace_id", workspaceId)
           .limit(100);
 
         let mismatches = 0;
+        let healed = 0;
         for (const row of sample ?? []) {
           const redis = await getInventory(row.sku);
-          if (redis.available !== row.available) mismatches++;
+          if (redis.available !== row.available) {
+            mismatches++;
+            if (healed < 50) {
+              // Auto-heal: align all three Redis fields to Postgres source of truth
+              await setInventory(row.sku, {
+                available: row.available,
+                committed: row.committed ?? 0,
+                incoming: row.incoming ?? 0,
+              });
+              healed++;
+            }
+          }
         }
 
         readings.push({
           sensorName: "inv.redis_postgres_drift",
           status: driftStatus(mismatches),
-          value: { sample_size: sample?.length ?? 0, mismatches },
+          value: { sample_size: sample?.length ?? 0, mismatches, auto_healed: healed },
           message:
             mismatches === 0
               ? "No drift detected"
-              : `${mismatches} mismatches in ${sample?.length} sampled SKUs`,
+              : `${mismatches} mismatches — ${healed} auto-healed`,
         });
       } catch (e) {
         readings.push({
@@ -167,7 +182,104 @@ export const sensorCheckTask = schedules.task({
         });
       }
 
-      // 5. webhook.silence (Rule #17)
+      // 5. bandcamp.merch_sync_log_stale — last successful merch_sync via channel_sync_log
+      try {
+        const { data: latestMerchSync } = await supabase
+          .from("channel_sync_log")
+          .select("created_at")
+          .eq("workspace_id", workspaceId)
+          .eq("sync_type", "merch_sync")
+          .eq("status", "completed")
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        const lastCompleted = latestMerchSync?.[0]?.created_at;
+        const minutesSince = lastCompleted
+          ? (Date.now() - new Date(lastCompleted).getTime()) / 60_000
+          : null;
+
+        readings.push({
+          sensorName: "bandcamp.merch_sync_log_stale",
+          status: syncStalenessStatus(minutesSince, 45, 90),
+          value: {
+            last_completed: lastCompleted,
+            minutes_since: minutesSince ? Math.round(minutesSince) : null,
+          },
+          message:
+            minutesSince === null
+              ? "No merch_sync log entries"
+              : `Last completed merch_sync ${Math.round(minutesSince)} min ago`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.merch_sync_log_stale",
+          status: "healthy",
+          value: {},
+          message: "No channel_sync_log data",
+        });
+      }
+
+      // 6. bandcamp.scraper_review_open — open bandcamp_scraper items in review queue
+      try {
+        const { count } = await supabase
+          .from("warehouse_review_queue")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .eq("category", "bandcamp_scraper")
+          .eq("status", "open");
+
+        const openCount = count ?? 0;
+        readings.push({
+          sensorName: "bandcamp.scraper_review_open",
+          status: openCount >= 50 ? "critical" : openCount >= 10 ? "warning" : "healthy",
+          value: { open_count: openCount },
+          message: openCount === 0 ? "No open scraper issues" : `${openCount} open bandcamp_scraper items`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.scraper_review_open",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7. bandcamp.scrape_block_rate — recent 403/429 rate from scrape_page logs
+      try {
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        const { data: recentScrapes } = await supabase
+          .from("channel_sync_log")
+          .select("status, metadata")
+          .eq("workspace_id", workspaceId)
+          .eq("sync_type", "scrape_page")
+          .gte("created_at", oneHourAgo);
+
+        const total = recentScrapes?.length ?? 0;
+        let blocked = 0;
+        for (const row of recentScrapes ?? []) {
+          const hs = (row.metadata as Record<string, unknown>)?.httpStatus;
+          if (hs === 403 || hs === 429) blocked++;
+        }
+        const blockRate = total > 0 ? blocked / total : 0;
+
+        readings.push({
+          sensorName: "bandcamp.scrape_block_rate",
+          status: blockRate >= 0.5 ? "critical" : blockRate >= 0.2 ? "warning" : "healthy",
+          value: { total_scrapes_1h: total, blocked_1h: blocked, block_rate: Math.round(blockRate * 100) },
+          message: total === 0
+            ? "No scrapes in last hour"
+            : `${Math.round(blockRate * 100)}% block rate (${blocked}/${total} in 1h)`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.scrape_block_rate",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 8. webhook.silence (Rule #17)
       try {
         const { data: conns } = await supabase
           .from("client_store_connections")
@@ -194,7 +306,7 @@ export const sensorCheckTask = schedules.task({
         // Non-critical
       }
 
-      // 6. billing.unpaid
+      // 9. billing.unpaid
       try {
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const { count } = await supabase
@@ -218,7 +330,7 @@ export const sensorCheckTask = schedules.task({
         });
       }
 
-      // 7. review.critical_open
+      // 10. review.critical_open
       try {
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         const { count } = await supabase

@@ -75,6 +75,25 @@ journeys:
       - full-site audit emits markdown/json reports
       - fail criteria include page errors and http 5xx
 
+  - id: bandcamp_scraper_health
+    area: admin_settings
+    paths:
+      - src/app/admin/settings/bandcamp/page.tsx
+      - src/actions/bandcamp.ts
+      - src/trigger/tasks/sensor-check.ts
+      - src/trigger/lib/sensors.ts
+      - src/trigger/tasks/bandcamp-sync.ts
+      - src/trigger/tasks/bandcamp-scrape-sweep.ts
+      - src/lib/clients/bandcamp-scraper.ts
+    status: green
+    checks:
+      - scraper health tab shows log-backed activity near-real-time
+      - catalog completeness shows snapshot-backed have/missing with computed_at
+      - sensor readings for merch_sync_stale, scraper_review_open, scrape_block_rate
+      - review queue items link to /admin/catalog/{id}
+      - Zod schemas use .passthrough() for data-tralbum resilience
+      - 429 Retry-After header parsed and persisted to channel_sync_log
+
   - id: webhook_and_trigger_pipeline
     area: integrations_async
     paths:

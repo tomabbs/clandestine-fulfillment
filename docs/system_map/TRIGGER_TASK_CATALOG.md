@@ -13,8 +13,11 @@ Canonical Trigger.dev task map for planning/build/audit.
 | Queue | File | Concurrency |
 |---|---|---|
 | `bandcamp-api` | `src/trigger/lib/bandcamp-queue.ts` | `1` |
-| `bandcamp-scrape` | `src/trigger/lib/bandcamp-scrape-queue.ts` | `3` |
+| `bandcamp-sweep` | `src/trigger/lib/bandcamp-sweep-queue.ts` | `1` |
+| `bandcamp-scrape` | `src/trigger/lib/bandcamp-scrape-queue.ts` | `5` |
 | `shipstation` | `src/trigger/lib/shipstation-queue.ts` | `1` |
+
+`bandcamp-scrape-page` (`bandcamp-sync.ts`): HTML fetch capped at **15s** in client; task `maxDuration` **60s** (parse, DB, optional Shopify description push).
 
 > ShipStation integration restored in bridge period (2026-03-30) for transition until Shopify app approval. Shipment poll runs every 30 min, deduplicates via `shipstation_shipment_id`.
 
@@ -26,7 +29,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `shopify-sync` | `src/trigger/tasks/shopify-sync.ts` | `*/15 * * * *` |
 | `shopify-order-sync` | `src/trigger/tasks/shopify-order-sync.ts` | `*/30 * * * *` |
 | `bandcamp-sale-poll` | `src/trigger/tasks/bandcamp-sale-poll.ts` | `*/5 * * * *` |
-| `bandcamp-inventory-push` | `src/trigger/tasks/bandcamp-inventory-push.ts` | `*/15 * * * *` |
+| `bandcamp-inventory-push` | `src/trigger/tasks/bandcamp-inventory-push.ts` | `*/5 * * * *` |
+| `bandcamp-scrape-sweep` | `src/trigger/tasks/bandcamp-scrape-sweep.ts` | `*/10 * * * *` |
 | `bandcamp-sync-cron` | `src/trigger/tasks/bandcamp-sync.ts` | `*/30 * * * *` |
 | `bandcamp-order-sync-cron` | `src/trigger/tasks/bandcamp-order-sync.ts` | `0 */6 * * *` |
 | `bandcamp-mark-shipped-cron` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `*/15 * * * *` |
@@ -43,7 +47,9 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `discogs-mailorder-sync` | `src/trigger/tasks/discogs-mailorder-sync.ts` | `*/10 * * * *` |
 | `discogs-client-order-sync` | `src/trigger/tasks/discogs-client-order-sync.ts` | `*/10 * * * *` |
 | `discogs-message-poll` | `src/trigger/tasks/discogs-message-poll.ts` | `*/5 * * * *` |
-| `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` |
+| `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` — **hardened 2026-04-02**: upsert ON CONFLICT `(workspace_id, shipstation_shipment_id)`, pre-fetches `/orders` for `shippingAmount` → `customer_shipping_charged`, two-phase order auto-link (exact normalized order number → auto-assign; probabilistic → review queue only), ghost item pruning, `label_source='shipstation'` |
+| `bundle-availability-sweep` | `src/trigger/tasks/bundle-availability-sweep.ts` | `0 6 * * *` (daily 6am UTC) |
+| `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
 
 ## Event/On-Demand Tasks
 
@@ -69,6 +75,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `discogs-catalog-match` | `src/trigger/tasks/discogs-catalog-match.ts` | `src/actions/discogs-admin.ts` |
 | `discogs-initial-listing` | `src/trigger/tasks/discogs-initial-listing.ts` | `src/actions/discogs-admin.ts` (confirmMapping) |
 | `discogs-message-send` | `src/trigger/tasks/discogs-message-send.ts` | Support UI / staff |
+| `catalog-stats-refresh-demand` | `src/trigger/tasks/catalog-stats-refresh.ts` | Staff admin UI (on-demand) |
+| `bundle-component-fanout` | `src/trigger/tasks/bundle-component-fanout.ts` | `bandcamp-sale-poll` (when bundle variant sold) |
 
 ## Domain Touchpoints
 
@@ -78,6 +86,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 - **Discogs master catalog:** `discogs-catalog-match`, `discogs-initial-listing`, `discogs-listing-replenish`, `discogs-message-poll`, `discogs-message-send`
 - **Catalog/release readiness:** `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
 - **Billing/storage:** `monthly-billing`, `storage-calc`
+- **Scraper observability:** `sensor-check` now includes `bandcamp.merch_sync_log_stale`, `bandcamp.scraper_review_open`, `bandcamp.scrape_block_rate` sensors from `channel_sync_log` + `warehouse_review_queue`. Index: `idx_channel_sync_log_sensor` on `(workspace_id, sync_type, created_at DESC) WHERE status = 'completed'`. `bandcamp-scrape-page` logs per-scrape outcome (HTTP status, retryAfterSeconds) to `channel_sync_log` sync_type `scrape_page`.
 - **Support/reliability:** `support-escalation`, `sensor-check`, `tag-cleanup-backfill`
   - `support-escalation` uses conversation status + read markers (`staff_last_read_at`, `client_last_read_at`) and cooldown timestamps (`last_staff_escalated_at`, `last_client_reminded_at`) to prevent reminder spam during active chat sessions
 - **OAuth hygiene:** `oauth-state-cleanup`

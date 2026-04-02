@@ -74,3 +74,13 @@ export {
 
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
+
+// ── Bundle component tracking (inventory hardening) ───────────────────────────
+export { bundleComponentFanoutTask } from "./bundle-component-fanout";
+export { bundleAvailabilitySweepTask } from "./bundle-availability-sweep";
+
+// ── Bandcamp scrape sweep (independent queue, avoids bandcamp-api congestion) ──
+export { bandcampScrapeSweepTask } from "./bandcamp-scrape-sweep";
+
+// ── Catalog stats snapshot refresh (nightly + on-demand) ──────────────────────
+export { catalogStatsRefreshSchedule, catalogStatsRefreshTask } from "./catalog-stats-refresh";

@@ -2,6 +2,7 @@
 
 import { z } from "zod/v4";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
 
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
 
@@ -264,4 +265,220 @@ export async function getBandcampMappings(
       warehouse_product_variants: undefined,
     } as BandcampProductMapping & { variant_sku: string; variant_title: string | null };
   });
+}
+
+/**
+ * Immediately queue scrape tasks for ALL pending items in one Bandcamp connection.
+ *
+ * Use after adding a new client connection (50-150 titles).
+ * Without this: new clients wait for cron cycles (~90 min for 150 items).
+ * With this: all items queued immediately, ~5 min to complete.
+ *
+ * Rule #48: No direct Bandcamp API calls — enqueues via Trigger task.
+ */
+export async function triggerBandcampConnectionBackfill(connectionId: string) {
+  // RBAC: verify user belongs to same workspace as the connection
+  const { userRecord } = await requireAuth();
+  if (!userRecord) throw new Error("User record not found");
+  const serviceClient = createServiceRoleClient();
+
+  const { data: conn } = await serviceClient
+    .from("bandcamp_connections")
+    .select("band_id, band_url, workspace_id, member_bands_cache")
+    .eq("id", connectionId)
+    .single();
+  if (!conn) throw new Error("Connection not found");
+
+  if (conn.workspace_id !== userRecord.workspace_id) {
+    throw new Error("Unauthorized: connection belongs to a different workspace");
+  }
+
+  const directSubdomain = (conn.band_url ?? "").replace("https://", "").split(".")[0];
+
+  // Build member_band_id → subdomain lookup
+  interface MemberBandEntry { band_id: number }
+  const memberBandSubdomain = new Map<number, string>();
+  memberBandSubdomain.set(conn.band_id as number, directSubdomain);
+
+  let memberBandsArr: MemberBandEntry[] = [];
+  try {
+    const raw = conn.member_bands_cache;
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (Array.isArray(parsed?.member_bands)) memberBandsArr = parsed.member_bands as MemberBandEntry[];
+    else if (Array.isArray(parsed)) memberBandsArr = parsed as MemberBandEntry[];
+  } catch { /* ignore parse errors — proceed with direct band only */ }
+
+  for (const mb of memberBandsArr) {
+    if (typeof mb?.band_id === "number") memberBandSubdomain.set(mb.band_id, directSubdomain);
+  }
+
+  // Find all pending mappings for this connection's bands
+  const memberBandIds = Array.from(memberBandSubdomain.keys());
+  const { data: pending } = await serviceClient
+    .from("bandcamp_product_mappings")
+    .select("id, bandcamp_url, variant_id, bandcamp_member_band_id")
+    .eq("workspace_id", conn.workspace_id)
+    .in("bandcamp_member_band_id", memberBandIds)
+    .or("bandcamp_type_name.is.null,bandcamp_about.is.null");
+
+  if (!pending?.length) return { triggered: 0, connectionId };
+
+  // Resolve product titles for URL construction (Group 2 items without URL)
+  const noUrlIds = (pending ?? []).filter((m) => !m.bandcamp_url).map((m) => m.variant_id);
+  const { data: variants } = noUrlIds.length > 0
+    ? await serviceClient
+        .from("warehouse_product_variants")
+        .select("id, warehouse_products!inner(title)")
+        .in("id", noUrlIds)
+    : { data: [] };
+
+  const titleByVariant = new Map(
+    (variants ?? []).map((v) => [
+      v.id,
+      (v.warehouse_products as unknown as { title: string }).title,
+    ]),
+  );
+
+  // Import Trigger task (lazy to avoid circular in server actions)
+  const { bandcampScrapePageTask } = await import("@/trigger/tasks/bandcamp-sync");
+
+  let triggered = 0;
+  for (const m of pending ?? []) {
+    let scrapeUrl = m.bandcamp_url as string | null;
+
+    if (!scrapeUrl) {
+      const memberBandId = m.bandcamp_member_band_id as number | null;
+      const subdomain = memberBandId ? (memberBandSubdomain.get(memberBandId) ?? directSubdomain) : directSubdomain;
+      if (!subdomain) continue;
+
+      const rawTitle = titleByVariant.get(m.variant_id) ?? "";
+      const withoutArtist = rawTitle.includes(" - ") ? rawTitle.split(" - ").slice(1).join(" - ") : rawTitle;
+      const albumTitle = withoutArtist
+        .replace(/\s+(\d*x?LP|CD|Cassette|Tape|7"|10"|12"|Box Set|Vinyl|Picture Disc|Flexi|SACD|DVD|Blu-ray|Limited Edition|Standard Edition|Deluxe Edition)[^a-zA-Z0-9]*$/i, "")
+        .trim();
+
+      scrapeUrl = buildBandcampAlbumUrl(subdomain, albumTitle);
+      if (!scrapeUrl) continue;
+
+      // Idempotency guard: only write URL if not already set
+      const { data: urlWritten } = await serviceClient
+        .from("bandcamp_product_mappings")
+        .update({ bandcamp_url: scrapeUrl, bandcamp_url_source: "constructed", updated_at: new Date().toISOString() })
+        .eq("id", m.id)
+        .is("bandcamp_url", null)
+        .select("id")
+        .single();
+
+      if (!urlWritten) continue;
+    }
+
+    await bandcampScrapePageTask.trigger({
+      url: scrapeUrl,
+      mappingId: m.id,
+      workspaceId: conn.workspace_id,
+      urlIsConstructed: !m.bandcamp_url,
+      urlSource: m.bandcamp_url ? "orders_api" : "constructed",
+    });
+    triggered++;
+  }
+
+  // Log progress to channel_sync_log for admin visibility
+  await serviceClient.from("channel_sync_log").insert({
+    workspace_id: conn.workspace_id,
+    channel: "bandcamp",
+    sync_type: "connection_backfill",
+    status: triggered > 0 ? "completed" : "skipped",
+    items_processed: triggered,
+    items_failed: 0,
+    started_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  });
+
+  return { triggered, connectionId };
+}
+
+// === Scraper health + catalog completeness (§1b admin dashboard) ===
+
+export async function getBandcampScraperHealth(workspaceId: string) {
+  const supabase = createServiceRoleClient();
+
+  // Recent channel_sync_log activity (log-backed, near-real-time)
+  const { data: recentLogs } = await supabase
+    .from("channel_sync_log")
+    .select("sync_type, status, items_processed, items_failed, created_at, metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("channel", "bandcamp")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  // Open scraper review queue items
+  const { data: reviewItems, count: reviewCount } = await supabase
+    .from("warehouse_review_queue")
+    .select("id, title, severity, group_key, metadata, created_at", { count: "exact" })
+    .eq("workspace_id", workspaceId)
+    .eq("category", "bandcamp_scraper")
+    .eq("status", "open")
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  // Latest sensor readings for bandcamp sensors
+  const { data: sensorReadings } = await supabase
+    .from("sensor_readings")
+    .select("sensor_name, status, value, message, created_at")
+    .eq("workspace_id", workspaceId)
+    .in("sensor_name", [
+      "sync.bandcamp_stale",
+      "bandcamp.merch_sync_log_stale",
+      "bandcamp.scraper_review_open",
+      "bandcamp.scrape_block_rate",
+    ])
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  // Catalog snapshot (if available)
+  const { data: catalogStats } = await supabase
+    .from("workspace_catalog_stats")
+    .select("stats, computed_at")
+    .eq("workspace_id", workspaceId)
+    .single();
+
+  // Live catalog completeness (lightweight version for small catalogs / when snapshot is stale)
+  const { data: mappingCounts } = await supabase
+    .from("bandcamp_product_mappings")
+    .select("id, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_url", { count: "exact" })
+    .eq("workspace_id", workspaceId);
+
+  const totalMappings = mappingCounts?.length ?? 0;
+  const completeness = {
+    total: totalMappings,
+    hasAlbumCover: mappingCounts?.filter(m => m.bandcamp_art_url != null).length ?? 0,
+    hasAbout: mappingCounts?.filter(m => m.bandcamp_about != null && m.bandcamp_about !== "").length ?? 0,
+    hasCredits: mappingCounts?.filter(m => m.bandcamp_credits != null && m.bandcamp_credits !== "").length ?? 0,
+    hasTracks: mappingCounts?.filter(m => m.bandcamp_tracks != null).length ?? 0,
+    hasUrl: mappingCounts?.filter(m => m.bandcamp_url != null).length ?? 0,
+  };
+
+  // Block rate from recent scrape logs (last hour)
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recentScrapes = (recentLogs ?? []).filter(
+    l => l.sync_type === "scrape_page" && l.created_at >= oneHourAgo,
+  );
+  const blockedScrapes = recentScrapes.filter(l => {
+    const hs = (l.metadata as Record<string, unknown>)?.httpStatus;
+    return hs === 403 || hs === 429;
+  });
+
+  return {
+    recentLogs: recentLogs ?? [],
+    reviewItems: reviewItems ?? [],
+    reviewCount: reviewCount ?? 0,
+    sensorReadings: sensorReadings ?? [],
+    catalogStats: catalogStats ?? null,
+    completeness,
+    blockRate: {
+      total: recentScrapes.length,
+      blocked: blockedScrapes.length,
+      rate: recentScrapes.length > 0 ? Math.round((blockedScrapes.length / recentScrapes.length) * 100) : 0,
+    },
+  };
 }

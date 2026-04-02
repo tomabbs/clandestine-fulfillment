@@ -33,6 +33,7 @@ export class BandcampFetchError extends Error {
     message: string,
     public readonly status: number,
     public readonly url: string,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "BandcampFetchError";
@@ -51,7 +52,7 @@ export class BandcampFetchError extends Error {
 
 const packageArtSchema = z.object({
   image_id: z.number().nullish(),
-});
+}).passthrough();
 
 const tralbumDataSchema = z.object({
   art_id:            z.number().nullish(),
@@ -62,37 +63,36 @@ const tralbumDataSchema = z.object({
       title:        z.string().nullish(),
       release_date: z.string().nullish(),
       art_id:       z.number().nullish(),
-      // Album metadata — confirmed present in data-tralbum.current (live test 2026-03-31)
       about:        z.string().nullish(),
       credits:      z.string().nullish(),
       upc:          z.string().nullish(),
     })
+    .passthrough()
     .nullish(),
   packages: z
     .array(
       z.object({
         type_name:    z.string().nullish(),
-        type_id:      z.number().nullish(),     // 1=CD, 3=Cassette, 15=2xLP — confirmed present
+        type_id:      z.number().nullish(),
         title:        z.string().nullish(),
-        sku:          z.string().nullish(),     // matches warehouse variant SKU
-        release_date: z.string().nullish(),     // package ship date (may differ from album)
-        new_date:     z.string().nullish(),     // legacy — fall back if release_date absent
-        image_id:     z.number().nullish(),     // ALWAYS NULL on real pages — use arts[0]
-        arts:         z.array(packageArtSchema).nullish(),  // real image source
-      }),
+        sku:          z.string().nullish(),
+        release_date: z.string().nullish(),
+        new_date:     z.string().nullish(),
+        image_id:     z.number().nullish(),
+        arts:         z.array(packageArtSchema).nullish(),
+      }).passthrough(),
     )
     .nullish(),
-  // Track listing — data-tralbum.trackinfo (live test: track_num, title, duration in seconds)
   trackinfo: z
     .array(
       z.object({
         track_num: z.number().nullish(),
         title:     z.string().nullish(),
-        duration:  z.number().nullish(),   // float seconds, e.g. 345.621
-      }),
+        duration:  z.number().nullish(),
+      }).passthrough(),
     )
     .nullish(),
-});
+}).passthrough();
 
 export type TralbumData = z.infer<typeof tralbumDataSchema>;
 
@@ -179,23 +179,49 @@ function parseGMTDate(dateStr: string | null | undefined): Date | null {
 // ─── HTML fetching ────────────────────────────────────────────────────────────
 
 export async function fetchBandcampPage(url: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml",
-    },
-  });
+  // 15-second timeout — prevents hung tasks from locking the scrape queue.
+  // Without this, a slow/unresponsive Bandcamp server holds the task open
+  // for the full maxDuration (300s global), blocking all 3 queue slots.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
 
-  if (!response.ok) {
-    throw new BandcampFetchError(
-      `Failed to fetch album page: ${response.status}`,
-      response.status,
-      url,
-    );
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+    });
+
+    if (!response.ok) {
+      let retryAfter: number | undefined;
+      if (response.status === 429) {
+        const ra = response.headers.get("retry-after");
+        if (ra) {
+          const parsed = Number(ra);
+          retryAfter = Number.isFinite(parsed) ? parsed : undefined;
+        }
+      }
+      throw new BandcampFetchError(
+        `Failed to fetch album page: ${response.status}`,
+        response.status,
+        url,
+        retryAfter,
+      );
+    }
+
+    return response.text();
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      // Timeout — treat as a transient HTTP error so the catch block routes it correctly
+      throw new BandcampFetchError(`Fetch timeout after 15s: ${url}`, 408, url);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.text();
 }
 
 // ─── Main parser ──────────────────────────────────────────────────────────────

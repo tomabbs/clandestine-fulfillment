@@ -83,7 +83,10 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - Key exports:
   - inbound: `getInboundShipments`, `getInboundDetail`, `createInbound`, `markArrived`, `beginCheckIn`, `checkInItem`, `completeCheckIn`
   - shipping log (renamed from "Shipping", route `/admin/shipping`): `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`, `getShippingRates`, `createOrderLabel`, `getLabelTaskStatus`
+    - `getShipments` select now includes: `ss_order_number`, `customer_shipping_charged`, `total_units`, `label_source`, `warehouse_orders(order_number)`
   - orders: `getOrders`, `getOrderDetail`, `getTrackingEvents`, `getClientShipments`, `getShipmentItems`
+    - `getClientShipments` **hardened 2026-04-02**: explicit `org_id` filter (resolves from authenticated user), includes `warehouse_orders(order_number)` join; no longer returns cross-org shipments
+    - `getOrderDetail` shipments now auto-populated via `order_id` FK set by `shipstation-poll` auto-link
   - scan: `lookupLocation`, `lookupBarcode`, `submitCount`, `recordReceivingScan`
   - mail orders: `getMailOrders` (admin), `getClientMailOrders` (portal), `getMailOrderPayoutSummary`
 
@@ -136,7 +139,9 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/pirate-ship.ts`
   - `src/actions/preorders.ts`
 - Key exports:
-  - trigger kickoffs/status: `triggerShopifySync`, `triggerFullBackfill`, `getShopifySyncStatus`, `triggerBandcampSync`, `getBandcampSyncStatus`
+  - trigger kickoffs/status: `triggerShopifySync`, `triggerFullBackfill`, `getShopifySyncStatus`, `triggerBandcampSync`, `getBandcampSyncStatus`, `triggerBandcampConnectionBackfill`
+  - Bandcamp connection management: `createBandcampConnection`, `deleteBandcampConnection`, `getBandcampAccounts`, `getBandcampMappings`, `getOrganizationsForWorkspace`
+  - scraper observability: `getBandcampScraperHealth` (log-backed activity, catalog completeness, sensor readings, block rate, review queue)
   - store connections and mappings: connection CRUD/test + mapping and reprocess ops
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`
   - preorder tools: `getPreorderProducts`, `manualRelease`, `getPreorderAllocationPreview`
