@@ -15,7 +15,7 @@
 
 import { logger, schedules } from "@trigger.dev/sdk";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
-import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
+import { buildBandcampAlbumUrl, extractAlbumTitle } from "@/lib/clients/bandcamp-scraper";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampSweepQueue } from "@/trigger/lib/bandcamp-sweep-queue";
 import { bandcampScrapePageTask } from "@/trigger/tasks/bandcamp-sync";
@@ -165,17 +165,9 @@ export const bandcampScrapeSweepTask = schedules.task({
             continue;
           }
 
-          const withoutArtist = rawTitle.includes(" - ")
-            ? rawTitle.split(" - ").slice(1).join(" - ")
-            : rawTitle;
-          const albumTitle = withoutArtist
-            .replace(
-              /\s+(\d*x?LP|CD|Cassette|Tape|7"|10"|12"|Box Set|Vinyl|Picture Disc|Flexi|SACD|DVD|Blu-ray|Limited Edition|Standard Edition|Deluxe Edition)[^a-zA-Z0-9]*$/i,
-              "",
-            )
-            .trim();
+          const albumTitle = extractAlbumTitle(rawTitle);
 
-          const scrapeUrl = buildBandcampAlbumUrl(subdomain, albumTitle);
+          const scrapeUrl = albumTitle ? buildBandcampAlbumUrl(subdomain, albumTitle) : null;
           if (!scrapeUrl) {
             g2SkipBadSlug++;
             continue;
@@ -212,7 +204,7 @@ export const bandcampScrapeSweepTask = schedules.task({
             mappingId: pm.id,
             workspaceId,
             urlIsConstructed: true,
-            albumTitle,
+            albumTitle: albumTitle ?? undefined,
             urlSource: "constructed",
           });
           triggered++;

@@ -13,6 +13,7 @@ import {
   BandcampFetchError,
   bandcampAlbumArtUrl,
   bandcampMerchImageUrl,
+  extractAlbumTitle,
   buildBandcampAlbumUrl,
   fetchBandcampPage,
   parseBandcampPage,
@@ -1291,12 +1292,10 @@ export const bandcampSyncTask = task({
             continue;
           }
 
-          // Extract album title from product title ("Artist - Album Format" → "Album")
           const rawTitle = vInfo.productTitle;
-          const withoutArtist = rawTitle.includes(" - ") ? rawTitle.split(" - ").slice(1).join(" - ") : rawTitle;
-          const albumTitle = withoutArtist.replace(/\s+(\d*x?LP|CD|Cassette|Tape|7"|10"|12"|Box Set|Vinyl|Picture Disc|Flexi|SACD|DVD|Blu-ray|Limited Edition|Standard Edition|Deluxe Edition)[^a-zA-Z0-9]*$/i, "").trim();
+          const albumTitle = extractAlbumTitle(rawTitle);
 
-          const scrapeUrl = buildBandcampAlbumUrl(subdomain, albumTitle);
+          const scrapeUrl = albumTitle ? buildBandcampAlbumUrl(subdomain, albumTitle) : null;
           if (!scrapeUrl) {
             g2SkipBadSlug++;
             continue;
@@ -1333,7 +1332,7 @@ export const bandcampSyncTask = task({
             mappingId: pm.id,
             workspaceId,
             urlIsConstructed: true,
-            albumTitle,
+            albumTitle: albumTitle ?? undefined,
             urlSource: "constructed",
           });
           g2SweepTriggered++;

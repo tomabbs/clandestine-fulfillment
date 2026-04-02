@@ -15,12 +15,94 @@ export function buildBandcampAlbumUrl(subdomain: string, albumTitle: string): st
   if (!trimmed) return null;
   const slug = trimmed
     .toLowerCase()
-    .normalize("NFD")                 // decompose é → e + combining accent
-    .replace(/[\u0300-\u036f]/g, "")  // strip combining diacritics
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   if (!slug) return null;
   return `https://${subdomain}.bandcamp.com/album/${slug}`;
+}
+
+const FORMAT_PATTERNS = [
+  /\b\d*x?LP\b/i, /\bCD\b/i, /\bCassette\b/i, /\bTape\b/i, /\bVinyl\b/i,
+  /\b(?:7|10|12)\s*[""\u201C\u201D\u2033']?\s*(?:inch)?\b/i, /\bBox\s*Set\b/i, /\bPicture\s*Disc\b/i,
+  /\bFlexi\b/i, /\bSACD\b/i, /\bDVD\b/i, /\bBlu-?ray\b/i,
+  /\bDigipak\b/i, /\bDigipack\b/i, /\bDigisleeve\b/i, /\bGatefold\b/i,
+  /\bJewel\s*Case\b/i, /\bSlipcase\b/i, /\bCompact\s*Disc\b/i,
+  /\bLimited\s*Edition\b/i, /\bStandard\s*Edition\b/i, /\bDeluxe\s*Edition\b/i,
+  /\bDeluxe\b/i, /\bLTD\b/i, /\bColou?red\b/i, /\bSplatter\b/i,
+  /\bTranslucent\b/i, /\bBlack\s*Variant\b/i, /\bNatural\b.*\bSplatter\b/i,
+  /\bin\s+(Digipack|Digisleeve|Digipak|Jacket|Gatefold)\b/i,
+];
+
+const MERCH_PATTERNS = [
+  /\bT-?Shirt\b/i, /\bTee\b/i, /\bHoodie\b/i, /\bHat\b/i, /\bCap\b/i,
+  /\bPoster\b/i, /\bSticker\b/i, /\bTote\b/i, /\bPatch\b/i, /\bPin\b/i,
+  /\bMug\b/i, /\bBundle\b/i, /\bSlipmat\b/i, /\bFlag\b/i, /\bBag\b/i,
+  /\bAlbum\s*Cover\s*T\b/i, /\s+T$/,
+];
+
+/**
+ * Extract a plausible album title from a warehouse product title.
+ * Product titles follow patterns like:
+ *   "Artist Name - Album Title Format" (e.g. "Horse Lords - Interventions CD")
+ *   "Album Title - Format Description" (e.g. "Interventions - Limited Edition 12\"")
+ *   "Format Description" alone (e.g. "CD in Digipack") — returns null
+ *   Merch items (e.g. "Band T-Shirt") — returns null
+ *
+ * Returns the cleaned album title or null if the title is pure format/merch.
+ */
+export function extractAlbumTitle(productTitle: string): string | null {
+  const raw = productTitle.trim();
+  if (!raw) return null;
+
+  // Reject pure merch items — no album page exists
+  if (MERCH_PATTERNS.some(p => p.test(raw))) return null;
+
+  // Split on " - " to separate artist from rest
+  const withoutArtist = raw.includes(" - ")
+    ? raw.split(" - ").slice(1).join(" - ")
+    : raw;
+
+  // Strip all format/variant descriptors
+  let cleaned = withoutArtist;
+  for (const pat of FORMAT_PATTERNS) {
+    cleaned = cleaned.replace(new RegExp(pat, "gi"), "");
+  }
+  // Strip trailing punctuation, parens with color descriptions, stray prepositions, and whitespace
+  cleaned = cleaned
+    .replace(/\(.*\)/g, "")
+    .replace(/[.\s]+$/g, "")
+    .replace(/^\s+/g, "")
+    .trim();
+
+  // Strip stray prepositions/articles and dangling quotes left after format removal
+  cleaned = cleaned.replace(/^(in|on|with|w\/)\s+/i, "").trim();
+  cleaned = cleaned.replace(/\s+(in|on|with|w\/)$/i, "").trim();
+  cleaned = cleaned.replace(/\s*[""\u201C\u201D\u2033']+\s*$/g, "").trim();
+
+  // If nothing meaningful remains (or just short noise), skip
+  if (!cleaned || cleaned.length < 3) return null;
+
+  // Reject if remaining text is just numbers/punctuation/quotes
+  if (/^[\d\u201C\u201D\u2033""'"\s.\-!?]+$/.test(cleaned)) return null;
+
+  // Reject color/variant-only descriptors that slipped through
+  if (/^(Standard|Double|Single|Special|Original|Limited)?\s*(Black|White|Clear|Red|Blue|Green|Orange|Pink|Natural)?\s*[""\u201C\u201D\u2033']?\s*$/i.test(cleaned)) return null;
+
+  // (color/variant-only check is handled after the quote-noise check below)
+
+  // If "Artist - AlbumName AlbumName Format", the album name is duplicated.
+  // Check if cleaned matches the part before " - " (the artist segment was actually album name)
+  if (raw.includes(" - ")) {
+    const firstPart = raw.split(" - ")[0].trim();
+    // If cleaned equals the first part, it's a "Album - Album Format" pattern — use it
+    if (cleaned.toLowerCase() === firstPart.toLowerCase()) {
+      return cleaned;
+    }
+  }
+
+  return cleaned;
 }
 
 // ─── Typed fetch error ────────────────────────────────────────────────────────
