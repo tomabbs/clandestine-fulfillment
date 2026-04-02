@@ -16,6 +16,7 @@ import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
+import { clientStoreOrderQueue } from "@/trigger/lib/client-store-order-queue";
 
 export function isEchoOrder(
   lineItems: Array<{ sku: string; quantity: number }>,
@@ -32,6 +33,7 @@ export const clientStoreOrderDetectTask = schedules.task({
   id: "client-store-order-detect",
   cron: "*/10 * * * *",
   maxDuration: 180,
+  queue: clientStoreOrderQueue,
   run: async () => {
     const supabase = createServiceRoleClient();
     const workspaceIds = await getAllWorkspaceIds(supabase);

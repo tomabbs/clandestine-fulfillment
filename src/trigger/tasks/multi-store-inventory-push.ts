@@ -59,10 +59,36 @@ export const multiStoreInventoryPushTask = schedules.task({
 
       if (!connections || connections.length === 0) continue;
 
+      // Load workspace safety stock default + bundles_enabled flag
+      const { data: ws } = await supabase
+        .from("workspaces")
+        .select("default_safety_stock, bundles_enabled")
+        .eq("id", workspaceId)
+        .single();
+      const workspaceSafetyStock = ws?.default_safety_stock ?? 3;
+      const bundlesEnabled = ws?.bundles_enabled ?? false;
+
+      // Load bundle components for this workspace (only if bundles are enabled)
+      type BundleComponent = { bundle_variant_id: string; component_variant_id: string; quantity: number };
+      let bundleMap = new Map<string, BundleComponent[]>();
+      if (bundlesEnabled) {
+        const { data: allComponents } = await supabase
+          .from("bundle_components")
+          .select("bundle_variant_id, component_variant_id, quantity")
+          .eq("workspace_id", workspaceId);
+        for (const bc of allComponents ?? []) {
+          const arr = bundleMap.get(bc.bundle_variant_id) ?? [];
+          arr.push(bc);
+          bundleMap.set(bc.bundle_variant_id, arr);
+        }
+      }
+
       // Process each connection independently — one failure must not block others
       for (const connection of connections as ClientStoreConnection[]) {
         try {
-          const pushed = await pushConnectionInventory(supabase, connection);
+          const pushed = await pushConnectionInventory(
+            supabase, connection, workspaceSafetyStock, bundlesEnabled ? bundleMap : new Map(),
+          );
           totalPushed += pushed;
         } catch (error) {
           totalFailed++;
@@ -75,9 +101,13 @@ export const multiStoreInventoryPushTask = schedules.task({
   },
 });
 
+type BundleComponent = { bundle_variant_id: string; component_variant_id: string; quantity: number };
+
 async function pushConnectionInventory(
   supabase: ReturnType<typeof createServiceRoleClient>,
   connection: ClientStoreConnection,
+  workspaceSafetyStock = 3,
+  bundleMap = new Map<string, BundleComponent[]>(),
 ): Promise<number> {
   // Get SKU mappings for this connection
   const { data: mappings } = await supabase
@@ -90,14 +120,24 @@ async function pushConnectionInventory(
 
   if (!mappings || mappings.length === 0) return 0;
 
-  // Get inventory levels for mapped variants
+  // Get inventory levels for mapped variants + component variants (for bundle MIN)
   const variantIds = mappings.map((m) => m.variant_id);
+  const componentVariantIds = Array.from(new Set(
+    Array.from(bundleMap.values()).flat().map(c => c.component_variant_id)
+  ));
+  const allVariantIds = Array.from(new Set([...variantIds, ...componentVariantIds]));
+
   const { data: levels } = await supabase
     .from("warehouse_inventory_levels")
-    .select("variant_id, available")
-    .in("variant_id", variantIds);
+    .select("variant_id, available, safety_stock")
+    .in("variant_id", allVariantIds);
 
-  const inventoryByVariant = new Map((levels ?? []).map((l) => [l.variant_id, l.available]));
+  const inventoryByVariant = new Map(
+    (levels ?? []).map((l) => [
+      l.variant_id,
+      { available: l.available, safetyStock: l.safety_stock as number | null },
+    ]),
+  );
 
   // Build SKU mapping context for the sync client
   const skuMappingContext = new Map(
@@ -111,21 +151,38 @@ async function pushConnectionInventory(
   let pushed = 0;
 
   for (const mapping of mappings) {
-    const available = inventoryByVariant.get(mapping.variant_id) ?? 0;
+    const inv = inventoryByVariant.get(mapping.variant_id);
+    const rawAvailable = inv?.available ?? 0;
+    const effectiveSafety = inv?.safetyStock ?? workspaceSafetyStock;
 
-    // Skip if quantity hasn't changed
-    if (mapping.last_pushed_quantity === available) continue;
+    // Compute bundle minimum if this variant is configured as a bundle
+    let effectiveAvailable = rawAvailable;
+    const components = bundleMap.get(mapping.variant_id);
+    if (components?.length) {
+      const componentMin = Math.min(
+        ...components.map(c => {
+          const compInv = inventoryByVariant.get(c.component_variant_id);
+          return Math.floor((compInv?.available ?? 0) / c.quantity);
+        }),
+      );
+      effectiveAvailable = Math.min(rawAvailable, Math.max(0, componentMin));
+    }
 
-    const idempotencyKey = `store-push:${connection.id}:${mapping.id}:${available}`;
+    const pushedQuantity = Math.max(0, effectiveAvailable - effectiveSafety);
+
+    // Skip if effective quantity hasn't changed (compare buffered value, not raw)
+    if (mapping.last_pushed_quantity === pushedQuantity) continue;
+
+    const idempotencyKey = `store-push:${connection.id}:${mapping.id}:${pushedQuantity}`;
 
     try {
-      await client.pushInventory(mapping.remote_sku ?? "", available, idempotencyKey);
+      await client.pushInventory(mapping.remote_sku ?? "", pushedQuantity, idempotencyKey);
 
-      // Rule #44: Update last_pushed_quantity and last_pushed_at
+      // Rule #44: Track the buffered quantity that was actually pushed
       await supabase
         .from("client_store_sku_mappings")
         .update({
-          last_pushed_quantity: available,
+          last_pushed_quantity: pushedQuantity,
           last_pushed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })

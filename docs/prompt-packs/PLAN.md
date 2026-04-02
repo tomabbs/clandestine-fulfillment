@@ -25,6 +25,19 @@ You are planning the next implementation step for `clandestine-fulfillment`.
 - Do not modify truth docs without listing required updates.
 - No guessing: verify API boundaries and Trigger touchpoints first.
 
+## Agent execution — migrations, CLI, and permissions
+
+Plans should assume the **agent** applies schema changes: `supabase db push --yes` from the `clandestine-fulfillment` repo root after migration edits—not “user runs SQL in dashboard” unless SQL-only is explicitly requested or CLI is unavailable.
+
+- Include migration steps as **agent-runnable**; note idempotency / drift risks if the remote may already partial-apply.
+- When listing verification, include `supabase migration list --linked` where schema is in scope.
+
+**If CLI access is lost**, the operator restores it with: install CLI → `supabase login` → `supabase link --project-ref <ref>` → confirm **●** in `supabase projects list` → `supabase db push --yes`. Agent shells may need **network/all** permissions or the user runs the same commands locally.
+
+**Fewer Cursor permission prompts:** Cursor Settings → Agent → **Auto-run in Sandbox** or **Run everything** (not “Ask every time”); optional `~/.cursor/permissions.json` `terminalAllowlist`. Details: `BUILD.md` → *Agent execution* → *Fewer Cursor permission prompts*.
+
+Do not imply the database was migrated without a successful push (or explicit SQL-only path).
+
 ## Required Plan Output Sections
 
 1. Scope summary

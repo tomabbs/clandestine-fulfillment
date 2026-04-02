@@ -5,6 +5,7 @@
 
 import { task } from "@trigger.dev/sdk";
 import { z } from "zod";
+import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 const payloadSchema = z.object({
@@ -35,28 +36,27 @@ export const inboundCheckinComplete = task({
       received_quantity: number | null;
     }[];
 
-    // Record inventory changes for each item (Rule #20)
-    // Note: recordInventoryChange is the canonical write path.
-    // We call supabase.rpc for the transactional inventory change.
+    // Record inventory changes for each item via canonical write path (Rule #20).
+    // Using recordInventoryChange (not direct RPC) ensures Redis is updated and
+    // fanout triggers Bandcamp/store pushes so stock arrives are visible immediately.
     for (const item of items) {
       if (item.received_quantity === null || item.received_quantity === 0) continue;
 
-      // Use the RPC-based inventory change function (Rule #64: PostgREST is NOT a transaction)
-      const { error: inventoryError } = await supabase.rpc("record_inventory_change_txn", {
-        p_sku: item.sku,
-        p_delta: item.received_quantity,
-        p_source: "inbound",
-        p_correlation_id: `inbound:${shipmentId}:${item.id}`,
-        p_workspace_id: shipment.workspace_id,
-        p_metadata: JSON.stringify({
+      const result = await recordInventoryChange({
+        workspaceId: shipment.workspace_id,
+        sku: item.sku,
+        delta: item.received_quantity,
+        source: "inbound",
+        correlationId: `inbound:${shipmentId}:${item.id}`,
+        metadata: {
           inbound_shipment_id: shipmentId,
           inbound_item_id: item.id,
           expected_quantity: item.expected_quantity,
           received_quantity: item.received_quantity,
-        }),
+        },
       });
 
-      if (inventoryError) {
+      if (!result.success && !result.alreadyProcessed) {
         // Don't crash the whole task — log and continue (Rule #39 pattern)
         await supabase.from("warehouse_review_queue").insert({
           workspace_id: shipment.workspace_id,
@@ -64,7 +64,7 @@ export const inboundCheckinComplete = task({
           category: "inbound_inventory_failure",
           severity: "high",
           title: `Failed to record inventory for SKU ${item.sku}`,
-          description: inventoryError.message,
+          description: `recordInventoryChange failed for inbound:${shipmentId}:${item.id}`,
           metadata: {
             inbound_shipment_id: shipmentId,
             inbound_item_id: item.id,

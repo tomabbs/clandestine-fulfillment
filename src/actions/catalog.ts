@@ -418,6 +418,7 @@ export async function updateProduct(
   // Update local DB
   const dbUpdate: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (data.title !== undefined) dbUpdate.title = data.title;
+  if (data.descriptionHtml !== undefined) dbUpdate.description_html = data.descriptionHtml;
   if (data.vendor !== undefined) dbUpdate.vendor = data.vendor;
   if (data.productType !== undefined) dbUpdate.product_type = data.productType;
   if (data.tags !== undefined) dbUpdate.tags = data.tags;

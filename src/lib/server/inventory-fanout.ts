@@ -83,5 +83,27 @@ export async function fanoutInventoryChange(
     }
   }
 
+  // Check if the changed SKU is a component in any bundle.
+  // If so, trigger push tasks to recompute bundle MIN availability for parent bundles.
+  if (variant) {
+    const { data: parentBundles } = await supabase
+      .from("bundle_components")
+      .select("bundle_variant_id")
+      .eq("workspace_id", workspaceId)
+      .eq("component_variant_id", variant.id)
+      .limit(1);
+
+    if (parentBundles?.length) {
+      // Push tasks are workspace-scoped and already compute bundle MIN —
+      // triggering them ensures parent bundle availability is recalculated
+      if (!targets.pushToBandcamp) {
+        try { await tasks.trigger("bandcamp-inventory-push", {}); } catch { /* non-critical */ }
+      }
+      if (!targets.pushToStores) {
+        try { await tasks.trigger("multi-store-inventory-push", {}); } catch { /* non-critical */ }
+      }
+    }
+  }
+
   return { storeConnectionsPushed, bandcampPushed };
 }

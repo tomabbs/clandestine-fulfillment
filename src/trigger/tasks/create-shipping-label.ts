@@ -162,6 +162,7 @@ export const createShippingLabelTask = task({
         ship_date: new Date().toISOString().split("T")[0],
         status: "label_created",
         shipping_cost: parseFloat(chosenRate.rate),
+        label_source: "easypost",
         label_data: {
           easypost_shipment_id: purchased.id,
           label_url: purchased.postage_label.label_url,

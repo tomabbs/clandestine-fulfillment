@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
+import { tasks } from "@trigger.dev/sdk";
 import { parseInboundEmail } from "@/lib/clients/resend-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -93,6 +94,60 @@ export async function POST(req: Request): Promise<Response> {
   // Resend wraps inbound email in a `data` field for event payloads
   const emailPayload = eventData.data ?? eventData;
   const email = parseInboundEmail(emailPayload);
+
+  // Strategy 0: Bandcamp email classification
+  // All three types come from noreply@bandcamp.com — classify before acting.
+  const fromAddress = extractEmailAddress(email.from ?? "");
+  const subjectRaw = email.subject ?? "";
+  const subjectLower = subjectRaw.toLowerCase();
+  const bodyLower = (email.body ?? "").toLowerCase();
+
+  const isBandcamp =
+    /^noreply@bandcamp\.com$/i.test(fromAddress) ||
+    /bandcamp\.com$/i.test(fromAddress);
+
+  if (isBandcamp) {
+    // Type 1: Order — "Bam!/Cha-ching! Another order for..." or body contains "just bought/paid"
+    const isBandcampOrder =
+      /^(bam!|cha-ching!)/i.test(subjectRaw) ||
+      /another order for/i.test(subjectLower) ||
+      /just (bought|paid)/i.test(bodyLower);
+
+    // Type 2: Fan/customer message — "A message from Bandcamp, on behalf of..."
+    const isBandcampFanMessage =
+      /a message from bandcamp/i.test(subjectLower) ||
+      /on behalf of/i.test(subjectLower);
+
+    // Type 3: New release alert — "New release from...", "New music from..."
+    // No action needed — silently dismiss
+    const isBandcampNewRelease =
+      /new (release|music|album|ep|single) from/i.test(subjectLower) ||
+      /just (released|dropped)/i.test(subjectLower);
+
+    if (isBandcampOrder) {
+      // Trigger immediate inventory poll
+      try {
+        await tasks.trigger("bandcamp-sale-poll", {});
+        await supabase.from("webhook_events").update({ status: "processed" }).eq("id", dedupRow.id);
+      } catch { /* non-critical — regular poll will pick it up */ }
+      return NextResponse.json({ ok: true, status: "bandcamp_order_poll_triggered" });
+    }
+
+    if (isBandcampNewRelease) {
+      // No action needed — silently dismiss
+      await supabase.from("webhook_events").update({ status: "processed" }).eq("id", dedupRow.id);
+      return NextResponse.json({ ok: true, status: "bandcamp_new_release_skipped" });
+    }
+
+    if (isBandcampFanMessage) {
+      // Fall through to existing support conversation routing below.
+      // Strategy 1–3 will create a support conversation or review queue item.
+      // Staff can reply — Bandcamp relays replies back to the fan.
+      // Do NOT return here — let the existing strategies handle it.
+    }
+
+    // Unknown Bandcamp email type — fall through to existing strategies
+  }
 
   const relatedMessageIdCandidates = [email.inReplyTo, ...email.references].filter(
     (value): value is string => Boolean(value),

@@ -1,5 +1,8 @@
 /**
- * Bandcamp inventory push — cron every 15 minutes.
+ * Bandcamp inventory push — cron every 5 minutes (was 15).
+ *
+ * Applies safety buffer at push time: pushed_qty = MAX(0, available - effective_safety_stock)
+ * effective_safety_stock = COALESCE(per_sku.safety_stock, workspace.default_safety_stock, 3)
  *
  * Rule #9: Uses bandcampQueue (serialized with all other Bandcamp API tasks).
  * Rule #7: Uses createServiceRoleClient().
@@ -13,7 +16,7 @@ import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
 export const bandcampInventoryPushTask = schedules.task({
   id: "bandcamp-inventory-push",
-  cron: "*/15 * * * *",
+  cron: "*/5 * * * *",
   queue: bandcampQueue,
   maxDuration: 120,
   run: async (_payload, { ctx }) => {
@@ -43,6 +46,31 @@ export const bandcampInventoryPushTask = schedules.task({
         continue;
       }
 
+      // Load workspace default safety stock + bundles_enabled flag
+      const { data: ws } = await supabase
+        .from("workspaces")
+        .select("default_safety_stock, bundles_enabled")
+        .eq("id", workspaceId)
+        .single();
+      const workspaceSafetyStock = ws?.default_safety_stock ?? 3;
+      const bundlesEnabled = ws?.bundles_enabled ?? false;
+
+      // Load bundle components for this workspace (only if bundles are enabled)
+      type BundleComponent = { bundle_variant_id: string; component_variant_id: string; quantity: number };
+      let bundleMap = new Map<string, BundleComponent[]>();
+      if (bundlesEnabled) {
+        const { data: allComponents } = await supabase
+          .from("bundle_components")
+          .select("bundle_variant_id, component_variant_id, quantity")
+          .eq("workspace_id", workspaceId);
+
+        for (const bc of allComponents ?? []) {
+          const arr = bundleMap.get(bc.bundle_variant_id) ?? [];
+          arr.push(bc);
+          bundleMap.set(bc.bundle_variant_id, arr);
+        }
+      }
+
       // Refresh token
       const accessToken = await refreshBandcampToken(workspaceId);
 
@@ -57,18 +85,28 @@ export const bandcampInventoryPushTask = schedules.task({
 
           if (!mappings || mappings.length === 0) continue;
 
-          // Get variant IDs to look up inventory
+          // Get variant IDs to look up inventory (include component variant IDs for bundle MIN)
           const variantIds = mappings.map((m) => m.variant_id);
+          const componentVariantIds = bundlesEnabled
+            ? Array.from(new Set(
+                Array.from(bundleMap.values()).flat().map(c => c.component_variant_id)
+              ))
+            : [];
+          const allVariantIds = Array.from(new Set([...variantIds, ...componentVariantIds]));
+
           const { data: inventoryLevels } = await supabase
             .from("warehouse_inventory_levels")
-            .select("variant_id, available")
-            .in("variant_id", variantIds);
+            .select("variant_id, available, safety_stock")
+            .in("variant_id", allVariantIds);
 
           const inventoryByVariant = new Map(
-            (inventoryLevels ?? []).map((l) => [l.variant_id, l.available]),
+            (inventoryLevels ?? []).map((l) => [
+              l.variant_id,
+              { available: l.available, safetyStock: l.safety_stock as number | null },
+            ]),
           );
 
-          // Build update payload — include quantity_sold for Bandcamp race condition handling
+          // Build update payload — apply safety buffer at push time
           const pushItems: Array<{
             item_id: number;
             item_type: string;
@@ -79,11 +117,33 @@ export const bandcampInventoryPushTask = schedules.task({
           for (const mapping of mappings) {
             if (!mapping.bandcamp_item_id || !mapping.bandcamp_item_type) continue;
 
-            const available = inventoryByVariant.get(mapping.variant_id) ?? 0;
+            const inv = inventoryByVariant.get(mapping.variant_id);
+            const rawAvailable = inv?.available ?? 0;
+            const effectiveSafety = inv?.safetyStock ?? workspaceSafetyStock;
+
+            // Compute bundle minimum when this variant is a bundle and bundles are enabled
+            let effectiveAvailable = rawAvailable;
+            if (bundlesEnabled) {
+              const components = bundleMap.get(mapping.variant_id);
+              if (components?.length) {
+                // DFS cycle safety is enforced at write time (setBundleComponents).
+                // At push time we just compute MIN — no recursion risk.
+                const componentMin = Math.min(
+                  ...components.map(c => {
+                    const compInv = inventoryByVariant.get(c.component_variant_id);
+                    return Math.floor((compInv?.available ?? 0) / c.quantity);
+                  }),
+                );
+                effectiveAvailable = Math.min(rawAvailable, Math.max(0, componentMin));
+              }
+            }
+
+            const pushedQuantity = Math.max(0, effectiveAvailable - effectiveSafety);
+
             pushItems.push({
               item_id: mapping.bandcamp_item_id,
               item_type: mapping.bandcamp_item_type,
-              quantity_available: available,
+              quantity_available: pushedQuantity,
               quantity_sold: mapping.last_quantity_sold ?? 0,
             });
           }

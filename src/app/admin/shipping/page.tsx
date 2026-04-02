@@ -301,19 +301,36 @@ function ShipmentTableRow({
   detailLoading: boolean;
 }) {
   const recipient = extractRecipient(shipment.label_data);
+
+  // Priority: linked warehouse_order number > ss_order_number > SS-{id} fallback
   const orderNumber =
     (shipment.warehouse_orders as unknown as { order_number: string | null } | null)
       ?.order_number ?? null;
-  // Fall back to SS-{shipstation_shipment_id} so staff can cross-reference in ShipStation
-  const displayOrderRef = orderNumber
-    ?? (shipment.shipstation_shipment_id ? `SS-${shipment.shipstation_shipment_id}` : null);
+  const ssOrderNum =
+    (shipment as ShipmentRow & { ss_order_number?: string | null }).ss_order_number ?? null;
+  const displayOrderRef =
+    orderNumber ??
+    ssOrderNum ??
+    (shipment.shipstation_shipment_id ? `SS-${shipment.shipstation_shipment_id}` : null);
+
   const clientName =
     (shipment.organizations as unknown as { name: string } | null)?.name ?? null;
-  const itemCount = Array.isArray(shipment.warehouse_shipment_items)
-    ? shipment.warehouse_shipment_items.length
-    : 0;
+
+  // Use total_units (physical units shipped), not line count
+  const itemCount =
+    (shipment as ShipmentRow & { total_units?: number | null }).total_units ?? 0;
+
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
   const carrierLabel = getCarrierLabel(shipment.carrier);
+  const labelSource = (shipment as ShipmentRow & { label_source?: string | null }).label_source;
+
+  // Shipping gap indicator
+  const customerCharged =
+    (shipment as ShipmentRow & { customer_shipping_charged?: number | null })
+      .customer_shipping_charged ?? null;
+  const postage = shipment.shipping_cost ?? null;
+  const shippingGap =
+    customerCharged != null && postage != null ? customerCharged - postage : null;
 
   return (
     <>
@@ -322,7 +339,7 @@ function ShipmentTableRow({
         onClick={onToggle}
       >
         <td className="px-4 py-3">
-          {shipment.ship_date ? new Date(shipment.ship_date).toLocaleDateString() : "---"}
+          {shipment.ship_date ? new Date(shipment.ship_date + "T12:00:00").toLocaleDateString() : "---"}
         </td>
         <td className="px-4 py-3 font-mono text-xs">{displayOrderRef ?? "---"}</td>
         <td className="px-4 py-3 text-sm text-muted-foreground">{clientName ?? "—"}</td>
@@ -340,6 +357,12 @@ function ShipmentTableRow({
         <td className="px-4 py-3">
           <div className="flex items-center gap-1.5">
             {carrierLabel && <Badge variant="secondary">{carrierLabel}</Badge>}
+            {labelSource === "shipstation" && (
+              <span className="text-xs bg-blue-100 text-blue-700 px-1 rounded">SS</span>
+            )}
+            {labelSource === "easypost" && (
+              <span className="text-xs bg-green-100 text-green-700 px-1 rounded">EP</span>
+            )}
             <span className="font-mono text-xs">
               {shipment.tracking_number ?? "---"}
             </span>
@@ -381,7 +404,23 @@ function ShipmentTableRow({
             )}
           </div>
         </td>
-        <td className="px-4 py-3 text-right font-mono">{formatCurrency(shipment.shipping_cost)}</td>
+        <td className="px-4 py-3 text-right font-mono">
+          <div className="flex items-center justify-end gap-1.5">
+            {shippingGap != null && (
+              <span
+                className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${
+                  shippingGap >= 0 ? "bg-green-500" : "bg-red-500"
+                }`}
+                title={
+                  shippingGap >= 0
+                    ? `Charged $${customerCharged?.toFixed(2)} / Postage $${postage?.toFixed(2)} (+$${shippingGap.toFixed(2)})`
+                    : `Charged $${customerCharged?.toFixed(2)} / Postage $${postage?.toFixed(2)} (-$${Math.abs(shippingGap).toFixed(2)} shortfall)`
+                }
+              />
+            )}
+            {formatCurrency(shipment.shipping_cost)}
+          </div>
+        </td>
       </tr>
       {isExpanded && (
         <tr className="border-b bg-muted/10">
@@ -556,36 +595,62 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
           <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
             Cost Breakdown
           </h4>
-          <dl className="text-sm space-y-1">
-            <div className="flex justify-between">
-              <dt>Postage</dt>
-              <dd className="font-mono">{formatCurrency(costBreakdown.postage)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>Materials</dt>
-              <dd className="font-mono">{formatCurrency(costBreakdown.materials)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>Pick & Pack</dt>
-              <dd className="font-mono">{formatCurrency(costBreakdown.pickPack)}</dd>
-            </div>
-            {costBreakdown.dropShip > 0 && (
-              <div className="flex justify-between">
-                <dt>Drop Ship</dt>
-                <dd className="font-mono">{formatCurrency(costBreakdown.dropShip)}</dd>
-              </div>
-            )}
-            {costBreakdown.insurance > 0 && (
-              <div className="flex justify-between">
-                <dt>Insurance</dt>
-                <dd className="font-mono">{formatCurrency(costBreakdown.insurance)}</dd>
-              </div>
-            )}
-            <div className="flex justify-between border-t pt-1 font-medium">
-              <dt>Total</dt>
-              <dd className="font-mono">{formatCurrency(costBreakdown.total)}</dd>
-            </div>
-          </dl>
+          {(() => {
+            const charged = (shipment as { customer_shipping_charged?: number | null })
+              .customer_shipping_charged ?? null;
+            const gap = charged != null ? charged - costBreakdown.postage : null;
+            return (
+              <dl className="text-sm space-y-1">
+                {charged != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Customer charged</dt>
+                    <dd className="font-mono">{formatCurrency(charged)}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <dt>Postage</dt>
+                  <dd className="font-mono">{formatCurrency(costBreakdown.postage)}</dd>
+                </div>
+                {gap != null && (
+                  <div
+                    className={`flex justify-between border-t pt-1 font-medium ${
+                      gap >= 0 ? "text-green-700" : "text-red-600"
+                    }`}
+                  >
+                    <dt>Shipping difference</dt>
+                    <dd className="font-mono">
+                      {gap >= 0 ? "+" : ""}
+                      {formatCurrency(gap)}
+                    </dd>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <dt>Materials</dt>
+                  <dd className="font-mono">{formatCurrency(costBreakdown.materials)}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt>Pick & Pack</dt>
+                  <dd className="font-mono">{formatCurrency(costBreakdown.pickPack)}</dd>
+                </div>
+                {costBreakdown.dropShip > 0 && (
+                  <div className="flex justify-between">
+                    <dt>Drop Ship</dt>
+                    <dd className="font-mono">{formatCurrency(costBreakdown.dropShip)}</dd>
+                  </div>
+                )}
+                {costBreakdown.insurance > 0 && (
+                  <div className="flex justify-between">
+                    <dt>Insurance</dt>
+                    <dd className="font-mono">{formatCurrency(costBreakdown.insurance)}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between border-t pt-1 font-medium">
+                  <dt>Total Clandestine Cost</dt>
+                  <dd className="font-mono">{formatCurrency(costBreakdown.total)}</dd>
+                </div>
+              </dl>
+            );
+          })()}
         </div>
       </div>
 

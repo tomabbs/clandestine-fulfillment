@@ -105,7 +105,7 @@ function ShipmentCard({ shipment }: { shipment: InboundShipmentWithOrg }) {
           <div className="flex gap-4 mt-1 text-sm text-muted-foreground">
             {shipment.carrier && <span>Carrier: {shipment.carrier}</span>}
             {shipment.expected_date && (
-              <span>Expected: {new Date(shipment.expected_date).toLocaleDateString()}</span>
+              <span>Expected: {new Date(shipment.expected_date + "T12:00:00").toLocaleDateString()}</span>
             )}
             <span>{shipment.item_count} item(s)</span>
           </div>

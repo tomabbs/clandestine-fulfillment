@@ -7,6 +7,7 @@
  * Rule #66: Return 200 fast — heavy processing in Trigger task.
  */
 
+import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { tasks } from "@trigger.dev/sdk";
 import type { NextRequest } from "next/server";
@@ -45,23 +46,35 @@ export async function POST(request: NextRequest) {
   // Step 3: Verify HMAC per platform (Rule #23)
   if (connection.webhook_secret) {
     let signature: string | null = null;
-    const algorithm: "SHA-256" | "SHA-1" = "SHA-256";
 
     if (connection.platform === "shopify") {
       signature = request.headers.get("X-Shopify-Hmac-SHA256");
+      if (signature) {
+        const valid = await verifyHmacSignature(rawBody, connection.webhook_secret, signature);
+        if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+      }
     } else if (connection.platform === "woocommerce") {
       signature = request.headers.get("X-WC-Webhook-Signature");
-    }
-
-    if (signature) {
-      const valid = await verifyHmacSignature(
-        rawBody,
-        connection.webhook_secret,
-        signature,
-        algorithm,
-      );
-      if (!valid) {
-        return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+      if (signature) {
+        const valid = await verifyHmacSignature(rawBody, connection.webhook_secret, signature);
+        if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+      }
+    } else if (connection.platform === "squarespace") {
+      // Squarespace uses "Squarespace-Signature" header.
+      // IMPORTANT: the webhook secret is hex-encoded — must decode to bytes before HMAC.
+      // Using verifyHmacSignature (UTF-8 key) would produce wrong results for Squarespace.
+      signature = request.headers.get("Squarespace-Signature");
+      if (signature) {
+        const secretBytes = Buffer.from(connection.webhook_secret, "hex");
+        const expectedSig = crypto
+          .createHmac("sha256", secretBytes)
+          .update(rawBody)
+          .digest("hex");
+        const valid = crypto.timingSafeEqual(
+          Buffer.from(expectedSig),
+          Buffer.from(signature),
+        );
+        if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
       }
     }
   }

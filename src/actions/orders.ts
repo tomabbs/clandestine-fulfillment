@@ -1,6 +1,6 @@
 "use server";
 
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 export async function getOrders(filters: {
   page?: number;
@@ -99,13 +99,33 @@ export async function getClientShipments(filters: {
   carrier?: string;
 }) {
   const supabase = await createServerSupabaseClient();
+  const serviceClient = createServiceRoleClient();
   const page = filters.page ?? 1;
   const pageSize = filters.pageSize ?? 25;
   const offset = (page - 1) * pageSize;
 
+  // Resolve org_id from the authenticated user — explicit org scoping is
+  // defense-in-depth on top of RLS; never return cross-org shipments.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { shipments: [], total: 0, page, pageSize };
+
+  const { data: userRecord } = await serviceClient
+    .from("users")
+    .select("org_id")
+    .eq("auth_user_id", user.id)
+    .single();
+
+  if (!userRecord?.org_id) return { shipments: [], total: 0, page, pageSize };
+
   let query = supabase
     .from("warehouse_shipments")
-    .select("*", { count: "exact" })
+    .select(
+      "*, warehouse_orders(order_number)",
+      { count: "exact" },
+    )
+    .eq("org_id", userRecord.org_id)
     .order("ship_date", { ascending: false })
     .range(offset, offset + pageSize - 1);
 

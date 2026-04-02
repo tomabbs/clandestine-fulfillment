@@ -41,8 +41,24 @@ export async function POST(req: Request) {
   const topic = req.headers.get("X-Shopify-Topic") ?? "unknown";
   const shopifyWebhookId = req.headers.get("X-Shopify-Webhook-Id") ?? `shopify:${Date.now()}`;
 
-  // Step 3: Dedup via webhook_events (Rule #62)
+  // Step 3: Resolve workspace from shop domain via client_store_connections.
+  // Using store_url ILIKE match is more reliable than slug matching (slugs can drift
+  // if workspace names change; store_url is immutable for a given Shopify store).
   const supabase = createServiceRoleClient();
+  const shopDomain = req.headers.get("X-Shopify-Shop-Domain");
+  let resolvedWorkspaceId: string | null = null;
+  if (shopDomain) {
+    const { data: conn } = await supabase
+      .from("client_store_connections")
+      .select("workspace_id")
+      .eq("platform", "shopify")
+      .ilike("store_url", `%${shopDomain}%`)
+      .limit(1)
+      .maybeSingle();
+    resolvedWorkspaceId = conn?.workspace_id ?? null;
+  }
+
+  // Step 4: Dedup via webhook_events (Rule #62)
   const { data: inserted } = await supabase
     .from("webhook_events")
     .insert({
@@ -50,6 +66,7 @@ export async function POST(req: Request) {
       external_webhook_id: shopifyWebhookId,
       topic,
       status: "pending",
+      workspace_id: resolvedWorkspaceId,
       metadata: { topic, payload },
     })
     .select("id")
@@ -59,7 +76,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, status: "duplicate" });
   }
 
-  // Step 4: Echo cancellation (Rule #65)
+  // Step 5: Echo cancellation (Rule #65)
   // When we push inventory TO Shopify, Shopify fires a webhook back.
   // If the webhook quantity matches what we last pushed, it's our own echo.
   if (topic === "inventory_levels/update") {
@@ -88,13 +105,13 @@ export async function POST(req: Request) {
     }
   }
 
-  // Step 5: Enqueue async processing (Rule #66)
+  // Step 6: Enqueue async processing (Rule #66)
   await tasks.trigger("process-shopify-webhook", {
     webhookEventId: inserted.id,
     topic,
     payload,
   });
 
-  // Step 6: Return 200 OK immediately
+  // Step 7: Return 200 OK immediately
   return NextResponse.json({ ok: true });
 }

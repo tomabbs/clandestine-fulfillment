@@ -8,6 +8,7 @@ import {
   adjustInventory,
   getInventoryDetail,
   getInventoryLevels,
+  updateInventoryBuffer,
   updateVariantFormat,
 } from "@/actions/inventory";
 import { EditableNumberCell, EditableSelectCell } from "@/components/shared/editable-cell";
@@ -150,9 +151,11 @@ export default function InventoryPage() {
               <TableHead className="w-12" />
               <TableHead>Product / SKU</TableHead>
               <TableHead className="hidden sm:table-cell">Label</TableHead>
-              <TableHead className="text-right">Avail</TableHead>
+              <TableHead className="text-right" title="Actual units in warehouse. Full truth.">Avail</TableHead>
+              <TableHead className="hidden xl:table-cell text-right" title="Units shown on Bandcamp and connected stores. Reduced by the safety buffer.">Listed As</TableHead>
               <TableHead className="hidden md:table-cell text-right">Committed</TableHead>
               <TableHead className="hidden md:table-cell text-right">Incoming</TableHead>
+              <TableHead className="hidden xl:table-cell text-right" title="Units held back from all sales channels. Default 3 covers Bandcamp's 5-min sync window.">Buffer</TableHead>
               <TableHead className="hidden lg:table-cell">Format</TableHead>
               <TableHead className="w-20" />
             </TableRow>
@@ -200,8 +203,25 @@ export default function InventoryPage() {
                       invalidateInventory();
                     }}
                   />
+                  {/* Listed As = what channels actually see (buffered quantity) */}
+                  <TableCell className="hidden xl:table-cell text-right font-mono text-muted-foreground">
+                    {Math.max(0, row.available - ((row as { safetyStock?: number | null }).safetyStock ?? 3))}
+                  </TableCell>
                   <TableCell className="hidden md:table-cell text-right font-mono">{row.committed}</TableCell>
                   <TableCell className="hidden md:table-cell text-right font-mono">{row.incoming}</TableCell>
+                  {/* Buffer — inline editable; null = uses workspace default (3) */}
+                  <EditableNumberCell
+                    value={(row as { safetyStock?: number | null }).safetyStock ?? 3}
+                    prefix=""
+                    placeholder="3"
+                    precision={0}
+                    className="hidden xl:table-cell text-right font-mono text-muted-foreground"
+                    onSave={async (newValue) => {
+                      const val = newValue ?? null;
+                      await updateInventoryBuffer(row.sku, val === 3 ? null : val);
+                      invalidateInventory();
+                    }}
+                  />
                   <EditableSelectCell
                     value={row.formatName ?? ""}
                     options={FORMAT_OPTIONS}

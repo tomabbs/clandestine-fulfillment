@@ -467,3 +467,47 @@ export async function getClientInventoryLevels(
     pageSize,
   };
 }
+
+/**
+ * Update the safety buffer for a single SKU.
+ * Pass null to revert to the workspace default.
+ */
+export async function updateInventoryBuffer(
+  sku: string,
+  safetyStock: number | null,
+): Promise<{ success: boolean }> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const serviceClient = createServiceRoleClient();
+  const { error } = await serviceClient
+    .from("warehouse_inventory_levels")
+    .update({ safety_stock: safetyStock, updated_at: new Date().toISOString() })
+    .eq("sku", sku);
+
+  if (error) throw new Error(`Failed to update buffer: ${error.message}`);
+  return { success: true };
+}
+
+/**
+ * Update the workspace-wide default safety buffer (default: 3 units).
+ * Individual SKU overrides (set via updateInventoryBuffer) take precedence.
+ */
+export async function updateWorkspaceDefaultBuffer(
+  workspaceId: string,
+  defaultSafetyStock: number,
+): Promise<{ success: boolean }> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const serviceClient = createServiceRoleClient();
+  const { error } = await serviceClient
+    .from("workspaces")
+    .update({ default_safety_stock: defaultSafetyStock })
+    .eq("id", workspaceId);
+
+  if (error) throw new Error(`Failed to update workspace buffer: ${error.message}`);
+  return { success: true };
+}

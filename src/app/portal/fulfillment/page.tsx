@@ -1,6 +1,6 @@
 "use client";
 
-import { Package } from "lucide-react";
+import { CheckCircle, Package } from "lucide-react";
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
@@ -172,8 +172,12 @@ function OrderExpandedDetail({ detail }: { detail: Awaited<ReturnType<typeof get
   const { order, items, shipments } = detail;
   if (!order) return null;
 
+  const isBandcamp = (order as { source?: string }).source === "bandcamp";
+  const fulfillmentStatus = (order as { fulfillment_status?: string | null }).fulfillment_status;
+
   return (
-    <div className="grid grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Column 1: Line Items */}
       <div>
         <h4 className="text-sm font-semibold mb-2">Line Items</h4>
         <div className="space-y-1 text-sm">
@@ -186,26 +190,61 @@ function OrderExpandedDetail({ detail }: { detail: Awaited<ReturnType<typeof get
               <span className="font-mono">x{item.quantity}</span>
             </div>
           ))}
+          {items.length === 0 && <p className="text-muted-foreground">No items</p>}
         </div>
       </div>
-      <div>
-        <h4 className="text-sm font-semibold mb-2">Shipments</h4>
-        {shipments.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No shipments yet</p>
-        ) : (
-          <div className="space-y-3">
-            {shipments.map((s) => (
-              <div key={s.id} className="border rounded-lg p-3">
-                <TrackingTimeline
-                  shipmentId={s.id}
-                  trackingNumber={s.tracking_number}
-                  carrier={s.carrier}
-                  fetchEvents={getTrackingEvents}
-                />
-              </div>
-            ))}
+
+      {/* Column 2: Status + Shipments */}
+      <div className="space-y-4">
+        {/* Section A: Bandcamp Platform Status */}
+        {isBandcamp && (
+          <div>
+            <h4 className="text-sm font-semibold mb-1">Bandcamp Status</h4>
+            {fulfillmentStatus === "fulfilled" ? (
+              <Badge variant="default" className="gap-1">
+                <CheckCircle className="h-3 w-3" /> Fulfilled on Bandcamp
+              </Badge>
+            ) : (
+              <Badge variant="outline">Unfulfilled on Bandcamp</Badge>
+            )}
           </div>
         )}
+
+        {/* Section B: Shipment & Tracking */}
+        <div>
+          <h4 className="text-sm font-semibold mb-2">Shipment & Tracking</h4>
+          {shipments.length > 0 ? (
+            <div className="space-y-3">
+              {shipments.map((s) => (
+                <div key={s.id} className="border rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-mono text-xs text-muted-foreground truncate">
+                      {s.tracking_number ?? "No tracking number"}
+                    </span>
+                    <a
+                      href={`/portal/shipping?search=${encodeURIComponent(s.tracking_number ?? "")}`}
+                      className="text-xs text-blue-600 hover:underline shrink-0 ml-2"
+                    >
+                      Shipping details →
+                    </a>
+                  </div>
+                  <TrackingTimeline
+                    shipmentId={s.id}
+                    trackingNumber={s.tracking_number}
+                    carrier={s.carrier}
+                    fetchEvents={getTrackingEvents}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : fulfillmentStatus === "fulfilled" ? (
+            <p className="text-sm text-muted-foreground">
+              Fulfilled — tracking not available in this system.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Not yet shipped.</p>
+          )}
+        </div>
       </div>
     </div>
   );

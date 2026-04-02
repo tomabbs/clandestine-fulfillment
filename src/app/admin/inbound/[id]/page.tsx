@@ -242,7 +242,7 @@ export default function InboundDetailPage() {
               <span>Org: {detail.org_name || "—"}</span>
               <span>
                 Expected:{" "}
-                {detail.expected_date ? new Date(detail.expected_date).toLocaleDateString() : "—"}
+                {detail.expected_date ? new Date(detail.expected_date + "T12:00:00").toLocaleDateString() : "—"}
               </span>
               {detail.actual_arrival_date && (
                 <span>Arrived: {new Date(detail.actual_arrival_date).toLocaleDateString()}</span>

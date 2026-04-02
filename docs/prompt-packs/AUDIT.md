@@ -21,6 +21,16 @@ If evidence is incomplete, return `BLOCKED`.
 - For async/integration domains, verify Trigger tasks explicitly.
 - Do not conclude on async bugs without a Trigger touchpoint check.
 
+## Agent execution — migrations, CLI, and permissions
+
+For findings that involve **schema, RLS, or migrations**, the agent should **verify with tooling**, not only read files: e.g. `supabase migration list --linked`, read relevant `supabase/migrations/*.sql`, and when fixing drift **run** `supabase db push --yes` (request **network** / **all** permissions as needed). Prefer fixing idempotent migrations and retrying push over instructing the user to manually reconcile unless CLI is unavailable.
+
+**If Supabase CLI access is lost**, tell the operator: install CLI → `supabase login` → `supabase link --project-ref <ref>` → verify **●** on this project in `supabase projects list` → `supabase db push --yes`. If the agent terminal cannot use stored auth, the user runs those commands locally while the agent handles repo-side fixes.
+
+**Fewer Cursor permission prompts:** Cursor Settings → Agent → **Auto-run in Sandbox** or **Run everything**; optional `~/.cursor/permissions.json` `terminalAllowlist`. Details: `BUILD.md` → *Agent execution* → *Fewer Cursor permission prompts*.
+
+Do not claim “migration applied” without evidence (successful push output or confirmed operator step).
+
 ## Required Evidence Table Per Finding
 
 | Field | Requirement |

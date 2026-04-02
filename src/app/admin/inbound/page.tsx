@@ -191,7 +191,7 @@ export default function AdminInboundPage() {
                     <td className="p-3">{shipment.org_name || "—"}</td>
                     <td className="p-3">
                       {shipment.expected_date
-                        ? new Date(shipment.expected_date).toLocaleDateString()
+                        ? new Date(shipment.expected_date + "T12:00:00").toLocaleDateString()
                         : "—"}
                     </td>
                     <td className="p-3">

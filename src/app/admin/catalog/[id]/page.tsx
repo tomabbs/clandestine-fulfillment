@@ -111,7 +111,7 @@ export default function ProductDetailPage() {
   const startEdit = useCallback(() => {
     if (!product) return;
     setEditTitle(product.title);
-    setEditDesc("");
+    setEditDesc((product as unknown as { description_html?: string | null }).description_html ?? "");
     setEditVendor(product.vendor ?? "");
     setEditType(product.product_type ?? "");
     setEditTags((product.tags as string[])?.join(", ") ?? "");

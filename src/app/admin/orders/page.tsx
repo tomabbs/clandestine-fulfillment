@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, ExternalLink, Loader2, Package, Tag } from "lucide-react";
+import { Check, CheckCircle, Copy, ExternalLink, Loader2, Package, Tag } from "lucide-react";
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
@@ -242,6 +242,8 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
     !order.fulfillment_status ||
     order.fulfillment_status === "unfulfilled" ||
     order.fulfillment_status === "pending";
+  // Hide Create Label when a shipment is already linked — order has been shipped.
+  const hasLinkedShipment = detail.shipments.length > 0;
 
   const handleCopyPaymentId = async () => {
     const id = String(order.bandcamp_payment_id);
@@ -255,9 +257,6 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
   };
 
   const shippingAddr = detail.order?.shipping_address as Record<string, string | undefined> | null;
-
-  const isFulfilledExternally =
-    order.fulfillment_status === "fulfilled" && detail.shipments.length === 0;
 
   return (
     <div className="space-y-4">
@@ -310,33 +309,75 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
         </div>
       )}
 
-      {/* Shipments — full width */}
+      {/* Section A: Bandcamp Platform Status — what the Bandcamp API reports */}
+      {order.source === "bandcamp" && (
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+            Bandcamp Platform Status
+          </h4>
+          {order.fulfillment_status === "fulfilled" ? (
+            <Badge variant="default" className="gap-1">
+              <CheckCircle className="h-3 w-3" /> Fulfilled on Bandcamp
+            </Badge>
+          ) : (
+            <Badge variant="outline">Unfulfilled on Bandcamp</Badge>
+          )}
+        </div>
+      )}
+
+      {/* Section B: Shipment & Tracking — what our system has */}
       <div>
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Shipments</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          Shipment & Tracking
+        </h4>
         {detail.shipments.length > 0 ? (
           <div className="space-y-3">
             {detail.shipments.map((s) => (
               <div key={s.id} className="border rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {s.tracking_number ?? "No tracking number"}
+                  </span>
+                  <a
+                    href={`/admin/shipping?search=${encodeURIComponent(s.tracking_number ?? "")}`}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    View in Shipping Log →
+                  </a>
+                </div>
                 <TrackingTimeline
                   shipmentId={s.id}
                   trackingNumber={s.tracking_number}
                   carrier={s.carrier}
                   fetchEvents={getTrackingEvents}
                 />
+                {order.fulfillment_status !== "fulfilled" && order.source === "bandcamp" && (
+                  <p className="text-xs text-amber-600 mt-2">
+                    Shipped — Bandcamp not yet notified. Use "Mark Shipped on Bandcamp" to sync tracking.
+                  </p>
+                )}
               </div>
             ))}
           </div>
-        ) : isFulfilledExternally ? (
+        ) : order.fulfillment_status === "fulfilled" ? (
           <p className="text-sm text-muted-foreground">
-            Marked fulfilled on {order.source === "bandcamp" ? "Bandcamp" : "source platform"} — no label created in this system.
+            Fulfilled externally — no label created in this system.
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">No shipments yet</p>
+          <p className="text-sm text-muted-foreground">No shipments yet.</p>
         )}
       </div>
 
-      {/* Create Label panel — only shown for unfulfilled orders */}
-      {isUnfulfilled && orderId && <CreateLabelPanel orderId={orderId} orderType="fulfillment" />}
+      {/* Create Label — hidden when a shipment already exists */}
+      {!hasLinkedShipment && isUnfulfilled && orderId && (
+        <CreateLabelPanel
+          orderId={orderId}
+          orderType="fulfillment"
+          customerShippingCharged={
+            (detail.order as { shipping_cost?: number | null }).shipping_cost ?? null
+          }
+        />
+      )}
 
       {showBandcamp && (
         <div className="border rounded-lg p-3 bg-muted/30">
@@ -364,9 +405,11 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
 function CreateLabelPanel({
   orderId,
   orderType,
+  customerShippingCharged,
 }: {
   orderId: string;
   orderType: "fulfillment" | "mailorder";
+  customerShippingCharged?: number | null;
 }) {
   const [showRates, setShowRates] = useState(false);
   const [selectedRateId, setSelectedRateId] = useState<string | null>(null);
@@ -427,6 +470,16 @@ function CreateLabelPanel({
           </Button>
         )}
       </div>
+
+      {customerShippingCharged != null && (
+        <p className="text-xs text-muted-foreground">
+          Customer paid for shipping:{" "}
+          <span className="font-mono font-medium text-foreground">
+            ${customerShippingCharged.toFixed(2)}
+          </span>{" "}
+          — pick the rate closest to this amount.
+        </p>
+      )}
 
       {/* Rates loading */}
       {showRates && ratesQuery.isLoading && (
