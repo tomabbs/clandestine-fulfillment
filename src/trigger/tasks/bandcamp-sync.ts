@@ -7,6 +7,7 @@ import {
   getMyBands,
   matchSkuToVariants,
   refreshBandcampToken,
+  updateSku,
 } from "@/lib/clients/bandcamp";
 import type { ScrapedAlbumData, ScrapedTrack } from "@/lib/clients/bandcamp-scraper";
 import {
@@ -24,6 +25,69 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { preorderSetupTask } from "@/trigger/tasks/preorder-setup";
+
+// ─── SKU generation for items without one ─────────────────────────────────────
+
+const FORMAT_CODES: Record<string, string> = {
+  "vinyl": "LP", "record/vinyl": "LP", "lp": "LP", "2xlp": "2LP",
+  "compact disc": "CD", "cd": "CD",
+  "cassette": "CS", "cassette tape": "CS", "tape": "CS",
+  "7\"": "7IN", "10\"": "10IN", "12\"": "12IN",
+  "t-shirt": "TS", "shirt": "TS", "tee": "TS",
+  "sweater/hoodie": "HOODIE", "hoodie": "HOODIE",
+  "poster/print": "POSTER", "poster": "POSTER",
+  "bag": "BAG", "tote": "BAG",
+  "hat/cap": "HAT",
+  "sticker": "STICKER",
+  "patch": "PATCH",
+  "pin": "PIN",
+  "other": "MERCH",
+};
+
+function deriveFormatCode(itemType: string | null | undefined, title: string): string {
+  const type = (itemType ?? "").toLowerCase().trim();
+  if (FORMAT_CODES[type]) return FORMAT_CODES[type];
+  const t = title.toLowerCase();
+  if (t.includes("vinyl") || t.includes(" lp") || t.includes('12"') || t.includes("12\u201D")) return "LP";
+  if (t.includes("compact disc") || t.includes(" cd")) return "CD";
+  if (t.includes("cassette") || t.includes("tape")) return "CS";
+  if (t.includes("t-shirt") || t.includes("tee")) return "TS";
+  if (t.includes("poster")) return "POSTER";
+  if (t.includes("hoodie") || t.includes("sweatshirt")) return "HOODIE";
+  if (t.includes("bag") || t.includes("tote")) return "BAG";
+  if (t.includes('7"') || t.includes("7\u201D")) return "7IN";
+  return "MERCH";
+}
+
+function slugify(text: string): string {
+  return text.trim().toUpperCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 20);
+}
+
+function generateSku(
+  merchItem: { item_type?: string | null; title: string; album_title?: string | null },
+  artistName: string,
+  existingSkus: Set<string>,
+): string {
+  const format = deriveFormatCode(merchItem.item_type, merchItem.title);
+  const artistSlug = slugify(artistName).slice(0, 6);
+  const albumSlug = slugify(merchItem.album_title ?? merchItem.title).slice(0, 12);
+
+  let base = `${format}-${artistSlug}-${albumSlug}`;
+  if (!base || base === `${format}--`) base = `${format}-${Date.now().toString(36).toUpperCase()}`;
+
+  let candidate = base;
+  let suffix = 2;
+  while (existingSkus.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix++;
+  }
+  existingSkus.add(candidate);
+  return candidate;
+}
 
 // ─── Description HTML builder ──────────────────────────────────────────────────
 // Composes a Shopify-ready HTML description from Bandcamp metadata.
@@ -928,10 +992,43 @@ export const bandcampSyncTask = task({
 
         // ── Unmatched items — auto-create DRAFT products ───────────────────────
 
-        for (const merchItem of unmatched) {
-          if (!merchItem.sku) continue;
+        // Collect existing SKUs for collision detection during auto-generation
+        const { data: allExistingSkus } = await supabase
+          .from("warehouse_product_variants")
+          .select("sku")
+          .eq("workspace_id", workspaceId);
+        const existingSkuSet = new Set((allExistingSkus ?? []).map(v => v.sku));
 
+        // Read workspace settings for SKU push flag
+        const { data: wsSettings } = await supabase
+          .from("workspaces")
+          .select("bandcamp_scraper_settings")
+          .eq("id", workspaceId)
+          .single();
+        const enableSkuPush = (wsSettings?.bandcamp_scraper_settings as Record<string, unknown>)?.enable_sku_push === true;
+
+        for (const merchItem of unmatched) {
           const artistName = band?.name ?? connection.band_name ?? "Unknown Artist";
+
+          // Auto-generate SKU if missing
+          let effectiveSku = merchItem.sku;
+          let skuGenerated = false;
+          if (!effectiveSku) {
+            effectiveSku = generateSku(merchItem, artistName, existingSkuSet);
+            skuGenerated = true;
+            logger.info("Auto-generated SKU", { sku: effectiveSku, title: merchItem.title, packageId: merchItem.package_id });
+
+            // Push generated SKU to Bandcamp so both sides match
+            if (enableSkuPush) {
+              try {
+                await updateSku([{ id: merchItem.package_id, id_type: "p", sku: effectiveSku }], accessToken);
+                logger.info("Pushed generated SKU to Bandcamp", { sku: effectiveSku, packageId: merchItem.package_id });
+              } catch (err) {
+                logger.warn("Failed to push SKU to Bandcamp", { sku: effectiveSku, error: String(err) });
+              }
+            }
+          }
+
           const title = assembleBandcampTitle(artistName, merchItem.album_title, merchItem.title);
           const tags: string[] = [];
           if (merchItem.new_date && new Date(merchItem.new_date) > new Date()) {
@@ -942,11 +1039,11 @@ export const bandcampSyncTask = task({
             .from("warehouse_product_variants")
             .select("id")
             .eq("workspace_id", workspaceId)
-            .eq("sku", merchItem.sku)
+            .eq("sku", effectiveSku)
             .maybeSingle();
 
           if (existingVariant) {
-            logger.info("SKU already exists, skipping creation", { sku: merchItem.sku });
+            logger.info("SKU already exists, skipping creation", { sku: effectiveSku });
             continue;
           }
 
@@ -962,7 +1059,7 @@ export const bandcampSyncTask = task({
               variants: [
                 {
                   optionValues: [{ optionName: "Title", name: "Default Title" }],
-                  sku: merchItem.sku,
+                  sku: effectiveSku,
                   inventoryPolicy: "DENY",
                 },
               ],
@@ -977,10 +1074,10 @@ export const bandcampSyncTask = task({
                   }
                 : {}),
             });
-            logger.info("Created Shopify DRAFT product", { sku: merchItem.sku, shopifyProductId });
+            logger.info("Created Shopify DRAFT product", { sku: effectiveSku, shopifyProductId });
           } catch (shopifyError) {
             logger.error("Failed to create Shopify product, continuing with warehouse-only", {
-              sku: merchItem.sku,
+              sku: effectiveSku,
               error: String(shopifyError),
             });
             await supabase.from("warehouse_review_queue").upsert(
@@ -990,15 +1087,15 @@ export const bandcampSyncTask = task({
                 category: "shopify_product_create",
                 severity: "medium" as const,
                 title: `Shopify product creation failed: ${title}`,
-                description: `SKU ${merchItem.sku} was created in the warehouse but productSetCreate failed.`,
+                description: `SKU ${effectiveSku} was created in the warehouse but productSetCreate failed.`,
                 metadata: {
-                  sku: merchItem.sku,
+                  sku: effectiveSku,
                   bandcamp_item_id: String(merchItem.package_id),
                   band_id: String(connection.band_id),
                   error: String(shopifyError),
                 },
                 status: "open" as const,
-                group_key: `shopify_create_failed_${merchItem.sku}`,
+                group_key: `shopify_create_failed_${effectiveSku}`,
                 occurrence_count: 1,
               },
               { onConflict: "group_key", ignoreDuplicates: false },
@@ -1023,7 +1120,7 @@ export const bandcampSyncTask = task({
 
           if (productError || !product) {
             logger.error("Failed to create product", {
-              sku: merchItem.sku,
+              sku: effectiveSku,
               error: productError?.message,
             });
             itemsFailed++;
@@ -1046,11 +1143,11 @@ export const bandcampSyncTask = task({
             .insert({
               product_id:   product.id,
               workspace_id: workspaceId,
-              sku:          merchItem.sku,
+              sku:          effectiveSku,
               title:        merchItem.title,
               price:        bcPrice,
               cost:         bcCost,
-              bandcamp_url: null,
+              bandcamp_url: merchItem.url ?? null,
               street_date:  merchItem.new_date,
               is_preorder:  tags.includes("Pre-Orders"),
             })
@@ -1063,7 +1160,7 @@ export const bandcampSyncTask = task({
               {
                 variant_id:   newVariant.id,
                 workspace_id: workspaceId,
-                sku:          merchItem.sku,
+                sku:          effectiveSku,
                 available:    0,
                 committed:    0,
                 incoming:     0,
@@ -1077,7 +1174,7 @@ export const bandcampSyncTask = task({
             if (initialQty > 0) {
               await recordInventoryChange({
                 workspaceId,
-                sku: merchItem.sku,
+                sku: effectiveSku,
                 delta: initialQty,
                 source: "backfill",
                 correlationId: `bandcamp-seed:${connection.band_id}:${merchItem.package_id}`,
@@ -1089,8 +1186,9 @@ export const bandcampSyncTask = task({
             }
 
             logger.info("Seeded initial inventory", {
-              sku: merchItem.sku,
+              sku: effectiveSku,
               available: initialQty,
+              skuGenerated,
             });
 
             const newOptionSkus = (merchItem.options ?? []).map(o => o.sku).filter((s): s is string => !!s);
