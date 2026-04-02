@@ -149,6 +149,48 @@ export async function POST(req: Request): Promise<Response> {
     // Unknown Bandcamp email type — fall through to existing strategies
   }
 
+  // Non-Bandcamp emails: only process if they match an existing support conversation
+  // or a known support email mapping. Otherwise silently dismiss to avoid flooding
+  // the review queue with unrelated emails forwarded from the fulfillment inbox.
+  if (!isBandcamp) {
+    const relatedIds = [email.inReplyTo, ...email.references].filter(
+      (value): value is string => Boolean(value),
+    );
+
+    // Check for existing conversation thread
+    if (relatedIds.length > 0) {
+      const { data: existingMsg } = await supabase
+        .from("support_messages")
+        .select("conversation_id")
+        .in("email_message_id", relatedIds)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingMsg) {
+        await appendMessageToConversation(supabase, existingMsg.conversation_id, email);
+        return NextResponse.json({ ok: true, status: "support_thread_reply" });
+      }
+    }
+
+    // Check for known support email mapping
+    const senderAddr = extractEmailAddress(email.from);
+    const { data: mapping } = await supabase
+      .from("support_email_mappings")
+      .select("org_id")
+      .eq("email_address", senderAddr)
+      .eq("is_active", true)
+      .single();
+
+    if (mapping) {
+      await createConversationFromEmail(supabase, mapping.org_id, email);
+      return NextResponse.json({ ok: true, status: "support_new_conversation" });
+    }
+
+    // Unknown non-Bandcamp email — silently dismiss (no review queue noise)
+    await supabase.from("webhook_events").update({ status: "dismissed" }).eq("id", dedupRow.id);
+    return NextResponse.json({ ok: true, status: "non_bandcamp_dismissed" });
+  }
+
   const relatedMessageIdCandidates = [email.inReplyTo, ...email.references].filter(
     (value): value is string => Boolean(value),
   );
