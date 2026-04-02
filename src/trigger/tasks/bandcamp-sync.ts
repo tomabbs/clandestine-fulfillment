@@ -614,73 +614,33 @@ async function triggerScrapeIfNeeded(
   supabase: ReturnType<typeof createServiceRoleClient>,
   variantId: string,
   workspaceId: string,
-  band: BandcampBand | undefined,
-  connection: { band_url?: string | null },
+  _band: BandcampBand | undefined,
+  _connection: { band_url?: string | null },
   merchItem: { url?: string | null; album_title?: string | null },
 ) {
-  // Idempotency: trigger if (a) not yet scraped, OR (b) scraped before about/credits/upc/tracks
-  // were added (has art_url but no about text yet — backfill window).
-  // TODO: once backfill confirmed complete (COUNT(*) WHERE bandcamp_art_url IS NOT NULL
-  //   AND bandcamp_about IS NULL = 0), simplify to:
-  //   !mapping.bandcamp_type_name || !mapping.bandcamp_about
+  // Scraper is enrichment-only: about, credits, tracks, package photos.
+  // URL comes from the API (merchItem.url), never constructed.
   const { data: mapping } = await supabase
     .from("bandcamp_product_mappings")
-    .select("id, bandcamp_url, bandcamp_type_name, bandcamp_art_url, bandcamp_about")
+    .select("id, bandcamp_url, bandcamp_about")
     .eq("variant_id", variantId)
     .single();
 
   if (!mapping) return;
 
-  const needsScrape =
-    !mapping.bandcamp_url ||
-    !mapping.bandcamp_type_name ||
-    (mapping.bandcamp_art_url && !mapping.bandcamp_about);
-  if (!needsScrape) return;
+  // Only scrape if missing enrichment data (about/credits/tracks)
+  if (mapping.bandcamp_about) return;
 
-  const bandSubdomain =
-    band?.subdomain ??
-    (connection.band_url ?? "").replace("https://", "").split(".")[0] ??
-    null;
-
-  const apiUrl = (merchItem.url as string | null | undefined) ?? null;
-  const existingUrl = mapping.bandcamp_url ?? null;
-  const constructedUrl =
-    bandSubdomain && merchItem.album_title
-      ? buildBandcampAlbumUrl(bandSubdomain, merchItem.album_title)
-      : null;
-
-  const scrapeUrl = apiUrl ?? existingUrl ?? constructedUrl;
-  if (!scrapeUrl) {
-    logger.warn("No scrape URL available for variant", {
-      variantId,
-      album_title: merchItem.album_title,
-      bandSubdomain,
-    });
-    return;
-  }
-
-  const urlSource: "orders_api" | "constructed" = apiUrl ? "orders_api" : "constructed";
-  const urlIsConstructed = !apiUrl && !existingUrl;
-
-  // Record url source before triggering (so review queue 404 items have context)
-  if (!existingUrl) {
-    await supabase
-      .from("bandcamp_product_mappings")
-      .update({
-        bandcamp_url:        scrapeUrl,
-        bandcamp_url_source: urlSource,
-        updated_at:          new Date().toISOString(),
-      })
-      .eq("id", mapping.id);
-  }
+  const scrapeUrl = (merchItem.url as string | null) ?? mapping.bandcamp_url;
+  if (!scrapeUrl) return;
 
   await bandcampScrapePageTask.trigger({
     url: scrapeUrl,
     mappingId: mapping.id,
     workspaceId,
-    urlIsConstructed,
+    urlIsConstructed: false,
     albumTitle: merchItem.album_title ?? undefined,
-    urlSource,
+    urlSource: "orders_api",
   });
 }
 
