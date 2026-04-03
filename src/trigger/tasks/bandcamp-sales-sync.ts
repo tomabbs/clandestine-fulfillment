@@ -11,6 +11,7 @@ import { salesReport, refreshBandcampToken } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
+import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
 
 export const bandcampSalesSyncSchedule = schedules.task({
   id: "bandcamp-sales-sync",
@@ -118,6 +119,11 @@ export const bandcampSalesSyncSchedule = schedules.task({
       } catch (err) {
         console.error(`[bandcamp-sales-sync] Token refresh failed for workspace ${workspaceId}:`, err instanceof Error ? err.message : err);
       }
+    }
+
+    // Cross-reference album URLs from new sales to mappings
+    for (const workspaceId of workspaceIds) {
+      await crossReferenceAlbumUrls(supabase, workspaceId);
     }
 
     await supabase.from("channel_sync_log").insert({

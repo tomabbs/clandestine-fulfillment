@@ -14,6 +14,7 @@ import {
   type SalesReportItem,
 } from "@/lib/clients/bandcamp";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
 
 async function pollForReport(token: string, accessToken: string, maxAttempts = 60): Promise<string> {
   for (let i = 0; i < maxAttempts; i++) {
@@ -203,6 +204,12 @@ export const bandcampSalesBackfillTask = task({
               .then(() => {}, () => {});
           }
         }
+      }
+
+      // Cross-reference album URLs from digital sales to physical merch mappings
+      const urlsMatched = await crossReferenceAlbumUrls(supabase, workspaceId);
+      if (urlsMatched > 0) {
+        console.log("[bandcamp-sales-backfill] Cross-referenced album URLs:", urlsMatched);
       }
 
       // Update state

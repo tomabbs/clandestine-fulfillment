@@ -24,6 +24,7 @@ import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
+import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
 import { preorderSetupTask } from "@/trigger/tasks/preorder-setup";
 
 // ─── SKU generation for items without one ─────────────────────────────────────
@@ -1297,6 +1298,12 @@ export const bandcampSyncTask = task({
       }
 
       logger.info("Bandcamp sync complete", { itemsProcessed, itemsFailed, totalMerchItems, unmatchedMerchCount });
+
+      // Cross-reference album URLs from digital sales to physical merch mappings
+      const urlsMatched = await crossReferenceAlbumUrls(supabase, workspaceId);
+      if (urlsMatched > 0) {
+        logger.info("Cross-referenced album URLs from sales", { urlsMatched });
+      }
 
       // ── Sweep: trigger scraper for ALL mappings that need it ─────────────────
       // This covers variants that are out of stock / removed from active Bandcamp
