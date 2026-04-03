@@ -546,7 +546,60 @@ export async function getBandcampSalesOverview(workspaceId: string) {
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", workspaceId);
 
-  return { connections: connectionStats, grandTotalSales: grandTotal ?? 0 };
+  // Per-item breakdown: group by item_name + artist + item_type + package
+  const { data: allSales } = await supabase
+    .from("bandcamp_sales")
+    .select("item_name, artist, item_type, package, item_url, sku, catalog_number, net_amount, quantity, connection_id, currency")
+    .eq("workspace_id", workspaceId);
+
+  const itemMap = new Map<string, {
+    itemName: string;
+    artist: string;
+    itemType: string;
+    package: string | null;
+    itemUrl: string | null;
+    sku: string | null;
+    catalogNumber: string | null;
+    currency: string;
+    connectionId: string;
+    totalUnits: number;
+    totalRevenue: number;
+    saleCount: number;
+  }>();
+
+  for (const sale of allSales ?? []) {
+    const key = `${sale.connection_id}|${sale.item_name}|${sale.artist}|${sale.item_type}|${sale.package ?? ""}`;
+    const existing = itemMap.get(key);
+    if (existing) {
+      existing.totalUnits += sale.quantity ?? 0;
+      existing.totalRevenue += Number(sale.net_amount) || 0;
+      existing.saleCount++;
+      if (!existing.itemUrl && sale.item_url) existing.itemUrl = sale.item_url;
+      if (!existing.sku && sale.sku) existing.sku = sale.sku;
+      if (!existing.catalogNumber && sale.catalog_number) existing.catalogNumber = sale.catalog_number;
+    } else {
+      itemMap.set(key, {
+        itemName: sale.item_name ?? "Unknown",
+        artist: sale.artist ?? "Unknown",
+        itemType: sale.item_type ?? "unknown",
+        package: sale.package ?? null,
+        itemUrl: sale.item_url ?? null,
+        sku: sale.sku ?? null,
+        catalogNumber: sale.catalog_number ?? null,
+        currency: sale.currency ?? "USD",
+        connectionId: sale.connection_id,
+        totalUnits: sale.quantity ?? 0,
+        totalRevenue: Number(sale.net_amount) || 0,
+        saleCount: 1,
+      });
+    }
+  }
+
+  const items = Array.from(itemMap.values())
+    .map(i => ({ ...i, totalRevenue: Math.round(i.totalRevenue * 100) / 100 }))
+    .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+  return { connections: connectionStats, grandTotalSales: grandTotal ?? 0, items };
 }
 
 export async function getBandcampFullItemData(variantId: string) {

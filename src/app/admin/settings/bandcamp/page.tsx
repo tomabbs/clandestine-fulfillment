@@ -325,6 +325,9 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
 // ─── Sales History Tab ────────────────────────────────────────────────────────
 
 function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
+  const [connFilter, setConnFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+
   const { data, isLoading, refetch, isFetching } = useAppQuery({
     queryKey: queryKeys.bandcamp.salesOverview(workspaceId),
     queryFn: () => getBandcampSalesOverview(workspaceId),
@@ -340,71 +343,124 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
     );
   }
 
+  const connLookup = new Map(data.connections.map(c => [c.connectionId, c.bandName]));
+
+  const filteredItems = (data.items ?? []).filter(item => {
+    if (connFilter !== "all" && item.connectionId !== connFilter) return false;
+    if (typeFilter !== "all" && item.itemType !== typeFilter) return false;
+    return true;
+  });
+
+  const filteredRevenue = filteredItems.reduce((s, i) => s + i.totalRevenue, 0);
+  const filteredUnits = filteredItems.reduce((s, i) => s + i.totalUnits, 0);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            All-time sales data from Bandcamp Sales Report API.
-            {data.grandTotalSales > 0 ? ` ${data.grandTotalSales.toLocaleString()} transactions loaded.` : " No sales data yet — run a backfill."}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {data.grandTotalSales.toLocaleString()} transactions loaded.
+          {" "}{(data.items ?? []).length} unique items.
+        </p>
         <Button variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
           <RefreshCw className={`h-3 w-3 mr-1 ${isFetching ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Connection</TableHead>
-            <TableHead className="text-right">Sales</TableHead>
-            <TableHead className="text-right">Revenue</TableHead>
-            <TableHead className="text-right">Refunds</TableHead>
-            <TableHead>Backfill</TableHead>
-            <TableHead>Last Date</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.connections.map((conn) => (
-            <TableRow key={conn.connectionId}>
-              <TableCell className="font-medium">
-                {conn.bandName}
-                {conn.bandUrl && (
-                  <a href={conn.bandUrl} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-600 text-xs hover:underline">
-                    (link)
-                  </a>
-                )}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{conn.totalSales.toLocaleString()}</TableCell>
-              <TableCell className="text-right tabular-nums">
-                {conn.totalRevenue > 0 ? `$${conn.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{conn.refundCount || "—"}</TableCell>
-              <TableCell>
+      {/* Connection summary + backfill status */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Backfill Status</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            {data.connections.map(conn => (
+              <div key={conn.connectionId} className="flex items-center gap-2">
                 <Badge variant={
                   conn.backfillStatus === "completed" ? "default" :
                   conn.backfillStatus === "running" ? "secondary" :
                   conn.backfillStatus === "failed" ? "destructive" : "outline"
-                }>
-                  {conn.backfillStatus}
+                } className="text-xs">{conn.backfillStatus}</Badge>
+                <span className="truncate text-xs">{conn.bandName}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Filters */}
+      <div className="flex gap-3 items-center">
+        <select
+          value={connFilter}
+          onChange={e => setConnFilter(e.target.value)}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
+          <option value="all">All Connections</option>
+          {data.connections.map(c => (
+            <option key={c.connectionId} value={c.connectionId}>{c.bandName}</option>
+          ))}
+        </select>
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
+          <option value="all">All Types</option>
+          <option value="album">Digital Albums</option>
+          <option value="track">Tracks</option>
+          <option value="package">Physical Merch</option>
+          <option value="bundle">Bundles</option>
+        </select>
+        <div className="ml-auto text-sm text-muted-foreground tabular-nums">
+          {filteredItems.length} items · {filteredUnits.toLocaleString()} units · ${filteredRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        </div>
+      </div>
+
+      {/* Items table */}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Title</TableHead>
+            <TableHead>Artist</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Format</TableHead>
+            <TableHead className="text-right">Units</TableHead>
+            <TableHead className="text-right">Revenue</TableHead>
+            <TableHead>SKU</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredItems.slice(0, 200).map((item, i) => (
+            <TableRow key={`${item.connectionId}-${item.itemName}-${item.itemType}-${i}`}>
+              <TableCell className="font-medium max-w-[250px] truncate">
+                {item.itemUrl ? (
+                  <a href={item.itemUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                    {item.itemName}
+                  </a>
+                ) : item.itemName}
+              </TableCell>
+              <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">{item.artist}</TableCell>
+              <TableCell>
+                <Badge variant={item.itemType === "album" ? "default" : item.itemType === "package" ? "secondary" : "outline"} className="text-xs">
+                  {item.itemType}
                 </Badge>
-                {conn.backfillError && (
-                  <p className="text-xs text-red-500 mt-1 truncate max-w-[200px]">{conn.backfillError}</p>
-                )}
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {conn.backfillLastDate ? new Date(conn.backfillLastDate).toLocaleDateString() : "—"}
+              <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">{item.package ?? "—"}</TableCell>
+              <TableCell className="text-right tabular-nums">{item.totalUnits.toLocaleString()}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                ${item.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">{item.sku ?? "—"}</TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
 
-      {data.connections.length === 0 && (
+      {filteredItems.length > 200 && (
+        <p className="text-xs text-muted-foreground text-center">Showing first 200 of {filteredItems.length} items</p>
+      )}
+
+      {filteredItems.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No connections found. Add Bandcamp accounts on the Accounts tab first.
+            No sales data {connFilter !== "all" || typeFilter !== "all" ? "for this filter" : "yet — backfill is running"}.
           </CardContent>
         </Card>
       )}
