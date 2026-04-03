@@ -96,9 +96,9 @@ export const bandcampSalesSyncSchedule = schedules.task({
 
             if (!error) totalInserted += items.length;
 
-            // Backfill catalog_number/upc to mappings
+            // Backfill catalog_number/upc/url to mappings
             for (const item of items) {
-              if (!item.sku || (!item.catalog_number && !item.upc)) continue;
+              if (!item.sku || (!item.catalog_number && !item.upc && !item.item_url)) continue;
               const { data: variants } = await supabase
                 .from("warehouse_product_variants")
                 .select("id").eq("workspace_id", workspaceId).eq("sku", item.sku).limit(1);
@@ -106,6 +106,7 @@ export const bandcampSalesSyncSchedule = schedules.task({
               const updateData: Record<string, unknown> = {};
               if (item.catalog_number) updateData.bandcamp_catalog_number = item.catalog_number;
               if (item.upc) updateData.bandcamp_upc = item.upc;
+              if (item.item_url) { updateData.bandcamp_url = item.item_url; updateData.bandcamp_url_source = "sales_api"; }
               await supabase.from("bandcamp_product_mappings")
                 .update(updateData).eq("variant_id", variants[0].id)
                 .then(() => {}, () => {});

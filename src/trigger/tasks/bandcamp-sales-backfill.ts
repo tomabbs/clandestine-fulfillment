@@ -173,12 +173,13 @@ export const bandcampSalesBackfillTask = task({
 
       const inserted = await insertSalesRows(supabase, workspaceId, connectionId, items);
 
-      // Backfill catalog_number + upc to mappings where we find matching SKUs
+      // Backfill catalog_number, upc, and item_url to mappings where we find matching SKUs
       for (const item of items) {
-        if (item.sku && (item.catalog_number || item.upc)) {
+        if (item.sku && (item.catalog_number || item.upc || item.item_url)) {
           const updateData: Record<string, unknown> = {};
           if (item.catalog_number) updateData.bandcamp_catalog_number = item.catalog_number;
           if (item.upc) updateData.bandcamp_upc = item.upc;
+          if (item.item_url) { updateData.bandcamp_url = item.item_url; updateData.bandcamp_url_source = "sales_api"; }
 
           await supabase.from("bandcamp_product_mappings")
             .update(updateData)
