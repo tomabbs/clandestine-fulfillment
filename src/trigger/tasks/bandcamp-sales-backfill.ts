@@ -110,17 +110,18 @@ async function insertSalesRows(
 export const bandcampSalesBackfillTask = task({
   id: "bandcamp-sales-backfill",
   maxDuration: 300,
-  run: async (payload: { connectionId: string; workspaceId: string }) => {
+  run: async (payload: { connectionId: string }) => {
     const supabase = createServiceRoleClient();
-    const { connectionId, workspaceId } = payload;
+    const { connectionId } = payload;
 
     const { data: conn } = await supabase
       .from("bandcamp_connections")
-      .select("band_id, band_name")
+      .select("band_id, band_name, workspace_id")
       .eq("id", connectionId)
       .single();
 
     if (!conn) throw new Error(`Connection ${connectionId} not found`);
+    const workspaceId = conn.workspace_id;
 
     // Initialize or read backfill state
     await supabase.from("bandcamp_sales_backfill_state").upsert(
@@ -215,7 +216,7 @@ export const bandcampSalesBackfillTask = task({
 
       // Self-trigger for next chunk if more to process
       if (effectiveEnd < now) {
-        await bandcampSalesBackfillTask.trigger({ connectionId, workspaceId });
+        await bandcampSalesBackfillTask.trigger({ connectionId });
       } else {
         await supabase.from("bandcamp_sales_backfill_state").update({
           status: "completed",
