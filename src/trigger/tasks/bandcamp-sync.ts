@@ -841,10 +841,21 @@ export const bandcampSyncTask = task({
             raw_api_data:                merchItem,
           };
 
-          await supabase.from("bandcamp_product_mappings").upsert(
+          const { error: upsertError } = await supabase.from("bandcamp_product_mappings").upsert(
             upsertPayload,
             { onConflict: "variant_id" },
           );
+
+          if (upsertError) {
+            logger.error("Mapping upsert failed", {
+              variantId,
+              error: upsertError.message,
+              url: upsertPayload.bandcamp_url,
+              subdomain: upsertPayload.bandcamp_subdomain,
+            });
+            itemsFailed++;
+            continue;
+          }
 
           // Read current mapping authority and variant state for conditional updates
           const { data: mapping } = await supabase

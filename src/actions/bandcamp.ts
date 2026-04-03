@@ -560,16 +560,7 @@ export async function getBandcampFullItemData(variantId: string) {
 
   if (!mapping) return null;
 
-  // Sales summary for this item
-  const { data: salesRows } = await supabase
-    .from("bandcamp_sales")
-    .select("sale_date, quantity, net_amount, currency, payment_state, item_name, package, catalog_number, upc")
-    .eq("workspace_id", mapping.workspace_id)
-    .eq("sku", mapping.bandcamp_item_id ? undefined : undefined)
-    .order("sale_date", { ascending: false })
-    .limit(50);
-
-  // Try matching by SKU from the variant
+  // Get variant SKU for sales lookup
   const { data: variant } = await supabase
     .from("warehouse_product_variants")
     .select("sku")

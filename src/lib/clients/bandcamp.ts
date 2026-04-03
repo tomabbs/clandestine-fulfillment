@@ -453,9 +453,7 @@ export function matchSkuToVariants(
     }
 
     if (!optionMatched) {
-      if (item.sku || item.options?.some(o => o.sku)) {
-        unmatched.push(item);
-      }
+      unmatched.push(item);
     }
   }
 

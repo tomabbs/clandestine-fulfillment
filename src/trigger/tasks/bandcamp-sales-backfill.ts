@@ -14,7 +14,6 @@ import {
   type SalesReportItem,
 } from "@/lib/clients/bandcamp";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
 async function pollForReport(token: string, accessToken: string, maxAttempts = 60): Promise<string> {
   for (let i = 0; i < maxAttempts; i++) {
@@ -110,7 +109,6 @@ async function insertSalesRows(
 
 export const bandcampSalesBackfillTask = task({
   id: "bandcamp-sales-backfill",
-  queue: bandcampQueue,
   maxDuration: 300,
   run: async (payload: { connectionId: string; workspaceId: string }) => {
     const supabase = createServiceRoleClient();
