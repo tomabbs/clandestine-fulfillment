@@ -3,6 +3,9 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   CheckCircle2,
   ExternalLink,
@@ -15,7 +18,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { getUserContext } from "@/actions/auth";
 import {
   createBandcampConnection,
@@ -43,6 +46,7 @@ import {
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 
 function HealthBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   if (!lastSyncedAt) {
@@ -324,9 +328,16 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
 
 // ─── Sales History Tab ────────────────────────────────────────────────────────
 
+type SalesSortField = "itemName" | "artist" | "itemType" | "package" | "totalUnits" | "totalRevenue" | "sku";
+type SortDir = "asc" | "desc";
+
 function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
   const [connFilter, setConnFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [sortField, setSortField] = useState<SalesSortField>("totalRevenue");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(25);
 
   const { data, isLoading, refetch, isFetching } = useAppQuery({
     queryKey: queryKeys.bandcamp.salesOverview(workspaceId),
@@ -334,6 +345,45 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
     tier: CACHE_TIERS.SESSION,
     enabled: !!workspaceId,
   });
+
+  function toggleSort(field: SalesSortField) {
+    if (sortField === field) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir(field === "itemName" || field === "artist" ? "asc" : "desc");
+    }
+    setPage(1);
+  }
+
+  function SortIcon({ field }: { field: SalesSortField }) {
+    if (sortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 inline opacity-40" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="ml-1 h-3 w-3 inline" />
+      : <ArrowDown className="ml-1 h-3 w-3 inline" />;
+  }
+
+  const sortedFiltered = useMemo(() => {
+    const items = (data?.items ?? []).filter(item => {
+      if (connFilter !== "all" && item.connectionId !== connFilter) return false;
+      if (typeFilter !== "all" && item.itemType !== typeFilter) return false;
+      return true;
+    });
+
+    const dir = sortDir === "asc" ? 1 : -1;
+    return items.sort((a, b) => {
+      switch (sortField) {
+        case "itemName": return dir * (a.itemName ?? "").localeCompare(b.itemName ?? "");
+        case "artist": return dir * (a.artist ?? "").localeCompare(b.artist ?? "");
+        case "itemType": return dir * (a.itemType ?? "").localeCompare(b.itemType ?? "");
+        case "package": return dir * (a.package ?? "").localeCompare(b.package ?? "");
+        case "totalUnits": return dir * (a.totalUnits - b.totalUnits);
+        case "totalRevenue": return dir * (a.totalRevenue - b.totalRevenue);
+        case "sku": return dir * (a.sku ?? "").localeCompare(b.sku ?? "");
+        default: return 0;
+      }
+    });
+  }, [data?.items, connFilter, typeFilter, sortField, sortDir]);
 
   if (isLoading || !data) {
     return (
@@ -343,16 +393,9 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
     );
   }
 
-  const connLookup = new Map(data.connections.map(c => [c.connectionId, c.bandName]));
-
-  const filteredItems = (data.items ?? []).filter(item => {
-    if (connFilter !== "all" && item.connectionId !== connFilter) return false;
-    if (typeFilter !== "all" && item.itemType !== typeFilter) return false;
-    return true;
-  });
-
-  const filteredRevenue = filteredItems.reduce((s, i) => s + i.totalRevenue, 0);
-  const filteredUnits = filteredItems.reduce((s, i) => s + i.totalUnits, 0);
+  const totalRevenue = sortedFiltered.reduce((s, i) => s + i.totalRevenue, 0);
+  const totalUnits = sortedFiltered.reduce((s, i) => s + i.totalUnits, 0);
+  const pageItems = sortedFiltered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className="space-y-6">
@@ -366,7 +409,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         </Button>
       </div>
 
-      {/* Connection summary + backfill status */}
+      {/* Backfill status */}
       <Card>
         <CardHeader><CardTitle className="text-base">Backfill Status</CardTitle></CardHeader>
         <CardContent>
@@ -385,23 +428,13 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         </CardContent>
       </Card>
 
-      {/* Filters */}
-      <div className="flex gap-3 items-center">
-        <select
-          value={connFilter}
-          onChange={e => setConnFilter(e.target.value)}
-          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
-        >
+      {/* Filters + summary */}
+      <div className="flex gap-3 items-center flex-wrap">
+        <select value={connFilter} onChange={e => { setConnFilter(e.target.value); setPage(1); }} className="border-input bg-background h-8 rounded-md border px-3 text-sm">
           <option value="all">All Connections</option>
-          {data.connections.map(c => (
-            <option key={c.connectionId} value={c.connectionId}>{c.bandName}</option>
-          ))}
+          {data.connections.map(c => (<option key={c.connectionId} value={c.connectionId}>{c.bandName}</option>))}
         </select>
-        <select
-          value={typeFilter}
-          onChange={e => setTypeFilter(e.target.value)}
-          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
-        >
+        <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(1); }} className="border-input bg-background h-8 rounded-md border px-3 text-sm">
           <option value="all">All Types</option>
           <option value="album">Digital Albums</option>
           <option value="track">Tracks</option>
@@ -409,55 +442,54 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
           <option value="bundle">Bundles</option>
         </select>
         <div className="ml-auto text-sm text-muted-foreground tabular-nums">
-          {filteredItems.length} items · {filteredUnits.toLocaleString()} units · ${filteredRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          {sortedFiltered.length} items · {totalUnits.toLocaleString()} units · ${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
         </div>
       </div>
 
-      {/* Items table */}
+      {/* Items table with sortable headers */}
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Title</TableHead>
-            <TableHead>Artist</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Format</TableHead>
-            <TableHead className="text-right">Units</TableHead>
-            <TableHead className="text-right">Revenue</TableHead>
-            <TableHead>SKU</TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("itemName")}>Title <SortIcon field="itemName" /></TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("artist")}>Artist <SortIcon field="artist" /></TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("itemType")}>Type <SortIcon field="itemType" /></TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("package")}>Format <SortIcon field="package" /></TableHead>
+            <TableHead className="cursor-pointer select-none text-right" onClick={() => toggleSort("totalUnits")}>Units <SortIcon field="totalUnits" /></TableHead>
+            <TableHead className="cursor-pointer select-none text-right" onClick={() => toggleSort("totalRevenue")}>Revenue <SortIcon field="totalRevenue" /></TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("sku")}>SKU <SortIcon field="sku" /></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filteredItems.slice(0, 200).map((item, i) => (
+          {pageItems.map((item, i) => (
             <TableRow key={`${item.connectionId}-${item.itemName}-${item.itemType}-${i}`}>
               <TableCell className="font-medium max-w-[250px] truncate">
                 {item.itemUrl ? (
-                  <a href={item.itemUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                    {item.itemName}
-                  </a>
+                  <a href={item.itemUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{item.itemName}</a>
                 ) : item.itemName}
               </TableCell>
               <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">{item.artist}</TableCell>
               <TableCell>
-                <Badge variant={item.itemType === "album" ? "default" : item.itemType === "package" ? "secondary" : "outline"} className="text-xs">
-                  {item.itemType}
-                </Badge>
+                <Badge variant={item.itemType === "album" ? "default" : item.itemType === "package" ? "secondary" : "outline"} className="text-xs">{item.itemType}</Badge>
               </TableCell>
               <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">{item.package ?? "—"}</TableCell>
               <TableCell className="text-right tabular-nums">{item.totalUnits.toLocaleString()}</TableCell>
-              <TableCell className="text-right tabular-nums">
-                ${item.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </TableCell>
+              <TableCell className="text-right tabular-nums">${item.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
               <TableCell className="font-mono text-xs text-muted-foreground">{item.sku ?? "—"}</TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
 
-      {filteredItems.length > 200 && (
-        <p className="text-xs text-muted-foreground text-center">Showing first 200 of {filteredItems.length} items</p>
-      )}
+      {/* Pagination */}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={sortedFiltered.length}
+        onPageChange={setPage}
+        onPageSizeChange={(s: PageSize) => { setPageSize(s); setPage(1); }}
+      />
 
-      {filteredItems.length === 0 && (
+      {sortedFiltered.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             No sales data {connFilter !== "all" || typeFilter !== "all" ? "for this filter" : "yet — backfill is running"}.
