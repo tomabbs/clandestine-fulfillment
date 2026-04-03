@@ -179,7 +179,7 @@ export const bandcampSalesBackfillTask = task({
           const updateData: Record<string, unknown> = {};
           if (item.catalog_number) updateData.bandcamp_catalog_number = item.catalog_number;
           if (item.upc) updateData.bandcamp_upc = item.upc;
-          if (item.item_url) { updateData.bandcamp_url = item.item_url; updateData.bandcamp_url_source = "sales_api"; }
+          if (item.item_url) { updateData.bandcamp_url = item.item_url; updateData.bandcamp_url_source = "orders_api"; }
 
           await supabase.from("bandcamp_product_mappings")
             .update(updateData)
