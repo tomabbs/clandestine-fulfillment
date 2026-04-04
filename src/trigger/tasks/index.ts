@@ -86,3 +86,6 @@ export {
 export { shipstationPollTask } from "./shipstation-poll";
 // ── Tag cleanup (admin settings) ──────────────────────────────────────────────
 export { tagCleanupBackfillTask } from "./tag-cleanup-backfill";
+
+// ── Bandcamp genre tag backfill (on-demand) ──────────────────────────────────
+export { bandcampTagBackfillTask } from "./bandcamp-tag-backfill";

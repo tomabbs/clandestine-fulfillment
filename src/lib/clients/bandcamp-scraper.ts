@@ -1,5 +1,6 @@
 import he from "he";
 import { z } from "zod";
+import { normalizeTag } from "@/lib/shared/genre-taxonomy";
 
 // ─── URL construction helper ──────────────────────────────────────────────────
 // Exported here so bandcamp-sync.ts imports it and unit tests validate the real
@@ -276,11 +277,13 @@ export interface ScrapedAlbumData {
   title: string | null;
   packages: ScrapedPackage[];
   metadataIncomplete: boolean; // true when release_date or packages absent
-  // Album metadata — from data-tralbum.current (confirmed 2026-03-31)
-  about: string | null; // album description / "about this album"
-  credits: string | null; // recording / production credits
-  upc: string | null; // album UPC/EAN code
-  tracks: ScrapedTrack[]; // tracklist from data-tralbum.trackinfo
+  about: string | null;
+  credits: string | null;
+  upc: string | null;
+  tracks: ScrapedTrack[];
+  tralbumId: number | null; // album ID from data-tralbum.id (NOT package_id)
+  tags: string[]; // display names from <a class="tag"> HTML elements
+  tagNorms: string[]; // normalized keys for matching (lowercase, hyphenated)
 }
 
 // ─── Image URL construction ───────────────────────────────────────────────────
@@ -429,6 +432,24 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
     }))
     .sort((a, b) => a.trackNum - b.trackNum);
 
+  // Extract tralbum_id from data-tralbum.id (the real album ID, NOT package_id)
+  const tralbumId = typeof (data as Record<string, unknown>).id === "number"
+    ? (data as Record<string, unknown>).id as number
+    : null;
+
+  // Extract genre tags from <a class="tag"> HTML elements (NOT from data-tralbum which lacks tags)
+  let tags: string[] = [];
+  let tagNorms: string[] = [];
+  try {
+    const tagMatches = html.match(/<a class="tag"[^>]*>([^<]+)<\/a>/g);
+    tags = (tagMatches ?? [])
+      .map((t) => t.replace(/<[^>]+>/g, "").trim())
+      .filter(Boolean);
+    tagNorms = Array.from(new Set(tags.map(normalizeTag).filter(Boolean)));
+  } catch {
+    // Tag extraction is non-critical; continue without tags
+  }
+
   return {
     releaseDate,
     isPreorder,
@@ -437,11 +458,13 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
     title: data.current?.title ?? null,
     packages,
     metadataIncomplete,
-    // Album metadata — trim whitespace; Bandcamp often has leading/trailing newlines
     about: data.current?.about?.trim() ?? null,
     credits: data.current?.credits?.trim() ?? null,
     upc: data.current?.upc?.trim() ?? null,
     tracks,
+    tralbumId,
+    tags,
+    tagNorms,
   };
 }
 
@@ -471,6 +494,9 @@ export function parseTralbumData(html: string): ScrapedAlbumData & {
     credits: null,
     upc: null,
     tracks: [],
+    tralbumId: null,
+    tags: [],
+    tagNorms: [],
   };
   return {
     ...base,

@@ -80,6 +80,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `catalog-stats-refresh-demand` | `src/trigger/tasks/catalog-stats-refresh.ts` | Staff admin UI (on-demand) |
 | `bandcamp-sales-backfill` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | Staff admin UI (on-demand); self-triggers in yearly chunks |
 | `bundle-component-fanout` | `src/trigger/tasks/bundle-component-fanout.ts` | `bandcamp-sale-poll` (when bundle variant sold) |
+| `bandcamp-tag-backfill` | `src/trigger/tasks/bandcamp-tag-backfill.ts` | Staff admin UI (on-demand); scrapes album HTML for `<a class="tag">` genre tags |
 
 ## Domain Touchpoints
 

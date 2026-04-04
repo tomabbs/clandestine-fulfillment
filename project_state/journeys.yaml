@@ -121,3 +121,20 @@ journeys:
       - crossReferenceAlbumUrls copies item_url from sales to mappings
       - daily sync keeps bandcamp_sales up to date
       - Sales History tab shows item-level breakdown
+      - Sales History has 3 genre filter dropdowns (BC, DSP, Sub)
+
+  - id: bandcamp_genre_intelligence
+    area: admin_settings
+    paths:
+      - src/lib/shared/genre-taxonomy.ts
+      - src/lib/clients/bandcamp-discover.ts
+      - src/lib/clients/bandcamp-scraper.ts
+      - src/trigger/tasks/bandcamp-tag-backfill.ts
+      - src/app/admin/settings/bandcamp/page.tsx
+    status: yellow
+    checks:
+      - tags extracted from HTML during scrape
+      - tag backfill populates bandcamp_tags and bandcamp_primary_genre
+      - 3-tier genre taxonomy matching (BC, DSP, Sub) with alias map
+      - Trending tab shows dig_deeper results with client-artist highlighting
+      - 3-minute server cache on trending queries

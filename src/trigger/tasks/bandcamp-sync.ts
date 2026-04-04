@@ -20,6 +20,7 @@ import {
   parseBandcampPage,
 } from "@/lib/clients/bandcamp-scraper";
 import { productSetCreate } from "@/lib/clients/shopify-client";
+import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
@@ -249,7 +250,8 @@ export const bandcampScrapePageTask = task({
         return { success: false, reason: "no_tralbum" };
       }
 
-      // Write scraped metadata — update mapping with all data-tralbum fields
+      // Write scraped metadata — update mapping with all data-tralbum fields + tags
+      const tagMatch = scraped.tagNorms.length > 0 ? matchTagToTaxonomy(scraped.tagNorms) : null;
       const { error: updateErr } = await supabase
         .from("bandcamp_product_mappings")
         .update({
@@ -266,6 +268,11 @@ export const bandcampScrapePageTask = task({
           bandcamp_about: scraped.about,
           bandcamp_credits: scraped.credits,
           bandcamp_tracks: scraped.tracks.length > 0 ? scraped.tracks : null,
+          bandcamp_tags: scraped.tags.length > 0 ? scraped.tags : null,
+          bandcamp_tag_norms: scraped.tagNorms.length > 0 ? scraped.tagNorms : null,
+          bandcamp_primary_genre: tagMatch?.bcGenre ?? null,
+          bandcamp_tralbum_id: scraped.tralbumId,
+          bandcamp_tags_fetched_at: scraped.tags.length > 0 ? new Date().toISOString() : null,
           last_synced_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })

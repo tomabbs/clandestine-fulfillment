@@ -81,6 +81,8 @@ domains:
       - credential and connection health
       - bandcamp scraper health dashboard (getBandcampScraperHealth)
       - bandcamp Sales Report API (backfill + daily sync)
+      - bandcamp genre tags (HTML scraping + taxonomy matching)
+      - bandcamp trending intelligence (dig_deeper API)
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
 

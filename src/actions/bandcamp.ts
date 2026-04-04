@@ -2,9 +2,11 @@
 
 import { z } from "zod/v4";
 import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
+import { fetchDigDeeper, bandcampArtUrl, type DigDeeperItem } from "@/lib/clients/bandcamp-discover";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
+import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 
 // Rule #48: No Server Action may call the Bandcamp API directly.
 // Force Sync MUST enqueue via Trigger task through the shared bandcampQueue.
@@ -709,6 +711,25 @@ export async function getBandcampSalesOverview(workspaceId: string) {
 
   const connNameMap = new Map((connections ?? []).map((c) => [c.id, c.band_name]));
 
+  // Load tag data from mappings (join via variant SKU)
+  const { data: tagMappings } = await supabase
+    .from("bandcamp_product_mappings")
+    .select("bandcamp_tags, bandcamp_tag_norms, bandcamp_primary_genre, warehouse_product_variants!inner(sku)")
+    .eq("workspace_id", workspaceId)
+    .not("bandcamp_tag_norms", "is", null);
+
+  const tagBySku = new Map<string, { tags: string[]; tagNorms: string[]; primaryGenre: string | null }>();
+  for (const m of tagMappings ?? []) {
+    const sku = (m.warehouse_product_variants as unknown as { sku: string })?.sku;
+    if (sku) {
+      tagBySku.set(sku, {
+        tags: (m.bandcamp_tags as string[]) ?? [],
+        tagNorms: (m.bandcamp_tag_norms as string[]) ?? [],
+        primaryGenre: m.bandcamp_primary_genre as string | null,
+      });
+    }
+  }
+
   const itemMap = new Map<
     string,
     {
@@ -725,6 +746,11 @@ export async function getBandcampSalesOverview(workspaceId: string) {
       totalUnits: number;
       totalRevenue: number;
       saleCount: number;
+      tags: string[];
+      tagNorms: string[];
+      bcGenre: string | null;
+      dspGenre: string | null;
+      subGenre: string | null;
     }
   >();
 
@@ -740,6 +766,9 @@ export async function getBandcampSalesOverview(workspaceId: string) {
       if (!existing.catalogNumber && sale.catalog_number)
         existing.catalogNumber = sale.catalog_number;
     } else {
+      const tagData = sale.sku ? tagBySku.get(sale.sku) : undefined;
+      const taxonomy = tagData?.tagNorms.length ? matchTagToTaxonomy(tagData.tagNorms) : { bcGenre: null, dspGenre: null, subGenre: null };
+
       itemMap.set(key, {
         itemName: sale.item_name ?? "Unknown",
         artist: sale.artist ?? "Unknown",
@@ -754,6 +783,11 @@ export async function getBandcampSalesOverview(workspaceId: string) {
         totalUnits: sale.quantity ?? 0,
         totalRevenue: Number(sale.net_amount) || 0,
         saleCount: 1,
+        tags: tagData?.tags ?? [],
+        tagNorms: tagData?.tagNorms ?? [],
+        bcGenre: tagData?.primaryGenre ?? taxonomy.bcGenre,
+        dspGenre: taxonomy.dspGenre,
+        subGenre: taxonomy.subGenre,
       });
     }
   }
@@ -762,7 +796,9 @@ export async function getBandcampSalesOverview(workspaceId: string) {
     .map((i) => ({ ...i, totalRevenue: Math.round(i.totalRevenue * 100) / 100 }))
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-  return { connections: connectionStats, grandTotalSales: grandTotal ?? 0, items };
+  const untaggedCount = items.filter((i) => !i.tagNorms.length).length;
+
+  return { connections: connectionStats, grandTotalSales: grandTotal ?? 0, items, untaggedCount };
 }
 
 export async function getBandcampFullItemData(variantId: string) {
@@ -810,4 +846,91 @@ export async function getBandcampFullItemData(variantId: string) {
   }
 
   return { mapping, salesByVariant };
+}
+
+// === Trending (dig_deeper) ===
+
+const trendingCache = new Map<string, { data: unknown; fetchedAt: number }>();
+const TRENDING_CACHE_TTL_MS = 180_000; // 3 minutes
+
+export async function getBandcampTrending(
+  workspaceId: string,
+  params: {
+    tags: string[];
+    sort?: "pop" | "new" | "rec" | "surprise" | "top";
+    format?: "all" | "digital" | "vinyl" | "cd" | "cassette";
+    page?: number;
+  },
+) {
+  const cacheKey = JSON.stringify(params);
+  const cached = trendingCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < TRENDING_CACHE_TTL_MS) {
+    return cached.data as { items: unknown[]; moreAvailable: boolean; formatSummary: { vinyl: number; cd: number; cassette: number; digital: number }; tagName?: string };
+  }
+
+  const result = await fetchDigDeeper(params.tags, {
+    sort: params.sort,
+    format: params.format,
+    page: params.page,
+  });
+
+  if (!result?.ok) {
+    if (cached) return cached.data;
+    return { items: [], moreAvailable: false, formatSummary: { vinyl: 0, cd: 0, cassette: 0, digital: 0 } };
+  }
+
+  const supabase = createServiceRoleClient();
+  const { data: connBands } = await supabase
+    .from("bandcamp_connections")
+    .select("band_id, band_name")
+    .eq("workspace_id", workspaceId)
+    .eq("is_active", true);
+
+  const clientBandIds = new Map((connBands ?? []).map((c) => [c.band_id, c.band_name]));
+
+  const items = result.items.map((item: DigDeeperItem) => {
+    const isClient = clientBandIds.has(item.band_id);
+    return {
+      title: item.title,
+      artist: item.artist,
+      bandName: item.band_name,
+      genre: item.genre,
+      url: item.tralbum_url,
+      bandUrl: item.band_url,
+      artUrl: bandcampArtUrl(item.art_id, 5),
+      artUrlSmall: bandcampArtUrl(item.art_id, 2),
+      featuredTrack: item.featured_track_title,
+      isPreorder: item.is_preorder ?? false,
+      comments: item.num_comments,
+      isClientArtist: isClient,
+      clientBandName: isClient ? clientBandIds.get(item.band_id) : null,
+      packages: (item.packages ?? []).map((p) => ({
+        typeStr: p.type_str,
+        isVinyl: p.is_vinyl,
+        price: p.price.amount / 100,
+        currency: p.price.currency,
+      })),
+      bandId: item.band_id,
+      subdomain: item.subdomain,
+    };
+  });
+
+  let vinyl = 0, cd = 0, cassette = 0, digital = 0;
+  for (const item of items) {
+    const types = new Set(item.packages.map((p: { typeStr: string }) => p.typeStr));
+    if (types.has("vinyl") || item.packages.some((p: { isVinyl: boolean }) => p.isVinyl)) vinyl++;
+    if (types.has("cd")) cd++;
+    if (types.has("cassette")) cassette++;
+    if (item.packages.length === 0) digital++;
+  }
+
+  const response = {
+    items,
+    moreAvailable: result.more_available,
+    formatSummary: { vinyl, cd, cassette, digital },
+    tagName: result.discover_spec?.tag_pretty_name ?? params.tags[0],
+  };
+
+  trendingCache.set(cacheKey, { data: response, fetchedAt: Date.now() });
+  return response;
 }
