@@ -8,6 +8,7 @@ import {
   ArrowUpDown,
   BarChart3,
   CheckCircle2,
+  Download,
   ExternalLink,
   Loader2,
   Music,
@@ -598,7 +599,7 @@ type SortDir = "asc" | "desc";
 function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
   const [connFilter, setConnFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [sortField, setSortField] = useState<SalesSortField>("totalRevenue");
+  const [sortField, setSortField] = useState<SalesSortField>("totalUnits");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(25);
@@ -746,9 +747,42 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
           <option value="package">Physical Merch</option>
           <option value="bundle">Bundles</option>
         </select>
-        <div className="ml-auto text-sm text-muted-foreground tabular-nums">
-          {sortedFiltered.length} items · {totalUnits.toLocaleString()} units · $
-          {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-sm text-muted-foreground tabular-nums">
+            {sortedFiltered.length} items · {totalUnits.toLocaleString()} units · $
+            {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const header = ["Title", "Artist", "Account", "Type", "Format", "Units", "Revenue", "Currency", "SKU", "Catalog #", "URL"];
+              const rows = sortedFiltered.map((item) => [
+                `"${(item.itemName ?? "").replace(/"/g, '""')}"`,
+                `"${(item.artist ?? "").replace(/"/g, '""')}"`,
+                `"${(item.bandName ?? "").replace(/"/g, '""')}"`,
+                item.itemType ?? "",
+                `"${(item.package ?? "").replace(/"/g, '""')}"`,
+                item.totalUnits,
+                item.totalRevenue.toFixed(2),
+                item.currency ?? "USD",
+                item.sku ?? "",
+                item.catalogNumber ?? "",
+                item.itemUrl ?? "",
+              ]);
+              const csv = [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
+              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `bandcamp-sales-${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <Download className="h-3.5 w-3.5 mr-1" />
+            Export CSV
+          </Button>
         </div>
       </div>
 
