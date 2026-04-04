@@ -114,7 +114,7 @@ function timeAgo(dateStr: string) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-// ─── Scraper & Catalog Health Tab ────────────────────────────────────────────
+// ─── Bandcamp Health Tab ─────────────────────────────────────────────────────
 
 function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
   const { data, isLoading, refetch, isFetching } = useAppQuery({
@@ -125,40 +125,61 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
   });
 
   if (isLoading || !data) {
-    return (
-      <div className="flex justify-center py-12 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin" />
-      </div>
-    );
+    return <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   }
+
+  const t = data.total;
 
   return (
     <div className="space-y-6">
-      {/* Header with refresh */}
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Scraper activity is <strong>near-real-time</strong> from logs. Catalog completeness numbers are{" "}
-          {data.catalogStats?.computed_at ? (
-            <>from snapshot <span className="font-mono text-xs">{timeAgo(data.catalogStats.computed_at)}</span></>
-          ) : (
-            <>computed live (no snapshot yet)</>
-          )}.
-        </p>
+        <p className="text-sm text-muted-foreground">Sync activity is <strong>near-real-time</strong> from logs. Data coverage is computed live.</p>
         <Button variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
           <RefreshCw className={`h-3 w-3 mr-1 ${isFetching ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>
 
-      {/* Sensor readings */}
+      {/* Row 1: Key numbers */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card>
+          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Mapped Items</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tabular-nums">{t}</p>
+            <p className="text-xs text-muted-foreground">{data.apiCoverage.rawApiData} matched by SKU ({t > 0 ? Math.round(data.apiCoverage.rawApiData / t * 100) : 0}%)</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">URLs Resolved</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tabular-nums">{data.totalWithUrl} <span className="text-sm font-normal text-muted-foreground">({t > 0 ? Math.round(data.totalWithUrl / t * 100) : 0}%)</span></p>
+            <p className="text-xs text-muted-foreground">{data.urlSources.scraper_verified} scraped · {data.urlSources.orders_api} from API · {data.urlSources.constructed} constructed</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Sales Loaded</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tabular-nums">{data.totalSales.toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground">{data.uniqueBuyers.toLocaleString()} unique buyers</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pre-orders</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tabular-nums">{data.preorders.length}</p>
+            <p className="text-xs text-muted-foreground">{data.preorders.length === 0 ? "No active pre-orders" : "active releases"}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Row 2: Sensor readings */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {data.sensorReadings.length > 0 ? (
           data.sensorReadings
             .filter((r, i, arr) => arr.findIndex(x => x.sensor_name === r.sensor_name) === i)
             .map((r) => (
               <Card key={r.sensor_name}>
-                <CardHeader className="pb-1 pt-3 px-4">
-                  <CardDescription className="text-xs truncate">{r.sensor_name}</CardDescription>
-                </CardHeader>
+                <CardHeader className="pb-1 pt-3 px-4"><CardDescription className="text-xs truncate">{r.sensor_name}</CardDescription></CardHeader>
                 <CardContent className="px-4 pb-3">
                   <div className="flex items-center justify-between">
                     <SensorBadge status={r.status} />
@@ -169,151 +190,181 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               </Card>
             ))
         ) : (
-          <Card className="col-span-full">
-            <CardContent className="py-4 text-center text-sm text-muted-foreground">
-              No sensor readings yet. Sensors run every 5 minutes.
-            </CardContent>
-          </Card>
+          <Card className="col-span-full"><CardContent className="py-4 text-center text-sm text-muted-foreground">Sensors run every 5 minutes.</CardContent></Card>
         )}
       </div>
 
-      {/* Block rate + scrape stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Block Rate (1h)</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">
-              {data.blockRate.rate}%
-            </p>
-            <p className="text-xs text-muted-foreground">{data.blockRate.blocked}/{data.blockRate.total} blocked</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Open Issues</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{data.reviewCount}</p>
-            <p className="text-xs text-muted-foreground">in review queue</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Mapped Items</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{data.completeness.total}</p>
-            <p className="text-xs text-muted-foreground">{data.completeness.hasUrl} with URL</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Catalog completeness (have vs missing) */}
+      {/* Row 3: Sync Pipeline */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" /> Catalog Completeness
-          </CardTitle>
-          <CardDescription>
-            Bandcamp-mapped products only. Secondary image counts are derived heuristics.
-          </CardDescription>
+          <CardTitle className="text-base flex items-center gap-2"><Activity className="h-4 w-4" /> Sync Pipeline</CardTitle>
+          <CardDescription>Every Bandcamp Trigger task and its last run</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Field</TableHead>
-                <TableHead className="text-right">Have</TableHead>
-                <TableHead className="text-right">Missing</TableHead>
-                <TableHead className="text-right">Coverage</TableHead>
+                <TableHead>Task</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Processed</TableHead>
+                <TableHead className="text-right">Failed</TableHead>
+                <TableHead>Last Run</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <CompletenessRow label="Album Cover" have={data.completeness.hasAlbumCover} total={data.completeness.total} />
-              <CompletenessRow label="About / Description" have={data.completeness.hasAbout} total={data.completeness.total} />
-              <CompletenessRow label="Credits" have={data.completeness.hasCredits} total={data.completeness.total} />
-              <CompletenessRow label="Track List" have={data.completeness.hasTracks} total={data.completeness.total} />
-              <CompletenessRow label="Bandcamp URL" have={data.completeness.hasUrl} total={data.completeness.total} />
+              {data.syncPipeline.map((s) => (
+                <TableRow key={s.syncType}>
+                  <TableCell className="font-mono text-xs">{s.syncType}</TableCell>
+                  <TableCell>
+                    <Badge variant={s.status === "completed" ? "default" : s.status === "failed" ? "destructive" : "secondary"}>{s.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{s.itemsProcessed}</TableCell>
+                  <TableCell className="text-right tabular-nums">{s.itemsFailed}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{timeAgo(s.createdAt)}</TableCell>
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell className="font-mono text-xs">scrape_page (1h)</TableCell>
+                <TableCell><Badge variant="outline">{data.scrapeStats.success} ok / {data.scrapeStats.failed} fail</Badge></TableCell>
+                <TableCell className="text-right tabular-nums">{data.scrapeStats.success}</TableCell>
+                <TableCell className="text-right tabular-nums">{data.scrapeStats.failed}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{data.scrapeStats.total} in last hour</TableCell>
+              </TableRow>
             </TableBody>
           </Table>
         </CardContent>
       </Card>
 
-      {/* Recent activity log */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Activity className="h-4 w-4" /> Recent Sync Activity
-          </CardTitle>
-          <CardDescription>Latest channel_sync_log entries (near-real-time)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {data.recentLogs.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">No recent activity.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Processed</TableHead>
-                  <TableHead className="text-right">Failed</TableHead>
-                  <TableHead>When</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.recentLogs.map((log, i) => (
-                  <TableRow key={`${log.created_at}-${i}`}>
-                    <TableCell className="font-mono text-xs">{log.sync_type}</TableCell>
-                    <TableCell>
-                      <Badge variant={log.status === "completed" ? "default" : log.status === "failed" ? "destructive" : "secondary"}>
-                        {log.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{log.items_processed}</TableCell>
-                    <TableCell className="text-right tabular-nums">{log.items_failed}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{timeAgo(log.created_at)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Open review queue items with catalog links */}
-      {data.reviewItems.length > 0 && (
+      {/* Row 4: Pre-orders */}
+      {data.preorders.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" /> Open Scraper Issues ({data.reviewCount})
-            </CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">Active Pre-orders ({data.preorders.length})</CardTitle></CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Title</TableHead>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>When</TableHead>
-                  <TableHead className="w-20" />
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Release Date</TableHead>
+                  <TableHead className="text-right">Days Until</TableHead>
                 </TableRow>
               </TableHeader>
+              <TableBody>
+                {data.preorders.map((p) => {
+                  const daysUntil = p.streetDate ? Math.max(0, Math.ceil((new Date(p.streetDate).getTime() - Date.now()) / 86400000)) : null;
+                  return (
+                    <TableRow key={p.variantId}>
+                      <TableCell className="font-medium">
+                        <a href={`/admin/catalog/${p.productId}`} className="text-blue-600 hover:underline">{p.title?.slice(0, 50)}</a>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{p.sku}</TableCell>
+                      <TableCell className="text-sm">{p.streetDate ? new Date(p.streetDate).toLocaleDateString() : "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{daysUntil != null ? `${daysUntil}d` : "—"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Row 5: Data Coverage — API vs Scraper side by side */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">API Data Coverage</CardTitle>
+            <CardDescription>From Bandcamp Merch API (get_merch_details). Only SKU-matched items receive this data.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader><TableRow><TableHead>Field</TableHead><TableHead className="text-right">Have</TableHead><TableHead className="text-right">Coverage</TableHead></TableRow></TableHeader>
+              <TableBody>
+                <CompletenessRow label="Subdomain" have={data.apiCoverage.subdomain} total={t} />
+                <CompletenessRow label="Album Title" have={data.apiCoverage.albumTitle} total={t} />
+                <CompletenessRow label="Price" have={data.apiCoverage.price} total={t} />
+                <CompletenessRow label="Release Date" have={data.apiCoverage.releaseDate} total={t} />
+                <CompletenessRow label="Image" have={data.apiCoverage.image} total={t} />
+                <CompletenessRow label="Stock by Origin" have={data.apiCoverage.originQuantities} total={t} />
+                <CompletenessRow label="Full API Snapshot" have={data.apiCoverage.rawApiData} total={t} />
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Scraper Enrichment</CardTitle>
+            <CardDescription>From HTML page (data-tralbum). Only items with a resolved URL get scraped.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader><TableRow><TableHead>Field</TableHead><TableHead className="text-right">Have</TableHead><TableHead className="text-right">Coverage</TableHead></TableRow></TableHeader>
+              <TableBody>
+                <CompletenessRow label="Album Cover (hi-res)" have={data.scraperCoverage.artUrl} total={t} />
+                <CompletenessRow label="About / Description" have={data.scraperCoverage.about} total={t} />
+                <CompletenessRow label="Credits" have={data.scraperCoverage.credits} total={t} />
+                <CompletenessRow label="Track List" have={data.scraperCoverage.tracks} total={t} />
+              </TableBody>
+            </Table>
+            <div className="mt-3 border-t pt-3">
+              <p className="text-xs font-medium text-muted-foreground mb-1">From Sales Report API</p>
+              <Table>
+                <TableBody>
+                  <CompletenessRow label="Catalog Number" have={data.salesCoverage.catalogNumber} total={t} />
+                  <CompletenessRow label="UPC" have={data.salesCoverage.upc} total={t} />
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Row 6: URL Source Breakdown */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">URL Sources</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
+            <div><p className="text-lg font-semibold tabular-nums">{data.urlSources.scraper_verified}</p><p className="text-xs text-muted-foreground">Scraper verified</p></div>
+            <div><p className="text-lg font-semibold tabular-nums">{data.urlSources.constructed}</p><p className="text-xs text-muted-foreground">Constructed</p></div>
+            <div><p className="text-lg font-semibold tabular-nums">{data.urlSources.orders_api}</p><p className="text-xs text-muted-foreground">Sales / Orders API</p></div>
+            <div><p className="text-lg font-semibold tabular-nums text-green-600">{data.totalWithUrl}</p><p className="text-xs text-muted-foreground">Total with URL</p></div>
+            <div><p className="text-lg font-semibold tabular-nums text-red-500">{data.urlSources.none}</p><p className="text-xs text-muted-foreground">No URL</p></div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Row 7: Sales Backfill Progress */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Sales Backfill Progress</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            {data.backfillProgress.map((b) => (
+              <div key={b.connectionId} className="flex items-center gap-2">
+                <Badge variant={b.status === "completed" ? "default" : b.status === "running" ? "secondary" : b.status === "failed" ? "destructive" : "outline"} className="text-xs">{b.status}</Badge>
+                <span className="truncate text-xs">{b.bandName}</span>
+                {b.totalTransactions > 0 && <span className="text-xs text-muted-foreground tabular-nums">({b.totalTransactions.toLocaleString()})</span>}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Row 8: Open Issues */}
+      {data.reviewItems.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Open Issues ({data.reviewCount})</CardTitle></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Severity</TableHead><TableHead>When</TableHead><TableHead className="w-20" /></TableRow></TableHeader>
               <TableBody>
                 {data.reviewItems.map((item) => {
                   const mappingId = (item.metadata as Record<string, unknown>)?.mappingId as string | undefined;
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="text-sm max-w-[300px] truncate">{item.title}</TableCell>
-                      <TableCell>
-                        <Badge variant={item.severity === "critical" ? "destructive" : item.severity === "medium" ? "secondary" : "outline"}>
-                          {item.severity}
-                        </Badge>
-                      </TableCell>
+                      <TableCell><Badge variant={item.severity === "critical" ? "destructive" : item.severity === "medium" ? "secondary" : "outline"}>{item.severity}</Badge></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{timeAgo(item.created_at)}</TableCell>
-                      <TableCell>
-                        {mappingId && (
-                          <a href={`/admin/catalog/${mappingId}`} className="text-blue-600 hover:underline">
-                            <ExternalLink className="h-3 w-3 inline mr-1" />View
-                          </a>
-                        )}
-                      </TableCell>
+                      <TableCell>{mappingId && <a href={`/admin/catalog/${mappingId}`} className="text-blue-600 hover:underline"><ExternalLink className="h-3 w-3 inline mr-1" />View</a>}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -589,7 +640,7 @@ export default function BandcampSettingsPage() {
       <Tabs defaultValue="accounts">
         <TabsList>
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
-          <TabsTrigger value="health">Scraper &amp; Catalog Health</TabsTrigger>
+          <TabsTrigger value="health">Bandcamp Health</TabsTrigger>
           <TabsTrigger value="sales">Sales History</TabsTrigger>
         </TabsList>
 

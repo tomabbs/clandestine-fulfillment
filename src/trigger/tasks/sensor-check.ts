@@ -189,7 +189,7 @@ export const sensorCheckTask = schedules.task({
           .select("created_at")
           .eq("workspace_id", workspaceId)
           .eq("sync_type", "merch_sync")
-          .eq("status", "completed")
+          .in("status", ["completed", "partial"])
           .order("created_at", { ascending: false })
           .limit(1);
 
