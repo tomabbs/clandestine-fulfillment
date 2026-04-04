@@ -55,17 +55,18 @@ export async function getOrderDetail(orderId: string) {
 
   // Parse line_items JSONB from the order row as a fallback when warehouse_order_items
   // has no rows (e.g. Bandcamp orders which store line items inline as JSONB).
-  const lineItemsJson = (order?.line_items as Array<{
-    sku?: string;
-    title?: string;
-    quantity?: number;
-    price?: number;
-  }> | null) ?? [];
+  const lineItemsJson =
+    (order?.line_items as Array<{
+      sku?: string;
+      title?: string;
+      quantity?: number;
+      price?: number;
+    }> | null) ?? [];
 
   // Merge: prefer normalised warehouse_order_items rows; fall back to JSONB
   const resolvedItems =
     (items ?? []).length > 0
-      ? items ?? []
+      ? (items ?? [])
       : lineItemsJson.map((li, i) => ({
           id: `jsonb-${i}`,
           order_id: orderId,
@@ -121,10 +122,7 @@ export async function getClientShipments(filters: {
 
   let query = supabase
     .from("warehouse_shipments")
-    .select(
-      "*, warehouse_orders(order_number)",
-      { count: "exact" },
-    )
+    .select("*, warehouse_orders(order_number)", { count: "exact" })
     .eq("org_id", userRecord.org_id)
     .order("ship_date", { ascending: false })
     .range(offset, offset + pageSize - 1);

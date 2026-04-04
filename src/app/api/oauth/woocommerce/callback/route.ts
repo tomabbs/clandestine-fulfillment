@@ -51,10 +51,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!consumerKey || !consumerSecret) {
-    return NextResponse.json(
-      { error: "Missing consumer_key or consumer_secret" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Missing consumer_key or consumer_secret" }, { status: 400 });
   }
 
   const supabase = createServiceRoleClient();

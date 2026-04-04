@@ -64,9 +64,11 @@ export const bundleComponentFanoutTask = task({
         },
       });
 
-      const status = result.alreadyProcessed ? "already_processed"
-        : result.success ? "decremented"
-        : (result as { reason?: string }).reason ?? "failed";
+      const status = result.alreadyProcessed
+        ? "already_processed"
+        : result.success
+          ? "decremented"
+          : ((result as { reason?: string }).reason ?? "failed");
 
       results.push({ sku: variant.sku, delta, status });
       if (result.success && !result.alreadyProcessed) decremented++;

@@ -51,6 +51,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bundle-availability-sweep` | `src/trigger/tasks/bundle-availability-sweep.ts` | `0 6 * * *` (daily 6am UTC) |
 | `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
 | `bandcamp-sales-sync` | `src/trigger/tasks/bandcamp-sales-sync.ts` | `0 5 * * *` (daily 5am UTC) |
+| `bandcamp-sales-backfill-cron` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | `*/10 * * * *` — processes backfill chunks for all connections with time guard (240s); each chunk downloads one year of sales history per connection via Sales Report API |
 
 ## Event/On-Demand Tasks
 

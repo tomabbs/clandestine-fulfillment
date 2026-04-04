@@ -14,6 +14,12 @@ const mockServiceClient = {
   from: mockServiceFrom,
 };
 
+vi.mock("@/lib/server/auth-context", () => ({
+  requireClient: vi
+    .fn()
+    .mockResolvedValue({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+}));
+
 vi.mock("@/lib/server/supabase-server", () => ({
   createServerSupabaseClient: async () => mockServerClient,
   createServiceRoleClient: () => mockServiceClient,
@@ -44,6 +50,7 @@ describe("catalog server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    mockServiceFrom.mockReset();
   });
 
   // === Auth tests ===
@@ -77,10 +84,13 @@ describe("catalog server actions", () => {
     });
 
     it("getClientReleases returns empty release groups when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      const { requireClient } = await import("@/lib/server/auth-context");
+      vi.mocked(requireClient).mockRejectedValueOnce(new Error("Authentication required"));
       await expect(getClientReleases()).resolves.toEqual({
         preorders: [],
         newReleases: [],
+        catalog: [],
+        total: 0,
       });
     });
   });
@@ -209,12 +219,12 @@ describe("catalog server actions", () => {
         }),
       });
 
-      // Mock the per-variant DB update
-      mockServiceFrom.mockReturnValue({
+      // Mock the per-variant DB update (use mockImplementation that handles multiple calls)
+      mockServiceFrom.mockImplementation(() => ({
         update: vi.fn().mockReturnValue({
           eq: vi.fn().mockResolvedValue({ error: null }),
         }),
-      });
+      }));
 
       mockProductVariantsBulkUpdate.mockResolvedValue([
         { id: "gid://shopify/ProductVariant/456", price: "29.99" },
@@ -271,51 +281,46 @@ describe("catalog server actions", () => {
   // === Client releases ===
 
   describe("getClientReleases", () => {
-    it("fetches pre-orders and new releases using RLS client", async () => {
-      // Pre-orders query
-      mockServerClient.from = vi
-        .fn()
-        .mockReturnValueOnce({
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              order: vi.fn().mockResolvedValue({
-                data: [
-                  {
-                    id: "v-1",
-                    sku: "PRE-001",
-                    title: "Pre-Order LP",
-                    street_date: "2026-04-01",
-                    is_preorder: true,
-                    warehouse_products: {
-                      id: "p-1",
-                      title: "Album",
-                      status: "active",
-                      org_id: "org-1",
-                      warehouse_product_images: [],
-                    },
-                    warehouse_inventory_levels: [{ available: 0, committed: 50, incoming: 200 }],
-                  },
-                ],
-                error: null,
-              }),
-            }),
-          }),
-        })
-        // New releases query
-        .mockReturnValueOnce({
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              gte: vi.fn().mockReturnValue({
-                lte: vi.fn().mockReturnValue({
-                  order: vi.fn().mockResolvedValue({
-                    data: [],
-                    error: null,
-                  }),
-                }),
-              }),
-            }),
-          }),
-        });
+    it("fetches pre-orders and new releases using service role client", async () => {
+      const preorderData = [
+        {
+          id: "v-1",
+          sku: "PRE-001",
+          title: "Pre-Order LP",
+          street_date: "2026-04-01",
+          is_preorder: true,
+          warehouse_products: {
+            id: "p-1",
+            title: "Album",
+            status: "active",
+            org_id: "org-1",
+            warehouse_product_images: [],
+          },
+          warehouse_inventory_levels: [{ available: 0, committed: 50, incoming: 200 }],
+        },
+      ];
+
+      // Use a Proxy-based chainable mock for all three service queries
+      const handler: ProxyHandler<Record<string, unknown>> = {
+        get(target, prop) {
+          if (prop === "then") {
+            const callIdx = (target._callIdx as number) ?? 0;
+            const results = [
+              { data: preorderData, error: null },
+              { data: [], error: null },
+              { data: [], error: null, count: 0 },
+            ];
+            return (resolve: (v: unknown) => void) => resolve(results[callIdx]);
+          }
+          return (..._args: unknown[]) => new Proxy({ ...target }, handler);
+        },
+      };
+
+      let callCount = 0;
+      mockServiceFrom.mockImplementation(() => {
+        const idx = callCount++;
+        return new Proxy({ _callIdx: idx }, handler);
+      });
 
       const result = await getClientReleases();
 

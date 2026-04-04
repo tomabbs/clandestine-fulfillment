@@ -69,8 +69,12 @@ export const multiStoreInventoryPushTask = schedules.task({
       const bundlesEnabled = ws?.bundles_enabled ?? false;
 
       // Load bundle components for this workspace (only if bundles are enabled)
-      type BundleComponent = { bundle_variant_id: string; component_variant_id: string; quantity: number };
-      let bundleMap = new Map<string, BundleComponent[]>();
+      type BundleComponent = {
+        bundle_variant_id: string;
+        component_variant_id: string;
+        quantity: number;
+      };
+      const bundleMap = new Map<string, BundleComponent[]>();
       if (bundlesEnabled) {
         const { data: allComponents } = await supabase
           .from("bundle_components")
@@ -87,7 +91,10 @@ export const multiStoreInventoryPushTask = schedules.task({
       for (const connection of connections as ClientStoreConnection[]) {
         try {
           const pushed = await pushConnectionInventory(
-            supabase, connection, workspaceSafetyStock, bundlesEnabled ? bundleMap : new Map(),
+            supabase,
+            connection,
+            workspaceSafetyStock,
+            bundlesEnabled ? bundleMap : new Map(),
           );
           totalPushed += pushed;
         } catch (error) {
@@ -101,7 +108,11 @@ export const multiStoreInventoryPushTask = schedules.task({
   },
 });
 
-type BundleComponent = { bundle_variant_id: string; component_variant_id: string; quantity: number };
+type BundleComponent = {
+  bundle_variant_id: string;
+  component_variant_id: string;
+  quantity: number;
+};
 
 async function pushConnectionInventory(
   supabase: ReturnType<typeof createServiceRoleClient>,
@@ -122,9 +133,13 @@ async function pushConnectionInventory(
 
   // Get inventory levels for mapped variants + component variants (for bundle MIN)
   const variantIds = mappings.map((m) => m.variant_id);
-  const componentVariantIds = Array.from(new Set(
-    Array.from(bundleMap.values()).flat().map(c => c.component_variant_id)
-  ));
+  const componentVariantIds = Array.from(
+    new Set(
+      Array.from(bundleMap.values())
+        .flat()
+        .map((c) => c.component_variant_id),
+    ),
+  );
   const allVariantIds = Array.from(new Set([...variantIds, ...componentVariantIds]));
 
   const { data: levels } = await supabase
@@ -160,7 +175,7 @@ async function pushConnectionInventory(
     const components = bundleMap.get(mapping.variant_id);
     if (components?.length) {
       const componentMin = Math.min(
-        ...components.map(c => {
+        ...components.map((c) => {
           const compInv = inventoryByVariant.get(c.component_variant_id);
           return Math.floor((compInv?.available ?? 0) / c.quantity);
         }),

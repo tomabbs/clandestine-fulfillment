@@ -1,7 +1,6 @@
 "use client";
 
 import { Loader2, Pencil } from "lucide-react";
-import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 import { useCallback, useEffect, useState } from "react";
 import {
   createBillingAdjustment,
@@ -19,6 +18,7 @@ import {
   updateFormatCost,
 } from "@/actions/billing";
 import { getClients } from "@/actions/clients";
+import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -211,7 +211,10 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
             pageSize={pageSize}
             total={data.total}
             onPageChange={setPage}
-            onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+            onPageSizeChange={(s) => {
+              setPageSize(s);
+              setPage(1);
+            }}
           />
         </>
       )}

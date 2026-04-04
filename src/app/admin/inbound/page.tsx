@@ -8,7 +8,7 @@ import {
   type InboundFilters,
   type InboundShipmentWithOrg,
 } from "@/actions/inbound";
-import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
+import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -215,7 +215,10 @@ export default function AdminInboundPage() {
         pageSize={pageSize}
         total={totalCount}
         onPageChange={setPage}
-        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          setPage(1);
+        }}
       />
     </div>
   );

@@ -12,7 +12,10 @@ export async function getDiscogsOverview() {
   const [creds, listings, orders, messages] = await Promise.all([
     supabase.from("discogs_credentials").select("id, username, created_at").single(),
     supabase.from("discogs_listings").select("id, status"),
-    supabase.from("mailorder_orders").select("id, fulfillment_status").eq("source", "clandestine_discogs"),
+    supabase
+      .from("mailorder_orders")
+      .select("id, fulfillment_status")
+      .eq("source", "clandestine_discogs"),
     supabase.from("discogs_order_messages").select("id", { count: "exact", head: true }),
   ]);
 
@@ -21,7 +24,8 @@ export async function getDiscogsOverview() {
     username: creds.data?.username ?? null,
     activeListings: (listings.data ?? []).filter((l) => l.status === "For Sale").length,
     totalOrders: orders.data?.length ?? 0,
-    unfulfilledOrders: (orders.data ?? []).filter((o) => o.fulfillment_status === "unfulfilled").length,
+    unfulfilledOrders: (orders.data ?? []).filter((o) => o.fulfillment_status === "unfulfilled")
+      .length,
     totalMessages: messages.count ?? 0,
   };
 }
@@ -38,10 +42,7 @@ export async function getDiscogsCredentials() {
   return { credentials: data ?? null };
 }
 
-export async function saveDiscogsCredentials(params: {
-  accessToken: string;
-  username: string;
-}) {
+export async function saveDiscogsCredentials(params: { accessToken: string; username: string }) {
   await requireStaff();
   const supabase = createServiceRoleClient();
 

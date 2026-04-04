@@ -32,7 +32,11 @@ export default function PortalCatalogDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const { data: product, isLoading, error } = useAppQuery({
+  const {
+    data: product,
+    isLoading,
+    error,
+  } = useAppQuery({
     queryKey: [...queryKeys.clientReleases.list(), "detail", id],
     queryFn: () => getClientProductDetail(id),
     tier: CACHE_TIERS.SESSION,
@@ -56,7 +60,8 @@ export default function PortalCatalogDetailPage() {
     if (product) {
       setForm({
         title: product.title ?? "",
-        descriptionHtml: (product as unknown as Record<string, unknown>).description_html as string ?? "",
+        descriptionHtml:
+          ((product as unknown as Record<string, unknown>).description_html as string) ?? "",
         productType: product.product_type ?? "",
         tags: Array.isArray(product.tags) ? (product.tags as string[]).join(", ") : "",
         status: (product.status as "active" | "draft" | "archived") ?? "draft",
@@ -70,7 +75,10 @@ export default function PortalCatalogDetailPage() {
         title: form.title,
         descriptionHtml: form.descriptionHtml,
         productType: form.productType,
-        tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        tags: form.tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean),
         status: form.status,
       });
     },
@@ -106,12 +114,20 @@ export default function PortalCatalogDetailPage() {
   }
 
   const images = (product.warehouse_product_images ?? []) as Array<{
-    id: string; src: string; alt: string | null; position: number;
+    id: string;
+    src: string;
+    alt: string | null;
+    position: number;
   }>;
   const primaryImage = [...images].sort((a, b) => a.position - b.position)[0];
   const variants = (product.warehouse_product_variants ?? []) as Array<{
-    id: string; sku: string; title: string | null; price: number | null;
-    format_name: string | null; street_date: string | null; is_preorder: boolean;
+    id: string;
+    sku: string;
+    title: string | null;
+    price: number | null;
+    format_name: string | null;
+    street_date: string | null;
+    is_preorder: boolean;
     warehouse_inventory_levels: Array<{ available: number; committed: number; incoming: number }>;
   }>;
 
@@ -203,7 +219,9 @@ export default function PortalCatalogDetailPage() {
               >
                 <option value="">—</option>
                 {PRODUCT_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
                 ))}
               </select>
             </div>
@@ -213,7 +231,12 @@ export default function PortalCatalogDetailPage() {
               <select
                 id="status"
                 value={form.status}
-                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as "active" | "draft" | "archived" }))}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    status: e.target.value as "active" | "draft" | "archived",
+                  }))
+                }
                 className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
               >
                 <option value="active">Active</option>
@@ -242,9 +265,7 @@ export default function PortalCatalogDetailPage() {
               )}
               Save Changes
             </Button>
-            {saved && (
-              <span className="text-sm text-green-600">Saved successfully</span>
-            )}
+            {saved && <span className="text-sm text-green-600">Saved successfully</span>}
           </div>
         </CardContent>
       </Card>

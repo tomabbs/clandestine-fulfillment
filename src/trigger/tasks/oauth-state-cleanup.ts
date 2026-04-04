@@ -8,7 +8,7 @@
  * Rule #12: Task payload is minimal.
  */
 
-import { schedules, task } from "@trigger.dev/sdk";
+import { logger, schedules, task } from "@trigger.dev/sdk";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 async function runCleanup(): Promise<{ success: boolean; deleted: number; error?: string }> {
@@ -21,13 +21,16 @@ async function runCleanup(): Promise<{ success: boolean; deleted: number; error?
     .lt("expires_at", new Date().toISOString());
 
   if (error) {
-    console.error("[oauth-state-cleanup] Error:", error.message);
+    logger.error("OAuth state cleanup error", {
+      task: "oauth-state-cleanup",
+      error: error.message,
+    });
     return { success: false, deleted: 0, error: error.message };
   }
 
   const deleted = count ?? 0;
   if (deleted > 0) {
-    console.log(`[oauth-state-cleanup] Deleted ${deleted} expired OAuth states`);
+    logger.info("Deleted expired OAuth states", { task: "oauth-state-cleanup", deleted });
   }
   return { success: true, deleted };
 }

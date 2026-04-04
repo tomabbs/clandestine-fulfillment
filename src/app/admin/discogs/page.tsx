@@ -28,7 +28,9 @@ export default function AdminDiscogsPage() {
 
       {isLoading ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24" />)}
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -74,13 +76,15 @@ export default function AdminDiscogsPage() {
             <CardContent>
               {data?.hasCredentials ? (
                 <div>
-                  <Badge variant="default" className="text-xs">Connected</Badge>
-                  {data.username && (
-                    <p className="text-sm font-mono mt-1">@{data.username}</p>
-                  )}
+                  <Badge variant="default" className="text-xs">
+                    Connected
+                  </Badge>
+                  {data.username && <p className="text-sm font-mono mt-1">@{data.username}</p>}
                 </div>
               ) : (
-                <Badge variant="outline" className="text-xs">Not configured</Badge>
+                <Badge variant="outline" className="text-xs">
+                  Not configured
+                </Badge>
               )}
             </CardContent>
           </Card>

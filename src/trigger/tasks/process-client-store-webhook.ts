@@ -175,8 +175,10 @@ async function handleOrderCreated(
     // floor_violation (medium) = expected stock-short; system_fault (high) = needs investigation.
     const platform = event.platform as string;
     const decrementResults: {
-      sku: string; delta: number;
-      status: "ok" | "floor_violation" | "not_mapped" | "error"; reason?: string
+      sku: string;
+      delta: number;
+      status: "ok" | "floor_violation" | "not_mapped" | "error";
+      reason?: string;
     }[] = [];
 
     for (let index = 0; index < lineItems.length; index++) {
@@ -192,7 +194,9 @@ async function handleOrderCreated(
         .eq("remote_sku", remoteSku)
         .single();
 
-      const warehouseSku = (mapping?.warehouse_product_variants as unknown as { sku: string } | null)?.sku;
+      const warehouseSku = (
+        mapping?.warehouse_product_variants as unknown as { sku: string } | null
+      )?.sku;
       if (!warehouseSku) {
         decrementResults.push({ sku: remoteSku, delta: 0, status: "not_mapped" });
         continue;
@@ -209,50 +213,65 @@ async function handleOrderCreated(
         source: platform === "woocommerce" ? "woocommerce" : "shopify",
         correlationId: `store-order:${event.id}:${warehouseSku}:${lineItemId}`,
         metadata: {
-          order_id: newOrder.id, remote_sku: remoteSku,
-          connection_id: connectionId, line_item_id: lineItemId,
+          order_id: newOrder.id,
+          remote_sku: remoteSku,
+          connection_id: connectionId,
+          line_item_id: lineItemId,
         },
       });
 
       if (result.success || result.alreadyProcessed) {
         decrementResults.push({ sku: warehouseSku, delta: -qty, status: "ok" });
       } else if ((result as { reason?: string }).reason === "floor_violation") {
-        decrementResults.push({ sku: warehouseSku, delta: -qty, status: "floor_violation",
-                                 reason: "insufficient_stock" });
+        decrementResults.push({
+          sku: warehouseSku,
+          delta: -qty,
+          status: "floor_violation",
+          reason: "insufficient_stock",
+        });
       } else {
-        decrementResults.push({ sku: warehouseSku, delta: -qty, status: "error",
-                                 reason: "system_fault" });
+        decrementResults.push({
+          sku: warehouseSku,
+          delta: -qty,
+          status: "error",
+          reason: "system_fault",
+        });
       }
     }
 
     // Record partial application to review queue if any line item failed
-    const failures = decrementResults.filter(r => r.status !== "ok" && r.status !== "not_mapped");
+    const failures = decrementResults.filter((r) => r.status !== "ok" && r.status !== "not_mapped");
     if (failures.length > 0) {
-      const hasSystemFault = failures.some(r => r.status === "error");
-      await supabase.from("warehouse_review_queue").upsert({
-        workspace_id: workspaceId,
-        org_id: orgId,
-        category: "inventory_partial_apply",
-        severity: hasSystemFault ? "high" : "medium",
-        title: hasSystemFault
-          ? `Order ${newOrder.id}: inventory write failed (system error)`
-          : `Order ${newOrder.id}: inventory short on ${failures.length} SKU(s)`,
-        description: failures.map(f =>
-          `${f.sku}: ${f.status}${f.reason ? ` (${f.reason})` : ""}`
-        ).join("; "),
-        metadata: { order_id: newOrder.id, decrement_results: decrementResults },
-        status: "open",
-        group_key: `inv_partial:${newOrder.id}`,
-        occurrence_count: 1,
-      }, { onConflict: "group_key", ignoreDuplicates: false });
+      const hasSystemFault = failures.some((r) => r.status === "error");
+      await supabase.from("warehouse_review_queue").upsert(
+        {
+          workspace_id: workspaceId,
+          org_id: orgId,
+          category: "inventory_partial_apply",
+          severity: hasSystemFault ? "high" : "medium",
+          title: hasSystemFault
+            ? `Order ${newOrder.id}: inventory write failed (system error)`
+            : `Order ${newOrder.id}: inventory short on ${failures.length} SKU(s)`,
+          description: failures
+            .map((f) => `${f.sku}: ${f.status}${f.reason ? ` (${f.reason})` : ""}`)
+            .join("; "),
+          metadata: { order_id: newOrder.id, decrement_results: decrementResults },
+          status: "open",
+          group_key: `inv_partial:${newOrder.id}`,
+          occurrence_count: 1,
+        },
+        { onConflict: "group_key", ignoreDuplicates: false },
+      );
     }
 
     // Trigger immediate push to all channels if any decrement succeeded
-    if (decrementResults.some(r => r.status === "ok")) {
+    if (decrementResults.some((r) => r.status === "ok")) {
       await Promise.allSettled([
         tasks.trigger("bandcamp-inventory-push", {}),
         tasks.trigger("multi-store-inventory-push", {}),
-      ]).catch(() => { /* non-critical */ });
+      ]).catch(() => {
+        /* non-critical */
+      });
     }
   }
 

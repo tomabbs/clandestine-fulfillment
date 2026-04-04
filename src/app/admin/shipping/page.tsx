@@ -2,7 +2,6 @@
 
 import { Download, ExternalLink, Loader2, Package, Search, Send, Upload } from "lucide-react";
 import Link from "next/link";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { setBandcampPaymentId, triggerBandcampMarkShipped } from "@/actions/bandcamp-shipping";
 import type { GetShipmentsFilters } from "@/actions/shipping";
@@ -12,6 +11,7 @@ import {
   getShipments,
   getShipmentsSummary,
 } from "@/actions/shipping";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -144,7 +144,6 @@ export default function ShippingPage() {
       setExporting(false);
     }
   }, [filters.orgId, filters.dateFrom, filters.dateTo]);
-
 
   return (
     <div className="p-6 space-y-6">
@@ -313,12 +312,10 @@ function ShipmentTableRow({
     ssOrderNum ??
     (shipment.shipstation_shipment_id ? `SS-${shipment.shipstation_shipment_id}` : null);
 
-  const clientName =
-    (shipment.organizations as unknown as { name: string } | null)?.name ?? null;
+  const clientName = (shipment.organizations as unknown as { name: string } | null)?.name ?? null;
 
   // Use total_units (physical units shipped), not line count
-  const itemCount =
-    (shipment as ShipmentRow & { total_units?: number | null }).total_units ?? 0;
+  const itemCount = (shipment as ShipmentRow & { total_units?: number | null }).total_units ?? 0;
 
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
   const carrierLabel = getCarrierLabel(shipment.carrier);
@@ -329,8 +326,7 @@ function ShipmentTableRow({
     (shipment as ShipmentRow & { customer_shipping_charged?: number | null })
       .customer_shipping_charged ?? null;
   const postage = shipment.shipping_cost ?? null;
-  const shippingGap =
-    customerCharged != null && postage != null ? customerCharged - postage : null;
+  const shippingGap = customerCharged != null && postage != null ? customerCharged - postage : null;
 
   return (
     <>
@@ -339,7 +335,9 @@ function ShipmentTableRow({
         onClick={onToggle}
       >
         <td className="px-4 py-3">
-          {shipment.ship_date ? new Date(shipment.ship_date + "T12:00:00").toLocaleDateString() : "---"}
+          {shipment.ship_date
+            ? new Date(shipment.ship_date + "T12:00:00").toLocaleDateString()
+            : "---"}
         </td>
         <td className="px-4 py-3 font-mono text-xs">{displayOrderRef ?? "---"}</td>
         <td className="px-4 py-3 text-sm text-muted-foreground">{clientName ?? "—"}</td>
@@ -363,9 +361,7 @@ function ShipmentTableRow({
             {labelSource === "easypost" && (
               <span className="text-xs bg-green-100 text-green-700 px-1 rounded">EP</span>
             )}
-            <span className="font-mono text-xs">
-              {shipment.tracking_number ?? "---"}
-            </span>
+            <span className="font-mono text-xs">{shipment.tracking_number ?? "---"}</span>
             {trackingUrl && (
               <a
                 href={trackingUrl}
@@ -596,8 +592,9 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
             Cost Breakdown
           </h4>
           {(() => {
-            const charged = (shipment as { customer_shipping_charged?: number | null })
-              .customer_shipping_charged ?? null;
+            const charged =
+              (shipment as { customer_shipping_charged?: number | null })
+                .customer_shipping_charged ?? null;
             const gap = charged != null ? charged - costBreakdown.postage : null;
             return (
               <dl className="text-sm space-y-1">

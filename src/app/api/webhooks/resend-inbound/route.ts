@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { NextResponse } from "next/server";
 import { tasks } from "@trigger.dev/sdk";
+import { NextResponse } from "next/server";
 import { parseInboundEmail } from "@/lib/clients/resend-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -103,8 +103,7 @@ export async function POST(req: Request): Promise<Response> {
   const bodyLower = (email.body ?? "").toLowerCase();
 
   const isBandcamp =
-    /^noreply@bandcamp\.com$/i.test(fromAddress) ||
-    /bandcamp\.com$/i.test(fromAddress);
+    /^noreply@bandcamp\.com$/i.test(fromAddress) || /bandcamp\.com$/i.test(fromAddress);
 
   if (isBandcamp) {
     // Type 1: Order — "Bam!/Cha-ching! Another order for..." or body contains "just bought/paid"
@@ -115,8 +114,7 @@ export async function POST(req: Request): Promise<Response> {
 
     // Type 2: Fan/customer message — "A message from Bandcamp, on behalf of..."
     const isBandcampFanMessage =
-      /a message from bandcamp/i.test(subjectLower) ||
-      /on behalf of/i.test(subjectLower);
+      /a message from bandcamp/i.test(subjectLower) || /on behalf of/i.test(subjectLower);
 
     // Type 3: New release alert — "New release from...", "New music from..."
     // No action needed — silently dismiss
@@ -129,7 +127,9 @@ export async function POST(req: Request): Promise<Response> {
       try {
         await tasks.trigger("bandcamp-sale-poll", {});
         await supabase.from("webhook_events").update({ status: "processed" }).eq("id", dedupRow.id);
-      } catch { /* non-critical — regular poll will pick it up */ }
+      } catch {
+        /* non-critical — regular poll will pick it up */
+      }
       return NextResponse.json({ ok: true, status: "bandcamp_order_poll_triggered" });
     }
 
@@ -153,8 +153,8 @@ export async function POST(req: Request): Promise<Response> {
   // or a known support email mapping. Otherwise silently dismiss to avoid flooding
   // the review queue with unrelated emails forwarded from the fulfillment inbox.
   if (!isBandcamp) {
-    const relatedIds = [email.inReplyTo, ...email.references].filter(
-      (value): value is string => Boolean(value),
+    const relatedIds = [email.inReplyTo, ...email.references].filter((value): value is string =>
+      Boolean(value),
     );
 
     // Check for existing conversation thread

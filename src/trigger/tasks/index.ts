@@ -67,24 +67,22 @@ export { discogsMessageSendTask } from "./discogs-message-send";
 
 // ── NEW: Discogs client connections (Phase 10) ────────────────────────────────
 
+// ── Bandcamp sales (backfill + daily sync) ────────────────────────────────────
+export { bandcampSalesBackfillCron, bandcampSalesBackfillTask } from "./bandcamp-sales-backfill";
+export { bandcampSalesSyncSchedule } from "./bandcamp-sales-sync";
+// ── Bandcamp scrape sweep (independent queue, avoids bandcamp-api congestion) ──
+export { bandcampScrapeSweepTask } from "./bandcamp-scrape-sweep";
+export { bundleAvailabilitySweepTask } from "./bundle-availability-sweep";
+// ── Bundle component tracking (inventory hardening) ───────────────────────────
+export { bundleComponentFanoutTask } from "./bundle-component-fanout";
+
+// ── Catalog stats snapshot refresh (nightly + on-demand) ──────────────────────
+export { catalogStatsRefreshSchedule, catalogStatsRefreshTask } from "./catalog-stats-refresh";
 export {
   discogsClientOrderSyncSchedule,
   discogsClientOrderSyncTask,
 } from "./discogs-client-order-sync";
-
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
-
-// ── Bundle component tracking (inventory hardening) ───────────────────────────
-export { bundleComponentFanoutTask } from "./bundle-component-fanout";
-export { bundleAvailabilitySweepTask } from "./bundle-availability-sweep";
-
-// ── Bandcamp scrape sweep (independent queue, avoids bandcamp-api congestion) ──
-export { bandcampScrapeSweepTask } from "./bandcamp-scrape-sweep";
-
-// ── Catalog stats snapshot refresh (nightly + on-demand) ──────────────────────
-export { catalogStatsRefreshSchedule, catalogStatsRefreshTask } from "./catalog-stats-refresh";
-
-// ── Bandcamp sales (backfill + daily sync) ────────────────────────────────────
-export { bandcampSalesBackfillTask, bandcampSalesBackfillCron } from "./bandcamp-sales-backfill";
-export { bandcampSalesSyncSchedule } from "./bandcamp-sales-sync";
+// ── Tag cleanup (admin settings) ──────────────────────────────────────────────
+export { tagCleanupBackfillTask } from "./tag-cleanup-backfill";

@@ -60,7 +60,10 @@ export async function setBundleComponents(
     graph.set(bc.bundle_variant_id, children);
   }
   // Add proposed new components to the graph for cycle checking
-  graph.set(bundleVariantId, parsed.map((c) => c.componentVariantId));
+  graph.set(
+    bundleVariantId,
+    parsed.map((c) => c.componentVariantId),
+  );
 
   // DFS from each proposed component to check if it can reach bundleVariantId
   // O(n × graph_size) — fine for typical catalog sizes (<1000 bundles per workspace)
@@ -104,10 +107,7 @@ export async function setBundleComponents(
 export async function removeBundleComponent(bundleComponentId: string) {
   await requireAuth();
   const supabase = createServiceRoleClient();
-  const { error } = await supabase
-    .from("bundle_components")
-    .delete()
-    .eq("id", bundleComponentId);
+  const { error } = await supabase.from("bundle_components").delete().eq("id", bundleComponentId);
   if (error) throw new Error(error.message);
 }
 
@@ -162,9 +162,7 @@ export async function computeBundleAvailability(bundleVariantId: string, workspa
       : Infinity;
 
   const effectiveBeforeBuffer =
-    componentDetails.length > 0
-      ? Math.min(bundleRaw, componentMin)
-      : bundleRaw;
+    componentDetails.length > 0 ? Math.min(bundleRaw, componentMin) : bundleRaw;
 
   const effectiveAvailable = Math.max(0, effectiveBeforeBuffer - bundleSafety);
   const constrainedBy =
@@ -172,5 +170,10 @@ export async function computeBundleAvailability(bundleVariantId: string, workspa
       ? (componentDetails.find((c) => c.contributes === componentMin) ?? null)
       : null;
 
-  return { rawAvailable: bundleRaw, effectiveAvailable, constrainedBy, components: componentDetails };
+  return {
+    rawAvailable: bundleRaw,
+    effectiveAvailable,
+    constrainedBy,
+    components: componentDetails,
+  };
 }

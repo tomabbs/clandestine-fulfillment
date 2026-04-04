@@ -164,9 +164,9 @@ export const bandcampOrderSyncTask = task({
               await supabase
                 .from("bandcamp_product_mappings")
                 .update({
-                  bandcamp_url:        url,
+                  bandcamp_url: url,
                   bandcamp_url_source: "orders_api",
-                  updated_at:          new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
                 })
                 .eq("variant_id", variantId)
                 .is("bandcamp_url", null);

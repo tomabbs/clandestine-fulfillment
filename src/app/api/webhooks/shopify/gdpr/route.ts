@@ -8,16 +8,18 @@
  *
  * Shopify signs GDPR webhooks with the app's client secret.
  * Rule #36: Raw body must be read before any parsing.
+ * Rule #62: Dedup via webhook_events INSERT.
  */
 
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { readWebhookBody, verifyHmacSignature } from "@/lib/server/webhook-body";
 import { env } from "@/lib/shared/env";
 
 export async function POST(req: Request) {
   const rawBody = await readWebhookBody(req);
 
-  // Verify HMAC — Shopify signs GDPR webhooks with the app's client secret
   const secret = env().SHOPIFY_CLIENT_SECRET;
   if (secret) {
     const signature = req.headers.get("X-Shopify-Hmac-SHA256");
@@ -30,8 +32,25 @@ export async function POST(req: Request) {
     }
   }
 
-  // Acknowledge receipt — all three topics handled here.
-  // No customer PII is stored beyond what's in our Supabase database
-  // (covered under our data retention policy).
+  const supabase = createServiceRoleClient();
+  const bodyHash = createHash("sha256").update(rawBody).digest("hex");
+  const { error: dedupError } = await supabase
+    .from("webhook_events")
+    .insert({
+      platform: "shopify",
+      external_webhook_id: `gdpr-${bodyHash}`,
+      topic: "gdpr/combined",
+      status: "received",
+    })
+    .select("id")
+    .single();
+
+  if (dedupError) {
+    if (dedupError.code === "23505") {
+      return NextResponse.json({ ok: true, status: "duplicate" });
+    }
+    console.error("webhook_events insert failed:", dedupError);
+  }
+
   return NextResponse.json({ received: true }, { status: 200 });
 }

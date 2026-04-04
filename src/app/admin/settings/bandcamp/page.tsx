@@ -24,17 +24,17 @@ import {
   createBandcampConnection,
   deleteBandcampConnection,
   getBandcampAccounts,
-  getBandcampScraperHealth,
   getBandcampSalesOverview,
+  getBandcampScraperHealth,
   getOrganizationsForWorkspace,
   triggerBandcampSync,
 } from "@/actions/bandcamp";
+import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -43,10 +43,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
-import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 
 function HealthBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   if (!lastSyncedAt) {
@@ -82,9 +82,23 @@ function HealthBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
 }
 
 function SensorBadge({ status }: { status: string }) {
-  if (status === "healthy") return <Badge variant="default" className="gap-1"><CheckCircle2 className="h-3 w-3" /> Healthy</Badge>;
-  if (status === "warning") return <Badge variant="secondary" className="gap-1 text-amber-600"><AlertTriangle className="h-3 w-3" /> Warning</Badge>;
-  return <Badge variant="destructive" className="gap-1"><ShieldAlert className="h-3 w-3" /> Critical</Badge>;
+  if (status === "healthy")
+    return (
+      <Badge variant="default" className="gap-1">
+        <CheckCircle2 className="h-3 w-3" /> Healthy
+      </Badge>
+    );
+  if (status === "warning")
+    return (
+      <Badge variant="secondary" className="gap-1 text-amber-600">
+        <AlertTriangle className="h-3 w-3" /> Warning
+      </Badge>
+    );
+  return (
+    <Badge variant="destructive" className="gap-1">
+      <ShieldAlert className="h-3 w-3" /> Critical
+    </Badge>
+  );
 }
 
 function CompletenessRow({ label, have, total }: { label: string; have: number; total: number }) {
@@ -96,7 +110,10 @@ function CompletenessRow({ label, have, total }: { label: string; have: number; 
       <TableCell className="text-right tabular-nums">{have}</TableCell>
       <TableCell className="text-right tabular-nums text-muted-foreground">{missing}</TableCell>
       <TableCell className="text-right">
-        <Badge variant={pct >= 90 ? "default" : pct >= 50 ? "secondary" : "outline"} className="tabular-nums">
+        <Badge
+          variant={pct >= 90 ? "default" : pct >= 50 ? "secondary" : "outline"}
+          className="tabular-nums"
+        >
           {pct}%
         </Badge>
       </TableCell>
@@ -125,11 +142,24 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
   });
 
   if (isLoading || !data) {
-    return <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>;
+    return (
+      <div className="flex justify-center py-12 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+      </div>
+    );
   }
 
   const t = data.total ?? 0;
-  const api = data.apiCoverage ?? { subdomain: 0, albumTitle: 0, price: 0, releaseDate: 0, image: 0, originQuantities: 0, rawApiData: 0, options: 0 };
+  const api = data.apiCoverage ?? {
+    subdomain: 0,
+    albumTitle: 0,
+    price: 0,
+    releaseDate: 0,
+    image: 0,
+    originQuantities: 0,
+    rawApiData: 0,
+    options: 0,
+  };
   const scraper = data.scraperCoverage ?? { artUrl: 0, about: 0, credits: 0, tracks: 0 };
   const sales = data.salesCoverage ?? { catalogNumber: 0, upc: 0 };
   const urls = data.urlSources ?? { scraper_verified: 0, constructed: 0, orders_api: 0, none: 0 };
@@ -140,7 +170,10 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Sync activity is <strong>near-real-time</strong> from logs. Data coverage is computed live.</p>
+        <p className="text-sm text-muted-foreground">
+          Sync activity is <strong>near-real-time</strong> from logs. Data coverage is computed
+          live.
+        </p>
         <Button variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
           <RefreshCw className={`h-3 w-3 mr-1 ${isFetching ? "animate-spin" : ""}`} /> Refresh
         </Button>
@@ -149,31 +182,62 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
       {/* Row 1: Key numbers */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Mapped Items</CardTitle></CardHeader>
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Mapped Items
+            </CardTitle>
+          </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold tabular-nums">{t}</p>
-            <p className="text-xs text-muted-foreground">{api.rawApiData} matched by SKU ({t > 0 ? Math.round(api.rawApiData / t * 100) : 0}%)</p>
+            <p className="text-xs text-muted-foreground">
+              {api.rawApiData} matched by SKU ({t > 0 ? Math.round((api.rawApiData / t) * 100) : 0}
+              %)
+            </p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">URLs Resolved</CardTitle></CardHeader>
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              URLs Resolved
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{totalWithUrl} <span className="text-sm font-normal text-muted-foreground">({t > 0 ? Math.round(totalWithUrl / t * 100) : 0}%)</span></p>
-            <p className="text-xs text-muted-foreground">{urls.scraper_verified} scraped · {urls.orders_api} from API · {urls.constructed} constructed</p>
+            <p className="text-2xl font-semibold tabular-nums">
+              {totalWithUrl}{" "}
+              <span className="text-sm font-normal text-muted-foreground">
+                ({t > 0 ? Math.round((totalWithUrl / t) * 100) : 0}%)
+              </span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {urls.scraper_verified} scraped · {urls.orders_api} from API · {urls.constructed}{" "}
+              constructed
+            </p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Sales Loaded</CardTitle></CardHeader>
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Sales Loaded
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{(data.totalSales ?? 0).toLocaleString()}</p>
-            <p className="text-xs text-muted-foreground">{(data.uniqueBuyers ?? 0).toLocaleString()} unique buyers</p>
+            <p className="text-2xl font-semibold tabular-nums">
+              {(data.totalSales ?? 0).toLocaleString()}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {(data.uniqueBuyers ?? 0).toLocaleString()} unique buyers
+            </p>
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pre-orders</CardTitle></CardHeader>
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Pre-orders</CardTitle>
+          </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold tabular-nums">{(data.preorders ?? []).length}</p>
-            <p className="text-xs text-muted-foreground">{(data.preorders ?? []).length === 0 ? "No active pre-orders" : "active releases"}</p>
+            <p className="text-xs text-muted-foreground">
+              {(data.preorders ?? []).length === 0 ? "No active pre-orders" : "active releases"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -182,10 +246,12 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {data.sensorReadings.length > 0 ? (
           data.sensorReadings
-            .filter((r, i, arr) => arr.findIndex(x => x.sensor_name === r.sensor_name) === i)
+            .filter((r, i, arr) => arr.findIndex((x) => x.sensor_name === r.sensor_name) === i)
             .map((r) => (
               <Card key={r.sensor_name}>
-                <CardHeader className="pb-1 pt-3 px-4"><CardDescription className="text-xs truncate">{r.sensor_name}</CardDescription></CardHeader>
+                <CardHeader className="pb-1 pt-3 px-4">
+                  <CardDescription className="text-xs truncate">{r.sensor_name}</CardDescription>
+                </CardHeader>
                 <CardContent className="px-4 pb-3">
                   <div className="flex items-center justify-between">
                     <SensorBadge status={r.status} />
@@ -196,14 +262,20 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               </Card>
             ))
         ) : (
-          <Card className="col-span-full"><CardContent className="py-4 text-center text-sm text-muted-foreground">Sensors run every 5 minutes.</CardContent></Card>
+          <Card className="col-span-full">
+            <CardContent className="py-4 text-center text-sm text-muted-foreground">
+              Sensors run every 5 minutes.
+            </CardContent>
+          </Card>
         )}
       </div>
 
       {/* Row 3: Sync Pipeline */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2"><Activity className="h-4 w-4" /> Sync Pipeline</CardTitle>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Sync Pipeline
+          </CardTitle>
           <CardDescription>Every Bandcamp Trigger task and its last run</CardDescription>
         </CardHeader>
         <CardContent>
@@ -222,19 +294,37 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
                 <TableRow key={s.syncType}>
                   <TableCell className="font-mono text-xs">{s.syncType}</TableCell>
                   <TableCell>
-                    <Badge variant={s.status === "completed" ? "default" : s.status === "failed" ? "destructive" : "secondary"}>{s.status}</Badge>
+                    <Badge
+                      variant={
+                        s.status === "completed"
+                          ? "default"
+                          : s.status === "failed"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                    >
+                      {s.status}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{s.itemsProcessed}</TableCell>
                   <TableCell className="text-right tabular-nums">{s.itemsFailed}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{timeAgo(s.createdAt)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {timeAgo(s.createdAt)}
+                  </TableCell>
                 </TableRow>
               ))}
               <TableRow>
                 <TableCell className="font-mono text-xs">scrape_page (1h)</TableCell>
-                <TableCell><Badge variant="outline">{scrapeStats.success} ok / {scrapeStats.failed} fail</Badge></TableCell>
+                <TableCell>
+                  <Badge variant="outline">
+                    {scrapeStats.success} ok / {scrapeStats.failed} fail
+                  </Badge>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">{scrapeStats.success}</TableCell>
                 <TableCell className="text-right tabular-nums">{scrapeStats.failed}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{scrapeStats.total} in last hour</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {scrapeStats.total} in last hour
+                </TableCell>
               </TableRow>
             </TableBody>
           </Table>
@@ -244,7 +334,11 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
       {/* Row 4: Pre-orders */}
       {(data.preorders ?? []).length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Active Pre-orders ({(data.preorders ?? []).length})</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Active Pre-orders ({(data.preorders ?? []).length})
+            </CardTitle>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
@@ -257,15 +351,29 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               </TableHeader>
               <TableBody>
                 {(data.preorders ?? []).map((p) => {
-                  const daysUntil = p.streetDate ? Math.max(0, Math.ceil((new Date(p.streetDate).getTime() - Date.now()) / 86400000)) : null;
+                  const daysUntil = p.streetDate
+                    ? Math.max(
+                        0,
+                        Math.ceil((new Date(p.streetDate).getTime() - Date.now()) / 86400000),
+                      )
+                    : null;
                   return (
                     <TableRow key={p.variantId}>
                       <TableCell className="font-medium">
-                        <a href={`/admin/catalog/${p.productId}`} className="text-blue-600 hover:underline">{p.title?.slice(0, 50)}</a>
+                        <a
+                          href={`/admin/catalog/${p.productId}`}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {p.title?.slice(0, 50)}
+                        </a>
                       </TableCell>
                       <TableCell className="font-mono text-xs">{p.sku}</TableCell>
-                      <TableCell className="text-sm">{p.streetDate ? new Date(p.streetDate).toLocaleDateString() : "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{daysUntil != null ? `${daysUntil}d` : "—"}</TableCell>
+                      <TableCell className="text-sm">
+                        {p.streetDate ? new Date(p.streetDate).toLocaleDateString() : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {daysUntil != null ? `${daysUntil}d` : "—"}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -280,11 +388,19 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">API Data Coverage</CardTitle>
-            <CardDescription>From Bandcamp Merch API (get_merch_details). Only SKU-matched items receive this data.</CardDescription>
+            <CardDescription>
+              From Bandcamp Merch API (get_merch_details). Only SKU-matched items receive this data.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
-              <TableHeader><TableRow><TableHead>Field</TableHead><TableHead className="text-right">Have</TableHead><TableHead className="text-right">Coverage</TableHead></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Field</TableHead>
+                  <TableHead className="text-right">Have</TableHead>
+                  <TableHead className="text-right">Coverage</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 <CompletenessRow label="Subdomain" have={api.subdomain} total={t} />
                 <CompletenessRow label="Album Title" have={api.albumTitle} total={t} />
@@ -300,11 +416,19 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Scraper Enrichment</CardTitle>
-            <CardDescription>From HTML page (data-tralbum). Only items with a resolved URL get scraped.</CardDescription>
+            <CardDescription>
+              From HTML page (data-tralbum). Only items with a resolved URL get scraped.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
-              <TableHeader><TableRow><TableHead>Field</TableHead><TableHead className="text-right">Have</TableHead><TableHead className="text-right">Coverage</TableHead></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Field</TableHead>
+                  <TableHead className="text-right">Have</TableHead>
+                  <TableHead className="text-right">Coverage</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 <CompletenessRow label="Album Cover (hi-res)" have={scraper.artUrl} total={t} />
                 <CompletenessRow label="About / Description" have={scraper.about} total={t} />
@@ -313,7 +437,9 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               </TableBody>
             </Table>
             <div className="mt-3 border-t pt-3">
-              <p className="text-xs font-medium text-muted-foreground mb-1">From Sales Report API</p>
+              <p className="text-xs font-medium text-muted-foreground mb-1">
+                From Sales Report API
+              </p>
               <Table>
                 <TableBody>
                   <CompletenessRow label="Catalog Number" have={sales.catalogNumber} total={t} />
@@ -327,28 +453,64 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
 
       {/* Row 6: URL Source Breakdown */}
       <Card>
-        <CardHeader><CardTitle className="text-base">URL Sources</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">URL Sources</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
-            <div><p className="text-lg font-semibold tabular-nums">{urls.scraper_verified}</p><p className="text-xs text-muted-foreground">Scraper verified</p></div>
-            <div><p className="text-lg font-semibold tabular-nums">{urls.constructed}</p><p className="text-xs text-muted-foreground">Constructed</p></div>
-            <div><p className="text-lg font-semibold tabular-nums">{urls.orders_api}</p><p className="text-xs text-muted-foreground">Sales / Orders API</p></div>
-            <div><p className="text-lg font-semibold tabular-nums text-green-600">{totalWithUrl}</p><p className="text-xs text-muted-foreground">Total with URL</p></div>
-            <div><p className="text-lg font-semibold tabular-nums text-red-500">{urls.none}</p><p className="text-xs text-muted-foreground">No URL</p></div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums">{urls.scraper_verified}</p>
+              <p className="text-xs text-muted-foreground">Scraper verified</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums">{urls.constructed}</p>
+              <p className="text-xs text-muted-foreground">Constructed</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums">{urls.orders_api}</p>
+              <p className="text-xs text-muted-foreground">Sales / Orders API</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums text-green-600">{totalWithUrl}</p>
+              <p className="text-xs text-muted-foreground">Total with URL</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums text-red-500">{urls.none}</p>
+              <p className="text-xs text-muted-foreground">No URL</p>
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* Row 7: Sales Backfill Progress */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Sales Backfill Progress</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">Sales Backfill Progress</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
             {(data.backfillProgress ?? []).map((b) => (
               <div key={b.connectionId} className="flex items-center gap-2">
-                <Badge variant={b.status === "completed" ? "default" : b.status === "running" ? "secondary" : b.status === "failed" ? "destructive" : "outline"} className="text-xs">{b.status}</Badge>
+                <Badge
+                  variant={
+                    b.status === "completed"
+                      ? "default"
+                      : b.status === "running"
+                        ? "secondary"
+                        : b.status === "failed"
+                          ? "destructive"
+                          : "outline"
+                  }
+                  className="text-xs"
+                >
+                  {b.status}
+                </Badge>
                 <span className="truncate text-xs">{b.bandName}</span>
-                {b.totalTransactions > 0 && <span className="text-xs text-muted-foreground tabular-nums">({b.totalTransactions.toLocaleString()})</span>}
+                {b.totalTransactions > 0 && (
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    ({b.totalTransactions.toLocaleString()})
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -358,19 +520,56 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
       {/* Row 8: Open Issues */}
       {data.reviewItems.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Open Issues ({data.reviewCount})</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" /> Open Issues ({data.reviewCount})
+            </CardTitle>
+          </CardHeader>
           <CardContent>
             <Table>
-              <TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Severity</TableHead><TableHead>When</TableHead><TableHead className="w-20" /></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>When</TableHead>
+                  <TableHead className="w-20" />
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 {data.reviewItems.map((item) => {
-                  const mappingId = (item.metadata as Record<string, unknown>)?.mappingId as string | undefined;
+                  const mappingId = (item.metadata as Record<string, unknown>)?.mappingId as
+                    | string
+                    | undefined;
                   return (
                     <TableRow key={item.id}>
                       <TableCell className="text-sm max-w-[300px] truncate">{item.title}</TableCell>
-                      <TableCell><Badge variant={item.severity === "critical" ? "destructive" : item.severity === "medium" ? "secondary" : "outline"}>{item.severity}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{timeAgo(item.created_at)}</TableCell>
-                      <TableCell>{mappingId && <a href={`/admin/catalog/${mappingId}`} className="text-blue-600 hover:underline"><ExternalLink className="h-3 w-3 inline mr-1" />View</a>}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            item.severity === "critical"
+                              ? "destructive"
+                              : item.severity === "medium"
+                                ? "secondary"
+                                : "outline"
+                          }
+                        >
+                          {item.severity}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {timeAgo(item.created_at)}
+                      </TableCell>
+                      <TableCell>
+                        {mappingId && (
+                          <a
+                            href={`/admin/catalog/${mappingId}`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="h-3 w-3 inline mr-1" />
+                            View
+                          </a>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -385,7 +584,14 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
 
 // ─── Sales History Tab ────────────────────────────────────────────────────────
 
-type SalesSortField = "itemName" | "artist" | "itemType" | "package" | "totalUnits" | "totalRevenue" | "sku";
+type SalesSortField =
+  | "itemName"
+  | "artist"
+  | "itemType"
+  | "package"
+  | "totalUnits"
+  | "totalRevenue"
+  | "sku";
 type SortDir = "asc" | "desc";
 
 function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
@@ -405,7 +611,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
 
   function toggleSort(field: SalesSortField) {
     if (sortField === field) {
-      setSortDir(d => d === "asc" ? "desc" : "asc");
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
       setSortDir(field === "itemName" || field === "artist" ? "asc" : "desc");
@@ -415,13 +621,15 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
 
   function SortIcon({ field }: { field: SalesSortField }) {
     if (sortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 inline opacity-40" />;
-    return sortDir === "asc"
-      ? <ArrowUp className="ml-1 h-3 w-3 inline" />
-      : <ArrowDown className="ml-1 h-3 w-3 inline" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="ml-1 h-3 w-3 inline" />
+    ) : (
+      <ArrowDown className="ml-1 h-3 w-3 inline" />
+    );
   }
 
   const sortedFiltered = useMemo(() => {
-    const items = (data?.items ?? []).filter(item => {
+    const items = (data?.items ?? []).filter((item) => {
       if (connFilter !== "all" && item.connectionId !== connFilter) return false;
       if (typeFilter !== "all" && item.itemType !== typeFilter) return false;
       return true;
@@ -430,14 +638,22 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
     const dir = sortDir === "asc" ? 1 : -1;
     return items.sort((a, b) => {
       switch (sortField) {
-        case "itemName": return dir * (a.itemName ?? "").localeCompare(b.itemName ?? "");
-        case "artist": return dir * (a.artist ?? "").localeCompare(b.artist ?? "");
-        case "itemType": return dir * (a.itemType ?? "").localeCompare(b.itemType ?? "");
-        case "package": return dir * (a.package ?? "").localeCompare(b.package ?? "");
-        case "totalUnits": return dir * (a.totalUnits - b.totalUnits);
-        case "totalRevenue": return dir * (a.totalRevenue - b.totalRevenue);
-        case "sku": return dir * (a.sku ?? "").localeCompare(b.sku ?? "");
-        default: return 0;
+        case "itemName":
+          return dir * (a.itemName ?? "").localeCompare(b.itemName ?? "");
+        case "artist":
+          return dir * (a.artist ?? "").localeCompare(b.artist ?? "");
+        case "itemType":
+          return dir * (a.itemType ?? "").localeCompare(b.itemType ?? "");
+        case "package":
+          return dir * (a.package ?? "").localeCompare(b.package ?? "");
+        case "totalUnits":
+          return dir * (a.totalUnits - b.totalUnits);
+        case "totalRevenue":
+          return dir * (a.totalRevenue - b.totalRevenue);
+        case "sku":
+          return dir * (a.sku ?? "").localeCompare(b.sku ?? "");
+        default:
+          return 0;
       }
     });
   }, [data?.items, connFilter, typeFilter, sortField, sortDir]);
@@ -458,8 +674,8 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {data.grandTotalSales.toLocaleString()} transactions loaded.
-          {" "}{(data.items ?? []).length} unique items.
+          {data.grandTotalSales.toLocaleString()} transactions loaded. {(data.items ?? []).length}{" "}
+          unique items.
         </p>
         <Button variant="outline" size="sm" disabled={isFetching} onClick={() => refetch()}>
           <RefreshCw className={`h-3 w-3 mr-1 ${isFetching ? "animate-spin" : ""}`} /> Refresh
@@ -468,16 +684,27 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
 
       {/* Backfill status */}
       <Card>
-        <CardHeader><CardTitle className="text-base">Backfill Status</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">Backfill Status</CardTitle>
+        </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            {data.connections.map(conn => (
+            {data.connections.map((conn) => (
               <div key={conn.connectionId} className="flex items-center gap-2">
-                <Badge variant={
-                  conn.backfillStatus === "completed" ? "default" :
-                  conn.backfillStatus === "running" ? "secondary" :
-                  conn.backfillStatus === "failed" ? "destructive" : "outline"
-                } className="text-xs">{conn.backfillStatus}</Badge>
+                <Badge
+                  variant={
+                    conn.backfillStatus === "completed"
+                      ? "default"
+                      : conn.backfillStatus === "running"
+                        ? "secondary"
+                        : conn.backfillStatus === "failed"
+                          ? "destructive"
+                          : "outline"
+                  }
+                  className="text-xs"
+                >
+                  {conn.backfillStatus}
+                </Badge>
                 <span className="truncate text-xs">{conn.bandName}</span>
               </div>
             ))}
@@ -487,11 +714,29 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
 
       {/* Filters + summary */}
       <div className="flex gap-3 items-center flex-wrap">
-        <select value={connFilter} onChange={e => { setConnFilter(e.target.value); setPage(1); }} className="border-input bg-background h-8 rounded-md border px-3 text-sm">
+        <select
+          value={connFilter}
+          onChange={(e) => {
+            setConnFilter(e.target.value);
+            setPage(1);
+          }}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
           <option value="all">All Connections</option>
-          {data.connections.map(c => (<option key={c.connectionId} value={c.connectionId}>{c.bandName}</option>))}
+          {data.connections.map((c) => (
+            <option key={c.connectionId} value={c.connectionId}>
+              {c.bandName}
+            </option>
+          ))}
         </select>
-        <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(1); }} className="border-input bg-background h-8 rounded-md border px-3 text-sm">
+        <select
+          value={typeFilter}
+          onChange={(e) => {
+            setTypeFilter(e.target.value);
+            setPage(1);
+          }}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
           <option value="all">All Types</option>
           <option value="album">Digital Albums</option>
           <option value="track">Tracks</option>
@@ -499,7 +744,8 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
           <option value="bundle">Bundles</option>
         </select>
         <div className="ml-auto text-sm text-muted-foreground tabular-nums">
-          {sortedFiltered.length} items · {totalUnits.toLocaleString()} units · ${totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          {sortedFiltered.length} items · {totalUnits.toLocaleString()} units · $
+          {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
         </div>
       </div>
 
@@ -507,13 +753,39 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("itemName")}>Title <SortIcon field="itemName" /></TableHead>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("artist")}>Artist <SortIcon field="artist" /></TableHead>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("itemType")}>Type <SortIcon field="itemType" /></TableHead>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("package")}>Format <SortIcon field="package" /></TableHead>
-            <TableHead className="cursor-pointer select-none text-right" onClick={() => toggleSort("totalUnits")}>Units <SortIcon field="totalUnits" /></TableHead>
-            <TableHead className="cursor-pointer select-none text-right" onClick={() => toggleSort("totalRevenue")}>Revenue <SortIcon field="totalRevenue" /></TableHead>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("sku")}>SKU <SortIcon field="sku" /></TableHead>
+            <TableHead
+              className="cursor-pointer select-none"
+              onClick={() => toggleSort("itemName")}
+            >
+              Title <SortIcon field="itemName" />
+            </TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("artist")}>
+              Artist <SortIcon field="artist" />
+            </TableHead>
+            <TableHead
+              className="cursor-pointer select-none"
+              onClick={() => toggleSort("itemType")}
+            >
+              Type <SortIcon field="itemType" />
+            </TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("package")}>
+              Format <SortIcon field="package" />
+            </TableHead>
+            <TableHead
+              className="cursor-pointer select-none text-right"
+              onClick={() => toggleSort("totalUnits")}
+            >
+              Units <SortIcon field="totalUnits" />
+            </TableHead>
+            <TableHead
+              className="cursor-pointer select-none text-right"
+              onClick={() => toggleSort("totalRevenue")}
+            >
+              Revenue <SortIcon field="totalRevenue" />
+            </TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("sku")}>
+              SKU <SortIcon field="sku" />
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -521,17 +793,47 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
             <TableRow key={`${item.connectionId}-${item.itemName}-${item.itemType}-${i}`}>
               <TableCell className="font-medium max-w-[250px] truncate">
                 {item.itemUrl ? (
-                  <a href={item.itemUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{item.itemName}</a>
-                ) : item.itemName}
+                  <a
+                    href={item.itemUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    {item.itemName}
+                  </a>
+                ) : (
+                  item.itemName
+                )}
               </TableCell>
-              <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">{item.artist}</TableCell>
+              <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">
+                {item.artist}
+              </TableCell>
               <TableCell>
-                <Badge variant={item.itemType === "album" ? "default" : item.itemType === "package" ? "secondary" : "outline"} className="text-xs">{item.itemType}</Badge>
+                <Badge
+                  variant={
+                    item.itemType === "album"
+                      ? "default"
+                      : item.itemType === "package"
+                        ? "secondary"
+                        : "outline"
+                  }
+                  className="text-xs"
+                >
+                  {item.itemType}
+                </Badge>
               </TableCell>
-              <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">{item.package ?? "—"}</TableCell>
-              <TableCell className="text-right tabular-nums">{item.totalUnits.toLocaleString()}</TableCell>
-              <TableCell className="text-right tabular-nums">${item.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">{item.sku ?? "—"}</TableCell>
+              <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">
+                {item.package ?? "—"}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {item.totalUnits.toLocaleString()}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                ${item.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                {item.sku ?? "—"}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -543,13 +845,20 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         pageSize={pageSize}
         total={sortedFiltered.length}
         onPageChange={setPage}
-        onPageSizeChange={(s: PageSize) => { setPageSize(s); setPage(1); }}
+        onPageSizeChange={(s: PageSize) => {
+          setPageSize(s);
+          setPage(1);
+        }}
       />
 
       {sortedFiltered.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No sales data {connFilter !== "all" || typeFilter !== "all" ? "for this filter" : "yet — backfill is running"}.
+            No sales data{" "}
+            {connFilter !== "all" || typeFilter !== "all"
+              ? "for this filter"
+              : "yet — backfill is running"}
+            .
           </CardContent>
         </Card>
       )}
@@ -667,7 +976,9 @@ export default function BandcampSettingsPage() {
               <div className="grid grid-cols-3 gap-4">
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Total Accounts</CardTitle>
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Total Accounts
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-2xl font-semibold">{accounts?.length ?? 0}</p>
@@ -675,7 +986,9 @@ export default function BandcampSettingsPage() {
                 </Card>
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Total Artists</CardTitle>
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Total Artists
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-2xl font-semibold">
@@ -685,7 +998,9 @@ export default function BandcampSettingsPage() {
                 </Card>
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Total Merch Items</CardTitle>
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Total Merch Items
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-2xl font-semibold">

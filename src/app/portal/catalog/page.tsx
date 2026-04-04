@@ -1,11 +1,11 @@
 "use client";
 
 import { Calendar, Disc3, Loader2, Package } from "lucide-react";
-import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getClientReleases } from "@/actions/catalog";
+import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -97,8 +97,11 @@ export default function CatalogPage() {
 
   if (!hydrated || isLoading) {
     return (
-      <div className="p-6 flex justify-center py-12 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div className="p-6 space-y-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
+        <div className="flex justify-center py-12 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
       </div>
     );
   }
@@ -164,9 +167,15 @@ export default function CatalogPage() {
                 const inv = v.warehouse_inventory_levels?.[0];
                 return (
                   <TableRow key={v.id}>
-                    <TableCell><VariantThumbnail variant={v} /></TableCell>
-                    <TableCell className="font-medium">{v.warehouse_products?.title ?? "—"}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{v.sku}</TableCell>
+                    <TableCell>
+                      <VariantThumbnail variant={v} />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {v.warehouse_products?.title ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {v.sku}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{formatDateUTC(v.street_date)}</Badge>
                     </TableCell>
@@ -200,9 +209,15 @@ export default function CatalogPage() {
                 const inv = v.warehouse_inventory_levels?.[0];
                 return (
                   <TableRow key={v.id}>
-                    <TableCell><VariantThumbnail variant={v} /></TableCell>
-                    <TableCell className="font-medium">{v.warehouse_products?.title ?? "—"}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{v.sku}</TableCell>
+                    <TableCell>
+                      <VariantThumbnail variant={v} />
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {v.warehouse_products?.title ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {v.sku}
+                    </TableCell>
                     <TableCell className="text-sm">{formatDateUTC(v.street_date)}</TableCell>
                     <TableCell className="text-right font-mono">{inv?.available ?? 0}</TableCell>
                     <TableCell className="text-right font-mono">{inv?.committed ?? 0}</TableCell>
@@ -238,7 +253,9 @@ export default function CatalogPage() {
               <TableBody>
                 {catalog.map((v) => {
                   const inv = v.warehouse_inventory_levels?.[0];
-                  const isRecent = v.street_date && new Date(v.street_date) >= new Date(Date.now() - 30*24*60*60*1000);
+                  const isRecent =
+                    v.street_date &&
+                    new Date(v.street_date) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
                   const productId = v.warehouse_products?.id;
                   return (
                     <TableRow
@@ -246,25 +263,31 @@ export default function CatalogPage() {
                       className="cursor-pointer hover:bg-muted/50"
                       onClick={() => productId && router.push(`/portal/catalog/${productId}`)}
                     >
-                      <TableCell><VariantThumbnail variant={v} /></TableCell>
+                      <TableCell>
+                        <VariantThumbnail variant={v} />
+                      </TableCell>
                       <TableCell className="font-medium max-w-[280px]">
                         <span className="truncate block">{v.warehouse_products?.title ?? "—"}</span>
                         <span className="flex gap-1 mt-0.5">
                           {v.is_preorder && (
-                            <Badge variant="outline" className="text-xs">Pre-Order</Badge>
+                            <Badge variant="outline" className="text-xs">
+                              Pre-Order
+                            </Badge>
                           )}
                           {isRecent && !v.is_preorder && (
-                            <Badge variant="secondary" className="text-xs">New</Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              New
+                            </Badge>
                           )}
                         </span>
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">{v.sku}</TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {v.sku}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDateUTC(v.street_date)}
                       </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {inv?.available ?? 0}
-                      </TableCell>
+                      <TableCell className="text-right font-mono">{inv?.available ?? 0}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -277,7 +300,10 @@ export default function CatalogPage() {
                 pageSize={pageSize}
                 total={total}
                 onPageChange={setPage}
-                onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+                onPageSizeChange={(s) => {
+                  setPageSize(s);
+                  setPage(1);
+                }}
               />
             )}
           </>

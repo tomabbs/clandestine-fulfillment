@@ -6,11 +6,11 @@
 import { runs, tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
 import {
+  ASENDIA_CARRIER_ACCOUNT_ID,
   createShipment,
+  isDomesticShipment,
   selectBestRate,
   WAREHOUSE_ADDRESS,
-  ASENDIA_CARRIER_ACCOUNT_ID,
-  isDomesticShipment,
 } from "@/lib/clients/easypost-client";
 import { getServiceDetails, normalizeService } from "@/lib/clients/easypost-service-map";
 import { requireStaff } from "@/lib/server/auth-context";

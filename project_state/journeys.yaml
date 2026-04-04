@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-03-20
+updated_at: 2026-04-04
 
 journeys:
   - id: staff_client_invite
@@ -105,3 +105,19 @@ journeys:
       - webhook ingress mapped to trigger tasks
       - retries and idempotency paths documented
       - troubleshooting requires trigger touchpoint review
+
+  - id: bandcamp_sales_data
+    area: admin_settings
+    paths:
+      - src/trigger/tasks/bandcamp-sales-backfill.ts
+      - src/trigger/tasks/bandcamp-sales-sync.ts
+      - src/trigger/lib/bandcamp-url-crossref.ts
+      - src/actions/bandcamp.ts
+      - src/app/admin/settings/bandcamp/page.tsx
+    status: yellow
+    checks:
+      - backfill cron processes all connections with time guard
+      - total_transactions counter accumulates correctly
+      - crossReferenceAlbumUrls copies item_url from sales to mappings
+      - daily sync keeps bandcamp_sales up to date
+      - Sales History tab shows item-level breakdown

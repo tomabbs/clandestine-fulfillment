@@ -1,8 +1,8 @@
 "use server";
 
 import { z } from "zod/v4";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
 
@@ -296,7 +296,9 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
   const directSubdomain = (conn.band_url ?? "").replace("https://", "").split(".")[0];
 
   // Build member_band_id → subdomain lookup
-  interface MemberBandEntry { band_id: number }
+  interface MemberBandEntry {
+    band_id: number;
+  }
   const memberBandSubdomain = new Map<number, string>();
   memberBandSubdomain.set(conn.band_id as number, directSubdomain);
 
@@ -304,9 +306,12 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
   try {
     const raw = conn.member_bands_cache;
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (Array.isArray(parsed?.member_bands)) memberBandsArr = parsed.member_bands as MemberBandEntry[];
+    if (Array.isArray(parsed?.member_bands))
+      memberBandsArr = parsed.member_bands as MemberBandEntry[];
     else if (Array.isArray(parsed)) memberBandsArr = parsed as MemberBandEntry[];
-  } catch { /* ignore parse errors — proceed with direct band only */ }
+  } catch {
+    /* ignore parse errors — proceed with direct band only */
+  }
 
   for (const mb of memberBandsArr) {
     if (typeof mb?.band_id === "number") memberBandSubdomain.set(mb.band_id, directSubdomain);
@@ -325,12 +330,13 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
 
   // Resolve product titles for URL construction (Group 2 items without URL)
   const noUrlIds = (pending ?? []).filter((m) => !m.bandcamp_url).map((m) => m.variant_id);
-  const { data: variants } = noUrlIds.length > 0
-    ? await serviceClient
-        .from("warehouse_product_variants")
-        .select("id, warehouse_products!inner(title)")
-        .in("id", noUrlIds)
-    : { data: [] };
+  const { data: variants } =
+    noUrlIds.length > 0
+      ? await serviceClient
+          .from("warehouse_product_variants")
+          .select("id, warehouse_products!inner(title)")
+          .in("id", noUrlIds)
+      : { data: [] };
 
   const titleByVariant = new Map(
     (variants ?? []).map((v) => [
@@ -348,13 +354,20 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
 
     if (!scrapeUrl) {
       const memberBandId = m.bandcamp_member_band_id as number | null;
-      const subdomain = memberBandId ? (memberBandSubdomain.get(memberBandId) ?? directSubdomain) : directSubdomain;
+      const subdomain = memberBandId
+        ? (memberBandSubdomain.get(memberBandId) ?? directSubdomain)
+        : directSubdomain;
       if (!subdomain) continue;
 
       const rawTitle = titleByVariant.get(m.variant_id) ?? "";
-      const withoutArtist = rawTitle.includes(" - ") ? rawTitle.split(" - ").slice(1).join(" - ") : rawTitle;
+      const withoutArtist = rawTitle.includes(" - ")
+        ? rawTitle.split(" - ").slice(1).join(" - ")
+        : rawTitle;
       const albumTitle = withoutArtist
-        .replace(/\s+(\d*x?LP|CD|Cassette|Tape|7"|10"|12"|Box Set|Vinyl|Picture Disc|Flexi|SACD|DVD|Blu-ray|Limited Edition|Standard Edition|Deluxe Edition)[^a-zA-Z0-9]*$/i, "")
+        .replace(
+          /\s+(\d*x?LP|CD|Cassette|Tape|7"|10"|12"|Box Set|Vinyl|Picture Disc|Flexi|SACD|DVD|Blu-ray|Limited Edition|Standard Edition|Deluxe Edition)[^a-zA-Z0-9]*$/i,
+          "",
+        )
         .trim();
 
       scrapeUrl = buildBandcampAlbumUrl(subdomain, albumTitle);
@@ -363,7 +376,11 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
       // Idempotency guard: only write URL if not already set
       const { data: urlWritten } = await serviceClient
         .from("bandcamp_product_mappings")
-        .update({ bandcamp_url: scrapeUrl, bandcamp_url_source: "constructed", updated_at: new Date().toISOString() })
+        .update({
+          bandcamp_url: scrapeUrl,
+          bandcamp_url_source: "constructed",
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", m.id)
         .is("bandcamp_url", null)
         .select("id")
@@ -405,35 +422,37 @@ export async function getBandcampScraperHealth(workspaceId: string) {
   // ── All mapping data for coverage calculations ──
   const { data: mappings } = await supabase
     .from("bandcamp_product_mappings")
-    .select("id, bandcamp_url, bandcamp_url_source, bandcamp_subdomain, bandcamp_album_title, bandcamp_price, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_options, bandcamp_origin_quantities, bandcamp_catalog_number, bandcamp_upc, raw_api_data, bandcamp_image_url, bandcamp_new_date")
+    .select(
+      "id, bandcamp_url, bandcamp_url_source, bandcamp_subdomain, bandcamp_album_title, bandcamp_price, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_options, bandcamp_origin_quantities, bandcamp_catalog_number, bandcamp_upc, raw_api_data, bandcamp_image_url, bandcamp_new_date",
+    )
     .eq("workspace_id", workspaceId);
 
   const t = mappings?.length ?? 0;
 
   // API data coverage
   const apiCoverage = {
-    subdomain: mappings?.filter(m => m.bandcamp_subdomain).length ?? 0,
-    albumTitle: mappings?.filter(m => m.bandcamp_album_title).length ?? 0,
-    price: mappings?.filter(m => m.bandcamp_price != null).length ?? 0,
-    releaseDate: mappings?.filter(m => m.bandcamp_new_date).length ?? 0,
-    image: mappings?.filter(m => m.bandcamp_image_url).length ?? 0,
-    originQuantities: mappings?.filter(m => m.bandcamp_origin_quantities).length ?? 0,
-    rawApiData: mappings?.filter(m => m.raw_api_data).length ?? 0,
-    options: mappings?.filter(m => m.bandcamp_options).length ?? 0,
+    subdomain: mappings?.filter((m) => m.bandcamp_subdomain).length ?? 0,
+    albumTitle: mappings?.filter((m) => m.bandcamp_album_title).length ?? 0,
+    price: mappings?.filter((m) => m.bandcamp_price != null).length ?? 0,
+    releaseDate: mappings?.filter((m) => m.bandcamp_new_date).length ?? 0,
+    image: mappings?.filter((m) => m.bandcamp_image_url).length ?? 0,
+    originQuantities: mappings?.filter((m) => m.bandcamp_origin_quantities).length ?? 0,
+    rawApiData: mappings?.filter((m) => m.raw_api_data).length ?? 0,
+    options: mappings?.filter((m) => m.bandcamp_options).length ?? 0,
   };
 
   // Scraper coverage
   const scraperCoverage = {
-    artUrl: mappings?.filter(m => m.bandcamp_art_url).length ?? 0,
-    about: mappings?.filter(m => m.bandcamp_about && m.bandcamp_about !== "").length ?? 0,
-    credits: mappings?.filter(m => m.bandcamp_credits && m.bandcamp_credits !== "").length ?? 0,
-    tracks: mappings?.filter(m => m.bandcamp_tracks).length ?? 0,
+    artUrl: mappings?.filter((m) => m.bandcamp_art_url).length ?? 0,
+    about: mappings?.filter((m) => m.bandcamp_about && m.bandcamp_about !== "").length ?? 0,
+    credits: mappings?.filter((m) => m.bandcamp_credits && m.bandcamp_credits !== "").length ?? 0,
+    tracks: mappings?.filter((m) => m.bandcamp_tracks).length ?? 0,
   };
 
   // Sales data coverage
   const salesCoverage = {
-    catalogNumber: mappings?.filter(m => m.bandcamp_catalog_number).length ?? 0,
-    upc: mappings?.filter(m => m.bandcamp_upc).length ?? 0,
+    catalogNumber: mappings?.filter((m) => m.bandcamp_catalog_number).length ?? 0,
+    upc: mappings?.filter((m) => m.bandcamp_upc).length ?? 0,
   };
 
   // URL breakdown by source
@@ -456,24 +475,43 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     .order("created_at", { ascending: false })
     .limit(100);
 
-  const syncPipeline: Array<{ syncType: string; status: string; itemsProcessed: number; itemsFailed: number; createdAt: string; metadata: unknown }> = [];
+  const syncPipeline: Array<{
+    syncType: string;
+    status: string;
+    itemsProcessed: number;
+    itemsFailed: number;
+    createdAt: string;
+    metadata: unknown;
+  }> = [];
   const seenTypes = new Set<string>();
   for (const l of allLogs ?? []) {
     if (l.sync_type === "scrape_page") continue;
     if (!seenTypes.has(l.sync_type)) {
       seenTypes.add(l.sync_type);
-      syncPipeline.push({ syncType: l.sync_type, status: l.status, itemsProcessed: l.items_processed, itemsFailed: l.items_failed, createdAt: l.created_at, metadata: l.metadata });
+      syncPipeline.push({
+        syncType: l.sync_type,
+        status: l.status,
+        itemsProcessed: l.items_processed,
+        itemsFailed: l.items_failed,
+        createdAt: l.created_at,
+        metadata: l.metadata,
+      });
     }
   }
 
   // Scrape page stats (last hour aggregate)
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const recentScrapes = (allLogs ?? []).filter(l => l.sync_type === "scrape_page" && l.created_at >= oneHourAgo);
+  const recentScrapes = (allLogs ?? []).filter(
+    (l) => l.sync_type === "scrape_page" && l.created_at >= oneHourAgo,
+  );
   const scrapeStats = {
     total: recentScrapes.length,
-    success: recentScrapes.filter(l => l.status === "completed").length,
-    failed: recentScrapes.filter(l => l.status === "failed").length,
-    blocked: recentScrapes.filter(l => { const hs = (l.metadata as Record<string, unknown>)?.httpStatus; return hs === 403 || hs === 429; }).length,
+    success: recentScrapes.filter((l) => l.status === "completed").length,
+    failed: recentScrapes.filter((l) => l.status === "failed").length,
+    blocked: recentScrapes.filter((l) => {
+      const hs = (l.metadata as Record<string, unknown>)?.httpStatus;
+      return hs === 403 || hs === 429;
+    }).length,
   };
 
   // ── Pre-orders ──
@@ -484,7 +522,7 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     .eq("is_preorder", true)
     .order("street_date", { ascending: true });
 
-  const preorderList = (preorders ?? []).map(p => ({
+  const preorderList = (preorders ?? []).map((p) => ({
     variantId: p.id,
     productId: (p.warehouse_products as unknown as { id: string }).id,
     title: (p.warehouse_products as unknown as { title: string }).title,
@@ -503,8 +541,8 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     .from("bandcamp_sales_backfill_state")
     .select("connection_id, status, total_transactions, last_processed_date, last_error");
 
-  const stateMap = new Map((backfillStates ?? []).map(s => [s.connection_id, s]));
-  const backfillProgress = (connections ?? []).map(c => {
+  const stateMap = new Map((backfillStates ?? []).map((s) => [s.connection_id, s]));
+  const backfillProgress = (connections ?? []).map((c) => {
     const s = stateMap.get(c.id);
     return {
       connectionId: c.id,
@@ -527,14 +565,19 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     .select("buyer_email")
     .eq("workspace_id", workspaceId)
     .not("buyer_email", "is", null);
-  const uniqueBuyers = new Set((buyerEmails ?? []).map(e => e.buyer_email)).size;
+  const uniqueBuyers = new Set((buyerEmails ?? []).map((e) => e.buyer_email)).size;
 
   // ── Sensor readings ──
   const { data: sensorReadings } = await supabase
     .from("sensor_readings")
     .select("sensor_name, status, value, message, created_at")
     .eq("workspace_id", workspaceId)
-    .in("sensor_name", ["sync.bandcamp_stale", "bandcamp.merch_sync_log_stale", "bandcamp.scraper_review_open", "bandcamp.scrape_block_rate"])
+    .in("sensor_name", [
+      "sync.bandcamp_stale",
+      "bandcamp.merch_sync_log_stale",
+      "bandcamp.scraper_review_open",
+      "bandcamp.scrape_block_rate",
+    ])
     .order("created_at", { ascending: false })
     .limit(10);
 
@@ -593,7 +636,10 @@ export async function getBandcampSalesOverview(workspaceId: string) {
       .not("net_amount", "is", null)
       .limit(1000);
 
-    const totalRevenue = (revenueRow ?? []).reduce((sum, r) => sum + (Number(r.net_amount) || 0), 0);
+    const totalRevenue = (revenueRow ?? []).reduce(
+      (sum, r) => sum + (Number(r.net_amount) || 0),
+      0,
+    );
     const currency = revenueRow?.[0]?.currency ?? "USD";
 
     const { count: refundCount } = await supabase
@@ -633,23 +679,28 @@ export async function getBandcampSalesOverview(workspaceId: string) {
   // Per-item breakdown: group by item_name + artist + item_type + package
   const { data: allSales } = await supabase
     .from("bandcamp_sales")
-    .select("item_name, artist, item_type, package, item_url, sku, catalog_number, net_amount, quantity, connection_id, currency")
+    .select(
+      "item_name, artist, item_type, package, item_url, sku, catalog_number, net_amount, quantity, connection_id, currency",
+    )
     .eq("workspace_id", workspaceId);
 
-  const itemMap = new Map<string, {
-    itemName: string;
-    artist: string;
-    itemType: string;
-    package: string | null;
-    itemUrl: string | null;
-    sku: string | null;
-    catalogNumber: string | null;
-    currency: string;
-    connectionId: string;
-    totalUnits: number;
-    totalRevenue: number;
-    saleCount: number;
-  }>();
+  const itemMap = new Map<
+    string,
+    {
+      itemName: string;
+      artist: string;
+      itemType: string;
+      package: string | null;
+      itemUrl: string | null;
+      sku: string | null;
+      catalogNumber: string | null;
+      currency: string;
+      connectionId: string;
+      totalUnits: number;
+      totalRevenue: number;
+      saleCount: number;
+    }
+  >();
 
   for (const sale of allSales ?? []) {
     const key = `${sale.connection_id}|${sale.item_name}|${sale.artist}|${sale.item_type}|${sale.package ?? ""}`;
@@ -660,7 +711,8 @@ export async function getBandcampSalesOverview(workspaceId: string) {
       existing.saleCount++;
       if (!existing.itemUrl && sale.item_url) existing.itemUrl = sale.item_url;
       if (!existing.sku && sale.sku) existing.sku = sale.sku;
-      if (!existing.catalogNumber && sale.catalog_number) existing.catalogNumber = sale.catalog_number;
+      if (!existing.catalogNumber && sale.catalog_number)
+        existing.catalogNumber = sale.catalog_number;
     } else {
       itemMap.set(key, {
         itemName: sale.item_name ?? "Unknown",
@@ -680,7 +732,7 @@ export async function getBandcampSalesOverview(workspaceId: string) {
   }
 
   const items = Array.from(itemMap.values())
-    .map(i => ({ ...i, totalRevenue: Math.round(i.totalRevenue * 100) / 100 }))
+    .map((i) => ({ ...i, totalRevenue: Math.round(i.totalRevenue * 100) / 100 }))
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 
   return { connections: connectionStats, grandTotalSales: grandTotal ?? 0, items };
@@ -716,16 +768,16 @@ export async function getBandcampFullItemData(variantId: string) {
 
     const totalUnits = (skuSales ?? []).reduce((s, r) => s + (r.quantity ?? 0), 0);
     const totalRevenue = (skuSales ?? []).reduce((s, r) => s + (Number(r.net_amount) || 0), 0);
-    const refunds = (skuSales ?? []).filter(r => r.payment_state === "refunded").length;
+    const refunds = (skuSales ?? []).filter((r) => r.payment_state === "refunded").length;
 
     salesByVariant = {
       totalUnits,
       totalRevenue: Math.round(totalRevenue * 100) / 100,
       refunds,
       lastSaleDate: skuSales?.[0]?.sale_date ?? null,
-      catalogNumber: skuSales?.find(r => r.catalog_number)?.catalog_number ?? null,
-      upc: skuSales?.find(r => r.upc)?.upc ?? null,
-      isrc: skuSales?.find(r => r.isrc)?.isrc ?? null,
+      catalogNumber: skuSales?.find((r) => r.catalog_number)?.catalog_number ?? null,
+      upc: skuSales?.find((r) => r.upc)?.upc ?? null,
+      isrc: skuSales?.find((r) => r.isrc)?.isrc ?? null,
       recentSales: (skuSales ?? []).slice(0, 10),
     };
   }

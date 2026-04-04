@@ -92,7 +92,9 @@ export const bandcampSalePollTask = schedules.task({
                   await Promise.allSettled([
                     tasks.trigger("bandcamp-inventory-push", {}),
                     tasks.trigger("multi-store-inventory-push", {}),
-                  ]).catch(() => { /* non-critical — cron covers it */ });
+                  ]).catch(() => {
+                    /* non-critical — cron covers it */
+                  });
 
                   // If this variant is a bundle, decrement component inventory
                   const { data: bundleCheck } = await supabase
@@ -109,7 +111,9 @@ export const bandcampSalePollTask = schedules.task({
                         workspaceId,
                         correlationBase: correlationId,
                       })
-                      .catch(() => { /* non-critical — review queue will surface failures */ });
+                      .catch(() => {
+                        /* non-critical — review queue will surface failures */
+                      });
                   }
                 }
 

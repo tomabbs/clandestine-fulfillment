@@ -32,6 +32,8 @@ type RouteAudit = {
   consoleIssues: ConsoleIssue[];
   pageErrors: string[];
   networkIssues: NetworkIssue[];
+  loadTimeMs?: number;
+  hydrationMismatches: number;
 };
 
 type AuditRun = {
@@ -71,23 +73,36 @@ const STAFF_ROUTES: Array<{ path: string; heading: RegExp }> = [
   { path: "/admin/settings/integrations", heading: /integrations/i },
   { path: "/admin/settings/health", heading: /health/i },
   { path: "/admin/reports/top-sellers", heading: /top sellers/i },
+  { path: "/admin/mail-order", heading: /mail.?order/i },
+  { path: "/admin/shipstation-orders", heading: /shipstation|orders/i },
+  { path: "/admin/discogs", heading: /discogs/i },
+  { path: "/admin/discogs/credentials", heading: /discogs|credentials/i },
+  { path: "/admin/discogs/matching", heading: /discogs|matching/i },
 ];
 
 const CLIENT_ROUTES: Array<{ path: string; heading: RegExp }> = [
   { path: "/portal", heading: /welcome|dashboard/i },
   { path: "/portal/inventory", heading: /inventory/i },
-  { path: "/portal/releases", heading: /releases/i },
+  { path: "/portal/releases", heading: /catalog/i },
   { path: "/portal/inbound", heading: /inbound/i },
   { path: "/portal/inbound/new", heading: /inbound/i },
-  { path: "/portal/orders", heading: /orders/i },
+  { path: "/portal/orders", heading: /fulfillment/i },
   { path: "/portal/shipping", heading: /shipping/i },
   { path: "/portal/sales", heading: /sales/i },
   { path: "/portal/billing", heading: /billing/i },
   { path: "/portal/support", heading: /support/i },
   { path: "/portal/settings", heading: /settings/i },
+  { path: "/portal/catalog", heading: /catalog/i },
+  { path: "/portal/fulfillment", heading: /fulfillment|shipping/i },
+  { path: "/portal/mail-order", heading: /mail.?order/i },
+  { path: "/portal/stores", heading: /store|connect/i },
 ];
 
-const PUBLIC_ROUTES: Array<{ path: string; heading?: RegExp }> = [{ path: "/login" }];
+const PUBLIC_ROUTES: Array<{ path: string; heading?: RegExp }> = [
+  { path: "/login" },
+  { path: "/privacy" },
+  { path: "/terms" },
+];
 
 async function auditRoute(
   page: Page,
@@ -156,8 +171,11 @@ async function auditRoute(
   let routeError: string | undefined;
   let headingCheck = "not_checked";
   let hasErrorBoundary = false;
+  const loadStart = Date.now();
+  let loadTimeMs: number | undefined;
   try {
     const res = await page.goto(targetPath, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    loadTimeMs = Date.now() - loadStart;
     status = res?.status();
 
     if (heading) {
@@ -181,6 +199,10 @@ async function auditRoute(
     (issue) => issue.kind === "http_error" && (issue.status ?? 0) >= 500,
   );
 
+  const hydrationMismatches = consoleIssues.filter(
+    (i) => i.type === "error" && /hydrat/i.test(i.text),
+  ).length;
+
   return {
     role,
     path: targetPath,
@@ -192,6 +214,8 @@ async function auditRoute(
     consoleIssues,
     pageErrors,
     networkIssues,
+    loadTimeMs,
+    hydrationMismatches,
   };
 }
 
@@ -248,7 +272,10 @@ test.afterAll(async () => {
     "",
     ...auditRun.routes.map((r) => {
       const status = r.skipped ? "SKIPPED" : r.ok ? "PASS" : "FAIL";
-      return `- [${status}] (${r.role}) \`${r.path}\` status=${r.status ?? "n/a"} console=${r.consoleIssues.length} pageErrors=${r.pageErrors.length} network=${r.networkIssues.length}${r.note ? ` note=${r.note}` : ""}${r.error ? ` error=${r.error}` : ""}`;
+      const timing = r.loadTimeMs != null ? ` load=${r.loadTimeMs}ms` : "";
+      const hydration = r.hydrationMismatches > 0 ? ` hydration=${r.hydrationMismatches}` : "";
+      const slow = (r.loadTimeMs ?? 0) > 5000 ? " [SLOW]" : "";
+      return `- [${status}] (${r.role}) \`${r.path}\` status=${r.status ?? "n/a"} console=${r.consoleIssues.length} pageErrors=${r.pageErrors.length} network=${r.networkIssues.length}${timing}${hydration}${slow}${r.note ? ` note=${r.note}` : ""}${r.error ? ` error=${r.error}` : ""}`;
     }),
     "",
   ].join("\n");
@@ -281,6 +308,7 @@ test("staff full-site page audit", async ({ page }) => {
           consoleIssues: [],
           pageErrors: [],
           networkIssues: [],
+          hydrationMismatches: 0,
         },
   );
 
@@ -299,6 +327,7 @@ test("staff full-site page audit", async ({ page }) => {
           consoleIssues: [],
           pageErrors: [],
           networkIssues: [],
+          hydrationMismatches: 0,
         },
   );
 
@@ -317,6 +346,7 @@ test("staff full-site page audit", async ({ page }) => {
           consoleIssues: [],
           pageErrors: [],
           networkIssues: [],
+          hydrationMismatches: 0,
         },
   );
 });

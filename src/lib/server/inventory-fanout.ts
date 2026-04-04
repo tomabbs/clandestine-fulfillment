@@ -97,10 +97,18 @@ export async function fanoutInventoryChange(
       // Push tasks are workspace-scoped and already compute bundle MIN —
       // triggering them ensures parent bundle availability is recalculated
       if (!targets.pushToBandcamp) {
-        try { await tasks.trigger("bandcamp-inventory-push", {}); } catch { /* non-critical */ }
+        try {
+          await tasks.trigger("bandcamp-inventory-push", {});
+        } catch {
+          /* non-critical */
+        }
       }
       if (!targets.pushToStores) {
-        try { await tasks.trigger("multi-store-inventory-push", {}); } catch { /* non-critical */ }
+        try {
+          await tasks.trigger("multi-store-inventory-push", {});
+        } catch {
+          /* non-critical */
+        }
       }
     }
   }

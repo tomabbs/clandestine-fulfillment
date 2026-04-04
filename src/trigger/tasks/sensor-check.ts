@@ -233,7 +233,8 @@ export const sensorCheckTask = schedules.task({
           sensorName: "bandcamp.scraper_review_open",
           status: openCount >= 50 ? "critical" : openCount >= 10 ? "warning" : "healthy",
           value: { open_count: openCount },
-          message: openCount === 0 ? "No open scraper issues" : `${openCount} open bandcamp_scraper items`,
+          message:
+            openCount === 0 ? "No open scraper issues" : `${openCount} open bandcamp_scraper items`,
         });
       } catch {
         readings.push({
@@ -265,10 +266,15 @@ export const sensorCheckTask = schedules.task({
         readings.push({
           sensorName: "bandcamp.scrape_block_rate",
           status: blockRate >= 0.5 ? "critical" : blockRate >= 0.2 ? "warning" : "healthy",
-          value: { total_scrapes_1h: total, blocked_1h: blocked, block_rate: Math.round(blockRate * 100) },
-          message: total === 0
-            ? "No scrapes in last hour"
-            : `${Math.round(blockRate * 100)}% block rate (${blocked}/${total} in 1h)`,
+          value: {
+            total_scrapes_1h: total,
+            blocked_1h: blocked,
+            block_rate: Math.round(blockRate * 100),
+          },
+          message:
+            total === 0
+              ? "No scrapes in last hour"
+              : `${Math.round(blockRate * 100)}% block rate (${blocked}/${total} in 1h)`,
         });
       } catch {
         readings.push({

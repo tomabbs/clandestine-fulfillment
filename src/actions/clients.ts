@@ -677,7 +677,12 @@ export async function addClientSupportEmail(orgId: string, email: string) {
   const { workspaceId } = await requireStaff();
   const supabase = createServiceRoleClient();
   const { error } = await supabase.from("support_email_mappings").upsert(
-    { workspace_id: workspaceId, email_address: email.toLowerCase().trim(), org_id: orgId, is_active: true },
+    {
+      workspace_id: workspaceId,
+      email_address: email.toLowerCase().trim(),
+      org_id: orgId,
+      is_active: true,
+    },
     { onConflict: "workspace_id,email_address" },
   );
   if (error) return { success: false, error: error.message };

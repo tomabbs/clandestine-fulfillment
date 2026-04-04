@@ -184,7 +184,7 @@ describe("bandcamp client", () => {
       expect(result.unmatched[0].title).toBe("Unknown");
     });
 
-    it("skips items without SKU", () => {
+    it("puts items without SKU into unmatched for auto-generation", () => {
       const merchItems = [
         { package_id: 1, title: "No SKU", sku: null },
         { package_id: 2, title: "Also no SKU" },
@@ -193,7 +193,7 @@ describe("bandcamp client", () => {
       const result = matchSkuToVariants(merchItems, variants);
 
       expect(result.matched).toHaveLength(0);
-      expect(result.unmatched).toHaveLength(0);
+      expect(result.unmatched).toHaveLength(2);
     });
   });
 });

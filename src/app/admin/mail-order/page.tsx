@@ -1,9 +1,9 @@
 "use client";
 
 import { ChevronDown, ChevronRight, MapPin, Package, Store } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getMailOrders } from "@/actions/mail-orders";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,13 +39,19 @@ type ShippingAddress = {
   country?: string;
 };
 
-const PAYOUT_STATUS_CONFIG: Record<string, { variant: "default" | "secondary" | "outline"; label: string }> = {
+const PAYOUT_STATUS_CONFIG: Record<
+  string,
+  { variant: "default" | "secondary" | "outline"; label: string }
+> = {
   pending: { variant: "outline", label: "Pending" },
   included_in_snapshot: { variant: "secondary", label: "In Billing" },
   paid: { variant: "default", label: "Paid" },
 };
 
-const FULFILLMENT_CONFIG: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
+const FULFILLMENT_CONFIG: Record<
+  string,
+  { variant: "default" | "secondary" | "outline" | "destructive"; label: string }
+> = {
   unfulfilled: { variant: "outline", label: "Unfulfilled" },
   fulfilled: { variant: "default", label: "Fulfilled" },
 };
@@ -90,7 +96,10 @@ function OrderDetail({ order }: { order: MailOrderRow }) {
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Items</p>
           <div className="rounded border bg-background divide-y">
             {lineItems.map((li, i) => (
-              <div key={`${li.sku}-${i}`} className="flex items-center justify-between px-3 py-2 text-sm">
+              <div
+                key={`${li.sku}-${i}`}
+                className="flex items-center justify-between px-3 py-2 text-sm"
+              >
                 <div className="min-w-0">
                   <span className="font-medium">{li.title ?? "—"}</span>
                   {li.variant_title && li.variant_title !== "Default Title" && (
@@ -114,11 +123,24 @@ function OrderDetail({ order }: { order: MailOrderRow }) {
 
       {/* Totals */}
       <div className="flex gap-6 text-sm text-muted-foreground">
-        <span>Subtotal: <span className="font-mono text-foreground">${Number(order.subtotal).toFixed(2)}</span></span>
+        <span>
+          Subtotal:{" "}
+          <span className="font-mono text-foreground">${Number(order.subtotal).toFixed(2)}</span>
+        </span>
         {Number(order.shipping_amount) > 0 && (
-          <span>Shipping: <span className="font-mono text-foreground">${Number(order.shipping_amount).toFixed(2)}</span></span>
+          <span>
+            Shipping:{" "}
+            <span className="font-mono text-foreground">
+              ${Number(order.shipping_amount).toFixed(2)}
+            </span>
+          </span>
         )}
-        <span>Payout (50%): <span className="font-mono font-medium text-foreground">${Number(order.client_payout_amount ?? 0).toFixed(2)}</span></span>
+        <span>
+          Payout (50%):{" "}
+          <span className="font-mono font-medium text-foreground">
+            ${Number(order.client_payout_amount ?? 0).toFixed(2)}
+          </span>
+        </span>
       </div>
     </div>
   );
@@ -144,7 +166,8 @@ export default function AdminMailOrderPage() {
     <div className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Mail-Order</h1>
       <p className="text-sm text-muted-foreground">
-        Consignment orders from Clandestine Shopify and Discogs. Each row is one client's share of an order. Payout = 50% of their items' subtotal.
+        Consignment orders from Clandestine Shopify and Discogs. Each row is one client's share of
+        an order. Payout = 50% of their items' subtotal.
       </p>
 
       <div className="flex flex-wrap gap-3">
@@ -219,11 +242,15 @@ export default function AdminMailOrderPage() {
                       onClick={() => setExpandedId(isExpanded ? null : order.id)}
                     >
                       <TableCell className="w-8 text-muted-foreground">
-                        {isExpanded
-                          ? <ChevronDown className="h-4 w-4" />
-                          : <ChevronRight className="h-4 w-4" />}
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{order.order_number ?? "—"}</TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {order.order_number ?? "—"}
+                      </TableCell>
                       <TableCell className="text-sm font-medium">{orgName}</TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-[160px] truncate">
                         {order.customer_name ?? "—"}

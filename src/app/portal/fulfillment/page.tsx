@@ -1,9 +1,9 @@
 "use client";
 
 import { CheckCircle, Package } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,6 @@ export default function PortalFulfillmentPage() {
     tier: CACHE_TIERS.SESSION,
     enabled: !!expandedId,
   });
-
 
   return (
     <div className="p-6 space-y-4">

@@ -1,9 +1,13 @@
 "use client";
 
 import { ExternalLink, Minus, Package, Plus } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
-import { getClientInventoryLevels, getInventoryDetail, updateInventoryBuffer } from "@/actions/inventory";
+import {
+  getClientInventoryLevels,
+  getInventoryDetail,
+  updateInventoryBuffer,
+} from "@/actions/inventory";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,7 +22,6 @@ import {
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
-
 
 export default function InventoryPage() {
   const [filters, setFilters] = useState({
@@ -49,7 +52,6 @@ export default function InventoryPage() {
     tier: CACHE_TIERS.REALTIME,
     enabled: !!expandedSku,
   });
-
 
   return (
     <div className="p-6 space-y-4">
@@ -84,11 +86,23 @@ export default function InventoryPage() {
             <TableRow>
               <TableHead className="w-12" />
               <TableHead>Product / SKU</TableHead>
-              <TableHead className="text-right" title="Actual units in warehouse.">In Stock</TableHead>
-              <TableHead className="text-right" title="Units shown as available on Bandcamp and your stores. Reduced by the safety buffer to prevent overselling.">Listed As</TableHead>
+              <TableHead className="text-right" title="Actual units in warehouse.">
+                In Stock
+              </TableHead>
+              <TableHead
+                className="text-right"
+                title="Units shown as available on Bandcamp and your stores. Reduced by the safety buffer to prevent overselling."
+              >
+                Listed As
+              </TableHead>
               <TableHead className="hidden md:table-cell text-right">Committed</TableHead>
               <TableHead className="hidden md:table-cell text-right">Incoming</TableHead>
-              <TableHead className="hidden lg:table-cell text-right" title="Units held back from all sales channels. Default 3 covers the Bandcamp sync window.">Buffer</TableHead>
+              <TableHead
+                className="hidden lg:table-cell text-right"
+                title="Units held back from all sales channels. Default 3 covers the Bandcamp sync window."
+              >
+                Buffer
+              </TableHead>
               <TableHead>Format</TableHead>
             </TableRow>
           </TableHeader>
@@ -121,10 +135,17 @@ export default function InventoryPage() {
                   <TableCell className="text-right font-mono">{row.available}</TableCell>
                   {/* Listed As = buffered quantity pushed to sales channels */}
                   <TableCell className="text-right font-mono text-muted-foreground">
-                    {Math.max(0, row.available - ((row as { safetyStock?: number | null }).safetyStock ?? 3))}
+                    {Math.max(
+                      0,
+                      row.available - ((row as { safetyStock?: number | null }).safetyStock ?? 3),
+                    )}
                   </TableCell>
-                  <TableCell className="hidden md:table-cell text-right font-mono">{row.committed}</TableCell>
-                  <TableCell className="hidden md:table-cell text-right font-mono">{row.incoming}</TableCell>
+                  <TableCell className="hidden md:table-cell text-right font-mono">
+                    {row.committed}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell text-right font-mono">
+                    {row.incoming}
+                  </TableCell>
                   {/* Buffer — client-adjustable (0–20), null = workspace default of 3 */}
                   <TableCell className="hidden lg:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1">

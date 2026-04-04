@@ -1,0 +1,1069 @@
+{
+  "startedAt": "2026-04-04T03:10:41.771Z",
+  "baseUrl": "http://localhost:3000",
+  "routes": [
+    {
+      "role": "staff",
+      "path": "/admin",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 2366,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inventory",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272246657",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 546,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inbound",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272247455",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 426,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/orders",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272247905",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 763,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/catalog",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272248676",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 506,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/clients",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272249196",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 498,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272249706",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 635,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipping/pirate-ship",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 963,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/billing",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272251230",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 568,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/channels",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272251901",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 596,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/review-queue",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272252516",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 563,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/support",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272253083",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 564,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/scan",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272253661",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 776,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272254439",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/admin/settings",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 565,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/users",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 818,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/bandcamp",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272256692",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 773,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/store-connections",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272257478",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 917,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/store-mapping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272258416",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 713,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/integrations",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272259140",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 651,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/settings/health",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 677,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/reports/top-sellers",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272261344",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 768,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/mail-order",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272262123",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 913,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/shipstation-orders",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272263039",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 718,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/discogs",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272263773",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/app/admin/layout.js",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 727,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/discogs/credentials",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272264508",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 732,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/discogs/matching",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272265253",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 795,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/clients/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in clients list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/catalog/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in catalog list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "staff",
+      "path": "/admin/inbound/[id]",
+      "ok": true,
+      "skipped": true,
+      "note": "No detail links found in inbound list",
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "https://cpanel.clandestinedistro.com/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "https://cpanel.clandestinedistro.com/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 3814,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/inventory",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 945,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/releases",
+      "ok": false,
+      "headingCheck": "failed",
+      "status": 200,
+      "error": "\u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('h1').first()\nExpected pattern: \u001b[32m/releases/i\u001b[39m\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for locator('h1').first()\u001b[22m\n",
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Warning: Expected server HTML to contain a matching <%s> in <%s>.%s table div \n    at table\n    at div\n    at Table (webpack-internal:///(app-pages-browser)/./src/components/ui/table.tsx:20:11)\n    at div\n    at InventoryPage (webpack-internal:///(app-pages-browser)/./src/app/portal/inventory/page.tsx:34:82)\n    at ClientPageRoot (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/client-page.js:14:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at Suspense\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundaryHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:113:9)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at main\n    at main\n    at SidebarInset (webpack-internal:///(app-pages-browser)/./src/components/ui/sidebar.tsx:359:11)\n    at div\n    at SidebarProvider (webpack-internal:///(app-pages-browser)/./src/components/ui/sidebar.tsx:75:11)\n    at PortalLayout (webpack-internal:///(app-pages-browser)/./src/app/portal/layout.tsx:18:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at FloatingDelayGroup (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@base-ui+react@1.3.0_@types+react@18.3.28_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/@base-ui/react/esm/floating-ui-react/components/FloatingDelayGroup.js:50:13)\n    at TooltipProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@base-ui+react@1.3.0_@types+react@18.3.28_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/@base-ui/react/esm/tooltip/provider/TooltipProvider.js:21:13)\n    at TooltipProvider (webpack-internal:///(app-pages-browser)/./src/components/ui/tooltip.tsx:21:11)\n    at QueryClientProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@tanstack+react-query@5.90.21_react@18.3.1/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:27:11)\n    at PersistQueryClientProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@tanstack+react-query-persist-client@5.90.25_@tanstack+react-query@5.90.21_react@18.3.1__react@18.3.1/node_modules/@tanstack/react-query-persist-client/build/modern/PersistQueryClientProvider.js:17:11)\n    at QueryProvider (webpack-internal:///(app-pages-browser)/./src/components/shared/query-provider.tsx:21:11)\n    at ThemeContextBridge (webpack-internal:///(app-pages-browser)/./src/contexts/ThemeContext.tsx:20:11)\n    at V (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next-themes@0.4.6_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next-themes/dist/index.mjs:54:24)\n    at J (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next-themes@0.4.6_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next-themes/dist/index.mjs:47:47)\n    at ThemeProvider (webpack-internal:///(app-pages-browser)/./src/contexts/ThemeContext.tsx:44:11)\n    at body\n    at html\n    at RootLayout (Server)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at DevRootNotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/dev-root-not-found-boundary.js:33:11)\n    at ReactDevOverlay (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/react-dev-overlay/app/ReactDevOverlay.js:87:9)\n    at HotReload (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/react-dev-overlay/app/hot-reloader-client.js:321:11)\n    at Router (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/app-router.js:207:11)\n    at ErrorBoundaryHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:113:9)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at AppRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/app-router.js:585:13)\n    at ServerRoot (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js:112:27)\n    at Root (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js:117:11)",
+          "location": "webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/catalog"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/catalog"
+        }
+      ],
+      "pageErrors": [
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "There was an error while hydrating this Suspense boundary. Switched to client rendering.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error"
+      ],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/inventory",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/inventory",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/catalog",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/catalog",
+          "resourceType": "fetch"
+        }
+      ],
+      "loadTimeMs": 2848,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/inbound",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 1166,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/inbound/new",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272287865",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 1180,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/orders",
+      "ok": false,
+      "headingCheck": "failed",
+      "status": 200,
+      "error": "\u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('h1').first()\nExpected pattern: \u001b[32m/orders/i\u001b[39m\nReceived string:  \u001b[31m\"Fulfillment\"\u001b[39m\nTimeout: 10000ms\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for locator('h1').first()\u001b[22m\n\u001b[2m    9 × locator resolved to <h1 class=\"text-2xl font-semibold tracking-tight\">Fulfillment</h1>\u001b[22m\n\u001b[2m      - unexpected value \"Fulfillment\"\u001b[22m\n",
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Failed to fetch RSC payload for http://localhost:3000/portal/fulfillment. Falling back to browser navigation. TypeError: Failed to fetch\n    at fetchServerResponse (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/router-reducer/fetch-server-response.js:59:27)\n    at refreshReducer (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/router-reducer/reducers/refresh-reducer.js:34:67)\n    at clientReducer (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/router-reducer/router-reducer.js:37:59)\n    at Object.action (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/shared/lib/router/action-queue.js:150:55)\n    at runAction (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/shared/lib/router/action-queue.js:56:38)\n    at dispatchAction (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/shared/lib/router/action-queue.js:113:9)\n    at Object.dispatch (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/shared/lib/router/action-queue.js:145:40)\n    at runRemainingActions (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/shared/lib/router/action-queue.js:39:29)\n    at handleResult (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/shared/lib/router/action-queue.js:66:9)",
+          "location": "webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js"
+        },
+        {
+          "type": "error",
+          "text": "Warning: Expected server HTML to contain a matching <%s> in <%s>.%s table div \n    at table\n    at div\n    at Table (webpack-internal:///(app-pages-browser)/./src/components/ui/table.tsx:20:11)\n    at div\n    at PortalFulfillmentPage (webpack-internal:///(app-pages-browser)/./src/app/portal/fulfillment/page.tsx:36:82)\n    at ClientPageRoot (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/client-page.js:14:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundaryHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:113:9)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at main\n    at main\n    at SidebarInset (webpack-internal:///(app-pages-browser)/./src/components/ui/sidebar.tsx:359:11)\n    at div\n    at SidebarProvider (webpack-internal:///(app-pages-browser)/./src/components/ui/sidebar.tsx:75:11)\n    at PortalLayout (webpack-internal:///(app-pages-browser)/./src/app/portal/layout.tsx:18:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at FloatingDelayGroup (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@base-ui+react@1.3.0_@types+react@18.3.28_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/@base-ui/react/esm/floating-ui-react/components/FloatingDelayGroup.js:50:13)\n    at TooltipProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@base-ui+react@1.3.0_@types+react@18.3.28_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/@base-ui/react/esm/tooltip/provider/TooltipProvider.js:21:13)\n    at TooltipProvider (webpack-internal:///(app-pages-browser)/./src/components/ui/tooltip.tsx:21:11)\n    at QueryClientProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@tanstack+react-query@5.90.21_react@18.3.1/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:27:11)\n    at PersistQueryClientProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@tanstack+react-query-persist-client@5.90.25_@tanstack+react-query@5.90.21_react@18.3.1__react@18.3.1/node_modules/@tanstack/react-query-persist-client/build/modern/PersistQueryClientProvider.js:17:11)\n    at QueryProvider (webpack-internal:///(app-pages-browser)/./src/components/shared/query-provider.tsx:21:11)\n    at ThemeContextBridge (webpack-internal:///(app-pages-browser)/./src/contexts/ThemeContext.tsx:20:11)\n    at V (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next-themes@0.4.6_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next-themes/dist/index.mjs:54:24)\n    at J (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next-themes@0.4.6_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next-themes/dist/index.mjs:47:47)\n    at ThemeProvider (webpack-internal:///(app-pages-browser)/./src/contexts/ThemeContext.tsx:44:11)\n    at body\n    at html\n    at RootLayout (Server)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at DevRootNotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/dev-root-not-found-boundary.js:33:11)\n    at ReactDevOverlay (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/react-dev-overlay/app/ReactDevOverlay.js:87:9)\n    at HotReload (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/react-dev-overlay/app/hot-reloader-client.js:321:11)\n    at Router (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/app-router.js:207:11)\n    at ErrorBoundaryHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:113:9)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at AppRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/app-router.js:585:13)\n    at ServerRoot (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js:112:27)\n    at Root (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js:117:11)",
+          "location": "webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js"
+        },
+        {
+          "type": "error",
+          "text": "Warning: An error occurred during hydration. The server HTML was replaced with client content in <%s>. #document",
+          "location": "webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js"
+        }
+      ],
+      "pageErrors": [
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "There was an error while hydrating. Because the error happened outside of a Suspense boundary, the entire root will switch to client rendering.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error"
+      ],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272289070",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/orders",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/portal/fulfillment?_rsc=ef503",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/fulfillment",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 965,
+      "hydrationMismatches": 1
+    },
+    {
+      "role": "client",
+      "path": "/portal/shipping",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 1324,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/sales",
+      "ok": false,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Warning: Expected server HTML to contain a matching <%s> in <%s>.%s table div \n    at table\n    at div\n    at Table (webpack-internal:///(app-pages-browser)/./src/components/ui/table.tsx:20:11)\n    at div\n    at PortalShippingPage (webpack-internal:///(app-pages-browser)/./src/app/portal/shipping/page.tsx:35:82)\n    at ClientPageRoot (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/client-page.js:14:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundaryHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:113:9)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at main\n    at main\n    at SidebarInset (webpack-internal:///(app-pages-browser)/./src/components/ui/sidebar.tsx:359:11)\n    at div\n    at SidebarProvider (webpack-internal:///(app-pages-browser)/./src/components/ui/sidebar.tsx:75:11)\n    at PortalLayout (webpack-internal:///(app-pages-browser)/./src/app/portal/layout.tsx:18:11)\n    at InnerLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:243:11)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at LoadingBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:349:11)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at InnerScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:153:9)\n    at ScrollAndFocusHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:228:11)\n    at RenderFromTemplateContext (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/render-from-template-context.js:16:44)\n    at OuterLayoutRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/layout-router.js:370:11)\n    at FloatingDelayGroup (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@base-ui+react@1.3.0_@types+react@18.3.28_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/@base-ui/react/esm/floating-ui-react/components/FloatingDelayGroup.js:50:13)\n    at TooltipProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@base-ui+react@1.3.0_@types+react@18.3.28_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/@base-ui/react/esm/tooltip/provider/TooltipProvider.js:21:13)\n    at TooltipProvider (webpack-internal:///(app-pages-browser)/./src/components/ui/tooltip.tsx:21:11)\n    at QueryClientProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@tanstack+react-query@5.90.21_react@18.3.1/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:27:11)\n    at PersistQueryClientProvider (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/@tanstack+react-query-persist-client@5.90.25_@tanstack+react-query@5.90.21_react@18.3.1__react@18.3.1/node_modules/@tanstack/react-query-persist-client/build/modern/PersistQueryClientProvider.js:17:11)\n    at QueryProvider (webpack-internal:///(app-pages-browser)/./src/components/shared/query-provider.tsx:21:11)\n    at ThemeContextBridge (webpack-internal:///(app-pages-browser)/./src/contexts/ThemeContext.tsx:20:11)\n    at V (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next-themes@0.4.6_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next-themes/dist/index.mjs:54:24)\n    at J (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next-themes@0.4.6_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/next-themes/dist/index.mjs:47:47)\n    at ThemeProvider (webpack-internal:///(app-pages-browser)/./src/contexts/ThemeContext.tsx:44:11)\n    at body\n    at html\n    at RootLayout (Server)\n    at RedirectErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:74:9)\n    at RedirectBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/redirect-boundary.js:82:11)\n    at NotFoundErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:76:9)\n    at NotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/not-found-boundary.js:84:11)\n    at DevRootNotFoundBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/dev-root-not-found-boundary.js:33:11)\n    at ReactDevOverlay (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/react-dev-overlay/app/ReactDevOverlay.js:87:9)\n    at HotReload (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/react-dev-overlay/app/hot-reloader-client.js:321:11)\n    at Router (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/app-router.js:207:11)\n    at ErrorBoundaryHandler (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:113:9)\n    at ErrorBoundary (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/error-boundary.js:160:11)\n    at AppRouter (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/components/app-router.js:585:13)\n    at ServerRoot (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js:112:27)\n    at Root (webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js:117:11)",
+          "location": "webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js"
+        },
+        {
+          "type": "error",
+          "text": "Warning: An error occurred during hydration. The server HTML was replaced with client content in <%s>. #document",
+          "location": "webpack-internal:///(app-pages-browser)/./node_modules/.pnpm/next@14.2.35_@babel+core@7.29.0_@opentelemetry+api@1.9.0_@playwright+test@1.58.2_react-_487acc8f59a372d3e0c61af5d066cbfb/node_modules/next/dist/client/app-index.js"
+        }
+      ],
+      "pageErrors": [
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "Hydration failed because the initial UI does not match what was rendered on the server.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error",
+        "There was an error while hydrating. Because the error happened outside of a Suspense boundary, the entire root will switch to client rendering.\nSee more info here: https://nextjs.org/docs/messages/react-hydration-error"
+      ],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/shipping",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/shipping",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 2582,
+      "hydrationMismatches": 1
+    },
+    {
+      "role": "client",
+      "path": "/portal/billing",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 996,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/support",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272305831",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 1467,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/settings",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272307304",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/settings",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 1087,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/catalog",
+      "ok": false,
+      "headingCheck": "failed",
+      "status": 200,
+      "error": "\u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: locator('h1').first()\nExpected pattern: \u001b[32m/catalog/i\u001b[39m\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for locator('h1').first()\u001b[22m\n",
+      "hasErrorBoundary": false,
+      "consoleIssues": [
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/catalog"
+        },
+        {
+          "type": "error",
+          "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+          "location": "http://localhost:3000/portal/catalog"
+        }
+      ],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "POST",
+          "url": "http://localhost:3000/portal/catalog",
+          "resourceType": "fetch",
+          "errorText": "net::ERR_ABORTED"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/catalog",
+          "resourceType": "fetch"
+        },
+        {
+          "kind": "http_error",
+          "method": "POST",
+          "status": 500,
+          "url": "http://localhost:3000/portal/catalog",
+          "resourceType": "fetch"
+        }
+      ],
+      "loadTimeMs": 51,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/fulfillment",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 42,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/mail-order",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272319375",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 1183,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "client",
+      "path": "/portal/stores",
+      "ok": true,
+      "headingCheck": "passed",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 1821,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "public",
+      "path": "/login",
+      "ok": true,
+      "headingCheck": "not_checked",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [],
+      "loadTimeMs": 981,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "public",
+      "path": "/privacy",
+      "ok": true,
+      "headingCheck": "not_checked",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272323464",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 1303,
+      "hydrationMismatches": 0
+    },
+    {
+      "role": "public",
+      "path": "/terms",
+      "ok": true,
+      "headingCheck": "not_checked",
+      "status": 200,
+      "hasErrorBoundary": false,
+      "consoleIssues": [],
+      "pageErrors": [],
+      "networkIssues": [
+        {
+          "kind": "requestfailed",
+          "method": "GET",
+          "url": "http://localhost:3000/_next/static/chunks/main-app.js?v=1775272324772",
+          "resourceType": "script",
+          "errorText": "net::ERR_ABORTED"
+        }
+      ],
+      "loadTimeMs": 977,
+      "hydrationMismatches": 0
+    }
+  ],
+  "finishedAt": "2026-04-04T03:12:05.833Z"
+}

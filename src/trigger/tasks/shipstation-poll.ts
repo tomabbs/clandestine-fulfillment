@@ -5,8 +5,8 @@
 import { logger, schedules } from "@trigger.dev/sdk";
 import { fetchOrders, fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
 import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
+import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
 
 export const shipstationPollTask = schedules.task({
   id: "shipstation-poll",
@@ -276,12 +276,10 @@ async function ingestFromPoll(
       item_index: idx,
     }));
 
-    const { error: itemsError } = await supabase
-      .from("warehouse_shipment_items")
-      .upsert(itemRows, {
-        onConflict: "shipment_id,sku,item_index",
-        ignoreDuplicates: false,
-      });
+    const { error: itemsError } = await supabase.from("warehouse_shipment_items").upsert(itemRows, {
+      onConflict: "shipment_id,sku,item_index",
+      ignoreDuplicates: false,
+    });
 
     if (itemsError) {
       logger.error(`Failed to upsert items for shipment ${shipstationShipmentId}`, {
@@ -317,9 +315,7 @@ async function ingestFromPoll(
 
       // Prefer Bandcamp's shipping_cost over ShipStation's shippingAmount
       const authoritativeShippingCharged =
-        linkedOrder?.shipping_cost != null
-          ? Number(linkedOrder.shipping_cost)
-          : ssShippingCharged;
+        linkedOrder?.shipping_cost != null ? Number(linkedOrder.shipping_cost) : ssShippingCharged;
 
       await supabase
         .from("warehouse_shipments")
@@ -402,9 +398,7 @@ async function matchShipmentToOrder(
         (o) => normalizeOrderNumber(o.order_number) === normalizedSsOrderNumber,
       );
       if (exactMatch) {
-        logger.info(
-          `Exact order number match: shipment ${shipmentDbId} → order ${exactMatch.id}`,
-        );
+        logger.info(`Exact order number match: shipment ${shipmentDbId} → order ${exactMatch.id}`);
         supabase
           .from("channel_sync_log")
           .insert({
@@ -417,7 +411,15 @@ async function matchShipmentToOrder(
             started_at: new Date().toISOString(),
             completed_at: new Date().toISOString(),
           })
-          .then(() => {}, () => {}); // fire-and-forget, non-critical
+          .then(
+            () => {},
+            (err) =>
+              logger.warn("channel_sync_log insert failed", {
+                error: String(err),
+                task: "shipstation-poll",
+                context: "order_auto_link_audit",
+              }),
+          );
         return exactMatch.id;
       }
     }
@@ -456,9 +458,7 @@ async function matchShipmentToOrder(
     let score = 0;
     const signals: string[] = [];
 
-    const addrPostal = (
-      order.shipping_address as Record<string, string> | null
-    )?.postalCode;
+    const addrPostal = (order.shipping_address as Record<string, string> | null)?.postalCode;
     if (postalCode && addrPostal === postalCode) {
       score += 30;
       signals.push("postal_code");
@@ -501,30 +501,28 @@ async function matchShipmentToOrder(
   scored.sort((a, b) => b.score - a.score);
   if (scored.length === 0) return null;
 
-  await supabase
-    .from("warehouse_review_queue")
-    .upsert(
-      {
-        workspace_id: workspaceId,
-        category: "shipment_order_match",
-        severity: scored[0].score >= 80 ? ("medium" as const) : ("low" as const),
-        title: `Probable order match for shipment — needs confirmation`,
-        description:
-          `Shipment ${shipmentDbId} (SS order: ${shipment.orderNumber ?? "unknown"}) ` +
-          `scored ${scored[0].score} against order ${scored[0].id}. ` +
-          `Signals: ${scored[0].signals.join(", ")}. ` +
-          `Set order_id on warehouse_shipments to confirm.`,
-        metadata: {
-          shipment_id: shipmentDbId,
-          ss_order_number: shipment.orderNumber,
-          top_candidates: scored.slice(0, 3),
-        },
-        status: "open" as const,
-        group_key: `shipment_order_prob_${shipmentDbId}`,
-        occurrence_count: 1,
+  await supabase.from("warehouse_review_queue").upsert(
+    {
+      workspace_id: workspaceId,
+      category: "shipment_order_match",
+      severity: scored[0].score >= 80 ? ("medium" as const) : ("low" as const),
+      title: `Probable order match for shipment — needs confirmation`,
+      description:
+        `Shipment ${shipmentDbId} (SS order: ${shipment.orderNumber ?? "unknown"}) ` +
+        `scored ${scored[0].score} against order ${scored[0].id}. ` +
+        `Signals: ${scored[0].signals.join(", ")}. ` +
+        `Set order_id on warehouse_shipments to confirm.`,
+      metadata: {
+        shipment_id: shipmentDbId,
+        ss_order_number: shipment.orderNumber,
+        top_candidates: scored.slice(0, 3),
       },
-      { onConflict: "group_key", ignoreDuplicates: true },
-    );
+      status: "open" as const,
+      group_key: `shipment_order_prob_${shipmentDbId}`,
+      occurrence_count: 1,
+    },
+    { onConflict: "group_key", ignoreDuplicates: true },
+  );
 
   return null;
 }

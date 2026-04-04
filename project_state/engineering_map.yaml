@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-03-20
+updated_at: 2026-04-04
 
 domains:
   - name: auth_and_access
@@ -80,6 +80,8 @@ domains:
       - shipstation/aftership/stripe/resend wiring
       - credential and connection health
       - bandcamp scraper health dashboard (getBandcampScraperHealth)
+      - bandcamp Sales Report API (backfill + daily sync)
+      - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
 
   - name: database_and_rls

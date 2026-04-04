@@ -30,7 +30,9 @@ export const bundleAvailabilitySweepTask = schedules.task({
         await Promise.allSettled([
           tasks.trigger("bandcamp-inventory-push", {}),
           tasks.trigger("multi-store-inventory-push", {}),
-        ]).catch(() => { /* non-critical */ });
+        ]).catch(() => {
+          /* non-critical */
+        });
       }
     }
 

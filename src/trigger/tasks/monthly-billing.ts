@@ -9,7 +9,7 @@
  * On any org failure: log error, create review queue item, continue to next org.
  */
 
-import { schedules } from "@trigger.dev/sdk";
+import { logger, schedules } from "@trigger.dev/sdk";
 import {
   calculateBillingForOrg,
   calculateConsignmentPayouts,
@@ -122,10 +122,11 @@ export const monthlyBillingTask = schedules.task({
                 .eq("id", snapshotId);
             } catch (stripeError) {
               // Stripe failure shouldn't block the billing snapshot
-              console.error(
-                `[monthly-billing] Stripe invoice failed for org ${org.id}:`,
-                stripeError instanceof Error ? stripeError.message : stripeError,
-              );
+              logger.error("Stripe invoice failed", {
+                task: "monthly-billing",
+                orgId: org.id,
+                error: stripeError instanceof Error ? stripeError.message : String(stripeError),
+              });
             }
           }
 
@@ -150,16 +151,23 @@ export const monthlyBillingTask = schedules.task({
             totalConsignmentPayouts += payouts.total_payout_amount;
             consignmentOrdersProcessed += payouts.order_count;
 
-            console.log(
-              `[monthly-billing] Org ${org.id}: ${payouts.order_count} consignment orders, $${payouts.total_payout_amount.toFixed(2)} payout`,
-            );
+            logger.info("Consignment payouts processed", {
+              task: "monthly-billing",
+              orgId: org.id,
+              orderCount: payouts.order_count,
+              payoutAmount: payouts.total_payout_amount.toFixed(2),
+            });
           }
 
           orgsProcessed++;
         } catch (error) {
           orgsFailed++;
           const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`[monthly-billing] Failed for org ${org.id}: ${errorMsg}`);
+          logger.error("Billing failed for org", {
+            task: "monthly-billing",
+            orgId: org.id,
+            error: errorMsg,
+          });
 
           await supabase.from("warehouse_review_queue").insert({
             workspace_id: workspaceId,

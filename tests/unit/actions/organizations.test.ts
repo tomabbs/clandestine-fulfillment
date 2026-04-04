@@ -75,9 +75,10 @@ describe("organizations server actions", () => {
       expect(result[0].name).toBe("Alpha Records");
     });
 
-    it("throws when not authenticated", async () => {
+    it("returns empty array when not authenticated", async () => {
       vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
-      await expect(getOrganizations()).rejects.toThrow("Unauthorized");
+      const result = await getOrganizations();
+      expect(result).toEqual([]);
     });
   });
 

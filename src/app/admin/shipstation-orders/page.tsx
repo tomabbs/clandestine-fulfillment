@@ -2,10 +2,7 @@
 
 import { ExternalLink, Loader2, Package, Search } from "lucide-react";
 import { useState } from "react";
-import {
-  getShipStationOrders,
-  type ShipStationOrder,
-} from "@/actions/shipstation-orders";
+import { getShipStationOrders, type ShipStationOrder } from "@/actions/shipstation-orders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,12 +36,7 @@ const STATUS_OPTIONS = [
 
 function formatAddress(shipTo: ShipStationOrder["shipTo"]): string {
   if (!shipTo) return "—";
-  const parts = [
-    shipTo.name,
-    shipTo.city,
-    shipTo.state,
-    shipTo.country,
-  ].filter(Boolean);
+  const parts = [shipTo.name, shipTo.city, shipTo.state, shipTo.country].filter(Boolean);
   return parts.join(", ");
 }
 
@@ -160,9 +152,7 @@ export default function ShipStationOrdersPage() {
                       <TableRow
                         key={order.orderId}
                         className="cursor-pointer"
-                        onClick={() =>
-                          setExpandedId(isExpanded ? null : order.orderId)
-                        }
+                        onClick={() => setExpandedId(isExpanded ? null : order.orderId)}
                       >
                         <TableCell className="font-mono text-sm font-medium">
                           <a
@@ -200,14 +190,10 @@ export default function ShipStationOrdersPage() {
                           </span>
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
-                          {order.amountPaid != null
-                            ? `$${order.amountPaid.toFixed(2)}`
-                            : "—"}
+                          {order.amountPaid != null ? `$${order.amountPaid.toFixed(2)}` : "—"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {order.orderDate
-                            ? new Date(order.orderDate).toLocaleDateString()
-                            : "—"}
+                          {order.orderDate ? new Date(order.orderDate).toLocaleDateString() : "—"}
                         </TableCell>
                       </TableRow>
 
@@ -253,12 +239,11 @@ export default function ShipStationOrdersPage() {
                                           .join(", ")}
                                       </div>
                                     )}
-                                    {order.shipTo.country &&
-                                      order.shipTo.country !== "US" && (
-                                        <div className="text-muted-foreground">
-                                          {order.shipTo.country}
-                                        </div>
-                                      )}
+                                    {order.shipTo.country && order.shipTo.country !== "US" && (
+                                      <div className="text-muted-foreground">
+                                        {order.shipTo.country}
+                                      </div>
+                                    )}
                                   </address>
                                 </div>
                               )}
@@ -296,9 +281,7 @@ export default function ShipStationOrdersPage() {
                               </div>
 
                               {storeId && (
-                                <p className="text-xs text-muted-foreground">
-                                  Store ID: {storeId}
-                                </p>
+                                <p className="text-xs text-muted-foreground">Store ID: {storeId}</p>
                               )}
                             </div>
                           </td>

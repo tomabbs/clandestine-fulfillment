@@ -54,7 +54,12 @@ async function requireAuth() {
 
 function isUnauthorizedError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
-  return msg.toLowerCase().includes("unauthorized");
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("unauthorized") ||
+    lower.includes("authentication required") ||
+    lower.includes("not found")
+  );
 }
 
 // === Inline single-field updates (for editable table cells) ===
@@ -503,7 +508,8 @@ export async function getClientReleases(filters?: { page?: number; pageSize?: nu
     const clientCtx = await requireClient();
     orgId = clientCtx.orgId;
   } catch (error) {
-    if (isUnauthorizedError(error)) return { preorders: [], newReleases: [], catalog: [], total: 0 };
+    if (isUnauthorizedError(error))
+      return { preorders: [], newReleases: [], catalog: [], total: 0 };
     throw error;
   }
 
@@ -545,7 +551,11 @@ export async function getClientReleases(filters?: { page?: number; pageSize?: nu
 
   // Full paginated catalog — all variants for this org, sorted by product title then SKU.
   // This is the primary view; preorders and newReleases are special callouts at the top.
-  const { data: catalog, error: catalogError, count } = await supabase
+  const {
+    data: catalog,
+    error: catalogError,
+    count,
+  } = await supabase
     .from("warehouse_product_variants")
     .select(SELECT, { count: "exact" })
     .eq("warehouse_products.org_id", orgId)

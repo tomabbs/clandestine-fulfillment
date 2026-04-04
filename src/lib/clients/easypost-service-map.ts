@@ -273,9 +273,7 @@ export function normalizeService(carrier: string, service: string): string {
 
   // ── DHL eCommerce (DhlEcsAccount — resells USPS at negotiated rates) ────────
   const isDhlEcs =
-    carrierClean === "dhlecs" ||
-    carrierClean.includes("dhlecs") ||
-    carrierClean.includes("dhlecs");
+    carrierClean === "dhlecs" || carrierClean.includes("dhlecs") || carrierClean.includes("dhlecs");
 
   if (isDhlEcs) {
     if (serviceClean.includes("firstclass") || serviceClean.includes("first"))
@@ -287,7 +285,8 @@ export function normalizeService(carrier: string, service: string): string {
 
   // ── DHL Express ─────────────────────────────────────────────────────────────
   const isDhlExpress =
-    carrierClean === "dhlexpress" || (carrierClean.includes("dhl") && !carrierClean.includes("ecs"));
+    carrierClean === "dhlexpress" ||
+    (carrierClean.includes("dhl") && !carrierClean.includes("ecs"));
 
   if (isDhlExpress) {
     if (serviceClean.includes("envelope")) return "dhlexpress:expressenvelope";
@@ -301,8 +300,7 @@ export function normalizeService(carrier: string, service: string): string {
   if (isFedEx) {
     if (serviceClean.includes("connectplus") || serviceClean.includes("connect"))
       return "fedex:internationalconnectplus";
-    if (serviceClean.includes("priorityexpress"))
-      return "fedex:internationalpriorityexpress";
+    if (serviceClean.includes("priorityexpress")) return "fedex:internationalpriorityexpress";
     if (serviceClean.includes("priority") && serviceClean.includes("international"))
       return "fedex:internationalpriority";
     if (serviceClean.includes("economy") && serviceClean.includes("international"))
@@ -320,18 +318,24 @@ export function normalizeService(carrier: string, service: string): string {
   }
 
   // ── USPS ─────────────────────────────────────────────────────────────────────
-  if (serviceClean.includes("mediamail") || serviceClean.includes("media"))
-    return "usps:mediamail";
+  if (serviceClean.includes("mediamail") || serviceClean.includes("media")) return "usps:mediamail";
   if (serviceClean.includes("librarymail") || serviceClean.includes("library"))
     return "usps:librarymail";
   if (serviceClean.includes("groundadvantage")) return "usps:groundadvantage";
   if (serviceClean.includes("ground") && carrierClean === "usps") return "usps:ground";
   if (serviceClean.includes("expressmailinternational")) return "usps:expressmailinternational";
-  if (serviceClean.includes("prioritymailexpressinternational")) return "usps:prioritymailexpressinternational";
+  if (serviceClean.includes("prioritymailexpressinternational"))
+    return "usps:prioritymailexpressinternational";
   if (serviceClean.includes("prioritymailinternational")) return "usps:prioritymailinternational";
-  if (serviceClean.includes("firstclasspackageinternational") || serviceClean.includes("firstclass"))
+  if (
+    serviceClean.includes("firstclasspackageinternational") ||
+    serviceClean.includes("firstclass")
+  )
     return "usps:firstclasspackageinternationalservice";
-  if (serviceClean.includes("prioritymailexpress") || (serviceClean.includes("priority") && serviceClean.includes("express")))
+  if (
+    serviceClean.includes("prioritymailexpress") ||
+    (serviceClean.includes("priority") && serviceClean.includes("express"))
+  )
     return "usps:express";
   if (serviceClean.includes("priority") && serviceClean.includes("international"))
     return "usps:prioritymailinternational";
@@ -350,23 +354,53 @@ export function getServiceDetails(serviceId: string): NormalizedService | null {
   // Synthetic entries for unmapped services — keep them readable
   if (serviceId.startsWith("usaexportpba:")) {
     const svc = serviceId.replace("usaexportpba:", "");
-    return { carrier: "USAExportPBA", serviceId, displayName: `USA Export ${svc} (Asendia)`, priority: 91, isMediaMail: false };
+    return {
+      carrier: "USAExportPBA",
+      serviceId,
+      displayName: `USA Export ${svc} (Asendia)`,
+      priority: 91,
+      isMediaMail: false,
+    };
   }
   if (serviceId.startsWith("dhlecs:")) {
     const svc = serviceId.replace("dhlecs:", "");
-    return { carrier: "DHL eCommerce", serviceId, displayName: `DHL eCommerce ${svc}`, priority: 89, isMediaMail: false };
+    return {
+      carrier: "DHL eCommerce",
+      serviceId,
+      displayName: `DHL eCommerce ${svc}`,
+      priority: 89,
+      isMediaMail: false,
+    };
   }
   if (serviceId.startsWith("dhlexpress:")) {
     const svc = serviceId.replace("dhlexpress:", "");
-    return { carrier: "DHL Express", serviceId, displayName: `DHL Express ${svc}`, priority: 96, isMediaMail: false };
+    return {
+      carrier: "DHL Express",
+      serviceId,
+      displayName: `DHL Express ${svc}`,
+      priority: 96,
+      isMediaMail: false,
+    };
   }
   if (serviceId.startsWith("fedex:")) {
     const svc = serviceId.replace("fedex:", "");
-    return { carrier: "FedEx", serviceId, displayName: `FedEx ${svc}`, priority: 99, isMediaMail: false };
+    return {
+      carrier: "FedEx",
+      serviceId,
+      displayName: `FedEx ${svc}`,
+      priority: 99,
+      isMediaMail: false,
+    };
   }
   if (serviceId.startsWith("canadapost:")) {
     const svc = serviceId.replace("canadapost:", "");
-    return { carrier: "Canada Post", serviceId, displayName: `Canada Post ${svc}`, priority: 116, isMediaMail: false };
+    return {
+      carrier: "Canada Post",
+      serviceId,
+      displayName: `Canada Post ${svc}`,
+      priority: 116,
+      isMediaMail: false,
+    };
   }
 
   return null;

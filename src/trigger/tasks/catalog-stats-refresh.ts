@@ -15,18 +15,22 @@ async function refreshStatsForWorkspace(workspaceId: string) {
 
   const { data: mappings } = await supabase
     .from("bandcamp_product_mappings")
-    .select("id, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_url, variant_id")
+    .select(
+      "id, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_url, variant_id",
+    )
     .eq("workspace_id", workspaceId);
 
   const total = mappings?.length ?? 0;
 
   const stats = {
     total,
-    hasAlbumCover: mappings?.filter(m => m.bandcamp_art_url != null).length ?? 0,
-    hasAbout: mappings?.filter(m => m.bandcamp_about != null && m.bandcamp_about !== "").length ?? 0,
-    hasCredits: mappings?.filter(m => m.bandcamp_credits != null && m.bandcamp_credits !== "").length ?? 0,
-    hasTracks: mappings?.filter(m => m.bandcamp_tracks != null).length ?? 0,
-    hasUrl: mappings?.filter(m => m.bandcamp_url != null).length ?? 0,
+    hasAlbumCover: mappings?.filter((m) => m.bandcamp_art_url != null).length ?? 0,
+    hasAbout:
+      mappings?.filter((m) => m.bandcamp_about != null && m.bandcamp_about !== "").length ?? 0,
+    hasCredits:
+      mappings?.filter((m) => m.bandcamp_credits != null && m.bandcamp_credits !== "").length ?? 0,
+    hasTracks: mappings?.filter((m) => m.bandcamp_tracks != null).length ?? 0,
+    hasUrl: mappings?.filter((m) => m.bandcamp_url != null).length ?? 0,
   };
 
   await supabase.from("workspace_catalog_stats").upsert(

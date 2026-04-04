@@ -41,10 +41,12 @@ const createTrackingResponseSchema = z.object({
 
 const getTrackingResponseSchema = z.object({
   meta: z.object({ code: z.number() }).optional(),
-  data: z.object({
-    tracking: trackingSchema.optional(),
-    trackings: z.array(trackingSchema).optional(),
-  }).optional(),
+  data: z
+    .object({
+      tracking: trackingSchema.optional(),
+      trackings: z.array(trackingSchema).optional(),
+    })
+    .optional(),
 });
 
 export type AfterShipTracking = z.infer<typeof trackingSchema>;
@@ -129,7 +131,8 @@ export async function getTracking(
     `/trackings?tracking_number=${encodeURIComponent(trackingNumber)}&slug=${encodeURIComponent(slug)}&limit=1`,
   );
   // Response is a list — take first match
-  const trackings = (response as unknown as { data: { trackings?: AfterShipTracking[] } })?.data?.trackings;
+  const trackings = (response as unknown as { data: { trackings?: AfterShipTracking[] } })?.data
+    ?.trackings;
   if (trackings?.length) {
     return trackings[0] as AfterShipTracking;
   }

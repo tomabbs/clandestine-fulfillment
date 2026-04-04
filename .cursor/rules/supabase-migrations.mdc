@@ -1,0 +1,12 @@
+---
+description: Prefer Supabase CLI for remote migrations in this repo
+alwaysApply: true
+---
+
+# Supabase migrations
+
+When this project needs schema changes applied to the **linked** Supabase project (`clandestine-fulfillment`), **run** `supabase db push` from the repo root (`Project/clandestine-fulfillment`) with network enabled, instead of only giving paste-only SQL—unless the user explicitly asks for SQL-only or push is impossible (no CLI / not linked).
+
+If `db push` fails on duplicate objects, make the relevant migration **idempotent** (e.g. `DROP POLICY IF EXISTS`, `IF NOT EXISTS` constraints via `pg_constraint` checks) and retry; do not assume the remote is a clean slate.
+
+Full agent/permissions/CLI recovery contract: `docs/prompt-packs/BUILD.md` → **Agent execution — migrations, CLI, and permissions** (mirrored in `PLAN.md` and `AUDIT.md`).

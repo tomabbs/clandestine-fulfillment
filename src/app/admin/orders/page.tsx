@@ -1,7 +1,6 @@
 "use client";
 
 import { Check, CheckCircle, Copy, ExternalLink, Loader2, Package, Tag } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
 import {
@@ -11,6 +10,7 @@ import {
   type LabelResult,
   type RateOption,
 } from "@/actions/shipping";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,6 @@ export default function AdminOrdersPage() {
     tier: CACHE_TIERS.SESSION,
     enabled: !!expandedId,
   });
-
 
   return (
     <div className="p-6 space-y-4">
@@ -262,7 +261,9 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
     <div className="space-y-4">
       {/* Line Items — full width */}
       <div>
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Line Items</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          Line Items
+        </h4>
         <div className="space-y-1.5 text-sm">
           {detail.items.length === 0 ? (
             <p className="text-muted-foreground">No items</p>
@@ -271,13 +272,19 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
               <div key={item.id} className="flex items-baseline justify-between gap-4">
                 <div className="min-w-0">
                   {item.sku && (
-                    <span className="font-mono text-xs text-muted-foreground mr-1.5">{item.sku}</span>
+                    <span className="font-mono text-xs text-muted-foreground mr-1.5">
+                      {item.sku}
+                    </span>
                   )}
                   <span>{cleanItemTitle(item.title) ?? "—"}</span>
                 </div>
                 <span className="font-mono text-xs shrink-0 text-right whitespace-nowrap">
                   x{item.quantity}
-                  {item.price != null && <span className="text-muted-foreground ml-1">· ${Number(item.price).toFixed(2)}</span>}
+                  {item.price != null && (
+                    <span className="text-muted-foreground ml-1">
+                      · ${Number(item.price).toFixed(2)}
+                    </span>
+                  )}
                 </span>
               </div>
             ))
@@ -288,18 +295,27 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
       {/* Ship To — full width */}
       {shippingAddr && (
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ship To</h4>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+            Ship To
+          </h4>
           <address className="text-sm not-italic space-y-0.5">
             {(shippingAddr.name || shippingAddr.firstName) && (
               <div className="font-medium">
-                {shippingAddr.name ?? `${shippingAddr.firstName ?? ""} ${shippingAddr.lastName ?? ""}`.trim()}
+                {shippingAddr.name ??
+                  `${shippingAddr.firstName ?? ""} ${shippingAddr.lastName ?? ""}`.trim()}
               </div>
             )}
-            {shippingAddr.street1 && <div className="text-muted-foreground">{shippingAddr.street1}</div>}
-            {shippingAddr.street2 && <div className="text-muted-foreground">{shippingAddr.street2}</div>}
+            {shippingAddr.street1 && (
+              <div className="text-muted-foreground">{shippingAddr.street1}</div>
+            )}
+            {shippingAddr.street2 && (
+              <div className="text-muted-foreground">{shippingAddr.street2}</div>
+            )}
             {(shippingAddr.city || shippingAddr.state || shippingAddr.zip) && (
               <div className="text-muted-foreground">
-                {[shippingAddr.city, shippingAddr.state, shippingAddr.zip].filter(Boolean).join(", ")}
+                {[shippingAddr.city, shippingAddr.state, shippingAddr.zip]
+                  .filter(Boolean)
+                  .join(", ")}
               </div>
             )}
             {shippingAddr.country && shippingAddr.country !== "US" && (
@@ -353,7 +369,8 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
                 />
                 {order.fulfillment_status !== "fulfilled" && order.source === "bandcamp" && (
                   <p className="text-xs text-amber-600 mt-2">
-                    Shipped — Bandcamp not yet notified. Use "Mark Shipped on Bandcamp" to sync tracking.
+                    Shipped — Bandcamp not yet notified. Use "Mark Shipped on Bandcamp" to sync
+                    tracking.
                   </p>
                 )}
               </div>

@@ -110,7 +110,7 @@ export default function SalesPage() {
                 {data.orders.map((o) => (
                   <tr key={o.id}>
                     <td className="p-2 text-muted-foreground">
-                      {new Date(o.created_at).toLocaleDateString()}
+                      {new Date(o.created_at).toISOString().slice(0, 10)}
                     </td>
                     <td className="p-2 capitalize">{o.source}</td>
                     <td className="p-2 font-mono text-xs">{o.order_number ?? "—"}</td>

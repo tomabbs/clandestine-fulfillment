@@ -1,0 +1,29 @@
+---
+description: Automation-first agent behavior, no spurious debug footers, CLI recovery
+alwaysApply: true
+---
+
+# User defaults
+
+## Automation and permissions
+
+- Prefer **running** commands over telling the user to run them: `supabase db push --yes` from this repo root (`clandestine-fulfillment`), `pnpm`/test/lint scripts, etc. Request **network** or **all** (non-sandbox) when the tool requires it.
+- Do **not** default to “paste into Supabase SQL Editor” or “open Cursor Settings and copy…” when the task can be done via CLI or repo edits. Reserve human-only steps for true browser logins or secrets the agent cannot access.
+
+## Fewer permission prompts (Cursor IDE)
+
+- Operator: **Cursor Settings → Agent** → enable **Auto-run in Sandbox** or **Run everything** (not “Ask every time”). Turn on **auto-approve network** / **git without approval** if shown.
+- Optional: `~/.cursor/permissions.json` → `terminalAllowlist` for prefixes like `pnpm`, `supabase`, `git` ([docs](https://cursor.com/docs/reference/permissions.md)). File-based list **replaces** the in-app terminal allowlist when that key is set.
+
+## How this relates to global User Rules
+
+- **Cursor Settings → Rules** and this file should stay aligned. Parent workspace copy: `WorkShared/.cursor/rules/user-agent-defaults.mdc`.
+
+## Reproduction steps / Proceed boilerplate
+
+- Do **not** append `<reproduction_steps>` blocks or “Press Proceed/Mark as fixed” unless you are in an **active, log-driven debug loop** where the user must run something and report back evidence.
+- For migrations, docs, planning, preferences, and normal answers: end with plain prose only—no faux workflow footer.
+
+## Supabase CLI recovery (operator)
+
+If the agent cannot push migrations: install [Supabase CLI](https://supabase.com/docs/guides/cli) → `supabase login` → `supabase link --project-ref <ref>` → confirm **●** on the project in `supabase projects list` → `supabase db push --yes`. Expanded checklist: `docs/prompt-packs/BUILD.md` → **Agent execution — migrations, CLI, and permissions**.

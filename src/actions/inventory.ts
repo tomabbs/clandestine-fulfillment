@@ -1,7 +1,7 @@
 "use server";
 
-import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { requireClient } from "@/lib/server/auth-context";
+import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 // === Types ===
@@ -73,7 +73,9 @@ export async function getInventoryLevels(
   filters: InventoryFilters = {},
   options: { bypassRls?: boolean } = {},
 ): Promise<InventoryListResult> {
-  const supabase = options.bypassRls ? createServiceRoleClient() : await createServerSupabaseClient();
+  const supabase = options.bypassRls
+    ? createServiceRoleClient()
+    : await createServerSupabaseClient();
   const page = filters.page ?? 1;
   const pageSize = filters.pageSize ?? 25;
   const offset = (page - 1) * pageSize;
@@ -477,7 +479,9 @@ export async function updateInventoryBuffer(
   safetyStock: number | null,
 ): Promise<{ success: boolean }> {
   const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
   const serviceClient = createServiceRoleClient();
@@ -499,7 +503,9 @@ export async function updateWorkspaceDefaultBuffer(
   defaultSafetyStock: number,
 ): Promise<{ success: boolean }> {
   const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
   const serviceClient = createServiceRoleClient();

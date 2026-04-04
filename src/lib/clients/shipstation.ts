@@ -298,10 +298,14 @@ export async function fetchOrders(params: FetchOrdersParams = {}) {
   if (params.storeId) searchParams.set("storeId", String(params.storeId));
   if (params.sortBy) searchParams.set("sortBy", params.sortBy);
   if (params.sortDir) searchParams.set("sortDir", params.sortDir);
-  if (params.createDateStart) searchParams.set("createDateStart", toShipStationDate(params.createDateStart));
-  if (params.createDateEnd) searchParams.set("createDateEnd", toShipStationDate(params.createDateEnd));
-  if (params.modifyDateStart) searchParams.set("modifyDateStart", toShipStationDate(params.modifyDateStart));
-  if (params.modifyDateEnd) searchParams.set("modifyDateEnd", toShipStationDate(params.modifyDateEnd));
+  if (params.createDateStart)
+    searchParams.set("createDateStart", toShipStationDate(params.createDateStart));
+  if (params.createDateEnd)
+    searchParams.set("createDateEnd", toShipStationDate(params.createDateEnd));
+  if (params.modifyDateStart)
+    searchParams.set("modifyDateStart", toShipStationDate(params.modifyDateStart));
+  if (params.modifyDateEnd)
+    searchParams.set("modifyDateEnd", toShipStationDate(params.modifyDateEnd));
 
   const query = searchParams.toString();
   const path = `/orders${query ? `?${query}` : ""}`;

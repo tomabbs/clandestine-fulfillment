@@ -84,11 +84,11 @@ describe("store-sync-client factory", () => {
       ).toThrow("WooCommerce connection missing api_key or api_secret");
     });
 
-    it("shopify client methods throw 'not yet implemented'", async () => {
+    it("shopify client methods are callable (real implementation)", async () => {
       const client = createStoreSyncClient(makeConnection({ platform: "shopify" }));
-      await expect(client.pushInventory("SKU-1", 10, "key")).rejects.toThrow("not yet implemented");
-      await expect(client.getRemoteQuantity("SKU-1")).rejects.toThrow("not yet implemented");
-      await expect(client.getOrders("2026-01-01")).rejects.toThrow("not yet implemented");
+      expect(typeof client.pushInventory).toBe("function");
+      expect(typeof client.getRemoteQuantity).toBe("function");
+      expect(typeof client.getOrders).toBe("function");
     });
   });
 });

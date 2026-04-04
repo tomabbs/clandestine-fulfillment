@@ -2,7 +2,6 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Minus, Package, Plus } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useCallback, useState } from "react";
 import {
   adjustInventory,
@@ -12,6 +11,7 @@ import {
   updateVariantFormat,
 } from "@/actions/inventory";
 import { EditableNumberCell, EditableSelectCell } from "@/components/shared/editable-cell";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -40,7 +40,6 @@ const FORMAT_OPTIONS = [
   { value: "Merch", label: "Merch" },
   { value: "Other", label: "Other" },
 ];
-
 
 export default function InventoryPage() {
   const queryClient = useQueryClient();
@@ -99,7 +98,6 @@ export default function InventoryPage() {
     },
   });
 
-
   return (
     <div className="p-6 space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
@@ -145,191 +143,210 @@ export default function InventoryPage() {
         </div>
       ) : (
         <div className="overflow-x-auto">
-        <Table className="min-w-[600px]">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12" />
-              <TableHead>Product / SKU</TableHead>
-              <TableHead className="hidden sm:table-cell">Label</TableHead>
-              <TableHead className="text-right" title="Actual units in warehouse. Full truth.">Avail</TableHead>
-              <TableHead className="hidden xl:table-cell text-right" title="Units shown on Bandcamp and connected stores. Reduced by the safety buffer.">Listed As</TableHead>
-              <TableHead className="hidden md:table-cell text-right">Committed</TableHead>
-              <TableHead className="hidden md:table-cell text-right">Incoming</TableHead>
-              <TableHead className="hidden xl:table-cell text-right" title="Units held back from all sales channels. Default 3 covers Bandcamp's 5-min sync window.">Buffer</TableHead>
-              <TableHead className="hidden lg:table-cell">Format</TableHead>
-              <TableHead className="w-20" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data?.rows.map((row) => (
-              <>
-                <TableRow
-                  key={row.variantId}
-                  className="cursor-pointer"
-                  onClick={() => setExpandedSku((prev) => (prev === row.sku ? null : row.sku))}
+          <Table className="min-w-[600px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12" />
+                <TableHead>Product / SKU</TableHead>
+                <TableHead className="hidden sm:table-cell">Label</TableHead>
+                <TableHead className="text-right" title="Actual units in warehouse. Full truth.">
+                  Avail
+                </TableHead>
+                <TableHead
+                  className="hidden xl:table-cell text-right"
+                  title="Units shown on Bandcamp and connected stores. Reduced by the safety buffer."
                 >
-                  <TableCell>
-                    {row.imageSrc ? (
-                      // biome-ignore lint/performance/noImgElement: external Shopify CDN URLs — next/image optimization not applicable
-                      <img
-                        src={row.imageSrc}
-                        alt={row.productTitle}
-                        className="h-8 w-8 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
-                        <Package className="text-muted-foreground h-4 w-4" />
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{row.productTitle}</div>
-                    <div className="text-muted-foreground text-xs">{row.sku}</div>
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
-                    {row.orgName ?? "—"}
-                  </TableCell>
-                  <EditableNumberCell
-                    value={row.available}
-                    prefix=""
-                    placeholder="0"
-                    precision={0}
-                    className="text-right font-mono"
-                    onSave={async (newValue) => {
-                      const target = newValue ?? 0;
-                      const delta = target - row.available;
-                      if (delta === 0) return;
-                      await adjustInventory(row.sku, delta, "Inline quantity edit");
-                      invalidateInventory();
-                    }}
-                  />
-                  {/* Listed As = what channels actually see (buffered quantity) */}
-                  <TableCell className="hidden xl:table-cell text-right font-mono text-muted-foreground">
-                    {Math.max(0, row.available - ((row as { safetyStock?: number | null }).safetyStock ?? 3))}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-right font-mono">{row.committed}</TableCell>
-                  <TableCell className="hidden md:table-cell text-right font-mono">{row.incoming}</TableCell>
-                  {/* Buffer — inline editable; null = uses workspace default (3) */}
-                  <EditableNumberCell
-                    value={(row as { safetyStock?: number | null }).safetyStock ?? 3}
-                    prefix=""
-                    placeholder="3"
-                    precision={0}
-                    className="hidden xl:table-cell text-right font-mono text-muted-foreground"
-                    onSave={async (newValue) => {
-                      const val = newValue ?? null;
-                      await updateInventoryBuffer(row.sku, val === 3 ? null : val);
-                      invalidateInventory();
-                    }}
-                  />
-                  <EditableSelectCell
-                    value={row.formatName ?? ""}
-                    options={FORMAT_OPTIONS}
-                    className="hidden lg:table-cell text-sm"
-                    onSave={async (newValue) => {
-                      await updateVariantFormat(row.variantId, newValue);
-                      invalidateInventory();
-                    }}
-                  />
-                  <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAdjustDialog({ sku: row.sku, title: row.productTitle });
-                      }}
-                    >
-                      Adjust
-                    </Button>
-                  </TableCell>
-                </TableRow>
-
-                {/* Expanded detail */}
-                {expandedSku === row.sku && (
-                  <TableRow key={`${row.variantId}-detail`}>
-                    <TableCell colSpan={8} className="bg-muted/30 p-4">
-                      {detailLoading ? (
-                        <Skeleton className="h-24 w-full" />
-                      ) : detail ? (
-                        <div className="grid grid-cols-2 gap-6">
-                          {/* Locations */}
-                          <div>
-                            <h4 className="mb-2 text-sm font-semibold">Locations</h4>
-                            {detail.locations.length === 0 ? (
-                              <p className="text-muted-foreground text-sm">No location data</p>
-                            ) : (
-                              <ul className="space-y-1 text-sm">
-                                {detail.locations.map((loc) => (
-                                  <li key={loc.locationId} className="flex justify-between">
-                                    <span>
-                                      {loc.locationName}{" "}
-                                      <span className="text-muted-foreground">
-                                        ({loc.locationType})
-                                      </span>
-                                    </span>
-                                    <span className="font-mono">{loc.quantity}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {detail.bandcampUrl && (
-                              <a
-                                href={detail.bandcampUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
-                              >
-                                <ExternalLink className="h-3 w-3" />
-                                Bandcamp
-                              </a>
-                            )}
-                          </div>
-
-                          {/* Recent Activity */}
-                          <div>
-                            <h4 className="mb-2 text-sm font-semibold">Recent Activity</h4>
-                            {detail.recentActivity.length === 0 ? (
-                              <p className="text-muted-foreground text-sm">No activity yet</p>
-                            ) : (
-                              <ul className="space-y-1 text-sm">
-                                {detail.recentActivity.slice(0, 10).map((a) => (
-                                  <li key={a.id} className="flex items-center justify-between">
-                                    <span className="flex items-center gap-1">
-                                      {a.delta > 0 ? (
-                                        <Plus className="h-3 w-3 text-green-600" />
-                                      ) : (
-                                        <Minus className="h-3 w-3 text-red-600" />
-                                      )}
-                                      <span className="font-mono">
-                                        {a.delta > 0 ? `+${a.delta}` : a.delta}
-                                      </span>
-                                      <span className="text-muted-foreground">{a.source}</span>
-                                    </span>
-                                    <span className="text-muted-foreground text-xs">
-                                      {new Date(a.createdAt).toLocaleDateString()}
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
+                  Listed As
+                </TableHead>
+                <TableHead className="hidden md:table-cell text-right">Committed</TableHead>
+                <TableHead className="hidden md:table-cell text-right">Incoming</TableHead>
+                <TableHead
+                  className="hidden xl:table-cell text-right"
+                  title="Units held back from all sales channels. Default 3 covers Bandcamp's 5-min sync window."
+                >
+                  Buffer
+                </TableHead>
+                <TableHead className="hidden lg:table-cell">Format</TableHead>
+                <TableHead className="w-20" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.rows.map((row) => (
+                <>
+                  <TableRow
+                    key={row.variantId}
+                    className="cursor-pointer"
+                    onClick={() => setExpandedSku((prev) => (prev === row.sku ? null : row.sku))}
+                  >
+                    <TableCell>
+                      {row.imageSrc ? (
+                        // biome-ignore lint/performance/noImgElement: external Shopify CDN URLs — next/image optimization not applicable
+                        <img
+                          src={row.imageSrc}
+                          alt={row.productTitle}
+                          className="h-8 w-8 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
+                          <Package className="text-muted-foreground h-4 w-4" />
                         </div>
-                      ) : null}
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium">{row.productTitle}</div>
+                      <div className="text-muted-foreground text-xs">{row.sku}</div>
+                    </TableCell>
+                    <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
+                      {row.orgName ?? "—"}
+                    </TableCell>
+                    <EditableNumberCell
+                      value={row.available}
+                      prefix=""
+                      placeholder="0"
+                      precision={0}
+                      className="text-right font-mono"
+                      onSave={async (newValue) => {
+                        const target = newValue ?? 0;
+                        const delta = target - row.available;
+                        if (delta === 0) return;
+                        await adjustInventory(row.sku, delta, "Inline quantity edit");
+                        invalidateInventory();
+                      }}
+                    />
+                    {/* Listed As = what channels actually see (buffered quantity) */}
+                    <TableCell className="hidden xl:table-cell text-right font-mono text-muted-foreground">
+                      {Math.max(
+                        0,
+                        row.available - ((row as { safetyStock?: number | null }).safetyStock ?? 3),
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-right font-mono">
+                      {row.committed}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-right font-mono">
+                      {row.incoming}
+                    </TableCell>
+                    {/* Buffer — inline editable; null = uses workspace default (3) */}
+                    <EditableNumberCell
+                      value={(row as { safetyStock?: number | null }).safetyStock ?? 3}
+                      prefix=""
+                      placeholder="3"
+                      precision={0}
+                      className="hidden xl:table-cell text-right font-mono text-muted-foreground"
+                      onSave={async (newValue) => {
+                        const val = newValue ?? null;
+                        await updateInventoryBuffer(row.sku, val === 3 ? null : val);
+                        invalidateInventory();
+                      }}
+                    />
+                    <EditableSelectCell
+                      value={row.formatName ?? ""}
+                      options={FORMAT_OPTIONS}
+                      className="hidden lg:table-cell text-sm"
+                      onSave={async (newValue) => {
+                        await updateVariantFormat(row.variantId, newValue);
+                        invalidateInventory();
+                      }}
+                    />
+                    <TableCell>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAdjustDialog({ sku: row.sku, title: row.productTitle });
+                        }}
+                      >
+                        Adjust
+                      </Button>
                     </TableCell>
                   </TableRow>
-                )}
-              </>
-            ))}
-            {data?.rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
-                  No inventory found
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+
+                  {/* Expanded detail */}
+                  {expandedSku === row.sku && (
+                    <TableRow key={`${row.variantId}-detail`}>
+                      <TableCell colSpan={8} className="bg-muted/30 p-4">
+                        {detailLoading ? (
+                          <Skeleton className="h-24 w-full" />
+                        ) : detail ? (
+                          <div className="grid grid-cols-2 gap-6">
+                            {/* Locations */}
+                            <div>
+                              <h4 className="mb-2 text-sm font-semibold">Locations</h4>
+                              {detail.locations.length === 0 ? (
+                                <p className="text-muted-foreground text-sm">No location data</p>
+                              ) : (
+                                <ul className="space-y-1 text-sm">
+                                  {detail.locations.map((loc) => (
+                                    <li key={loc.locationId} className="flex justify-between">
+                                      <span>
+                                        {loc.locationName}{" "}
+                                        <span className="text-muted-foreground">
+                                          ({loc.locationType})
+                                        </span>
+                                      </span>
+                                      <span className="font-mono">{loc.quantity}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {detail.bandcampUrl && (
+                                <a
+                                  href={detail.bandcampUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  Bandcamp
+                                </a>
+                              )}
+                            </div>
+
+                            {/* Recent Activity */}
+                            <div>
+                              <h4 className="mb-2 text-sm font-semibold">Recent Activity</h4>
+                              {detail.recentActivity.length === 0 ? (
+                                <p className="text-muted-foreground text-sm">No activity yet</p>
+                              ) : (
+                                <ul className="space-y-1 text-sm">
+                                  {detail.recentActivity.slice(0, 10).map((a) => (
+                                    <li key={a.id} className="flex items-center justify-between">
+                                      <span className="flex items-center gap-1">
+                                        {a.delta > 0 ? (
+                                          <Plus className="h-3 w-3 text-green-600" />
+                                        ) : (
+                                          <Minus className="h-3 w-3 text-red-600" />
+                                        )}
+                                        <span className="font-mono">
+                                          {a.delta > 0 ? `+${a.delta}` : a.delta}
+                                        </span>
+                                        <span className="text-muted-foreground">{a.source}</span>
+                                      </span>
+                                      <span className="text-muted-foreground text-xs">
+                                        {new Date(a.createdAt).toLocaleDateString()}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </>
+              ))}
+              {data?.rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
+                    No inventory found
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
       )}
 

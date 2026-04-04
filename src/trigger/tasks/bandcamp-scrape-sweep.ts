@@ -30,7 +30,7 @@ export const bandcampScrapeSweepTask = schedules.task({
       const startedAt = new Date().toISOString();
       let triggered = 0;
       let g1Triggered = 0;
-      let g2Triggered = 0;
+      const g2Triggered = 0;
       let g3Triggered = 0;
 
       // ── Group 1: has URL, missing type_name (enrichment scrape) ────────────

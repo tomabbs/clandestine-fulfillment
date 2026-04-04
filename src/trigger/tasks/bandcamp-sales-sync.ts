@@ -6,8 +6,8 @@
  * backfill is complete.
  */
 
-import { schedules } from "@trigger.dev/sdk";
-import { salesReport, refreshBandcampToken } from "@/lib/clients/bandcamp";
+import { logger, schedules } from "@trigger.dev/sdk";
+import { refreshBandcampToken, salesReport } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
@@ -45,7 +45,7 @@ export const bandcampSalesSyncSchedule = schedules.task({
 
             if (!items.length) continue;
 
-            const rows = items.map(item => ({
+            const rows = items.map((item) => ({
               workspace_id: workspaceId,
               connection_id: conn.id,
               bandcamp_transaction_id: item.bandcamp_transaction_id,
@@ -90,10 +90,10 @@ export const bandcampSalesSyncSchedule = schedules.task({
               city: item.city ?? null,
             }));
 
-            const { error } = await supabase.from("bandcamp_sales").upsert(
-              rows,
-              { onConflict: "workspace_id,bandcamp_transaction_id,bandcamp_transaction_item_id", ignoreDuplicates: true },
-            );
+            const { error } = await supabase.from("bandcamp_sales").upsert(rows, {
+              onConflict: "workspace_id,bandcamp_transaction_id,bandcamp_transaction_item_id",
+              ignoreDuplicates: true,
+            });
 
             if (!error) totalInserted += items.length;
 
@@ -102,22 +102,47 @@ export const bandcampSalesSyncSchedule = schedules.task({
               if (!item.sku || (!item.catalog_number && !item.upc && !item.item_url)) continue;
               const { data: variants } = await supabase
                 .from("warehouse_product_variants")
-                .select("id").eq("workspace_id", workspaceId).eq("sku", item.sku).limit(1);
+                .select("id")
+                .eq("workspace_id", workspaceId)
+                .eq("sku", item.sku)
+                .limit(1);
               if (!variants?.length) continue;
               const updateData: Record<string, unknown> = {};
               if (item.catalog_number) updateData.bandcamp_catalog_number = item.catalog_number;
               if (item.upc) updateData.bandcamp_upc = item.upc;
-              if (item.item_url) { updateData.bandcamp_url = item.item_url; updateData.bandcamp_url_source = "orders_api"; }
-              await supabase.from("bandcamp_product_mappings")
-                .update(updateData).eq("variant_id", variants[0].id)
-                .then(() => {}, () => {});
+              if (item.item_url) {
+                updateData.bandcamp_url = item.item_url;
+                updateData.bandcamp_url_source = "orders_api";
+              }
+              await supabase
+                .from("bandcamp_product_mappings")
+                .update(updateData)
+                .eq("variant_id", variants[0].id)
+                .then(
+                  () => {},
+                  (err) =>
+                    logger.warn("Mapping enrichment failed", {
+                      error: String(err),
+                      task: "bandcamp-sales-sync",
+                      sku: item.sku,
+                      variantId: variants[0].id,
+                    }),
+                );
             }
           } catch (err) {
-            console.error(`[bandcamp-sales-sync] Error for ${conn.band_name}:`, err instanceof Error ? err.message : err);
+            logger.error("Sales sync error for connection", {
+              task: "bandcamp-sales-sync",
+              band: conn.band_name,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         }
       } catch (err) {
-        console.error(`[bandcamp-sales-sync] Token refresh failed for workspace ${workspaceId}:`, err instanceof Error ? err.message : err);
+        logger.error("Token refresh failed", {
+          task: "bandcamp-sales-sync",
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

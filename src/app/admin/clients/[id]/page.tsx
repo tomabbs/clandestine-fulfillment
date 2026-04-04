@@ -558,11 +558,15 @@ function StoresTab({ orgId }: { orgId: string }) {
                   <TableCell className="font-medium capitalize">{c.platform}</TableCell>
                   <TableCell className="font-mono text-xs">{c.store_url}</TableCell>
                   <TableCell>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${c.connection_status === "active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                    <span
+                      className={`text-xs px-1.5 py-0.5 rounded ${c.connection_status === "active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
+                    >
                       {c.connection_status}
                     </span>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">{formatDate(c.created_at)}</TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {formatDate(c.created_at)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -949,7 +953,11 @@ function SettingsField({
 }
 
 function SupportEmailsCard({ orgId }: { orgId: string }) {
-  const { data: emails, isLoading, refetch } = useAppQuery({
+  const {
+    data: emails,
+    isLoading,
+    refetch,
+  } = useAppQuery({
     queryKey: ["client-support-emails", orgId],
     queryFn: () => getClientSupportEmails(orgId),
     tier: CACHE_TIERS.SESSION,
@@ -959,7 +967,10 @@ function SupportEmailsCard({ orgId }: { orgId: string }) {
   const addMut = useAppMutation({
     mutationFn: () => addClientSupportEmail(orgId, newEmail),
     invalidateKeys: [["client-support-emails", orgId]],
-    onSuccess: () => { setNewEmail(""); refetch(); },
+    onSuccess: () => {
+      setNewEmail("");
+      refetch();
+    },
   });
   const removeMut = useAppMutation({
     mutationFn: (id: string) => removeClientSupportEmail(id),
@@ -972,7 +983,8 @@ function SupportEmailsCard({ orgId }: { orgId: string }) {
       <CardHeader>
         <CardTitle>Support Email Routing</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Emails from these addresses to the fulfillment inbox will automatically create support conversations for this client.
+          Emails from these addresses to the fulfillment inbox will automatically create support
+          conversations for this client.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -985,9 +997,17 @@ function SupportEmailsCard({ orgId }: { orgId: string }) {
             {(emails ?? []).length > 0 && (
               <div className="space-y-1">
                 {(emails ?? []).map((m) => (
-                  <div key={m.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-muted/50">
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between py-1 px-2 rounded hover:bg-muted/50"
+                  >
                     <span className="text-sm font-mono">{m.email_address}</span>
-                    <Button variant="ghost" size="sm" onClick={() => removeMut.mutate(m.id)} disabled={removeMut.isPending}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeMut.mutate(m.id)}
+                      disabled={removeMut.isPending}
+                    >
                       <X className="h-3 w-3" />
                     </Button>
                   </div>
@@ -1000,7 +1020,9 @@ function SupportEmailsCard({ orgId }: { orgId: string }) {
                 placeholder="Add email address..."
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && newEmail.includes("@")) addMut.mutate(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newEmail.includes("@")) addMut.mutate();
+                }}
                 className="border-input bg-background flex-1 h-8 rounded-md border px-3 text-sm"
               />
               <Button

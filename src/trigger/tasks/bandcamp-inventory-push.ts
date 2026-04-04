@@ -56,8 +56,12 @@ export const bandcampInventoryPushTask = schedules.task({
       const bundlesEnabled = ws?.bundles_enabled ?? false;
 
       // Load bundle components for this workspace (only if bundles are enabled)
-      type BundleComponent = { bundle_variant_id: string; component_variant_id: string; quantity: number };
-      let bundleMap = new Map<string, BundleComponent[]>();
+      type BundleComponent = {
+        bundle_variant_id: string;
+        component_variant_id: string;
+        quantity: number;
+      };
+      const bundleMap = new Map<string, BundleComponent[]>();
       if (bundlesEnabled) {
         const { data: allComponents } = await supabase
           .from("bundle_components")
@@ -88,9 +92,13 @@ export const bandcampInventoryPushTask = schedules.task({
           // Get variant IDs to look up inventory (include component variant IDs for bundle MIN)
           const variantIds = mappings.map((m) => m.variant_id);
           const componentVariantIds = bundlesEnabled
-            ? Array.from(new Set(
-                Array.from(bundleMap.values()).flat().map(c => c.component_variant_id)
-              ))
+            ? Array.from(
+                new Set(
+                  Array.from(bundleMap.values())
+                    .flat()
+                    .map((c) => c.component_variant_id),
+                ),
+              )
             : [];
           const allVariantIds = Array.from(new Set([...variantIds, ...componentVariantIds]));
 
@@ -129,7 +137,7 @@ export const bandcampInventoryPushTask = schedules.task({
                 // DFS cycle safety is enforced at write time (setBundleComponents).
                 // At push time we just compute MIN — no recursion risk.
                 const componentMin = Math.min(
-                  ...components.map(c => {
+                  ...components.map((c) => {
                     const compInv = inventoryByVariant.get(c.component_variant_id);
                     return Math.floor((compInv?.available ?? 0) / c.quantity);
                   }),

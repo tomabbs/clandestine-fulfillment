@@ -4,7 +4,7 @@ import { Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { getInboundShipments, type InboundShipmentWithOrg } from "@/actions/inbound";
-import { PaginationBar, type PageSize } from "@/components/shared/pagination-bar";
+import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
@@ -81,7 +81,10 @@ export default function PortalInboundPage() {
         pageSize={pageSize}
         total={totalCount}
         onPageChange={setPage}
-        onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          setPage(1);
+        }}
       />
     </div>
   );
@@ -105,7 +108,9 @@ function ShipmentCard({ shipment }: { shipment: InboundShipmentWithOrg }) {
           <div className="flex gap-4 mt-1 text-sm text-muted-foreground">
             {shipment.carrier && <span>Carrier: {shipment.carrier}</span>}
             {shipment.expected_date && (
-              <span>Expected: {new Date(shipment.expected_date + "T12:00:00").toLocaleDateString()}</span>
+              <span>
+                Expected: {new Date(shipment.expected_date + "T12:00:00").toLocaleDateString()}
+              </span>
             )}
             <span>{shipment.item_count} item(s)</span>
           </div>

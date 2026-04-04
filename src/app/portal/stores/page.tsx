@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   Disc3,
@@ -11,7 +12,6 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   deleteStoreConnection,
   getMyStoreConnections,
@@ -51,7 +51,8 @@ const PLATFORM_META: Record<
   woocommerce: {
     label: "WooCommerce",
     icon: <ShoppingBag className="h-5 w-5" />,
-    description: "Connect your WooCommerce store. You'll approve the connection in your WordPress admin — no API keys needed.",
+    description:
+      "Connect your WooCommerce store. You'll approve the connection in your WordPress admin — no API keys needed.",
     authType: "oauth",
   },
   discogs: {
@@ -355,10 +356,7 @@ function OAuthRedirectButton({
     <Button
       className="w-full"
       onClick={() => {
-        window.open(
-          `/api/oauth/${platform}?org_id=${encodeURIComponent(orgId)}`,
-          "_blank",
-        );
+        window.open(`/api/oauth/${platform}?org_id=${encodeURIComponent(orgId)}`, "_blank");
       }}
     >
       {label} →
@@ -407,13 +405,12 @@ function WooCommerceCredentialsForm({
         />
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button
-        className="w-full"
-        disabled={!storeUrl.trim() || loading}
-        onClick={handleConnect}
-      >
+      <Button className="w-full" disabled={!storeUrl.trim() || loading} onClick={handleConnect}>
         {loading ? (
-          <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Opening…</>
+          <>
+            <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            Opening…
+          </>
         ) : (
           "Connect with WooCommerce →"
         )}

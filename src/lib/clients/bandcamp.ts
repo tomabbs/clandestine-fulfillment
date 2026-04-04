@@ -11,64 +11,80 @@ const tokenResponseSchema = z.object({
   token_type: z.string(),
 });
 
-const bandSchema = z.object({
-  band_id: z.number(),
-  name: z.string(),
-  subdomain: z.string().optional(),
-  member_bands: z
-    .array(
-      z.object({
-        band_id: z.number(),
-        name: z.string(),
-        subdomain: z.string().optional(),
-      }).passthrough(),
-    )
-    .optional(),
-}).passthrough();
+const bandSchema = z
+  .object({
+    band_id: z.number(),
+    name: z.string(),
+    subdomain: z.string().optional(),
+    member_bands: z
+      .array(
+        z
+          .object({
+            band_id: z.number(),
+            name: z.string(),
+            subdomain: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
 
 const myBandsResponseSchema = z.object({
   bands: z.preprocess((v) => v ?? [], z.array(bandSchema)),
 });
 
-const merchOptionSchema = z.object({
-  option_id: z.number(),
-  title: z.string().nullish(),
-  sku: z.string().nullish(),
-  quantity_available: z.number().nullish(),
-  quantity_sold: z.number().nullish(),
-}).passthrough();
-
-const originQuantitySchema = z.object({
-  origin_id: z.number(),
-  quantity_available: z.number().nullish(),
-  quantity_sold: z.number().nullish(),
-  option_quantities: z.array(z.object({
+const merchOptionSchema = z
+  .object({
     option_id: z.number(),
+    title: z.string().nullish(),
+    sku: z.string().nullish(),
     quantity_available: z.number().nullish(),
     quantity_sold: z.number().nullish(),
-  }).passthrough()).nullish(),
-}).passthrough();
+  })
+  .passthrough();
 
-const merchItemSchema = z.object({
-  package_id: z.number(),
-  title: z.string(),
-  album_title: z.string().nullish(),
-  sku: z.string().nullish(),
-  item_type: z.string().nullish(),
-  member_band_id: z.number().nullish(),
-  new_date: z.string().nullish(),
-  price: z.number().nullish(),
-  currency: z.string().nullish(),
-  quantity_available: z.number().nullish(),
-  quantity_sold: z.number().nullish(),
-  origin_quantity: z.number().nullish(),
-  url: z.string().nullish(),
-  image_url: z.string().nullish(),
-  subdomain: z.string().nullish(),
-  is_set_price: z.union([z.boolean(), z.number()]).nullish(),
-  options: z.array(merchOptionSchema).nullish(),
-  origin_quantities: z.array(originQuantitySchema).nullish(),
-}).passthrough();
+const originQuantitySchema = z
+  .object({
+    origin_id: z.number(),
+    quantity_available: z.number().nullish(),
+    quantity_sold: z.number().nullish(),
+    option_quantities: z
+      .array(
+        z
+          .object({
+            option_id: z.number(),
+            quantity_available: z.number().nullish(),
+            quantity_sold: z.number().nullish(),
+          })
+          .passthrough(),
+      )
+      .nullish(),
+  })
+  .passthrough();
+
+const merchItemSchema = z
+  .object({
+    package_id: z.number(),
+    title: z.string(),
+    album_title: z.string().nullish(),
+    sku: z.string().nullish(),
+    item_type: z.string().nullish(),
+    member_band_id: z.number().nullish(),
+    new_date: z.string().nullish(),
+    price: z.number().nullish(),
+    currency: z.string().nullish(),
+    quantity_available: z.number().nullish(),
+    quantity_sold: z.number().nullish(),
+    origin_quantity: z.number().nullish(),
+    url: z.string().nullish(),
+    image_url: z.string().nullish(),
+    subdomain: z.string().nullish(),
+    is_set_price: z.union([z.boolean(), z.number()]).nullish(),
+    options: z.array(merchOptionSchema).nullish(),
+    origin_quantities: z.array(originQuantitySchema).nullish(),
+  })
+  .passthrough();
 
 const merchDetailsResponseSchema = z.object({
   items: z.preprocess((v) => v ?? [], z.array(merchItemSchema)),
@@ -420,11 +436,19 @@ export function matchSkuToVariants(
   merchItems: BandcampMerchItem[],
   variants: Array<{ id: string; sku: string }>,
 ): {
-  matched: Array<{ merchItem: BandcampMerchItem; variantId: string; matchedVia: "item_sku" | "option_sku" }>;
+  matched: Array<{
+    merchItem: BandcampMerchItem;
+    variantId: string;
+    matchedVia: "item_sku" | "option_sku";
+  }>;
   unmatched: BandcampMerchItem[];
 } {
   const skuMap = new Map(variants.map((v) => [v.sku, v.id]));
-  const matched: Array<{ merchItem: BandcampMerchItem; variantId: string; matchedVia: "item_sku" | "option_sku" }> = [];
+  const matched: Array<{
+    merchItem: BandcampMerchItem;
+    variantId: string;
+    matchedVia: "item_sku" | "option_sku";
+  }> = [];
   const unmatched: BandcampMerchItem[] = [];
 
   for (const item of merchItems) {

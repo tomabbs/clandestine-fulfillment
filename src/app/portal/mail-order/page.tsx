@@ -1,9 +1,9 @@
 "use client";
 
 import { ChevronDown, ChevronRight, DollarSign, MapPin } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import { useState } from "react";
 import { getClientMailOrders, getMailOrderPayoutSummary } from "@/actions/mail-orders";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -241,11 +241,15 @@ export default function PortalMailOrderPage() {
                       onClick={() => setExpandedId(isExpanded ? null : order.id)}
                     >
                       <TableCell className="w-8 text-muted-foreground">
-                        {isExpanded
-                          ? <ChevronDown className="h-4 w-4" />
-                          : <ChevronRight className="h-4 w-4" />}
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{order.order_number ?? "—"}</TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {order.order_number ?? "—"}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-[140px] truncate">
                         {order.customer_name ?? "—"}
                       </TableCell>
@@ -258,7 +262,9 @@ export default function PortalMailOrderPage() {
                         {new Date(order.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={order.fulfillment_status === "fulfilled" ? "default" : "outline"}>
+                        <Badge
+                          variant={order.fulfillment_status === "fulfilled" ? "default" : "outline"}
+                        >
                           {order.fulfillment_status === "fulfilled" ? "Fulfilled" : "Unfulfilled"}
                         </Badge>
                       </TableCell>

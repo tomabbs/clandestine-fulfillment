@@ -24,24 +24,63 @@ export function buildBandcampAlbumUrl(subdomain: string, albumTitle: string): st
 }
 
 const FORMAT_PATTERNS = [
-  /\b\d*x?LP\b/i, /\bCD\b/i, /\bCassette\b/i, /\bTape\b/i, /\bVinyl\b/i,
-  /\b(?:7|10|12)\s*[""\u201C\u201D\u2033']?\s*(?:inch)?\b/i, /\bBox\s*Set\b/i, /\bPicture\s*Disc\b/i,
-  /\bFlexi\b/i, /\bSACD\b/i, /\bDVD\b/i, /\bBlu-?ray\b/i,
-  /\bDigipak\b/i, /\bDigipack\b/i, /\bDigisleeve\b/i, /\bGatefold\b/i,
-  /\bJewel\s*Case\b/i, /\bSlipcase\b/i, /\bCompact\s*Disc\b/i,
-  /\bLimited\s*Edition\b/i, /\bStandard\s*Edition\b/i, /\bDeluxe\s*Edition\b/i,
-  /\bDeluxe\b/i, /\bLTD\b/i, /\bColou?red\b/i, /\bSplatter\b/i,
-  /\bReissue\b/i, /\bSplit\b/i, /\bTriple\b/i, /\bDouble\b/i, /\bSingle\b/i,
-  /\bw\/\s*Alt\.?\s*Artwork\b/i, /\bAlt\.?\s*Artwork\b/i,
-  /\bTranslucent\b/i, /\bBlack\s*Variant\b/i, /\bNatural\b.*\bSplatter\b/i,
+  /\b\d*x?LP\b/i,
+  /\bCD\b/i,
+  /\bCassette\b/i,
+  /\bTape\b/i,
+  /\bVinyl\b/i,
+  /\b(?:7|10|12)\s*[""\u201C\u201D\u2033']?\s*(?:inch)?\b/i,
+  /\bBox\s*Set\b/i,
+  /\bPicture\s*Disc\b/i,
+  /\bFlexi\b/i,
+  /\bSACD\b/i,
+  /\bDVD\b/i,
+  /\bBlu-?ray\b/i,
+  /\bDigipak\b/i,
+  /\bDigipack\b/i,
+  /\bDigisleeve\b/i,
+  /\bGatefold\b/i,
+  /\bJewel\s*Case\b/i,
+  /\bSlipcase\b/i,
+  /\bCompact\s*Disc\b/i,
+  /\bLimited\s*Edition\b/i,
+  /\bStandard\s*Edition\b/i,
+  /\bDeluxe\s*Edition\b/i,
+  /\bDeluxe\b/i,
+  /\bLTD\b/i,
+  /\bColou?red\b/i,
+  /\bSplatter\b/i,
+  /\bReissue\b/i,
+  /\bSplit\b/i,
+  /\bTriple\b/i,
+  /\bDouble\b/i,
+  /\bSingle\b/i,
+  /\bw\/\s*Alt\.?\s*Artwork\b/i,
+  /\bAlt\.?\s*Artwork\b/i,
+  /\bTranslucent\b/i,
+  /\bBlack\s*Variant\b/i,
+  /\bNatural\b.*\bSplatter\b/i,
   /\bin\s+(Digipack|Digisleeve|Digipak|Jacket|Gatefold)\b/i,
 ];
 
 const MERCH_PATTERNS = [
-  /\bT-?Shirt\b/i, /\bTee\b/i, /\bHoodie\b/i, /\bHat\b/i, /\bCap\b/i,
-  /\bPoster\b/i, /\bSticker\b/i, /\bTote\b/i, /\bPatch\b/i, /\bPin\b/i,
-  /\bMug\b/i, /\bBundle\b/i, /\bSlipmat\b/i, /\bFlag\b/i, /\bBag\b/i,
-  /\bAlbum\s*Cover\s*T\b/i, /\s+T$/,
+  /\bT-?Shirt\b/i,
+  /\bTee\b/i,
+  /\bHoodie\b/i,
+  /\bHat\b/i,
+  /\bCap\b/i,
+  /\bPoster\b/i,
+  /\bSticker\b/i,
+  /\bTote\b/i,
+  /\bPatch\b/i,
+  /\bPin\b/i,
+  /\bMug\b/i,
+  /\bBundle\b/i,
+  /\bSlipmat\b/i,
+  /\bFlag\b/i,
+  /\bBag\b/i,
+  /\bAlbum\s*Cover\s*T\b/i,
+  /\s+T$/,
 ];
 
 /**
@@ -59,12 +98,15 @@ export function extractAlbumTitle(productTitle: string): string | null {
   if (!raw) return null;
 
   // Reject pure merch items — no album page exists
-  if (MERCH_PATTERNS.some(p => p.test(raw))) return null;
+  if (MERCH_PATTERNS.some((p) => p.test(raw))) return null;
 
   // Reject PACKAGE bundle listings — no single album page
   if (/PACKAGE\s*:/i.test(raw)) return null;
 
-  const parts = raw.split(" - ").map(s => s.trim()).filter(Boolean);
+  const parts = raw
+    .split(" - ")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   // Try to extract a clean album title from each candidate
   function stripFormats(text: string): string | null {
@@ -87,9 +129,15 @@ export function extractAlbumTitle(productTitle: string): string | null {
 
     if (!cleaned || cleaned.length < 3) return null;
     if (/^[\d\u201C\u201D\u2033""'"\s.\-!?&]+$/.test(cleaned)) return null;
-    if (/^(Standard|Double|Single|Special|Original|Limited|Triple|Alt|Split|Reissue)?\s*(Black|White|Clear|Red|Blue|Green|Orange|Pink|Natural|Colored|Colou?red)?\s*[""\u201C\u201D\u2033']?\s*$/i.test(cleaned)) return null;
+    if (
+      /^(Standard|Double|Single|Special|Original|Limited|Triple|Alt|Split|Reissue)?\s*(Black|White|Clear|Red|Blue|Green|Orange|Pink|Natural|Colored|Colou?red)?\s*[""\u201C\u201D\u2033']?\s*$/i.test(
+        cleaned,
+      )
+    )
+      return null;
     // Reject residue that's still just packaging/bundle descriptors
-    if (/^(Artwork|Art\s*Print|Sleeve|Jacket|Insert|Booklet|Batch|Series|Sigil)\s*$/i.test(cleaned)) return null;
+    if (/^(Artwork|Art\s*Print|Sleeve|Jacket|Insert|Booklet|Batch|Series|Sigil)\s*$/i.test(cleaned))
+      return null;
     if (/^\d+\s*(CD|LP)$/i.test(cleaned)) return null;
     // Reject PACKAGE: prefixed bundle items
     if (/^PACKAGE\s*:/i.test(cleaned)) return null;
@@ -141,49 +189,57 @@ export class BandcampFetchError extends Error {
 // - packages[].sku matches warehouse SKUs (e.g. LP-NS-167, CD-NS-167)
 // - packages[].type_id is present (1=CD, 3=Cassette, 15=2xLP)
 
-const packageArtSchema = z.object({
-  image_id: z.number().nullish(),
-}).passthrough();
+const packageArtSchema = z
+  .object({
+    image_id: z.number().nullish(),
+  })
+  .passthrough();
 
-const tralbumDataSchema = z.object({
-  art_id:            z.number().nullish(),
-  is_preorder:       z.boolean().nullish(),
-  album_is_preorder: z.boolean().nullish(),
-  current: z
-    .object({
-      title:        z.string().nullish(),
-      release_date: z.string().nullish(),
-      art_id:       z.number().nullish(),
-      about:        z.string().nullish(),
-      credits:      z.string().nullish(),
-      upc:          z.string().nullish(),
-    })
-    .passthrough()
-    .nullish(),
-  packages: z
-    .array(
-      z.object({
-        type_name:    z.string().nullish(),
-        type_id:      z.number().nullish(),
-        title:        z.string().nullish(),
-        sku:          z.string().nullish(),
+const tralbumDataSchema = z
+  .object({
+    art_id: z.number().nullish(),
+    is_preorder: z.boolean().nullish(),
+    album_is_preorder: z.boolean().nullish(),
+    current: z
+      .object({
+        title: z.string().nullish(),
         release_date: z.string().nullish(),
-        new_date:     z.string().nullish(),
-        image_id:     z.number().nullish(),
-        arts:         z.array(packageArtSchema).nullish(),
-      }).passthrough(),
-    )
-    .nullish(),
-  trackinfo: z
-    .array(
-      z.object({
-        track_num: z.number().nullish(),
-        title:     z.string().nullish(),
-        duration:  z.number().nullish(),
-      }).passthrough(),
-    )
-    .nullish(),
-}).passthrough();
+        art_id: z.number().nullish(),
+        about: z.string().nullish(),
+        credits: z.string().nullish(),
+        upc: z.string().nullish(),
+      })
+      .passthrough()
+      .nullish(),
+    packages: z
+      .array(
+        z
+          .object({
+            type_name: z.string().nullish(),
+            type_id: z.number().nullish(),
+            title: z.string().nullish(),
+            sku: z.string().nullish(),
+            release_date: z.string().nullish(),
+            new_date: z.string().nullish(),
+            image_id: z.number().nullish(),
+            arts: z.array(packageArtSchema).nullish(),
+          })
+          .passthrough(),
+      )
+      .nullish(),
+    trackinfo: z
+      .array(
+        z
+          .object({
+            track_num: z.number().nullish(),
+            title: z.string().nullish(),
+            duration: z.number().nullish(),
+          })
+          .passthrough(),
+      )
+      .nullish(),
+  })
+  .passthrough();
 
 export type TralbumData = z.infer<typeof tralbumDataSchema>;
 
@@ -199,32 +255,32 @@ export interface ScrapedPackage {
   typeId: number | null;
   title: string | null;
   sku: string | null;
-  releaseDate: Date | null;    // parsed from release_date or new_date GMT string
-  imageId: number | null;      // arts[0].image_id (pkg.image_id is always NULL)
-  imageUrl: string | null;     // 1200px image from arts[0]
+  releaseDate: Date | null; // parsed from release_date or new_date GMT string
+  imageId: number | null; // arts[0].image_id (pkg.image_id is always NULL)
+  imageUrl: string | null; // 1200px image from arts[0]
   arts: ScrapedPackageImage[]; // all arts entries (typically 4 per package)
 }
 
 export interface ScrapedTrack {
   trackNum: number;
   title: string;
-  durationSec: number;   // raw float seconds from Bandcamp
+  durationSec: number; // raw float seconds from Bandcamp
   durationFormatted: string; // "M:SS" display string
 }
 
 export interface ScrapedAlbumData {
-  releaseDate: Date | null;    // from current.release_date
-  isPreorder: boolean;         // from is_preorder || album_is_preorder
-  artId: number | null;        // top-level album art_id
-  albumArtUrl: string | null;  // 1200px from https://f4.bcbits.com/img/a{art_id}_10.jpg
+  releaseDate: Date | null; // from current.release_date
+  isPreorder: boolean; // from is_preorder || album_is_preorder
+  artId: number | null; // top-level album art_id
+  albumArtUrl: string | null; // 1200px from https://f4.bcbits.com/img/a{art_id}_10.jpg
   title: string | null;
   packages: ScrapedPackage[];
   metadataIncomplete: boolean; // true when release_date or packages absent
   // Album metadata — from data-tralbum.current (confirmed 2026-03-31)
-  about: string | null;        // album description / "about this album"
-  credits: string | null;      // recording / production credits
-  upc: string | null;          // album UPC/EAN code
-  tracks: ScrapedTrack[];      // tracklist from data-tralbum.trackinfo
+  about: string | null; // album description / "about this album"
+  credits: string | null; // recording / production credits
+  upc: string | null; // album UPC/EAN code
+  tracks: ScrapedTrack[]; // tracklist from data-tralbum.trackinfo
 }
 
 // ─── Image URL construction ───────────────────────────────────────────────────
@@ -242,7 +298,10 @@ export function bandcampAlbumArtUrl(artId: number | null | undefined, size = 10)
  * Package/merch image URL (no "a" prefix): https://f4.bcbits.com/img/{image_id}_{size}.jpg
  * Source: pkg.arts[].image_id (NOT pkg.image_id — confirmed always NULL on real pages).
  */
-export function bandcampMerchImageUrl(imageId: number | null | undefined, size = 10): string | null {
+export function bandcampMerchImageUrl(
+  imageId: number | null | undefined,
+  size = 10,
+): string | null {
   if (imageId == null) return null;
   return `https://f4.bcbits.com/img/${imageId}_${size}.jpg`;
 }
@@ -347,13 +406,13 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
     const primaryImageId = arts[0]?.imageId ?? null;
 
     return {
-      typeName:    pkg.type_name ?? null,
-      typeId:      pkg.type_id ?? null,
-      title:       pkg.title ?? null,
-      sku:         pkg.sku ?? null,
+      typeName: pkg.type_name ?? null,
+      typeId: pkg.type_id ?? null,
+      title: pkg.title ?? null,
+      sku: pkg.sku ?? null,
       releaseDate: parseGMTDate(pkg.release_date ?? pkg.new_date ?? null),
-      imageId:     primaryImageId,
-      imageUrl:    bandcampMerchImageUrl(primaryImageId),
+      imageId: primaryImageId,
+      imageUrl: bandcampMerchImageUrl(primaryImageId),
       arts,
     };
   });
@@ -363,9 +422,9 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
   const tracks: ScrapedTrack[] = (data.trackinfo ?? [])
     .filter((t) => t.title != null && t.duration != null)
     .map((t) => ({
-      trackNum:          t.track_num ?? 0,
-      title:             t.title as string,
-      durationSec:       t.duration as number,
+      trackNum: t.track_num ?? 0,
+      title: t.title as string,
+      durationSec: t.duration as number,
       durationFormatted: formatDuration(t.duration as number),
     }))
     .sort((a, b) => a.trackNum - b.trackNum);
@@ -379,9 +438,9 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
     packages,
     metadataIncomplete,
     // Album metadata — trim whitespace; Bandcamp often has leading/trailing newlines
-    about:   data.current?.about?.trim()   ?? null,
+    about: data.current?.about?.trim() ?? null,
     credits: data.current?.credits?.trim() ?? null,
-    upc:     data.current?.upc?.trim()     ?? null,
+    upc: data.current?.upc?.trim() ?? null,
     tracks,
   };
 }

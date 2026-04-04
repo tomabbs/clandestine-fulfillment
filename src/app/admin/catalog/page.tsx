@@ -1,7 +1,6 @@
 "use client";
 
 import { AlertTriangle, Layers, Package, Search } from "lucide-react";
-import { PaginationBar } from "@/components/shared/pagination-bar";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,6 +15,7 @@ import {
   EditableSelectCell,
   EditableTextCell,
 } from "@/components/shared/editable-cell";
+import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -85,7 +85,6 @@ export default function CatalogPage() {
     queryFn: () => getCatalogStats(),
     tier: CACHE_TIERS.SESSION,
   });
-
 
   return (
     <div className="p-6 space-y-4">

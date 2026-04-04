@@ -12,7 +12,7 @@
  * maxDuration: 300 — rate limit backoffs require extra time.
  */
 
-import { schedules, task } from "@trigger.dev/sdk";
+import { logger, schedules, task } from "@trigger.dev/sdk";
 import type { DiscogsAuthConfig } from "@/lib/clients/discogs-client";
 import { getOrder, getOrders } from "@/lib/clients/discogs-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
@@ -34,7 +34,10 @@ async function runSync(): Promise<{ imported: number; skipped: number; total: nu
       .single();
 
     if (!credentials) {
-      console.log(`[discogs-mailorder-sync] No Discogs credentials for workspace ${workspaceId}`);
+      logger.info("No Discogs credentials for workspace", {
+        task: "discogs-mailorder-sync",
+        workspaceId,
+      });
       continue;
     }
 
@@ -122,7 +125,11 @@ async function runSync(): Promise<{ imported: number; skipped: number; total: nu
       });
 
       if (error) {
-        console.error(`[discogs-mailorder-sync] Insert failed for order ${fullOrder.id}:`, error);
+        logger.error("Insert failed for order", {
+          task: "discogs-mailorder-sync",
+          orderId: fullOrder.id,
+          error: String(error),
+        });
       } else {
         imported++;
       }

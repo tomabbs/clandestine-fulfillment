@@ -31,13 +31,12 @@ describe("aftership-client", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
+          meta: { code: 201 },
           data: {
-            tracking: {
-              id: "track-1",
-              tracking_number: "9400111111",
-              slug: "usps",
-              checkpoints: [],
-            },
+            id: "track-1",
+            tracking_number: "9400111111",
+            slug: "usps",
+            checkpoints: [],
           },
         }),
       });
@@ -46,14 +45,14 @@ describe("aftership-client", () => {
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url, options] = mockFetch.mock.calls[0];
-      expect(url).toBe("https://api.aftership.com/v4/trackings");
+      expect(url).toBe("https://api.aftership.com/tracking/2024-07/trackings");
       expect(options.method).toBe("POST");
-      expect(options.headers["aftership-api-key"]).toBe("test-aftership-key");
+      expect(options.headers["as-api-key"]).toBe("test-aftership-key");
 
       const body = JSON.parse(options.body);
-      expect(body.tracking.tracking_number).toBe("9400111111");
-      expect(body.tracking.slug).toBe("usps");
-      expect(body.tracking.order_id).toBe("order-1");
+      expect(body.tracking_number).toBe("9400111111");
+      expect(body.slug).toBe("usps");
+      expect(body.order_id).toBe("order-1");
     });
 
     it("throws on API error", async () => {
@@ -72,20 +71,23 @@ describe("aftership-client", () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
+          meta: { code: 200 },
           data: {
-            tracking: {
-              id: "track-1",
-              tracking_number: "9400111111",
-              slug: "usps",
-              tag: "InTransit",
-              checkpoints: [
-                {
-                  tag: "InTransit",
-                  message: "In transit",
-                  checkpoint_time: "2026-03-15T10:00:00Z",
-                },
-              ],
-            },
+            trackings: [
+              {
+                id: "track-1",
+                tracking_number: "9400111111",
+                slug: "usps",
+                tag: "InTransit",
+                checkpoints: [
+                  {
+                    tag: "InTransit",
+                    message: "In transit",
+                    checkpoint_time: "2026-03-15T10:00:00Z",
+                  },
+                ],
+              },
+            ],
           },
         }),
       });
@@ -96,7 +98,9 @@ describe("aftership-client", () => {
       expect(result.checkpoints[0].tag).toBe("InTransit");
 
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toBe("https://api.aftership.com/v4/trackings/usps/9400111111");
+      expect(url).toBe(
+        "https://api.aftership.com/tracking/2024-07/trackings?tracking_number=9400111111&slug=usps&limit=1",
+      );
     });
   });
 

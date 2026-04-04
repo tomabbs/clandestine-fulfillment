@@ -10,8 +10,13 @@ const mockServerClient = {
   from: mockFrom,
 };
 
+vi.mock("@/lib/server/auth-context", () => ({
+  requireStaff: vi.fn().mockResolvedValue({ userId: "user-1", workspaceId: "ws-1" }),
+}));
+
 vi.mock("@/lib/server/supabase-server", () => ({
   createServerSupabaseClient: async () => mockServerClient,
+  createServiceRoleClient: () => ({ from: mockFrom }),
 }));
 
 vi.mock("@/lib/shared/onboarding", () => ({
@@ -63,6 +68,8 @@ function chainMock(result: unknown) {
 
 /**
  * Sets up mockFrom to return chainMock results for sequential `.from()` calls.
+ * Note: requireStaff() consumes the first mockFrom call (provided in beforeEach),
+ * so action data queries start from the second call onward.
  */
 function setupFromSequence(results: unknown[]) {
   for (const result of results) {
@@ -634,6 +641,7 @@ describe("clients server actions", () => {
             },
           ],
         },
+        { data: [] },
       ]);
 
       const result = await getClientStores("org-1");

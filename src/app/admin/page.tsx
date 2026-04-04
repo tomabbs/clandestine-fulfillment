@@ -255,8 +255,8 @@ function PreorderList({
           <div className="min-w-0 flex-1">
             <span className="font-medium truncate block">{v.productTitle}</span>
             <span className="text-xs text-muted-foreground">
-              {v.streetDate ? new Date(v.streetDate + "T12:00:00").toLocaleDateString() : "—"} &middot;{" "}
-              {v.orderCount} orders &middot; {v.availableStock} avail
+              {v.streetDate ? new Date(v.streetDate + "T12:00:00").toLocaleDateString() : "—"}{" "}
+              &middot; {v.orderCount} orders &middot; {v.availableStock} avail
               {v.isShortRisk && <span className="text-destructive ml-1">SHORT</span>}
             </span>
           </div>

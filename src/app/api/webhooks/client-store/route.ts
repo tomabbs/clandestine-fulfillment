@@ -66,14 +66,8 @@ export async function POST(request: NextRequest) {
       signature = request.headers.get("Squarespace-Signature");
       if (signature) {
         const secretBytes = Buffer.from(connection.webhook_secret, "hex");
-        const expectedSig = crypto
-          .createHmac("sha256", secretBytes)
-          .update(rawBody)
-          .digest("hex");
-        const valid = crypto.timingSafeEqual(
-          Buffer.from(expectedSig),
-          Buffer.from(signature),
-        );
+        const expectedSig = crypto.createHmac("sha256", secretBytes).update(rawBody).digest("hex");
+        const valid = crypto.timingSafeEqual(Buffer.from(expectedSig), Buffer.from(signature));
         if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
       }
     }

@@ -100,9 +100,9 @@ describe("buildBandcampAlbumUrl", () => {
 describe("parseBandcampPage — about / credits / upc", () => {
   it("extracts about, credits, and upc from data-tralbum.current", () => {
     const html = makeHtml({
-      about:   "An incredible debut album.",
+      about: "An incredible debut album.",
       credits: "Recorded by Jane Smith at Studio A.",
-      upc:     "703610875463",
+      upc: "703610875463",
     });
     const result = parseBandcampPage(html);
     expect(result).not.toBeNull();
@@ -120,9 +120,9 @@ describe("parseBandcampPage — about / credits / upc", () => {
 
   it("trims leading/trailing whitespace from about, credits, and upc", () => {
     const html = makeHtml({
-      about:   "\n\nDescription with leading newlines.\n",
+      about: "\n\nDescription with leading newlines.\n",
       credits: "\nRecorded by someone.\n\n",
-      upc:     " 634457226203 ",
+      upc: " 634457226203 ",
     });
     const result = parseBandcampPage(html);
     expect(result!.about).toBe("Description with leading newlines.");
@@ -149,9 +149,9 @@ describe("parseBandcampPage — trackinfo", () => {
 
   it("formats duration seconds as M:SS", () => {
     const result = parseBandcampPage(makeHtml({}, sampleTracks));
-    expect(result!.tracks[0].durationFormatted).toBe("3:45");   // 225s
-    expect(result!.tracks[1].durationFormatted).toBe("5:46");   // 345.621s rounds to 346s
-    expect(result!.tracks[2].durationFormatted).toBe("1:12");   // 72.4s rounds to 72s
+    expect(result!.tracks[0].durationFormatted).toBe("3:45"); // 225s
+    expect(result!.tracks[1].durationFormatted).toBe("5:46"); // 345.621s rounds to 346s
+    expect(result!.tracks[2].durationFormatted).toBe("1:12"); // 72.4s rounds to 72s
   });
 
   it("returns empty array when trackinfo absent", () => {
@@ -168,8 +168,8 @@ describe("parseBandcampPage — trackinfo", () => {
   it("skips tracks with missing title or duration", () => {
     const mixed = [
       { track_num: 1, title: "Good Track", duration: 200 },
-      { track_num: 2, title: null,         duration: 180 },   // no title — skipped
-      { track_num: 3, title: "Also Good",  duration: null },  // no duration — skipped
+      { track_num: 2, title: null, duration: 180 }, // no title — skipped
+      { track_num: 3, title: "Also Good", duration: null }, // no duration — skipped
     ];
     const result = parseBandcampPage(makeHtml({}, mixed));
     expect(result!.tracks).toHaveLength(1);
