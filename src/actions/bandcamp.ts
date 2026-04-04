@@ -629,18 +629,25 @@ export async function getBandcampSalesOverview(workspaceId: string) {
       .select("id", { count: "exact", head: true })
       .eq("connection_id", conn.id);
 
-    const { data: revenueRow } = await supabase
-      .from("bandcamp_sales")
-      .select("net_amount, currency")
-      .eq("connection_id", conn.id)
-      .not("net_amount", "is", null)
-      .limit(1000);
-
-    const totalRevenue = (revenueRow ?? []).reduce(
-      (sum, r) => sum + (Number(r.net_amount) || 0),
-      0,
-    );
-    const currency = revenueRow?.[0]?.currency ?? "USD";
+    let totalRevenue = 0;
+    let currency = "USD";
+    let revOffset = 0;
+    const REV_PAGE = 1000;
+    while (true) {
+      const { data: revPage } = await supabase
+        .from("bandcamp_sales")
+        .select("net_amount, currency")
+        .eq("connection_id", conn.id)
+        .not("net_amount", "is", null)
+        .range(revOffset, revOffset + REV_PAGE - 1);
+      if (!revPage?.length) break;
+      for (const r of revPage) {
+        totalRevenue += Number(r.net_amount) || 0;
+        if (revOffset === 0 && !currency) currency = r.currency ?? "USD";
+      }
+      if (revPage.length < REV_PAGE) break;
+      revOffset += REV_PAGE;
+    }
 
     const { count: refundCount } = await supabase
       .from("bandcamp_sales")
@@ -677,12 +684,28 @@ export async function getBandcampSalesOverview(workspaceId: string) {
     .eq("workspace_id", workspaceId);
 
   // Per-item breakdown: group by item_name + artist + item_type + package
-  const { data: allSales } = await supabase
-    .from("bandcamp_sales")
-    .select(
-      "item_name, artist, item_type, package, item_url, sku, catalog_number, net_amount, quantity, connection_id, currency",
-    )
-    .eq("workspace_id", workspaceId);
+  // Paginate to fetch all rows (Supabase default limit is 1000)
+  const allSales: Array<{
+    item_name: string | null; artist: string | null; item_type: string | null;
+    package: string | null; item_url: string | null; sku: string | null;
+    catalog_number: string | null; net_amount: string | null; quantity: number | null;
+    connection_id: string; currency: string | null;
+  }> = [];
+  let salesOffset = 0;
+  const SALES_PAGE = 1000;
+  while (true) {
+    const { data: page } = await supabase
+      .from("bandcamp_sales")
+      .select(
+        "item_name, artist, item_type, package, item_url, sku, catalog_number, net_amount, quantity, connection_id, currency",
+      )
+      .eq("workspace_id", workspaceId)
+      .range(salesOffset, salesOffset + SALES_PAGE - 1);
+    if (!page?.length) break;
+    allSales.push(...page);
+    if (page.length < SALES_PAGE) break;
+    salesOffset += SALES_PAGE;
+  }
 
   const itemMap = new Map<
     string,
@@ -702,7 +725,7 @@ export async function getBandcampSalesOverview(workspaceId: string) {
     }
   >();
 
-  for (const sale of allSales ?? []) {
+  for (const sale of allSales) {
     const key = `${sale.connection_id}|${sale.item_name}|${sale.artist}|${sale.item_type}|${sale.package ?? ""}`;
     const existing = itemMap.get(key);
     if (existing) {
