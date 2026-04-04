@@ -756,10 +756,10 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
             variant="outline"
             size="sm"
             onClick={() => {
-              const header = ["Title", "Artist", "Account", "Type", "Format", "Units", "Revenue", "Currency", "SKU", "Catalog #", "URL"];
+              const header = ["Artist", "Title", "Account", "Type", "Format", "Units", "Revenue", "Currency", "SKU", "Catalog #", "URL"];
               const rows = sortedFiltered.map((item) => [
-                `"${(item.itemName ?? "").replace(/"/g, '""')}"`,
                 `"${(item.artist ?? "").replace(/"/g, '""')}"`,
+                `"${(item.itemName ?? "").replace(/"/g, '""')}"`,
                 `"${(item.bandName ?? "").replace(/"/g, '""')}"`,
                 item.itemType ?? "",
                 `"${(item.package ?? "").replace(/"/g, '""')}"`,
@@ -790,14 +790,14 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("artist")}>
+              Artist <SortIcon field="artist" />
+            </TableHead>
             <TableHead
               className="cursor-pointer select-none"
               onClick={() => toggleSort("itemName")}
             >
               Title <SortIcon field="itemName" />
-            </TableHead>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("artist")}>
-              Artist <SortIcon field="artist" />
             </TableHead>
             <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("bandName")}>
               Account <SortIcon field="bandName" />
@@ -831,6 +831,9 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         <TableBody>
           {pageItems.map((item, i) => (
             <TableRow key={`${item.connectionId}-${item.itemName}-${item.itemType}-${i}`}>
+              <TableCell className="text-sm max-w-[150px] truncate">
+                {item.artist}
+              </TableCell>
               <TableCell className="font-medium max-w-[250px] truncate">
                 {item.itemUrl ? (
                   <a
@@ -844,9 +847,6 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
                 ) : (
                   item.itemName
                 )}
-              </TableCell>
-              <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">
-                {item.artist}
               </TableCell>
               <TableCell className="text-muted-foreground text-xs max-w-[130px] truncate">
                 {item.bandName}
