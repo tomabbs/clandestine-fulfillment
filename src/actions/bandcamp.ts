@@ -707,6 +707,8 @@ export async function getBandcampSalesOverview(workspaceId: string) {
     salesOffset += SALES_PAGE;
   }
 
+  const connNameMap = new Map((connections ?? []).map((c) => [c.id, c.band_name]));
+
   const itemMap = new Map<
     string,
     {
@@ -719,6 +721,7 @@ export async function getBandcampSalesOverview(workspaceId: string) {
       catalogNumber: string | null;
       currency: string;
       connectionId: string;
+      bandName: string;
       totalUnits: number;
       totalRevenue: number;
       saleCount: number;
@@ -747,6 +750,7 @@ export async function getBandcampSalesOverview(workspaceId: string) {
         catalogNumber: sale.catalog_number ?? null,
         currency: sale.currency ?? "USD",
         connectionId: sale.connection_id,
+        bandName: connNameMap.get(sale.connection_id) ?? "Unknown",
         totalUnits: sale.quantity ?? 0,
         totalRevenue: Number(sale.net_amount) || 0,
         saleCount: 1,

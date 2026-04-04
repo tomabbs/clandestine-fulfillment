@@ -587,6 +587,7 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
 type SalesSortField =
   | "itemName"
   | "artist"
+  | "bandName"
   | "itemType"
   | "package"
   | "totalUnits"
@@ -614,7 +615,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
-      setSortDir(field === "itemName" || field === "artist" ? "asc" : "desc");
+      setSortDir(field === "itemName" || field === "artist" || field === "bandName" ? "asc" : "desc");
     }
     setPage(1);
   }
@@ -642,6 +643,8 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
           return dir * (a.itemName ?? "").localeCompare(b.itemName ?? "");
         case "artist":
           return dir * (a.artist ?? "").localeCompare(b.artist ?? "");
+        case "bandName":
+          return dir * (a.bandName ?? "").localeCompare(b.bandName ?? "");
         case "itemType":
           return dir * (a.itemType ?? "").localeCompare(b.itemType ?? "");
         case "package":
@@ -762,6 +765,9 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
             <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("artist")}>
               Artist <SortIcon field="artist" />
             </TableHead>
+            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("bandName")}>
+              Account <SortIcon field="bandName" />
+            </TableHead>
             <TableHead
               className="cursor-pointer select-none"
               onClick={() => toggleSort("itemType")}
@@ -807,6 +813,9 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
               </TableCell>
               <TableCell className="text-muted-foreground text-sm max-w-[150px] truncate">
                 {item.artist}
+              </TableCell>
+              <TableCell className="text-muted-foreground text-xs max-w-[130px] truncate">
+                {item.bandName}
               </TableCell>
               <TableCell>
                 <Badge
