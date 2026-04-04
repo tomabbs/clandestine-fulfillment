@@ -1369,6 +1369,33 @@ export const bandcampSyncTask = task({
           itemsProcessed++;
         }
 
+        // Backfill API data to existing mappings that were created before api_complete migration.
+        // These have bandcamp_item_id but are missing subdomain, album_title, raw_api_data.
+        for (const merchItem of merchItems) {
+          await supabase
+            .from("bandcamp_product_mappings")
+            .update({
+              bandcamp_subdomain: merchItem.subdomain ?? undefined,
+              bandcamp_album_title: merchItem.album_title ?? undefined,
+              bandcamp_price: merchItem.price ?? undefined,
+              bandcamp_currency: merchItem.currency ?? undefined,
+              bandcamp_is_set_price: merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : undefined,
+              bandcamp_options: merchItem.options ?? undefined,
+              bandcamp_origin_quantities: merchItem.origin_quantities ?? undefined,
+              bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? undefined,
+              bandcamp_new_date: merchItem.new_date ?? undefined,
+              raw_api_data: merchItem,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("workspace_id", workspaceId)
+            .eq("bandcamp_item_id", merchItem.package_id)
+            .is("raw_api_data", null)
+            .then(
+              () => {},
+              (err) => logger.warn("Legacy mapping backfill failed", { error: String(err), task: "bandcamp-sync", packageId: merchItem.package_id }),
+            );
+        }
+
         await supabase
           .from("bandcamp_connections")
           .update({ last_synced_at: new Date().toISOString() })
