@@ -95,7 +95,27 @@ export const bandcampSalesSyncSchedule = schedules.task({
               ignoreDuplicates: true,
             });
 
-            if (!error) totalInserted += items.length;
+            if (!error) {
+              totalInserted += items.length;
+
+              // Keep backfill state counter in sync with actual rows
+              const { data: bfState } = await supabase
+                .from("bandcamp_sales_backfill_state")
+                .select("total_transactions")
+                .eq("connection_id", conn.id)
+                .single();
+
+              if (bfState) {
+                await supabase
+                  .from("bandcamp_sales_backfill_state")
+                  .update({
+                    total_transactions: (bfState.total_transactions ?? 0) + items.length,
+                    latest_sale_date: new Date(items[0].date).toISOString(),
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("connection_id", conn.id);
+              }
+            }
 
             // Backfill catalog_number/upc/url to mappings
             for (const item of items) {
