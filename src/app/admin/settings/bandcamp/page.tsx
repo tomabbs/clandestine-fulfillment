@@ -128,7 +128,13 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
     return <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   }
 
-  const t = data.total;
+  const t = data.total ?? 0;
+  const api = data.apiCoverage ?? { subdomain: 0, albumTitle: 0, price: 0, releaseDate: 0, image: 0, originQuantities: 0, rawApiData: 0, options: 0 };
+  const scraper = data.scraperCoverage ?? { artUrl: 0, about: 0, credits: 0, tracks: 0 };
+  const sales = data.salesCoverage ?? { catalogNumber: 0, upc: 0 };
+  const urls = data.urlSources ?? { scraper_verified: 0, constructed: 0, orders_api: 0, none: 0 };
+  const totalWithUrl = data.totalWithUrl ?? 0;
+  const scrapeStats = data.scrapeStats ?? { total: 0, success: 0, failed: 0, blocked: 0 };
 
   return (
     <div className="space-y-6">
@@ -146,28 +152,28 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
           <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Mapped Items</CardTitle></CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold tabular-nums">{t}</p>
-            <p className="text-xs text-muted-foreground">{data.apiCoverage.rawApiData} matched by SKU ({t > 0 ? Math.round(data.apiCoverage.rawApiData / t * 100) : 0}%)</p>
+            <p className="text-xs text-muted-foreground">{api.rawApiData} matched by SKU ({t > 0 ? Math.round(api.rawApiData / t * 100) : 0}%)</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">URLs Resolved</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{data.totalWithUrl} <span className="text-sm font-normal text-muted-foreground">({t > 0 ? Math.round(data.totalWithUrl / t * 100) : 0}%)</span></p>
-            <p className="text-xs text-muted-foreground">{data.urlSources.scraper_verified} scraped · {data.urlSources.orders_api} from API · {data.urlSources.constructed} constructed</p>
+            <p className="text-2xl font-semibold tabular-nums">{totalWithUrl} <span className="text-sm font-normal text-muted-foreground">({t > 0 ? Math.round(totalWithUrl / t * 100) : 0}%)</span></p>
+            <p className="text-xs text-muted-foreground">{urls.scraper_verified} scraped · {urls.orders_api} from API · {urls.constructed} constructed</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Sales Loaded</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{data.totalSales.toLocaleString()}</p>
-            <p className="text-xs text-muted-foreground">{data.uniqueBuyers.toLocaleString()} unique buyers</p>
+            <p className="text-2xl font-semibold tabular-nums">{(data.totalSales ?? 0).toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground">{(data.uniqueBuyers ?? 0).toLocaleString()} unique buyers</p>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-1"><CardTitle className="text-sm font-medium text-muted-foreground">Pre-orders</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tabular-nums">{data.preorders.length}</p>
-            <p className="text-xs text-muted-foreground">{data.preorders.length === 0 ? "No active pre-orders" : "active releases"}</p>
+            <p className="text-2xl font-semibold tabular-nums">{(data.preorders ?? []).length}</p>
+            <p className="text-xs text-muted-foreground">{(data.preorders ?? []).length === 0 ? "No active pre-orders" : "active releases"}</p>
           </CardContent>
         </Card>
       </div>
@@ -212,7 +218,7 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.syncPipeline.map((s) => (
+              {(data.syncPipeline ?? []).map((s) => (
                 <TableRow key={s.syncType}>
                   <TableCell className="font-mono text-xs">{s.syncType}</TableCell>
                   <TableCell>
@@ -225,10 +231,10 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               ))}
               <TableRow>
                 <TableCell className="font-mono text-xs">scrape_page (1h)</TableCell>
-                <TableCell><Badge variant="outline">{data.scrapeStats.success} ok / {data.scrapeStats.failed} fail</Badge></TableCell>
-                <TableCell className="text-right tabular-nums">{data.scrapeStats.success}</TableCell>
-                <TableCell className="text-right tabular-nums">{data.scrapeStats.failed}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{data.scrapeStats.total} in last hour</TableCell>
+                <TableCell><Badge variant="outline">{scrapeStats.success} ok / {scrapeStats.failed} fail</Badge></TableCell>
+                <TableCell className="text-right tabular-nums">{scrapeStats.success}</TableCell>
+                <TableCell className="text-right tabular-nums">{scrapeStats.failed}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{scrapeStats.total} in last hour</TableCell>
               </TableRow>
             </TableBody>
           </Table>
@@ -236,9 +242,9 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
       </Card>
 
       {/* Row 4: Pre-orders */}
-      {data.preorders.length > 0 && (
+      {(data.preorders ?? []).length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">Active Pre-orders ({data.preorders.length})</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Active Pre-orders ({(data.preorders ?? []).length})</CardTitle></CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
@@ -250,7 +256,7 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.preorders.map((p) => {
+                {(data.preorders ?? []).map((p) => {
                   const daysUntil = p.streetDate ? Math.max(0, Math.ceil((new Date(p.streetDate).getTime() - Date.now()) / 86400000)) : null;
                   return (
                     <TableRow key={p.variantId}>
@@ -280,13 +286,13 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
             <Table>
               <TableHeader><TableRow><TableHead>Field</TableHead><TableHead className="text-right">Have</TableHead><TableHead className="text-right">Coverage</TableHead></TableRow></TableHeader>
               <TableBody>
-                <CompletenessRow label="Subdomain" have={data.apiCoverage.subdomain} total={t} />
-                <CompletenessRow label="Album Title" have={data.apiCoverage.albumTitle} total={t} />
-                <CompletenessRow label="Price" have={data.apiCoverage.price} total={t} />
-                <CompletenessRow label="Release Date" have={data.apiCoverage.releaseDate} total={t} />
-                <CompletenessRow label="Image" have={data.apiCoverage.image} total={t} />
-                <CompletenessRow label="Stock by Origin" have={data.apiCoverage.originQuantities} total={t} />
-                <CompletenessRow label="Full API Snapshot" have={data.apiCoverage.rawApiData} total={t} />
+                <CompletenessRow label="Subdomain" have={api.subdomain} total={t} />
+                <CompletenessRow label="Album Title" have={api.albumTitle} total={t} />
+                <CompletenessRow label="Price" have={api.price} total={t} />
+                <CompletenessRow label="Release Date" have={api.releaseDate} total={t} />
+                <CompletenessRow label="Image" have={api.image} total={t} />
+                <CompletenessRow label="Stock by Origin" have={api.originQuantities} total={t} />
+                <CompletenessRow label="Full API Snapshot" have={api.rawApiData} total={t} />
               </TableBody>
             </Table>
           </CardContent>
@@ -300,18 +306,18 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
             <Table>
               <TableHeader><TableRow><TableHead>Field</TableHead><TableHead className="text-right">Have</TableHead><TableHead className="text-right">Coverage</TableHead></TableRow></TableHeader>
               <TableBody>
-                <CompletenessRow label="Album Cover (hi-res)" have={data.scraperCoverage.artUrl} total={t} />
-                <CompletenessRow label="About / Description" have={data.scraperCoverage.about} total={t} />
-                <CompletenessRow label="Credits" have={data.scraperCoverage.credits} total={t} />
-                <CompletenessRow label="Track List" have={data.scraperCoverage.tracks} total={t} />
+                <CompletenessRow label="Album Cover (hi-res)" have={scraper.artUrl} total={t} />
+                <CompletenessRow label="About / Description" have={scraper.about} total={t} />
+                <CompletenessRow label="Credits" have={scraper.credits} total={t} />
+                <CompletenessRow label="Track List" have={scraper.tracks} total={t} />
               </TableBody>
             </Table>
             <div className="mt-3 border-t pt-3">
               <p className="text-xs font-medium text-muted-foreground mb-1">From Sales Report API</p>
               <Table>
                 <TableBody>
-                  <CompletenessRow label="Catalog Number" have={data.salesCoverage.catalogNumber} total={t} />
-                  <CompletenessRow label="UPC" have={data.salesCoverage.upc} total={t} />
+                  <CompletenessRow label="Catalog Number" have={sales.catalogNumber} total={t} />
+                  <CompletenessRow label="UPC" have={sales.upc} total={t} />
                 </TableBody>
               </Table>
             </div>
@@ -324,11 +330,11 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
         <CardHeader><CardTitle className="text-base">URL Sources</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
-            <div><p className="text-lg font-semibold tabular-nums">{data.urlSources.scraper_verified}</p><p className="text-xs text-muted-foreground">Scraper verified</p></div>
-            <div><p className="text-lg font-semibold tabular-nums">{data.urlSources.constructed}</p><p className="text-xs text-muted-foreground">Constructed</p></div>
-            <div><p className="text-lg font-semibold tabular-nums">{data.urlSources.orders_api}</p><p className="text-xs text-muted-foreground">Sales / Orders API</p></div>
-            <div><p className="text-lg font-semibold tabular-nums text-green-600">{data.totalWithUrl}</p><p className="text-xs text-muted-foreground">Total with URL</p></div>
-            <div><p className="text-lg font-semibold tabular-nums text-red-500">{data.urlSources.none}</p><p className="text-xs text-muted-foreground">No URL</p></div>
+            <div><p className="text-lg font-semibold tabular-nums">{urls.scraper_verified}</p><p className="text-xs text-muted-foreground">Scraper verified</p></div>
+            <div><p className="text-lg font-semibold tabular-nums">{urls.constructed}</p><p className="text-xs text-muted-foreground">Constructed</p></div>
+            <div><p className="text-lg font-semibold tabular-nums">{urls.orders_api}</p><p className="text-xs text-muted-foreground">Sales / Orders API</p></div>
+            <div><p className="text-lg font-semibold tabular-nums text-green-600">{totalWithUrl}</p><p className="text-xs text-muted-foreground">Total with URL</p></div>
+            <div><p className="text-lg font-semibold tabular-nums text-red-500">{urls.none}</p><p className="text-xs text-muted-foreground">No URL</p></div>
           </div>
         </CardContent>
       </Card>
@@ -338,7 +344,7 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
         <CardHeader><CardTitle className="text-base">Sales Backfill Progress</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            {data.backfillProgress.map((b) => (
+            {(data.backfillProgress ?? []).map((b) => (
               <div key={b.connectionId} className="flex items-center gap-2">
                 <Badge variant={b.status === "completed" ? "default" : b.status === "running" ? "secondary" : b.status === "failed" ? "destructive" : "outline"} className="text-xs">{b.status}</Badge>
                 <span className="truncate text-xs">{b.bandName}</span>
