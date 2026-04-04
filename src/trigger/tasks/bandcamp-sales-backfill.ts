@@ -1,18 +1,23 @@
 /**
- * Bandcamp sales backfill — on-demand, resumable in yearly chunks.
+ * Bandcamp sales backfill — cron-driven, resumable in yearly chunks.
  *
  * Pulls all-time sales history from the Sales Report API (v4) and stores
- * in bandcamp_sales. Processes one year per run, self-triggers for the
- * next chunk. Tracks progress in bandcamp_sales_backfill_state.
+ * in bandcamp_sales. The cron schedule processes one chunk per connection
+ * per run, cycling through all connections until all are complete.
+ *
+ * NOTE: API-triggered tasks (.trigger()) never start on this Trigger.dev
+ * project — they stay QUEUED and expire. Only cron-scheduled tasks work.
+ * So the backfill runs as a cron (every 10 min) instead of self-triggering.
  */
 
-import { task } from "@trigger.dev/sdk";
+import { logger, schedules, task } from "@trigger.dev/sdk";
 import {
   generateSalesReport,
   fetchSalesReport,
   refreshBandcampToken,
   type SalesReportItem,
 } from "@/lib/clients/bandcamp";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
 
@@ -222,10 +227,8 @@ export const bandcampSalesBackfillTask = task({
         updated_at: new Date().toISOString(),
       }).eq("connection_id", connectionId);
 
-      // Self-trigger for next chunk if more to process
-      if (effectiveEnd < now) {
-        await bandcampSalesBackfillTask.trigger({ connectionId });
-      } else {
+      // Mark completed if we've reached the present
+      if (effectiveEnd >= now) {
         await supabase.from("bandcamp_sales_backfill_state").update({
           status: "completed",
           completed_at: new Date().toISOString(),
@@ -242,5 +245,59 @@ export const bandcampSalesBackfillTask = task({
       }).eq("connection_id", connectionId);
       throw error;
     }
+  },
+});
+
+/**
+ * Cron schedule: process one backfill chunk every 10 minutes.
+ * Finds the next connection that needs backfilling and runs one yearly chunk.
+ * Cycles through all connections until all are completed.
+ */
+export const bandcampSalesBackfillCron = schedules.task({
+  id: "bandcamp-sales-backfill-cron",
+  cron: "*/10 * * * *",
+  maxDuration: 300,
+  run: async () => {
+    const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
+    let processed = 0;
+
+    for (const workspaceId of workspaceIds) {
+      const { data: connections } = await supabase
+        .from("bandcamp_connections")
+        .select("id, band_name")
+        .eq("workspace_id", workspaceId)
+        .eq("is_active", true);
+
+      for (const conn of connections ?? []) {
+        // Check if this connection needs backfilling
+        const { data: state } = await supabase
+          .from("bandcamp_sales_backfill_state")
+          .select("status")
+          .eq("connection_id", conn.id)
+          .single();
+
+        if (state?.status === "completed") continue;
+
+        // Run one chunk for this connection
+        try {
+          logger.info("Backfill cron: processing chunk", { band: conn.band_name, connectionId: conn.id });
+          const result = await bandcampSalesBackfillTask.triggerAndWait({ connectionId: conn.id });
+          logger.info("Backfill cron: chunk done", { band: conn.band_name, result });
+          processed++;
+          // Only process one connection per cron run to stay within maxDuration
+          return { processed, band: conn.band_name };
+        } catch (err) {
+          logger.error("Backfill cron: chunk failed", { band: conn.band_name, error: String(err) });
+          // Continue to next connection
+        }
+      }
+    }
+
+    if (processed === 0) {
+      logger.info("Backfill cron: all connections completed or no connections found");
+    }
+
+    return { processed, status: "all_done" };
   },
 });
