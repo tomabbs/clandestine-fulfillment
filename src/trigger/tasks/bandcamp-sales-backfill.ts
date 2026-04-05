@@ -34,23 +34,35 @@ async function pollForReport(
   throw new Error("Sales report generation timed out");
 }
 
+function safeBigint(val: unknown): number | null {
+  if (val == null) return null;
+  const s = String(val);
+  if (/^\d+$/.test(s)) return Number.parseInt(s, 10);
+  return null;
+}
+
 async function insertSalesRows(
   supabase: ReturnType<typeof createServiceRoleClient>,
   workspaceId: string,
   connectionId: string,
   items: SalesReportItem[],
 ): Promise<number> {
+  // Filter out items with non-numeric transaction IDs (payouts, transfers have "t" prefix)
+  const validItems = items.filter((item) => {
+    return safeBigint(item.bandcamp_transaction_id) !== null && safeBigint(item.bandcamp_transaction_item_id) !== null;
+  });
+
   let inserted = 0;
   const batchSize = 100;
 
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
+  for (let i = 0; i < validItems.length; i += batchSize) {
+    const batch = validItems.slice(i, i + batchSize);
     const rows = batch.map((item) => ({
       workspace_id: workspaceId,
       connection_id: connectionId,
-      bandcamp_transaction_id: item.bandcamp_transaction_id,
-      bandcamp_transaction_item_id: item.bandcamp_transaction_item_id,
-      bandcamp_related_transaction_id: item.bandcamp_related_transaction_id ?? null,
+      bandcamp_transaction_id: safeBigint(item.bandcamp_transaction_id),
+      bandcamp_transaction_item_id: safeBigint(item.bandcamp_transaction_item_id),
+      bandcamp_related_transaction_id: safeBigint(item.bandcamp_related_transaction_id),
       sale_date: new Date(item.date).toISOString(),
       item_type: item.item_type ?? null,
       item_name: item.item_name ?? null,
