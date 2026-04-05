@@ -549,3 +549,157 @@ After each phase:
   - Changed backup to use `VACUUM INTO` (atomic) instead of Python file copy
   - Added logging to stderr (stdout reserved for MCP protocol)
   - Moved `memory_stats` from Phase 5 to Phase 2 (useful for debugging from the start)
+- v3 (2026-04-04): Post-implementation documentation added (final outcome, deviations, lessons)
+
+---
+
+# Final Outcome
+
+**Status: COMPLETE -- all 6 phases built and verified.**
+
+The MCP Memory Layer is a working, local-first engineering memory system with:
+- 11 MCP tools (9 planned + `ingest_repo_docs` + `backup_memory` added during build)
+- SQLite+FTS5+WAL storage at `~/.local/share/mcp-memory/memory.db`
+- Pydantic-validated inputs, cycle-safe supersede chains, content-hash dedup
+- Markdown ingestion engine with deterministic heading classification
+- Wired to both Cursor and Claude Desktop via `mcp.json`
+
+**Verification results:**
+- 13/13 unit tests passing
+- Ingestion tested: 682 memories extracted from 37 clandestine-fulfillment docs
+- FTS search confirmed working: "bandcamp sales backfill" returns 20 relevant results
+- Backup via VACUUM INTO confirmed working
+- FastMCP v3.2 import path verified (`from fastmcp import FastMCP`)
+- FTS5 verified on macOS SQLite 3.51.2
+- WAL mode verified for concurrent read safety
+
+**Total code written:** 1,004 lines across 8 files (excluding config and empty __init__.py)
+
+---
+
+# Implementation Notes
+
+**Environment setup:**
+- Installed Python 3.12.13 and uv via Homebrew (both were missing)
+- `fastmcp>=3.2,<4` installed as standalone PyPI package (NOT `mcp[cli]` as the original spec suggested)
+- `aiosqlite` for async SQLite, `pydantic` for validation, `pytest` + `pytest-asyncio` for tests
+
+**Key implementation decisions made during build:**
+1. **UUIDv7 IDs**: Implemented a simple time-sortable UUID generator using Unix timestamp + random suffix. Not RFC-compliant UUIDv7 but gives chronological ordering.
+2. **FTS query sanitization**: Added `_sanitize_fts_query()` method that wraps each word in double quotes to prevent FTS5 syntax errors from special characters (backticks, parentheses, etc.) in memory content.
+3. **Lazy DB initialization**: Database is initialized on first tool call via `_ensure_db()`, not at server startup. This avoids errors if the DB directory doesn't exist yet when the server process starts.
+4. **Write lock scope**: `asyncio.Lock` wraps only write transactions (INSERT/UPDATE), not reads. This allows concurrent searches while a write is in progress (WAL mode handles the isolation).
+5. **FTS trigger approach**: Used content-bearing FTS5 (not contentless) with AFTER INSERT/UPDATE/DELETE triggers. This is simpler and more reliable than manual FTS maintenance, at the cost of slightly larger DB size.
+
+**Ingestion heading classification:**
+- 30+ heading patterns mapped to 9 memory types
+- Unrecognized headings default to `observation` with `confidence = "low"`
+- Section boundaries determined by heading level (content between same-level headings = one memory)
+- Code blocks preserved intact, not split across memories
+
+---
+
+# Deviations from Plan
+
+| Planned | Actual | Reason |
+|---|---|---|
+| 9 tools | 11 tools | Added `ingest_repo_docs` and `backup_memory` during Phase 4/5 -- they were described in the plan but not counted in the "9 tools" number |
+| `@server.tool()` decorator | `@mcp.tool` decorator | FastMCP v3 API uses `@mcp.tool` (no parentheses). Caught during research before build. |
+| `from mcp.server.fastmcp import FastMCP` | `from fastmcp import FastMCP` | FastMCP is a standalone package since v3.0 (Feb 2026). The original spec's import path was for the v1 era when FastMCP was bundled in the `mcp` SDK. |
+| Separate Phase 5 for stats | Stats built in Phase 2 | `memory_stats` was useful for debugging from the start, so it was included with the core tools. |
+| `uv init --python 3.12` creates src layout | `uv init` creates flat layout | Had to manually create `src/memory_server/` directory structure. |
+| PYTHONPATH auto-configured by pyproject.toml | Added `[tool.pytest.ini_options] pythonpath = ["src"]` | uv + pytest needed explicit pythonpath config for the src layout. |
+| FTS5 search "just works" | Required query sanitization | Real-world memory content contains backticks, parentheses, and other FTS5 syntax characters. Added `_sanitize_fts_query()` to escape them. |
+| Supersede cycle check walks from new_id | Walks from old_id | The original direction was wrong -- need to check if old_id can reach new_id through existing supersede links, not the reverse. |
+
+---
+
+# Final Files Changed
+
+**New project: `/Users/Shared/WorkShared/mcp-memory/`**
+
+| File | Lines | Purpose |
+|---|---|---|
+| `pyproject.toml` | 21 | Project config, dependencies, pytest config |
+| `migrations/001_initial.sql` | 75 | Full schema: memories, memory_links, FTS5, triggers, indexes |
+| `src/memory_server/__init__.py` | 0 | Package marker |
+| `src/memory_server/__main__.py` | 3 | Entry point: `mcp.run()` |
+| `src/memory_server/models.py` | 54 | Pydantic models: MemoryRecord, MemoryLink, enums |
+| `src/memory_server/db.py` | 303 | Database layer: MemoryDB class with all CRUD + search + supersede + backup |
+| `src/memory_server/ingest.py` | 235 | Markdown ingestion: heading classification, section parsing, provenance hashing |
+| `src/memory_server/server.py` | 152 | MCP server: 11 FastMCP tools with logging |
+| `tests/__init__.py` | 0 | Package marker |
+| `tests/test_db.py` | 182 | 13 tests: add, search, filters, supersede, cycles, dedup, links, stats, backup, validation |
+| **Total** | **1,004** | |
+
+**Modified (config only):**
+
+| File | Change |
+|---|---|
+| `~/.cursor/mcp.json` | Added `memory` server entry |
+| `~/Library/Application Support/Claude/claude_desktop_config.json` | Added `memory` server entry |
+
+---
+
+# Follow-Up Tasks
+
+1. **Restart Cursor and Claude Desktop** to activate the memory server. First tool call will auto-create the database.
+2. **Run initial ingestion**: Call `ingest_repo_docs` with `repo_path="/Users/Shared/WorkShared/Project/clandestine-fulfillment"` and `project_id="clandestine-fulfillment"` to populate the memory with all plan and decision docs.
+3. **Verify in Cursor**: Type a message that references past decisions. The memory tools should appear in the MCP panel. Test `ping` first to confirm connectivity.
+4. **Add to `.gitignore`**: The memory DB (`~/.local/share/mcp-memory/memory.db`) is outside the repo and doesn't need gitignoring. But if backups accumulate, consider a cleanup cron.
+5. **Add AGENTS.md reference**: Add a section to the repo's `AGENTS.md` or `TRUTH_LAYER.md` noting the memory system exists and how agents should use it (query before making architectural decisions, log deviations, etc.).
+
+---
+
+# Deferred Items (Updated)
+
+| Item | Priority | Notes |
+|---|---|---|
+| Vector search via embeddings | Phase 5 | FTS5 works well for keyword search. Add when semantic search is needed. Consider Ollama `nomic-embed-text` for fast local embeddings. |
+| ChatGPT export import | Medium | Requires parsing ChatGPT JSON export format. Separate ingestion adapter. |
+| Cursor local DB extraction | Low | Cursor stores conversations in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`. Format is version-dependent and fragile. |
+| Claude/Gemini conversation import | Low | Similar to ChatGPT -- need export format parsers for each. |
+| LLM-assisted extraction | Medium | Use Claude/local model to parse raw chat into structured memories. The extraction prompt from the review is ready to use. |
+| Validation agent | Low | An LLM that reviews and corrects ingested memories for accuracy and type classification. |
+| Memory decay/expiration | Low | Auto-deprioritize old assumptions. Add `valid_until` column when needed. |
+| Cross-project dashboard | Medium | The schema supports it (`project_id` column). Build a summary view across all projects. |
+| VS Code / Codex / Gemini CLI wiring | Low | Same MCP config pattern. Add when those tools are in active use. |
+| HTTP transport | Low | Some MCP clients may need HTTP instead of stdio. Add `localhost:8787` server mode if needed. |
+| Ingestion for YAML files | Medium | `project_state/*.yaml` files are scanned but not parsed as structured data. Add YAML section extraction. |
+| Improve heading classification | Medium | Currently 674/682 memories classified as "observation" -- the heading patterns need tuning for actual clandestine-fulfillment doc structure. Many docs use `##` subheadings not `#` top-level. |
+
+---
+
+# Known Limitations
+
+1. **Most ingested memories are type "observation"**: The heading classifier matched only 8 of 682 memories to specific types (decision, plan, deferred, etc.). The remaining 674 defaulted to "observation". This is because clandestine-fulfillment docs use varied heading formats that don't match the current pattern list. The classifier needs tuning for the actual doc structure.
+
+2. **No semantic search**: FTS5 is keyword-based. Searching for "how do we handle rate limiting" won't find a memory titled "Bandcamp 429 retry strategy" unless the words overlap. Vector embeddings (Phase 5) would solve this.
+
+3. **Single-user only**: No authentication, no multi-user conflict resolution. Last-write-wins on concurrent writes from different MCP clients. Acceptable for a single developer but would need CRDT or locking for teams.
+
+4. **No auto-ingestion**: Memories must be explicitly added via `add_memory` or `ingest_repo_docs`. The system does not watch for file changes or auto-ingest on commit. A file watcher could be added later.
+
+5. **UUIDv7 is approximate**: The ID generator uses Unix milliseconds + random suffix but is not RFC 9562 compliant. IDs are time-sortable within the same second but not guaranteed globally unique across distributed systems. Fine for local-only use.
+
+6. **VACUUM INTO requires autocommit**: Backup uses `VACUUM INTO` which requires the connection to be in autocommit mode (`isolation_level=None`). This is set during DB initialization and works, but means all SQL execution uses explicit `BEGIN`/`COMMIT` instead of Python's default implicit transactions.
+
+7. **No migration rollback**: The migration system applies forward-only. There's no `down()` migration. To roll back, restore from backup or manually drop/recreate tables.
+
+---
+
+# What We Learned
+
+1. **FastMCP v3 is a standalone package.** The original spec (and many online examples) use `from mcp.server.fastmcp import FastMCP` which was the v1 path when FastMCP was bundled inside the `mcp` SDK. As of Feb 2026, FastMCP is its own package on PyPI (`fastmcp` v3.2.0). The decorator is `@mcp.tool` (no parentheses), not `@server.tool()`. This would have been a showstopper if not caught during the research phase.
+
+2. **FTS5 needs query sanitization.** Real engineering documents contain backticks, parentheses, asterisks, and other characters that are FTS5 operators. Passing raw content to `MATCH` causes syntax errors. Wrapping each search word in double quotes makes it a phrase search and avoids all syntax issues.
+
+3. **Supersede cycle detection direction matters.** The first implementation walked from `new_id` looking for `old_id`, but the correct direction is from `old_id` looking for `new_id`. The question is: "if I add a link from new->old, can old already reach new through existing links?" Walking from old answers that.
+
+4. **Lazy DB initialization is essential for MCP servers.** MCP servers start before any tool is called. If DB initialization happens at import time or server startup, errors (missing directories, permission issues) crash the server before the client can even connect. Lazy init on first tool call is more resilient.
+
+5. **`uv` is excellent for standalone Python projects.** Single command to create a project, add dependencies, and run with isolated environments. No virtualenv management, no pip conflicts, no PATH issues. The `uv run --directory` pattern for MCP configs is clean and reliable.
+
+6. **Heading-based extraction is a starting point, not a solution.** The 674/682 "observation" classification rate shows that simple heading matching doesn't capture the structure of real engineering documents. Next iteration should use LLM-assisted extraction or more sophisticated parsing (e.g., looking for decision keywords in content, not just headings).
+
+7. **The memory system's value is in the write path, not just read.** While search and retrieval are the visible features, the real value comes from the discipline of writing structured memories (decisions with rationale, rejected alternatives, deferred items). The system creates a forcing function for engineering documentation that persists across AI sessions.
