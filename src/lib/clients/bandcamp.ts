@@ -137,6 +137,15 @@ export async function refreshBandcampToken(workspaceId: string): Promise<string>
     throw new Error(`No Bandcamp credentials found for workspace ${workspaceId}`);
   }
 
+  // Return cached token if still valid (5-minute buffer before expiry)
+  if (creds.access_token && creds.token_expires_at) {
+    const expiresAt = new Date(creds.token_expires_at).getTime();
+    const bufferMs = 5 * 60 * 1000;
+    if (Date.now() < expiresAt - bufferMs) {
+      return creds.access_token;
+    }
+  }
+
   const response = await fetch("https://bandcamp.com/oauth_token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
