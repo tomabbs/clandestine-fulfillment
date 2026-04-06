@@ -24,7 +24,7 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 type OrderRow = Awaited<ReturnType<typeof getOrders>>["orders"][number];
 
 export default function PortalFulfillmentPage() {
-  const [filters, setFilters] = useState({ page: 1, pageSize: 25, status: "", search: "" });
+  const [filters, setFilters] = useState({ page: 1, pageSize: 50, status: "", search: "" });
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({
@@ -71,73 +71,84 @@ export default function PortalFulfillmentPage() {
           ))}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Order</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Items</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.orders ?? []).map((order: OrderRow) => (
-              <>
-                <TableRow
-                  key={order.id}
-                  className="cursor-pointer"
-                  onClick={() => setExpandedId((prev) => (prev === order.id ? null : order.id))}
-                >
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm">{order.order_number ?? "—"}</span>
-                      {order.is_preorder && (
-                        <Badge variant="secondary" className="text-xs">
-                          Pre-Order
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {new Date(order.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell>{order.customer_name ?? order.customer_email ?? "—"}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {Array.isArray(order.line_items) ? order.line_items.length : 0} item(s)
-                  </TableCell>
-                  <TableCell>
-                    <FulfillmentStatusBadge status={order.fulfillment_status} />
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    {order.total_price != null ? `$${Number(order.total_price).toFixed(2)}` : "—"}
-                  </TableCell>
-                </TableRow>
-
-                {expandedId === order.id && (
-                  <TableRow key={`${order.id}-detail`}>
-                    <TableCell colSpan={6} className="bg-muted/30 p-4">
-                      {detailLoading ? (
-                        <Skeleton className="h-32 w-full" />
-                      ) : detail ? (
-                        <OrderExpandedDetail detail={detail} />
-                      ) : null}
+        <>
+          {data && data.total > 0 && (
+            <PaginationBar
+              page={filters.page}
+              pageSize={filters.pageSize}
+              total={data.total}
+              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+            />
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Items</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.orders ?? []).map((order: OrderRow) => (
+                <>
+                  <TableRow
+                    key={order.id}
+                    className="cursor-pointer"
+                    onClick={() => setExpandedId((prev) => (prev === order.id ? null : order.id))}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm">{order.order_number ?? "—"}</span>
+                        {order.is_preorder && (
+                          <Badge variant="secondary" className="text-xs">
+                            Pre-Order
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(order.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>{order.customer_name ?? order.customer_email ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {Array.isArray(order.line_items) ? order.line_items.length : 0} item(s)
+                    </TableCell>
+                    <TableCell>
+                      <FulfillmentStatusBadge status={order.fulfillment_status} />
+                    </TableCell>
+                    <TableCell className="text-right font-mono">
+                      {order.total_price != null ? `$${Number(order.total_price).toFixed(2)}` : "—"}
                     </TableCell>
                   </TableRow>
-                )}
-              </>
-            ))}
-            {(data?.orders ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  No fulfillment orders found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+
+                  {expandedId === order.id && (
+                    <TableRow key={`${order.id}-detail`}>
+                      <TableCell colSpan={6} className="bg-muted/30 p-4">
+                        {detailLoading ? (
+                          <Skeleton className="h-32 w-full" />
+                        ) : detail ? (
+                          <OrderExpandedDetail detail={detail} />
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </>
+              ))}
+              {(data?.orders ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    No fulfillment orders found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </>
       )}
 
       {data && data.total > 0 && (

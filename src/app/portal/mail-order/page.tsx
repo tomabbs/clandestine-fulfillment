@@ -128,7 +128,7 @@ function OrderDetail({ order }: { order: MailOrderRow }) {
 export default function PortalMailOrderPage() {
   const [filters, setFilters] = useState({
     page: 1,
-    pageSize: 25,
+    pageSize: 50,
     status: "",
     payoutStatus: "",
   });
@@ -215,99 +215,112 @@ export default function PortalMailOrderPage() {
           ))}
         </div>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-8" />
-                <TableHead>Order</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Subtotal</TableHead>
-                <TableHead className="text-right">Your Payout</TableHead>
-                <TableHead>Payout Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.orders ?? []).map((order: MailOrderRow) => {
-                const isExpanded = expandedId === order.id;
-                return (
-                  <>
-                    <TableRow
-                      key={order.id}
-                      className="cursor-pointer"
-                      onClick={() => setExpandedId(isExpanded ? null : order.id)}
-                    >
-                      <TableCell className="w-8 text-muted-foreground">
-                        {isExpanded ? (
-                          <ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {order.order_number ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[140px] truncate">
-                        {order.customer_name ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">
-                          {order.source === "clandestine_shopify" ? "Shopify" : "Discogs"}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {new Date(order.created_at).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={order.fulfillment_status === "fulfilled" ? "default" : "outline"}
-                        >
-                          {order.fulfillment_status === "fulfilled" ? "Fulfilled" : "Unfulfilled"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        ${Number(order.subtotal).toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono font-medium text-green-700">
-                        +${Number(order.client_payout_amount ?? 0).toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            order.client_payout_status === "paid"
-                              ? "default"
-                              : order.client_payout_status === "included_in_snapshot"
-                                ? "secondary"
-                                : "outline"
-                          }
-                        >
-                          {PAYOUT_LABELS[order.client_payout_status ?? "pending"] ?? "Pending"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                    {isExpanded && (
-                      <tr key={`${order.id}-detail`}>
-                        <td colSpan={9} className="p-0">
-                          <OrderDetail order={order} />
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                );
-              })}
-              {(data?.orders ?? []).length === 0 && (
+        <>
+          {data && data.total > 0 && (
+            <PaginationBar
+              page={filters.page}
+              pageSize={filters.pageSize}
+              total={data.total}
+              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+            />
+          )}
+          <div className="border rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                    No mail-order sales yet.
-                  </TableCell>
+                  <TableHead className="w-8" />
+                  <TableHead>Order</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Subtotal</TableHead>
+                  <TableHead className="text-right">Your Payout</TableHead>
+                  <TableHead>Payout Status</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {(data?.orders ?? []).map((order: MailOrderRow) => {
+                  const isExpanded = expandedId === order.id;
+                  return (
+                    <>
+                      <TableRow
+                        key={order.id}
+                        className="cursor-pointer"
+                        onClick={() => setExpandedId(isExpanded ? null : order.id)}
+                      >
+                        <TableCell className="w-8 text-muted-foreground">
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {order.order_number ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[140px] truncate">
+                          {order.customer_name ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">
+                            {order.source === "clandestine_shopify" ? "Shopify" : "Discogs"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {new Date(order.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              order.fulfillment_status === "fulfilled" ? "default" : "outline"
+                            }
+                          >
+                            {order.fulfillment_status === "fulfilled" ? "Fulfilled" : "Unfulfilled"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          ${Number(order.subtotal).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-medium text-green-700">
+                          +${Number(order.client_payout_amount ?? 0).toFixed(2)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              order.client_payout_status === "paid"
+                                ? "default"
+                                : order.client_payout_status === "included_in_snapshot"
+                                  ? "secondary"
+                                  : "outline"
+                            }
+                          >
+                            {PAYOUT_LABELS[order.client_payout_status ?? "pending"] ?? "Pending"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded && (
+                        <tr key={`${order.id}-detail`}>
+                          <td colSpan={9} className="p-0">
+                            <OrderDetail order={order} />
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  );
+                })}
+                {(data?.orders ?? []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
+                      No mail-order sales yet.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
 
       {data && data.total > 0 && (

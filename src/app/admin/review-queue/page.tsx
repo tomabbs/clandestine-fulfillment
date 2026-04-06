@@ -11,6 +11,11 @@ import {
   resolveReviewItem,
   suppressReviewItem,
 } from "@/actions/review-queue";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PaginationBar,
+} from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +53,11 @@ type QueueItem = Awaited<ReturnType<typeof getReviewQueueItems>>["items"][number
 
 export default function ReviewQueuePage() {
   const [tab, setTab] = useState<string>("all");
-  const [filters, setFilters] = useState({ category: "", page: 1 });
+  const [filters, setFilters] = useState({
+    category: "",
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE as PageSize,
+  });
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignInput, setAssignInput] = useState("");
@@ -58,6 +67,7 @@ export default function ReviewQueuePage() {
     ...(filters.category ? { category: filters.category } : {}),
     status: "open",
     page: filters.page,
+    pageSize: filters.pageSize,
   };
 
   const { data, isLoading } = useAppQuery({
@@ -159,6 +169,16 @@ export default function ReviewQueuePage() {
           </div>
         )}
       </div>
+
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
+      )}
 
       {isLoading ? (
         <div className="flex items-center gap-2 py-8 justify-center text-muted-foreground">
@@ -265,6 +285,16 @@ export default function ReviewQueuePage() {
             })}
           </TableBody>
         </Table>
+      )}
+
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
     </div>
   );

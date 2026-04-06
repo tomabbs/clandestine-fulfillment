@@ -5,7 +5,7 @@ import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/serve
 
 const filtersSchema = z.object({
   page: z.number().int().positive().default(1),
-  pageSize: z.number().int().positive().max(100).default(25),
+  pageSize: z.number().int().positive().max(250).default(50),
   search: z.string().optional(),
   status: z.string().optional(),
   source: z.string().optional(),

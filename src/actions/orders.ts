@@ -14,7 +14,7 @@ export async function getOrders(filters: {
 }) {
   const supabase = await createServerSupabaseClient();
   const page = filters.page ?? 1;
-  const pageSize = filters.pageSize ?? 25;
+  const pageSize = filters.pageSize ?? 50;
   const offset = (page - 1) * pageSize;
 
   let query = supabase
@@ -102,7 +102,7 @@ export async function getClientShipments(filters: {
   const supabase = await createServerSupabaseClient();
   const serviceClient = createServiceRoleClient();
   const page = filters.page ?? 1;
-  const pageSize = filters.pageSize ?? 25;
+  const pageSize = filters.pageSize ?? 50;
   const offset = (page - 1) * pageSize;
 
   // Resolve org_id from the authenticated user — explicit org scoping is

@@ -19,7 +19,7 @@ const inboundFiltersSchema = z.object({
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
   page: z.number().int().min(1).default(1),
-  pageSize: z.number().int().min(1).max(100).default(25),
+  pageSize: z.number().int().min(1).max(250).default(50),
 });
 
 export type InboundFilters = z.infer<typeof inboundFiltersSchema>;

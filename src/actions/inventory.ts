@@ -77,7 +77,7 @@ export async function getInventoryLevels(
     ? createServiceRoleClient()
     : await createServerSupabaseClient();
   const page = filters.page ?? 1;
-  const pageSize = filters.pageSize ?? 25;
+  const pageSize = filters.pageSize ?? 50;
   const offset = (page - 1) * pageSize;
 
   // Build query: inventory_levels → variants → products → orgs
@@ -381,7 +381,7 @@ export async function getClientInventoryLevels(
   const { orgId } = await requireClient();
   const supabase = createServiceRoleClient();
   const page = filters.page ?? 1;
-  const pageSize = filters.pageSize ?? 25;
+  const pageSize = filters.pageSize ?? 50;
   const offset = (page - 1) * pageSize;
 
   // Start from variants so zero-stock items are included.

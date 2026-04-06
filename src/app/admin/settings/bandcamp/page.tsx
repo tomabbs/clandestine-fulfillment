@@ -31,8 +31,11 @@ import {
   getOrganizationsForWorkspace,
   triggerBandcampSync,
 } from "@/actions/bandcamp";
-import { BC_GENRES } from "@/lib/shared/genre-taxonomy";
-import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PaginationBar,
+} from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +51,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { BC_GENRES } from "@/lib/shared/genre-taxonomy";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -608,7 +612,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
   const [sortField, setSortField] = useState<SalesSortField>("totalUnits");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(25);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const { data, isLoading, refetch, isFetching } = useAppQuery({
     queryKey: queryKeys.bandcamp.salesOverview(workspaceId),
@@ -622,7 +626,11 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
-      setSortDir(field === "itemName" || field === "artist" || field === "bandName" || field === "bcGenre" ? "asc" : "desc");
+      setSortDir(
+        field === "itemName" || field === "artist" || field === "bandName" || field === "bcGenre"
+          ? "asc"
+          : "desc",
+      );
     }
     setPage(1);
   }
@@ -640,8 +648,9 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
     const items = (data?.items ?? []).filter((item) => {
       if (connFilter !== "all" && item.connectionId !== connFilter) return false;
       if (typeFilter !== "all" && item.itemType !== typeFilter) return false;
-      if (bcGenreFilter === "untagged") { if (item.bcGenre) return false; }
-      else if (bcGenreFilter !== "all" && item.bcGenre !== bcGenreFilter) return false;
+      if (bcGenreFilter === "untagged") {
+        if (item.bcGenre) return false;
+      } else if (bcGenreFilter !== "all" && item.bcGenre !== bcGenreFilter) return false;
       if (dspGenreFilter !== "all" && item.dspGenre !== dspGenreFilter) return false;
       if (subGenreFilter !== "all" && item.subGenre !== subGenreFilter) return false;
       return true;
@@ -672,23 +681,38 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
           return 0;
       }
     });
-  }, [data?.items, connFilter, typeFilter, bcGenreFilter, dspGenreFilter, subGenreFilter, sortField, sortDir]);
+  }, [
+    data?.items,
+    connFilter,
+    typeFilter,
+    bcGenreFilter,
+    dspGenreFilter,
+    subGenreFilter,
+    sortField,
+    sortDir,
+  ]);
 
   const allBcGenres = useMemo(() => {
     const set = new Set<string>();
-    for (const item of data?.items ?? []) { if (item.bcGenre) set.add(item.bcGenre); }
+    for (const item of data?.items ?? []) {
+      if (item.bcGenre) set.add(item.bcGenre);
+    }
     return Array.from(set).sort();
   }, [data?.items]);
 
   const allDspGenres = useMemo(() => {
     const set = new Set<string>();
-    for (const item of data?.items ?? []) { if (item.dspGenre) set.add(item.dspGenre); }
+    for (const item of data?.items ?? []) {
+      if (item.dspGenre) set.add(item.dspGenre);
+    }
     return Array.from(set).sort();
   }, [data?.items]);
 
   const allSubGenres = useMemo(() => {
     const set = new Set<string>();
-    for (const item of data?.items ?? []) { if (item.subGenre) set.add(item.subGenre); }
+    for (const item of data?.items ?? []) {
+      if (item.subGenre) set.add(item.subGenre);
+    }
     return Array.from(set).sort();
   }, [data?.items]);
 
@@ -704,7 +728,12 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
   const totalUnits = sortedFiltered.reduce((s, i) => s + i.totalUnits, 0);
   const allItemsRevenue = (data.items ?? []).reduce((s, i) => s + i.totalRevenue, 0);
   const allItemsUnits = (data.items ?? []).reduce((s, i) => s + i.totalUnits, 0);
-  const isFiltered = connFilter !== "all" || typeFilter !== "all" || bcGenreFilter !== "all" || dspGenreFilter !== "all" || subGenreFilter !== "all";
+  const isFiltered =
+    connFilter !== "all" ||
+    typeFilter !== "all" ||
+    bcGenreFilter !== "all" ||
+    dspGenreFilter !== "all" ||
+    subGenreFilter !== "all";
   const pctRevenue = allItemsRevenue > 0 ? Math.round((totalRevenue / allItemsRevenue) * 100) : 100;
   const pctUnits = allItemsUnits > 0 ? Math.round((totalUnits / allItemsUnits) * 100) : 100;
   const pageItems = sortedFiltered.slice((page - 1) * pageSize, page * pageSize);
@@ -784,39 +813,78 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         </select>
         <select
           value={bcGenreFilter}
-          onChange={(e) => { setBcGenreFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setBcGenreFilter(e.target.value);
+            setPage(1);
+          }}
           className="border-input bg-background h-8 rounded-md border px-3 text-sm"
         >
           <option value="all">BC Genres</option>
           <option value="untagged">Untagged ({data.untaggedCount ?? 0})</option>
-          {allBcGenres.map((g) => <option key={g} value={g}>{g}</option>)}
+          {allBcGenres.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
         </select>
         <select
           value={dspGenreFilter}
-          onChange={(e) => { setDspGenreFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setDspGenreFilter(e.target.value);
+            setPage(1);
+          }}
           className="border-input bg-background h-8 rounded-md border px-3 text-sm"
         >
           <option value="all">DSP Genres</option>
-          {allDspGenres.map((g) => <option key={g} value={g}>{g}</option>)}
+          {allDspGenres.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
         </select>
         <select
           value={subGenreFilter}
-          onChange={(e) => { setSubGenreFilter(e.target.value); setPage(1); }}
+          onChange={(e) => {
+            setSubGenreFilter(e.target.value);
+            setPage(1);
+          }}
           className="border-input bg-background h-8 rounded-md border px-3 text-sm"
         >
           <option value="all">Sub Genres</option>
-          {allSubGenres.map((g) => <option key={g} value={g}>{g}</option>)}
+          {allSubGenres.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
         </select>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-sm text-muted-foreground tabular-nums">
-            {sortedFiltered.length} items{isFiltered ? ` (${pctUnits}%)` : ""} · {totalUnits.toLocaleString()} units · $
-            {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}{isFiltered ? ` (${pctRevenue}% of revenue)` : ""}
+            {sortedFiltered.length} items{isFiltered ? ` (${pctUnits}%)` : ""} ·{" "}
+            {totalUnits.toLocaleString()} units · $
+            {totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {isFiltered ? ` (${pctRevenue}% of revenue)` : ""}
           </span>
           <Button
             variant="outline"
             size="sm"
             onClick={() => {
-              const header = ["Artist", "Title", "Account", "BC Genre", "DSP Genre", "Sub Genre", "Tags", "Type", "Format", "Units", "Revenue", "Currency", "SKU", "Catalog #", "URL"];
+              const header = [
+                "Artist",
+                "Title",
+                "Account",
+                "BC Genre",
+                "DSP Genre",
+                "Sub Genre",
+                "Tags",
+                "Type",
+                "Format",
+                "Units",
+                "Revenue",
+                "Currency",
+                "SKU",
+                "Catalog #",
+                "URL",
+              ];
               const rows = sortedFiltered.map((item) => [
                 `"${(item.artist ?? "").replace(/"/g, '""')}"`,
                 `"${(item.itemName ?? "").replace(/"/g, '""')}"`,
@@ -851,6 +919,16 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
       </div>
 
       {/* Items table with sortable headers */}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={sortedFiltered.length}
+        onPageChange={setPage}
+        onPageSizeChange={(s: PageSize) => {
+          setPageSize(s);
+          setPage(1);
+        }}
+      />
       <Table>
         <TableHeader>
           <TableRow>
@@ -863,7 +941,10 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
             >
               Title <SortIcon field="itemName" />
             </TableHead>
-            <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("bandName")}>
+            <TableHead
+              className="cursor-pointer select-none"
+              onClick={() => toggleSort("bandName")}
+            >
               Account <SortIcon field="bandName" />
             </TableHead>
             <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("bcGenre")}>
@@ -898,9 +979,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         <TableBody>
           {pageItems.map((item, i) => (
             <TableRow key={`${item.connectionId}-${item.itemName}-${item.itemType}-${i}`}>
-              <TableCell className="text-sm max-w-[150px] truncate">
-                {item.artist}
-              </TableCell>
+              <TableCell className="text-sm max-w-[150px] truncate">{item.artist}</TableCell>
               <TableCell className="font-medium max-w-[250px] truncate">
                 {item.itemUrl ? (
                   <a
@@ -920,7 +999,9 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
               </TableCell>
               <TableCell className="text-xs max-w-[100px] truncate">
                 {item.bcGenre ? (
-                  <Badge variant="outline" className="text-xs">{item.bcGenre}</Badge>
+                  <Badge variant="outline" className="text-xs">
+                    {item.bcGenre}
+                  </Badge>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
@@ -993,10 +1074,19 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
 
   type TrendingResult = {
     items: Array<{
-      title: string; artist: string; genre: string; url: string; bandUrl: string;
-      artUrl: string; artUrlSmall: string; featuredTrack: string | null;
-      isPreorder: boolean; comments: number; isClientArtist: boolean;
-      clientBandName: string | null; packages: Array<{ typeStr: string; isVinyl: boolean; price: number; currency: string }>;
+      title: string;
+      artist: string;
+      genre: string;
+      url: string;
+      bandUrl: string;
+      artUrl: string;
+      artUrlSmall: string;
+      featuredTrack: string | null;
+      isPreorder: boolean;
+      comments: number;
+      isClientArtist: boolean;
+      clientBandName: string | null;
+      packages: Array<{ typeStr: string; isVinyl: boolean; price: number; currency: string }>;
     }>;
     moreAvailable: boolean;
     formatSummary: { vinyl: number; cd: number; cassette: number; digital: number };
@@ -1005,7 +1095,13 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
 
   const { data, isLoading, isFetching } = useAppQuery({
     queryKey: ["bandcamp-trending", genre, sort, format, trendingPage],
-    queryFn: () => getBandcampTrending(workspaceId, { tags: [genre], sort, format, page: trendingPage }) as Promise<TrendingResult>,
+    queryFn: () =>
+      getBandcampTrending(workspaceId, {
+        tags: [genre],
+        sort,
+        format,
+        page: trendingPage,
+      }) as Promise<TrendingResult>,
     tier: CACHE_TIERS.SESSION,
   });
 
@@ -1021,41 +1117,65 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
       </div>
 
       <div className="flex gap-3 items-center flex-wrap">
-        <select value={genre} onChange={(e) => { setGenre(e.target.value); setTrendingPage(1); }}
-          className="border-input bg-background h-8 rounded-md border px-3 text-sm">
-          {BC_GENRES.map((g) => <option key={g} value={g}>{g}</option>)}
+        <select
+          value={genre}
+          onChange={(e) => {
+            setGenre(e.target.value);
+            setTrendingPage(1);
+          }}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
+          {BC_GENRES.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
         </select>
-        <select value={sort} onChange={(e) => { setSort(e.target.value as typeof sort); setTrendingPage(1); }}
-          className="border-input bg-background h-8 rounded-md border px-3 text-sm">
+        <select
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value as typeof sort);
+            setTrendingPage(1);
+          }}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
           <option value="pop">Popular</option>
           <option value="new">New</option>
           <option value="top">Top Selling</option>
           <option value="rec">Recommended</option>
           <option value="surprise">Surprise</option>
         </select>
-        <select value={format} onChange={(e) => { setFormat(e.target.value as typeof format); setTrendingPage(1); }}
-          className="border-input bg-background h-8 rounded-md border px-3 text-sm">
+        <select
+          value={format}
+          onChange={(e) => {
+            setFormat(e.target.value as typeof format);
+            setTrendingPage(1);
+          }}
+          className="border-input bg-background h-8 rounded-md border px-3 text-sm"
+        >
           <option value="all">All Formats</option>
           <option value="digital">Digital</option>
           <option value="vinyl">Vinyl</option>
           <option value="cd">CD</option>
           <option value="cassette">Cassette</option>
         </select>
-        {(isLoading || isFetching) && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {(isLoading || isFetching) && (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        )}
         <div className="ml-auto text-xs text-muted-foreground tabular-nums">
-          {items.length > 0 && `${fmt.vinyl} vinyl · ${fmt.cd} CD · ${fmt.cassette} cassette · ${fmt.digital} digital-only`}
+          {items.length > 0 &&
+            `${fmt.vinyl} vinyl · ${fmt.cd} CD · ${fmt.cassette} cassette · ${fmt.digital} digital-only`}
         </div>
       </div>
 
-      {data?.tagName && (
-        <h2 className="text-lg font-semibold">
-          Trending in {data.tagName}
-        </h2>
-      )}
+      {data?.tagName && <h2 className="text-lg font-semibold">Trending in {data.tagName}</h2>}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {items.map((item, i) => (
-          <Card key={`${item.url}-${i}`} className={item.isClientArtist ? "border-2 border-blue-500" : ""}>
+          <Card
+            key={`${item.url}-${i}`}
+            className={item.isClientArtist ? "border-2 border-blue-500" : ""}
+          >
             <div className="aspect-square relative overflow-hidden rounded-t-lg">
               <img
                 src={item.artUrl}
@@ -1065,25 +1185,43 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
               />
               {item.isClientArtist && (
                 <div className="absolute top-2 right-2">
-                  <Badge variant="default" className="bg-blue-600 text-white text-xs">Your Artist</Badge>
+                  <Badge variant="default" className="bg-blue-600 text-white text-xs">
+                    Your Artist
+                  </Badge>
                 </div>
               )}
               {item.isPreorder && (
                 <div className="absolute top-2 left-2">
-                  <Badge variant="secondary" className="text-xs">Pre-order</Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    Pre-order
+                  </Badge>
                 </div>
               )}
             </div>
             <CardContent className="p-3 space-y-1">
-              <a href={item.url} target="_blank" rel="noopener noreferrer"
-                className="font-medium text-sm hover:underline line-clamp-1">{item.title}</a>
-              <a href={item.bandUrl} target="_blank" rel="noopener noreferrer"
-                className="text-xs text-muted-foreground hover:underline line-clamp-1">{item.artist}</a>
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-sm hover:underline line-clamp-1"
+              >
+                {item.title}
+              </a>
+              <a
+                href={item.bandUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-muted-foreground hover:underline line-clamp-1"
+              >
+                {item.artist}
+              </a>
               {item.isClientArtist && item.clientBandName && (
                 <p className="text-xs text-blue-600 font-medium">{item.clientBandName}</p>
               )}
               <div className="flex gap-1 flex-wrap pt-1">
-                <Badge variant="outline" className="text-xs">{item.genre}</Badge>
+                <Badge variant="outline" className="text-xs">
+                  {item.genre}
+                </Badge>
                 {item.packages.map((p, j) => (
                   <Badge key={j} variant="secondary" className="text-xs">
                     {p.typeStr} ${p.price}
@@ -1092,7 +1230,8 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
               </div>
               {item.featuredTrack && (
                 <p className="text-xs text-muted-foreground truncate pt-1">
-                  <Music className="h-3 w-3 inline mr-1" />{item.featuredTrack}
+                  <Music className="h-3 w-3 inline mr-1" />
+                  {item.featuredTrack}
                 </p>
               )}
             </CardContent>
@@ -1110,7 +1249,11 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
 
       {data?.moreAvailable && (
         <div className="flex justify-center">
-          <Button variant="outline" onClick={() => setTrendingPage((p) => p + 1)} disabled={isFetching}>
+          <Button
+            variant="outline"
+            onClick={() => setTrendingPage((p) => p + 1)}
+            disabled={isFetching}
+          >
             {isFetching ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
             Load More
           </Button>

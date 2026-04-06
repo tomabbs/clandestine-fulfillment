@@ -124,7 +124,7 @@ describe("shipping server actions", () => {
     });
 
     it("rejects invalid page size", async () => {
-      await expect(getShipments({ page: 1, pageSize: 200 })).rejects.toThrow();
+      await expect(getShipments({ page: 1, pageSize: 300 })).rejects.toThrow();
     });
   });
 

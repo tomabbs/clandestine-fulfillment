@@ -13,7 +13,7 @@ const productFiltersSchema = z.object({
   search: z.string().optional(),
   missingCost: z.boolean().optional(),
   page: z.number().int().min(1).default(1),
-  pageSize: z.union([z.literal(25), z.literal(50), z.literal(100)]).default(25),
+  pageSize: z.union([z.literal(50), z.literal(100), z.literal(250)]).default(50),
 });
 
 export type ProductFilters = z.infer<typeof productFiltersSchema>;
@@ -40,7 +40,7 @@ const updateVariantSchema = z.object({
 
 const clientReleasesFiltersSchema = z.object({
   page: z.number().int().min(1).default(1),
-  pageSize: z.union([z.literal(25), z.literal(50), z.literal(100)]).default(25),
+  pageSize: z.union([z.literal(50), z.literal(100), z.literal(250)]).default(50),
 });
 
 // === Helper ===
@@ -500,7 +500,8 @@ export async function updateVariants(
   return { success: true };
 }
 
-export async function getClientReleases(filters?: { page?: number; pageSize?: number }) {
+export async function getClientReleases(rawFilters?: { page?: number; pageSize?: number }) {
+  const parsed = clientReleasesFiltersSchema.parse(rawFilters ?? {});
   // Use service role client + explicit org filter — never rely on RLS alone
   // because staff users who also have access to the portal would see all orgs.
   let orgId: string;
@@ -513,8 +514,8 @@ export async function getClientReleases(filters?: { page?: number; pageSize?: nu
     throw error;
   }
 
-  const page = filters?.page ?? 1;
-  const pageSize = filters?.pageSize ?? 50;
+  const page = parsed.page;
+  const pageSize = parsed.pageSize;
   const offset = (page - 1) * pageSize;
 
   const supabase = createServiceRoleClient();

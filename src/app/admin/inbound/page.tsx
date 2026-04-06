@@ -8,7 +8,11 @@ import {
   type InboundFilters,
   type InboundShipmentWithOrg,
 } from "@/actions/inbound";
-import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PaginationBar,
+} from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,7 +46,7 @@ export default function AdminInboundPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(25);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   const filters: InboundFilters = {
     status: activeTab === "all" ? undefined : (activeTab as InboundFilters["status"]),
@@ -141,6 +145,16 @@ export default function AdminInboundPage() {
       </div>
 
       {/* Table */}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={totalCount}
+        onPageChange={setPage}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          setPage(1);
+        }}
+      />
       <div className="border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead>

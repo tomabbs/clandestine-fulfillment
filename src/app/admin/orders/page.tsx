@@ -10,7 +10,7 @@ import {
   type LabelResult,
   type RateOption,
 } from "@/actions/shipping";
-import { PaginationBar } from "@/components/shared/pagination-bar";
+import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,7 @@ const SOURCE_COLORS: Record<string, string> = {
 export default function AdminOrdersPage() {
   const [filters, setFilters] = useState({
     page: 1,
-    pageSize: 25,
+    pageSize: DEFAULT_PAGE_SIZE,
     status: "",
     source: "",
     search: "",
@@ -107,95 +107,108 @@ export default function AdminOrdersPage() {
           ))}
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Order</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Organization</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.orders ?? []).map((order: OrderRow) => {
-              const orgName =
-                (order as OrderRow & { organizations?: { name: string } }).organizations?.name ??
-                "—";
-              return (
-                <>
-                  <TableRow
-                    key={order.id}
-                    className="cursor-pointer"
-                    onClick={() => setExpandedId((prev) => (prev === order.id ? null : order.id))}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-sm">{order.order_number ?? "—"}</span>
-                        {order.is_preorder && (
-                          <Badge variant="secondary" className="text-xs">
-                            Pre-Order
-                          </Badge>
-                        )}
-                        {order.source === "bandcamp" &&
-                          (order as OrderRow & { bandcamp_payment_id?: number | null })
-                            .bandcamp_payment_id != null && (
-                            <Badge variant="outline" className="text-xs font-mono">
-                              BC{" "}
-                              {
-                                (order as OrderRow & { bandcamp_payment_id?: number })
-                                  .bandcamp_payment_id
-                              }
+        <>
+          {data && data.total > 0 && (
+            <PaginationBar
+              page={filters.page}
+              pageSize={filters.pageSize}
+              total={data.total}
+              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+            />
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Organization</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.orders ?? []).map((order: OrderRow) => {
+                const orgName =
+                  (order as OrderRow & { organizations?: { name: string } }).organizations?.name ??
+                  "—";
+                return (
+                  <>
+                    <TableRow
+                      key={order.id}
+                      className="cursor-pointer"
+                      onClick={() => setExpandedId((prev) => (prev === order.id ? null : order.id))}
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-sm">{order.order_number ?? "—"}</span>
+                          {order.is_preorder && (
+                            <Badge variant="secondary" className="text-xs">
+                              Pre-Order
                             </Badge>
                           )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {new Date(order.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>{order.customer_name ?? "—"}</TableCell>
-                    <TableCell className="text-sm">{orgName}</TableCell>
-                    <TableCell>
-                      <span
-                        className={`text-xs px-1.5 py-0.5 rounded ${SOURCE_COLORS[order.source] ?? "bg-gray-100"}`}
-                      >
-                        {order.source}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={order.fulfillment_status} />
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {order.total_price != null ? `$${Number(order.total_price).toFixed(2)}` : "—"}
-                    </TableCell>
-                  </TableRow>
-
-                  {expandedId === order.id && (
-                    <TableRow key={`${order.id}-detail`}>
-                      <TableCell colSpan={7} className="bg-muted/30 p-4">
-                        {detailLoading ? (
-                          <Skeleton className="h-32 w-full" />
-                        ) : detail ? (
-                          <OrderDetailExpanded detail={detail} />
-                        ) : null}
+                          {order.source === "bandcamp" &&
+                            (order as OrderRow & { bandcamp_payment_id?: number | null })
+                              .bandcamp_payment_id != null && (
+                              <Badge variant="outline" className="text-xs font-mono">
+                                BC{" "}
+                                {
+                                  (order as OrderRow & { bandcamp_payment_id?: number })
+                                    .bandcamp_payment_id
+                                }
+                              </Badge>
+                            )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(order.created_at).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>{order.customer_name ?? "—"}</TableCell>
+                      <TableCell className="text-sm">{orgName}</TableCell>
+                      <TableCell>
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded ${SOURCE_COLORS[order.source] ?? "bg-gray-100"}`}
+                        >
+                          {order.source}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={order.fulfillment_status} />
+                      </TableCell>
+                      <TableCell className="text-right font-mono">
+                        {order.total_price != null
+                          ? `$${Number(order.total_price).toFixed(2)}`
+                          : "—"}
                       </TableCell>
                     </TableRow>
-                  )}
-                </>
-              );
-            })}
-            {(data?.orders ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  No orders found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+
+                    {expandedId === order.id && (
+                      <TableRow key={`${order.id}-detail`}>
+                        <TableCell colSpan={7} className="bg-muted/30 p-4">
+                          {detailLoading ? (
+                            <Skeleton className="h-32 w-full" />
+                          ) : detail ? (
+                            <OrderDetailExpanded detail={detail} />
+                          ) : null}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </>
+                );
+              })}
+              {(data?.orders ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    No orders found.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </>
       )}
 
       {data && data.total > 0 && (

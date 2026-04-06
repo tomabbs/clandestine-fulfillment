@@ -11,7 +11,7 @@ import {
   getShipments,
   getShipmentsSummary,
 } from "@/actions/shipping";
-import { PaginationBar } from "@/components/shared/pagination-bar";
+import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,7 +81,7 @@ function formatCurrency(value: number | null | undefined): string {
 export default function ShippingPage() {
   const [filters, setFilters] = useState<GetShipmentsFilters>({
     page: 1,
-    pageSize: 25,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
   const [searchInput, setSearchInput] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -232,6 +232,15 @@ export default function ShippingPage() {
       </div>
 
       {/* Table */}
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page ?? 1}
+          pageSize={filters.pageSize ?? DEFAULT_PAGE_SIZE}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
+      )}
       <div className="rounded-md border overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -274,7 +283,7 @@ export default function ShippingPage() {
       {data && data.total > 0 && (
         <PaginationBar
           page={filters.page ?? 1}
-          pageSize={filters.pageSize ?? 25}
+          pageSize={filters.pageSize ?? DEFAULT_PAGE_SIZE}
           total={data.total}
           onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
           onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}

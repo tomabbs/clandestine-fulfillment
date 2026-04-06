@@ -27,7 +27,7 @@ const getShipmentsSchema = z.object({
   status: z.string().optional(),
   carrier: z.string().optional(),
   page: z.number().int().positive().default(1),
-  pageSize: z.number().int().positive().max(100).default(25),
+  pageSize: z.number().int().positive().max(250).default(50),
 });
 
 export type GetShipmentsFilters = z.infer<typeof getShipmentsSchema>;

@@ -3,8 +3,11 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export const PAGE_SIZES = [25, 50, 100] as const;
+export const PAGE_SIZES = [50, 100, 250] as const;
 export type PageSize = (typeof PAGE_SIZES)[number];
+
+/** Default rows per page for list views using PaginationBar. */
+export const DEFAULT_PAGE_SIZE: PageSize = 50;
 
 interface PaginationBarProps {
   page: number;
@@ -20,7 +23,7 @@ interface PaginationBarProps {
  *
  * Layout is fully LEFT-aligned so it never overlaps the bottom-right chat bubble.
  *
- *   [← Prev] [Next →]  1–25 of 355  Rows per page: [25 ▼]
+ *   [← Prev] [Next →]  1–50 of 355  Rows per page: [50 ▼]
  */
 export function PaginationBar({
   page,

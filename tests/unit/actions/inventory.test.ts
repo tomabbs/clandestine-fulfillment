@@ -59,13 +59,13 @@ describe("inventory Server Actions", () => {
 
       expect(mockFrom).toHaveBeenCalledWith("warehouse_inventory_levels");
       expect(mockSelect).toHaveBeenCalledWith(expect.any(String), { count: "exact" });
-      expect(mockRange).toHaveBeenCalledWith(0, 24); // page 1, pageSize 25
+      expect(mockRange).toHaveBeenCalledWith(0, 49); // page 1, pageSize 50
       expect(mockOrder).toHaveBeenCalledWith("sku", { ascending: true });
       expect(result).toEqual({
         rows: [],
         total: 0,
         page: 1,
-        pageSize: 25,
+        pageSize: 50,
       });
     });
 

@@ -30,7 +30,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function PortalInboundPage() {
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(25);
+  const [pageSize, setPageSize] = useState<PageSize>(50);
 
   const { data, isLoading } = useAppQuery<{ data: InboundShipmentWithOrg[]; count: number }>({
     queryKey: queryKeys.inbound.list({ page, pageSize, portal: true } as Record<string, unknown>),
@@ -59,6 +59,16 @@ export default function PortalInboundPage() {
       </div>
 
       {/* Shipments List */}
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={totalCount}
+        onPageChange={setPage}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          setPage(1);
+        }}
+      />
       <div className="space-y-3">
         {isLoading ? (
           ["sk-1", "sk-2", "sk-3"].map((id) => (

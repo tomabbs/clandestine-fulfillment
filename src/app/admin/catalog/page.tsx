@@ -15,7 +15,7 @@ import {
   EditableSelectCell,
   EditableTextCell,
 } from "@/components/shared/editable-cell";
-import { PaginationBar } from "@/components/shared/pagination-bar";
+import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,7 +61,7 @@ export default function CatalogPage() {
     search: "",
     missingCost: false,
     page: 1,
-    pageSize: 25 as 25 | 50 | 100,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
 
   const queryFilters = {
@@ -221,120 +221,131 @@ export default function CatalogPage() {
           ))}
         </div>
       ) : (
-        <div className="overflow-x-auto min-w-0 border rounded-lg">
-          <Table className="min-w-[800px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10" />
-                <TableHead className="min-w-[180px] max-w-[300px]">Title</TableHead>
-                <TableHead className="hidden md:table-cell w-[130px]">Vendor</TableHead>
-                <TableHead className="w-28">SKU</TableHead>
-                <TableHead className="hidden lg:table-cell text-right w-20">Cost</TableHead>
-                <TableHead className="text-right w-20">Price</TableHead>
-                <TableHead className="w-24">Status</TableHead>
-                <TableHead className="hidden md:table-cell w-20">Format</TableHead>
-                <TableHead className="text-right w-16">Inv</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.products ?? []).map((product) => {
-                const images = (product.warehouse_product_images ?? []) as Array<{
-                  id: string;
-                  src: string;
-                  alt: string | null;
-                  position: number;
-                }>;
-                const _org = product.organizations as { id: string; name: string } | null;
-                const primaryImage = images.sort((a, b) => a.position - b.position)[0];
-                const imagesJson = product.images as Array<{ src: string }> | null;
-                const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
+        <>
+          {data && data.total > 0 && (
+            <PaginationBar
+              page={filters.page}
+              pageSize={filters.pageSize}
+              total={data.total}
+              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+            />
+          )}
+          <div className="overflow-x-auto min-w-0 border rounded-lg">
+            <Table className="min-w-[800px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead className="min-w-[180px] max-w-[300px]">Title</TableHead>
+                  <TableHead className="hidden md:table-cell w-[130px]">Vendor</TableHead>
+                  <TableHead className="w-28">SKU</TableHead>
+                  <TableHead className="hidden lg:table-cell text-right w-20">Cost</TableHead>
+                  <TableHead className="text-right w-20">Price</TableHead>
+                  <TableHead className="w-24">Status</TableHead>
+                  <TableHead className="hidden md:table-cell w-20">Format</TableHead>
+                  <TableHead className="text-right w-16">Inv</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(data?.products ?? []).map((product) => {
+                  const images = (product.warehouse_product_images ?? []) as Array<{
+                    id: string;
+                    src: string;
+                    alt: string | null;
+                    position: number;
+                  }>;
+                  const _org = product.organizations as { id: string; name: string } | null;
+                  const primaryImage = images.sort((a, b) => a.position - b.position)[0];
+                  const imagesJson = product.images as Array<{ src: string }> | null;
+                  const thumbSrc = primaryImage?.src ?? imagesJson?.[0]?.src;
 
-                const firstVarId = product.firstVariantId as string | null;
+                  const firstVarId = product.firstVariantId as string | null;
 
-                return (
-                  <TableRow
-                    key={product.id}
-                    className="cursor-pointer"
-                    onClick={() => router.push(`/admin/catalog/${product.id}`)}
-                  >
-                    <TableCell className="w-10 p-2">
-                      {thumbSrc ? (
-                        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
-                          <Image
-                            src={thumbSrc}
-                            alt={primaryImage?.alt ?? product.title}
-                            fill
-                            sizes="40px"
-                            className="object-cover"
-                          />
-                        </div>
-                      ) : (
-                        <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded">
-                          <Package className="text-muted-foreground h-5 w-5" />
-                        </div>
-                      )}
-                    </TableCell>
-                    <EditableTextCell
-                      value={product.title}
-                      onSave={async (v) => {
-                        await updateProductField(product.id, "title", v);
-                      }}
-                      className="max-w-[300px] font-medium"
-                    />
-                    <EditableTextCell
-                      value={product.vendor}
-                      onSave={async (v) => {
-                        await updateProductField(product.id, "vendor", v);
-                      }}
-                      className="hidden md:table-cell text-sm"
-                    />
-                    <EditableTextCell
-                      value={product.firstVariantSku}
-                      onSave={async (v) => {
-                        if (firstVarId) await updateVariantField(firstVarId, "sku", v);
-                      }}
-                      className="font-mono text-xs"
-                    />
-                    <EditableNumberCell
-                      value={product.firstVariantCost}
-                      onSave={async (v) => {
-                        if (firstVarId) await updateVariantField(firstVarId, "cost", v);
-                      }}
-                      className="hidden lg:table-cell"
-                    />
-                    <EditableNumberCell
-                      value={product.firstVariantPrice}
-                      onSave={async (v) => {
-                        if (firstVarId) await updateVariantField(firstVarId, "price", v);
-                      }}
-                    />
-                    <EditableSelectCell
-                      value={product.status}
-                      options={STATUS_OPTIONS}
-                      onSave={async (v) => {
-                        await updateProductField(product.id, "status", v);
-                      }}
-                    />
-                    <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
-                      {product.product_type ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right text-sm font-medium">
-                      {product.inventoryTotal}
+                  return (
+                    <TableRow
+                      key={product.id}
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/admin/catalog/${product.id}`)}
+                    >
+                      <TableCell className="w-10 p-2">
+                        {thumbSrc ? (
+                          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
+                            <Image
+                              src={thumbSrc}
+                              alt={primaryImage?.alt ?? product.title}
+                              fill
+                              sizes="40px"
+                              className="object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="bg-muted flex h-10 w-10 shrink-0 items-center justify-center rounded">
+                            <Package className="text-muted-foreground h-5 w-5" />
+                          </div>
+                        )}
+                      </TableCell>
+                      <EditableTextCell
+                        value={product.title}
+                        onSave={async (v) => {
+                          await updateProductField(product.id, "title", v);
+                        }}
+                        className="max-w-[300px] font-medium"
+                      />
+                      <EditableTextCell
+                        value={product.vendor}
+                        onSave={async (v) => {
+                          await updateProductField(product.id, "vendor", v);
+                        }}
+                        className="hidden md:table-cell text-sm"
+                      />
+                      <EditableTextCell
+                        value={product.firstVariantSku}
+                        onSave={async (v) => {
+                          if (firstVarId) await updateVariantField(firstVarId, "sku", v);
+                        }}
+                        className="font-mono text-xs"
+                      />
+                      <EditableNumberCell
+                        value={product.firstVariantCost}
+                        onSave={async (v) => {
+                          if (firstVarId) await updateVariantField(firstVarId, "cost", v);
+                        }}
+                        className="hidden lg:table-cell"
+                      />
+                      <EditableNumberCell
+                        value={product.firstVariantPrice}
+                        onSave={async (v) => {
+                          if (firstVarId) await updateVariantField(firstVarId, "price", v);
+                        }}
+                      />
+                      <EditableSelectCell
+                        value={product.status}
+                        options={STATUS_OPTIONS}
+                        onSave={async (v) => {
+                          await updateProductField(product.id, "status", v);
+                        }}
+                      />
+                      <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
+                        {product.product_type ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-right text-sm font-medium">
+                        {product.inventoryTotal}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {(data?.products ?? []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
+                      <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      No products found.
                     </TableCell>
                   </TableRow>
-                );
-              })}
-              {(data?.products ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                    <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    No products found.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
 
       {data && data.total > 0 && (

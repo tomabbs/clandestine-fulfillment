@@ -148,7 +148,7 @@ export async function getBillingSnapshots(filters: {
 }) {
   const supabase = await createServerSupabaseClient();
   const page = filters.page ?? 1;
-  const pageSize = filters.pageSize ?? 20;
+  const pageSize = filters.pageSize ?? 50;
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 

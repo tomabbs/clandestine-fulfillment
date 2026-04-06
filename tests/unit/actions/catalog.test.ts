@@ -58,11 +58,11 @@ describe("catalog server actions", () => {
   describe("authentication", () => {
     it("getProducts returns empty result when user is not authenticated", async () => {
       mockGetUser.mockResolvedValue({ data: { user: null } });
-      await expect(getProducts({ page: 1, pageSize: 25 })).resolves.toEqual({
+      await expect(getProducts({ page: 1, pageSize: 50 })).resolves.toEqual({
         products: [],
         total: 0,
         page: 1,
-        pageSize: 25,
+        pageSize: 50,
       });
     });
 
@@ -118,13 +118,13 @@ describe("catalog server actions", () => {
         }),
       });
 
-      await getProducts({ page: 1, pageSize: 25, status: "active" });
+      await getProducts({ page: 1, pageSize: 50, status: "active" });
 
       expect(mockServiceFrom).toHaveBeenCalledWith("warehouse_products");
       expect(eqMock).toHaveBeenCalledWith("status", "active");
     });
 
-    it("validates page size is one of 25, 50, 100", async () => {
+    it("validates page size is one of 50, 100, 250", async () => {
       await expect(getProducts({ page: 1, pageSize: 30 as never })).rejects.toThrow();
     });
   });

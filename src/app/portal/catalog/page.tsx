@@ -78,7 +78,7 @@ export default function CatalogPage() {
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(25);
+  const [pageSize, setPageSize] = useState<PageSize>(50);
 
   const { data, isLoading, error } = useAppQuery({
     queryKey: [...queryKeys.clientReleases.list(), page, pageSize],
@@ -240,6 +240,18 @@ export default function CatalogPage() {
           <p className="text-muted-foreground text-sm py-4">No catalog items found.</p>
         ) : (
           <>
+            {total > 0 && (
+              <PaginationBar
+                page={page}
+                pageSize={pageSize}
+                total={total}
+                onPageChange={setPage}
+                onPageSizeChange={(s) => {
+                  setPageSize(s);
+                  setPage(1);
+                }}
+              />
+            )}
             <Table>
               <TableHeader>
                 <TableRow>

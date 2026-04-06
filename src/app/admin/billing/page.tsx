@@ -18,7 +18,11 @@ import {
   updateFormatCost,
 } from "@/actions/billing";
 import { getClients } from "@/actions/clients";
-import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PaginationBar,
+} from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -152,7 +156,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(25);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({
@@ -173,6 +177,16 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
         <p className="text-muted-foreground text-sm">No billing snapshots yet.</p>
       ) : (
         <>
+          <PaginationBar
+            page={page}
+            pageSize={pageSize}
+            total={data.total}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => {
+              setPageSize(s);
+              setPage(1);
+            }}
+          />
           <div className="border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">

@@ -21,17 +21,17 @@ describe("admin orders", () => {
 
     it("calculates correct offset from page", () => {
       const page = 3;
-      const pageSize = 25;
+      const pageSize = 50;
       const offset = (page - 1) * pageSize;
-      expect(offset).toBe(50);
+      expect(offset).toBe(100);
     });
 
-    it("defaults page to 1 and pageSize to 25", () => {
+    it("defaults page to 1 and pageSize to 50", () => {
       const filters: { page?: number; pageSize?: number } = {};
       const page = filters.page ?? 1;
-      const pageSize = filters.pageSize ?? 25;
+      const pageSize = filters.pageSize ?? 50;
       expect(page).toBe(1);
-      expect(pageSize).toBe(25);
+      expect(pageSize).toBe(50);
     });
   });
 
