@@ -903,8 +903,6 @@ export const bandcampSyncTask = task({
               : "package",
             bandcamp_member_band_id: merchItem.member_band_id,
             bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
-            bandcamp_url: merchItem.url ?? null,
-            bandcamp_url_source: merchItem.url ? "orders_api" : null,
             bandcamp_subdomain: merchItem.subdomain ?? null,
             bandcamp_album_title: merchItem.album_title ?? null,
             bandcamp_price: merchItem.price ?? null,
@@ -920,6 +918,13 @@ export const bandcampSyncTask = task({
             updated_at: new Date().toISOString(),
             raw_api_data: merchItem,
           };
+
+          // Only overwrite URL if the API actually provides one — avoid nullifying
+          // URLs that were set by the sales backfill or scraper
+          if (merchItem.url) {
+            upsertPayload.bandcamp_url = merchItem.url;
+            upsertPayload.bandcamp_url_source = "orders_api";
+          }
 
           const { error: upsertError } = await supabase
             .from("bandcamp_product_mappings")
