@@ -800,6 +800,7 @@ export const bandcampSyncTask = task({
     let itemsFailed = 0;
     let totalMerchItems = 0;
     let unmatchedMerchCount = 0;
+    let lastVariantQueryCount = 0;
 
     try {
       const accessToken = await refreshBandcampToken(workspaceId);
@@ -860,7 +861,16 @@ export const bandcampSyncTask = task({
         const { data: variants } = await supabase
           .from("warehouse_product_variants")
           .select("id, sku")
-          .eq("workspace_id", workspaceId);
+          .eq("workspace_id", workspaceId)
+          .limit(10000);
+
+        lastVariantQueryCount = variants?.length ?? 0;
+        if (lastVariantQueryCount >= 10000) {
+          logger.warn("Variant query may be truncated — catalog exceeds 10,000 items", {
+            workspaceId,
+            variantCount: lastVariantQueryCount,
+          });
+        }
 
         const { matched, unmatched } = matchSkuToVariants(merchItems, variants ?? []);
         totalMerchItems += merchItems.length;
@@ -1107,7 +1117,8 @@ export const bandcampSyncTask = task({
         const { data: allExistingSkus } = await supabase
           .from("warehouse_product_variants")
           .select("sku")
-          .eq("workspace_id", workspaceId);
+          .eq("workspace_id", workspaceId)
+          .limit(10000);
         const existingSkuSet = new Set((allExistingSkus ?? []).map((v) => v.sku));
 
         // Read workspace settings for SKU push flag
@@ -1499,6 +1510,9 @@ export const bandcampSyncTask = task({
                 totalMerchItems > 0
                   ? Math.round(((totalMerchItems - unmatchedMerchCount) / totalMerchItems) * 100)
                   : null,
+              variant_query_count: lastVariantQueryCount,
+              matched_count: totalMerchItems - unmatchedMerchCount,
+              variants_truncated_warning: lastVariantQueryCount >= 10000,
             },
           })
           .eq("id", syncLogId);
