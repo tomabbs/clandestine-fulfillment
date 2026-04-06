@@ -8,6 +8,9 @@
  * Group 3: has URL + art, missing about/credits/tracks (enrichment backfill)
  *
  * Group 2 (URL construction) removed — API provides URLs directly.
+ *
+ * Inventory-aware prioritization: in-stock items fill 80% of the budget,
+ * OOS items get the remaining 20% for catalog completeness catch-up.
  */
 
 import { logger, schedules } from "@trigger.dev/sdk";
@@ -15,6 +18,9 @@ import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampSweepQueue } from "@/trigger/lib/bandcamp-sweep-queue";
 import { bandcampScrapePageTask } from "@/trigger/tasks/bandcamp-sync";
+
+const IN_STOCK_LIMIT = 80;
+const OOS_CATCHUP_LIMIT = 20;
 
 export const bandcampScrapeSweepTask = schedules.task({
   id: "bandcamp-scrape-sweep",
@@ -30,20 +36,31 @@ export const bandcampScrapeSweepTask = schedules.task({
       const startedAt = new Date().toISOString();
       let triggered = 0;
       let g1Triggered = 0;
-      const g2Triggered = 0;
+      let g1InStock = 0;
+      let g1Oos = 0;
       let g3Triggered = 0;
+      let g3InStock = 0;
+      let g3Oos = 0;
 
       // ── Group 1: has URL, missing type_name (enrichment scrape) ────────────
-      const { data: group1 } = await supabase
+      // Priority pass: in-stock items first
+      const { data: g1All } = await supabase
         .from("bandcamp_product_mappings")
-        .select("id, bandcamp_url")
+        .select("id, bandcamp_url, variant_id, raw_api_data")
         .eq("workspace_id", workspaceId)
         .not("bandcamp_url", "is", null)
         .is("bandcamp_type_name", null)
         .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
-        .limit(100);
+        .limit(200);
 
-      for (const pm of group1 ?? []) {
+      const g1Prioritized = await prioritizeByStock(
+        supabase,
+        g1All ?? [],
+        IN_STOCK_LIMIT,
+        OOS_CATCHUP_LIMIT,
+      );
+
+      for (const pm of g1Prioritized.items) {
         await bandcampScrapePageTask.trigger({
           url: pm.bandcamp_url as string,
           mappingId: pm.id,
@@ -54,21 +71,30 @@ export const bandcampScrapeSweepTask = schedules.task({
         triggered++;
         g1Triggered++;
       }
+      g1InStock = g1Prioritized.inStockCount;
+      g1Oos = g1Prioritized.oosCount;
 
       // Group 2 removed — URLs now come from the Bandcamp API, not construction.
 
       // ── Group 3: has URL + art but missing about/credits/tracks (enrichment) ──
-      const { data: group3 } = await supabase
+      const { data: g3All } = await supabase
         .from("bandcamp_product_mappings")
-        .select("id, bandcamp_url")
+        .select("id, bandcamp_url, variant_id, raw_api_data")
         .eq("workspace_id", workspaceId)
         .not("bandcamp_url", "is", null)
         .is("bandcamp_about", null)
         .not("bandcamp_art_url", "is", null)
         .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
-        .limit(100);
+        .limit(200);
 
-      for (const pm of group3 ?? []) {
+      const g3Prioritized = await prioritizeByStock(
+        supabase,
+        g3All ?? [],
+        IN_STOCK_LIMIT,
+        OOS_CATCHUP_LIMIT,
+      );
+
+      for (const pm of g3Prioritized.items) {
         await bandcampScrapePageTask.trigger({
           url: pm.bandcamp_url as string,
           mappingId: pm.id,
@@ -79,6 +105,8 @@ export const bandcampScrapeSweepTask = schedules.task({
         triggered++;
         g3Triggered++;
       }
+      g3InStock = g3Prioritized.inStockCount;
+      g3Oos = g3Prioritized.oosCount;
 
       await supabase.from("channel_sync_log").insert({
         workspace_id: workspaceId,
@@ -91,19 +119,29 @@ export const bandcampScrapeSweepTask = schedules.task({
         completed_at: new Date().toISOString(),
         metadata: {
           source: "bandcamp_scrape_sweep_cron",
-          limits: { per_group: 100 },
+          limits: { in_stock: IN_STOCK_LIMIT, oos_catchup: OOS_CATCHUP_LIMIT },
           scrape_queue_concurrency: 5,
           scrape_task_max_duration_sec: 60,
-          g1: { selected: group1?.length ?? 0, triggered: g1Triggered },
-          g3: { selected: group3?.length ?? 0, triggered: g3Triggered },
+          g1: {
+            candidates: g1All?.length ?? 0,
+            triggered: g1Triggered,
+            in_stock: g1InStock,
+            oos_catchup: g1Oos,
+          },
+          g3: {
+            candidates: g3All?.length ?? 0,
+            triggered: g3Triggered,
+            in_stock: g3InStock,
+            oos_catchup: g3Oos,
+          },
         },
       });
 
       logger.info("bandcamp-scrape-sweep complete", {
         workspaceId,
         triggered,
-        group1Count: group1?.length ?? 0,
-        group3Count: group3?.length ?? 0,
+        g1: { total: g1All?.length ?? 0, triggered: g1Triggered, inStock: g1InStock, oos: g1Oos },
+        g3: { total: g3All?.length ?? 0, triggered: g3Triggered, inStock: g3InStock, oos: g3Oos },
       });
 
       totalTriggered += triggered;
@@ -112,3 +150,52 @@ export const bandcampScrapeSweepTask = schedules.task({
     return { totalTriggered };
   },
 });
+
+interface MappingRow {
+  id: string;
+  bandcamp_url: string | null;
+  variant_id: string;
+  raw_api_data: Record<string, unknown> | null;
+}
+
+async function prioritizeByStock(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  mappings: MappingRow[],
+  inStockLimit: number,
+  oosLimit: number,
+): Promise<{ items: MappingRow[]; inStockCount: number; oosCount: number }> {
+  if (mappings.length === 0) return { items: [], inStockCount: 0, oosCount: 0 };
+
+  const variantIds = mappings.map((m) => m.variant_id).filter(Boolean);
+  const { data: levels } = await supabase
+    .from("warehouse_inventory_levels")
+    .select("variant_id, available")
+    .in("variant_id", variantIds);
+
+  const invMap = new Map((levels ?? []).map((l) => [l.variant_id, l.available as number]));
+
+  const inStock: MappingRow[] = [];
+  const oos: MappingRow[] = [];
+
+  for (const m of mappings) {
+    const bcQty = (m.raw_api_data?.quantity_available as number | null | undefined) ?? null;
+    const whQty = invMap.get(m.variant_id);
+
+    if ((bcQty !== null && bcQty > 0) || (whQty !== undefined && whQty > 0)) {
+      inStock.push(m);
+    } else if (whQty === undefined && bcQty === null) {
+      // Unknown stock (no inventory row, no BC data) — treat as in-stock to avoid skipping new items
+      inStock.push(m);
+    } else {
+      oos.push(m);
+    }
+  }
+
+  const selected = [...inStock.slice(0, inStockLimit), ...oos.slice(0, oosLimit)];
+
+  return {
+    items: selected,
+    inStockCount: Math.min(inStock.length, inStockLimit),
+    oosCount: Math.min(oos.length, oosLimit),
+  };
+}
