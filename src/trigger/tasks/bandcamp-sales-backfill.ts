@@ -337,10 +337,18 @@ export const bandcampSalesBackfillCron = schedules.task({
   maxDuration: 300,
   run: async () => {
     const supabase = createServiceRoleClient();
+
+    // Check pause flag — skip if manual backfill script is running
+    const { data: ws } = await supabase.from("workspaces").select("bandcamp_scraper_settings").limit(1).single();
+    if ((ws?.bandcamp_scraper_settings as Record<string, unknown>)?.pause_sales_backfill_cron) {
+      logger.info("Backfill cron: PAUSED (pause_sales_backfill_cron flag set)");
+      return { processed: 0, status: "paused" };
+    }
+
     const workspaceIds = await getAllWorkspaceIds(supabase);
     let processed = 0;
     const startTime = Date.now();
-    const MAX_CRON_RUNTIME_MS = 240_000; // 4 min safety margin under 300s maxDuration
+    const MAX_CRON_RUNTIME_MS = 240_000;
 
     for (const workspaceId of workspaceIds) {
       if (Date.now() - startTime > MAX_CRON_RUNTIME_MS) {

@@ -25,7 +25,7 @@ if (!url || !key || !BC_CLIENT_ID || !BC_CLIENT_SECRET) {
 }
 const sb = createClient(url, key);
 
-const DELAY_MS = 600;
+const DELAY_MS = 3000; // 3 seconds between API calls — well under 50-per-10-sec limit
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120;
 
@@ -271,8 +271,9 @@ async function main() {
     let connInserted = 0;
 
     while (cursor < now) {
+      // Use MONTHLY chunks for accuracy (yearly can miss data for high-volume labels)
       const chunkEnd = new Date(cursor);
-      chunkEnd.setFullYear(chunkEnd.getFullYear() + 1);
+      chunkEnd.setMonth(chunkEnd.getMonth() + 1);
       const effectiveEnd = chunkEnd > now ? now : chunkEnd;
 
       const startStr = cursor.toISOString().slice(0, 10);
@@ -281,14 +282,17 @@ async function main() {
 
       try {
         const token = await ensureToken();
-        const reportToken = await generateReport(conn.band_id, startStr, endStr, token);
-        await new Promise(r => setTimeout(r, DELAY_MS));
 
-        const reportUrl = await pollReport(reportToken, token);
-        const reportRes = await fetch(reportUrl);
-        if (!reportRes.ok) throw new Error(`Download failed: ${reportRes.status}`);
-        const reportData = await reportRes.json();
-        const items = Array.isArray(reportData) ? reportData : reportData.report ?? [];
+        // Use SYNCHRONOUS sales_report API (not async generate/fetch which can truncate)
+        const res = await fetch("https://bandcamp.com/api/sales/4/sales_report", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ band_id: conn.band_id, start_time: startStr, end_time: endStr }),
+        });
+        if (!res.ok) throw new Error(`sales_report failed: ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(`sales_report error: ${data.error_message}`);
+        const items = data.report ?? [];
 
         const inserted = await insertRows(conn.workspace_id, conn.id, items);
         connInserted += inserted;
@@ -379,6 +383,24 @@ async function main() {
     }
   }
   console.log(`  Matched ${urlsMatched} URLs from sales to mappings`);
+
+  // Unpause the cron now that the script is done
+  const { data: wsSettings } = await sb.from("workspaces").select("id, bandcamp_scraper_settings").single();
+  if (wsSettings) {
+    const s = wsSettings.bandcamp_scraper_settings ?? {};
+    delete s.pause_sales_backfill_cron;
+    await sb.from("workspaces").update({ bandcamp_scraper_settings: s }).eq("id", wsSettings.id);
+    console.log("\nCron unpause flag CLEARED — cron will resume on next cycle");
+  }
+
+  // Reconcile counters
+  console.log("\n── Reconciling counters ──");
+  const { data: allStates } = await sb.from("bandcamp_sales_backfill_state").select("connection_id");
+  for (const s of allStates ?? []) {
+    const { count: actual } = await sb.from("bandcamp_sales").select("*", { count: "exact", head: true }).eq("connection_id", s.connection_id);
+    await sb.from("bandcamp_sales_backfill_state").update({ total_transactions: actual ?? 0, updated_at: new Date().toISOString() }).eq("connection_id", s.connection_id);
+  }
+  console.log("  Counters reconciled for", allStates?.length, "connections");
 
   console.log("\n═══════════════════════════════════════════════");
   console.log(`  DONE: ${totalInserted} sales inserted across ${totalChunks} chunks`);
