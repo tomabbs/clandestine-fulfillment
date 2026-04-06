@@ -858,21 +858,30 @@ export const bandcampSyncTask = task({
           continue;
         }
 
-        const { data: variants } = await supabase
-          .from("warehouse_product_variants")
-          .select("id, sku")
-          .eq("workspace_id", workspaceId)
-          .limit(10000);
-
-        lastVariantQueryCount = variants?.length ?? 0;
-        if (lastVariantQueryCount >= 10000) {
-          logger.warn("Variant query may be truncated — catalog exceeds 10,000 items", {
-            workspaceId,
-            variantCount: lastVariantQueryCount,
-          });
+        const variants: Array<{ id: string; sku: string }> = [];
+        {
+          const PAGE = 1000;
+          let offset = 0;
+          while (true) {
+            const { data: page } = await supabase
+              .from("warehouse_product_variants")
+              .select("id, sku")
+              .eq("workspace_id", workspaceId)
+              .range(offset, offset + PAGE - 1);
+            if (!page || page.length === 0) break;
+            variants.push(...page);
+            if (page.length < PAGE) break;
+            offset += PAGE;
+          }
         }
 
-        const { matched, unmatched } = matchSkuToVariants(merchItems, variants ?? []);
+        lastVariantQueryCount = variants.length;
+        logger.info("Loaded variants for SKU matching", {
+          workspaceId,
+          variantCount: lastVariantQueryCount,
+        });
+
+        const { matched, unmatched } = matchSkuToVariants(merchItems, variants);
         totalMerchItems += merchItems.length;
         unmatchedMerchCount += unmatched.length;
 
@@ -1114,12 +1123,7 @@ export const bandcampSyncTask = task({
         // ── Unmatched items — auto-create DRAFT products ───────────────────────
 
         // Collect existing SKUs for collision detection during auto-generation
-        const { data: allExistingSkus } = await supabase
-          .from("warehouse_product_variants")
-          .select("sku")
-          .eq("workspace_id", workspaceId)
-          .limit(10000);
-        const existingSkuSet = new Set((allExistingSkus ?? []).map((v) => v.sku));
+        const existingSkuSet = new Set(variants.map((v) => v.sku));
 
         // Read workspace settings for SKU push flag
         const { data: wsSettings } = await supabase
