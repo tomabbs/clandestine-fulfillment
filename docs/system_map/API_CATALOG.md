@@ -142,9 +142,10 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - trigger kickoffs/status: `triggerShopifySync`, `triggerFullBackfill`, `getShopifySyncStatus`, `triggerBandcampSync`, `getBandcampSyncStatus`, `triggerBandcampConnectionBackfill`
   - Bandcamp connection management: `createBandcampConnection`, `deleteBandcampConnection`, `getBandcampAccounts`, `getBandcampMappings`, `getOrganizationsForWorkspace`
   - scraper observability: `getBandcampScraperHealth` (log-backed activity, catalog completeness, sensor readings, block rate, review queue)
-  - sales data: `getBandcampSalesOverview` (item-level sales breakdown, sortable, filterable, genre-matched), `getBandcampFullItemData` (all API data for a single catalog item)
+  - sales data: `getBandcampSalesOverview` (item-level sales breakdown, sortable, filterable, genre-matched)
+  - backfill coverage: `getBandcampBackfillAudit` (chunk-level backfill coverage dashboard, per-account heatmap data from bandcamp_sales_backfill_log)
   - trending: `getBandcampTrending` (live dig_deeper API proxy with client-artist highlighting + 3-min server cache)
-  - Sales Report API: `salesReport`, `generateSalesReport`, `fetchSalesReport` (v4, all-time transaction history with catalog_number/upc/isrc)
+  - Sales Report API: `salesReport`, `generateSalesReport`, `fetchSalesReport` (v4, all-time transaction history with catalog_number/upc/isrc); async generate/fetch deprecated in favor of sync sales_report
   - SKU management: `updateSku` (push SKUs to Bandcamp, behind feature flag)
   - store connections and mappings: connection CRUD/test + mapping and reprocess ops
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`

@@ -535,30 +535,6 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     streetDate: p.street_date,
   }));
 
-  // ── Sales backfill progress ──
-  const { data: connections } = await supabase
-    .from("bandcamp_connections")
-    .select("id, band_name")
-    .eq("workspace_id", workspaceId)
-    .eq("is_active", true);
-
-  const { data: backfillStates } = await supabase
-    .from("bandcamp_sales_backfill_state")
-    .select("connection_id, status, total_transactions, last_processed_date, last_error");
-
-  const stateMap = new Map((backfillStates ?? []).map((s) => [s.connection_id, s]));
-  const backfillProgress = (connections ?? []).map((c) => {
-    const s = stateMap.get(c.id);
-    return {
-      connectionId: c.id,
-      bandName: c.band_name,
-      status: s?.status ?? "pending",
-      totalTransactions: s?.total_transactions ?? 0,
-      lastProcessedDate: s?.last_processed_date ?? null,
-      lastError: s?.last_error ?? null,
-    };
-  });
-
   // Sales totals
   const { count: totalSales } = await supabase
     .from("bandcamp_sales")
@@ -606,7 +582,6 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     syncPipeline,
     scrapeStats,
     preorders: preorderList,
-    backfillProgress,
     totalSales: totalSales ?? 0,
     uniqueBuyers,
     sensorReadings: sensorReadings ?? [],
@@ -818,51 +793,167 @@ export async function getBandcampSalesOverview(workspaceId: string) {
   return { connections: connectionStats, grandTotalSales: grandTotal ?? 0, items, untaggedCount };
 }
 
-export async function getBandcampFullItemData(variantId: string) {
+// === Backfill Audit (chunk-level dashboard data) ===
+
+export async function getBandcampBackfillAudit(workspaceId: string) {
   const supabase = createServiceRoleClient();
 
-  const { data: mapping } = await supabase
-    .from("bandcamp_product_mappings")
-    .select("*")
-    .eq("variant_id", variantId)
-    .single();
+  const { data: connections } = await supabase
+    .from("bandcamp_connections")
+    .select("id, band_name, created_at")
+    .eq("workspace_id", workspaceId)
+    .eq("is_active", true)
+    .order("band_name");
 
-  if (!mapping) return null;
+  const { data: states } = await supabase
+    .from("bandcamp_sales_backfill_state")
+    .select(
+      "connection_id, status, total_transactions, earliest_sale_date, latest_sale_date, coverage_start_date, last_error",
+    );
 
-  // Get variant SKU for sales lookup
-  const { data: variant } = await supabase
-    .from("warehouse_product_variants")
-    .select("sku")
-    .eq("id", variantId)
-    .single();
+  const stateMap = new Map((states ?? []).map((s) => [s.connection_id, s]));
 
-  let salesByVariant = null;
-  if (variant?.sku) {
-    const { data: skuSales } = await supabase
-      .from("bandcamp_sales")
-      .select("sale_date, quantity, net_amount, currency, payment_state, catalog_number, upc, isrc")
-      .eq("workspace_id", mapping.workspace_id)
-      .eq("sku", variant.sku)
-      .order("sale_date", { ascending: false })
-      .limit(100);
+  const { data: allLogs } = await supabase
+    .from("bandcamp_sales_backfill_log")
+    .select(
+      "connection_id, chunk_start, status, sales_inserted, error_message, attempt_number, created_at",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("attempt_number", { ascending: false });
 
-    const totalUnits = (skuSales ?? []).reduce((s, r) => s + (r.quantity ?? 0), 0);
-    const totalRevenue = (skuSales ?? []).reduce((s, r) => s + (Number(r.net_amount) || 0), 0);
-    const refunds = (skuSales ?? []).filter((r) => r.payment_state === "refunded").length;
-
-    salesByVariant = {
-      totalUnits,
-      totalRevenue: Math.round(totalRevenue * 100) / 100,
-      refunds,
-      lastSaleDate: skuSales?.[0]?.sale_date ?? null,
-      catalogNumber: skuSales?.find((r) => r.catalog_number)?.catalog_number ?? null,
-      upc: skuSales?.find((r) => r.upc)?.upc ?? null,
-      isrc: skuSales?.find((r) => r.isrc)?.isrc ?? null,
-      recentSales: (skuSales ?? []).slice(0, 10),
-    };
+  const logsByConn = new Map<
+    string,
+    Array<{
+      chunk_start: string;
+      status: string;
+      sales_inserted: number;
+      error_message: string | null;
+      attempt_number: number;
+      created_at: string;
+    }>
+  >();
+  for (const log of allLogs ?? []) {
+    const arr = logsByConn.get(log.connection_id) ?? [];
+    arr.push(log);
+    logsByConn.set(log.connection_id, arr);
   }
 
-  return { mapping, salesByVariant };
+  const now = new Date();
+  let totalCompleted = 0;
+  let totalPartial = 0;
+  let totalRunning = 0;
+  let totalFailedChunks = 0;
+  let grandTotalSales = 0;
+
+  const accounts = (connections ?? []).map((conn) => {
+    const st = stateMap.get(conn.id);
+    const status = (st?.status as string) ?? "pending";
+    const coverageStart = st?.coverage_start_date ?? conn.created_at?.slice(0, 10) ?? "2010-01-01";
+
+    const connLogs = logsByConn.get(conn.id) ?? [];
+    const latestByChunk = new Map<string, (typeof connLogs)[0]>();
+    for (const log of connLogs) {
+      if (!latestByChunk.has(log.chunk_start)) latestByChunk.set(log.chunk_start, log);
+    }
+
+    const expectedChunks: Array<{ year: number; month: number; start: string; end: string }> = [];
+    const cursor = new Date(coverageStart);
+    cursor.setDate(1);
+    while (cursor < now) {
+      const y = cursor.getFullYear();
+      const m = cursor.getMonth() + 1;
+      const startStr = cursor.toISOString().slice(0, 10);
+      const endD = new Date(cursor);
+      endD.setMonth(endD.getMonth() + 1);
+      const endStr = (endD > now ? now : endD).toISOString().slice(0, 10);
+      expectedChunks.push({ year: y, month: m, start: startStr, end: endStr });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    let covered = 0;
+    let failed = 0;
+    let connSales = 0;
+    const monthGrid: Array<{
+      year: number;
+      month: number;
+      chunkStatus: "success" | "failed" | "skipped" | "pending";
+      salesCount: number;
+      error: string | null;
+      lastAttempt: string | null;
+    }> = [];
+
+    for (const ec of expectedChunks) {
+      const log = latestByChunk.get(ec.start);
+      if (!log) {
+        monthGrid.push({
+          year: ec.year,
+          month: ec.month,
+          chunkStatus: "pending",
+          salesCount: 0,
+          error: null,
+          lastAttempt: null,
+        });
+      } else if (log.status === "success" || log.status === "skipped") {
+        covered++;
+        const sc = log.sales_inserted ?? 0;
+        connSales += sc;
+        monthGrid.push({
+          year: ec.year,
+          month: ec.month,
+          chunkStatus: log.status as "success" | "skipped",
+          salesCount: sc,
+          error: null,
+          lastAttempt: log.created_at,
+        });
+      } else {
+        failed++;
+        monthGrid.push({
+          year: ec.year,
+          month: ec.month,
+          chunkStatus: "failed",
+          salesCount: 0,
+          error: log.error_message,
+          lastAttempt: log.created_at,
+        });
+      }
+    }
+
+    const coveragePercent =
+      expectedChunks.length > 0 ? Math.round((covered / expectedChunks.length) * 100) : 0;
+    const totalSales = st?.total_transactions ?? connSales;
+    grandTotalSales += totalSales;
+
+    if (status === "completed") totalCompleted++;
+    else if (status === "partial") totalPartial++;
+    else if (status === "running") totalRunning++;
+    totalFailedChunks += failed;
+
+    return {
+      connectionId: conn.id,
+      bandName: conn.band_name,
+      status,
+      totalSales,
+      coveragePercent,
+      failedChunks: failed,
+      missingChunks: expectedChunks.length - covered - failed,
+      earliestSale: st?.earliest_sale_date ?? null,
+      latestSale: st?.latest_sale_date ?? null,
+      lastError: st?.last_error ?? null,
+      monthGrid,
+    };
+  });
+
+  return {
+    overall: {
+      totalSales: grandTotalSales,
+      totalConnections: connections?.length ?? 0,
+      completedCount: totalCompleted,
+      partialCount: totalPartial,
+      runningCount: totalRunning,
+      failedChunkCount: totalFailedChunks,
+    },
+    accounts,
+  };
 }
 
 // === Trending (dig_deeper) ===

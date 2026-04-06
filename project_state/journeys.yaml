@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-04
+updated_at: 2026-04-07
 
 journeys:
   - id: staff_client_invite
@@ -109,14 +109,19 @@ journeys:
   - id: bandcamp_sales_data
     area: admin_settings
     paths:
+      - supabase/migrations/20260407000000_backfill_audit_log.sql
       - src/trigger/tasks/bandcamp-sales-backfill.ts
       - src/trigger/tasks/bandcamp-sales-sync.ts
       - src/trigger/lib/bandcamp-url-crossref.ts
       - src/actions/bandcamp.ts
       - src/app/admin/settings/bandcamp/page.tsx
-    status: yellow
+    status: green
     checks:
-      - backfill cron processes all connections with time guard
+      - backfill script writes chunk-level audit log to bandcamp_sales_backfill_log
+      - completion verified against expected chunk set (not cursor position)
+      - partial status enables retry-only mode for failed/missing chunks
+      - cron self-heals: detects stale running, retries failed chunks
+      - BackfillAuditCard shows per-account coverage heatmap with month grid
       - total_transactions counter accumulates correctly
       - crossReferenceAlbumUrls copies item_url from sales to mappings
       - daily sync keeps bandcamp_sales up to date

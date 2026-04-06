@@ -281,23 +281,28 @@ Estimated runtime: 60-90 minutes for all 17 connections.
 
 ---
 
-## 8. Recommended Next Steps
+## 8. Audit Log System (2026-04-07)
 
-### After this backfill completes (automated by the script)
-The script auto-runs these on completion:
-1. **Unpause cron** — clears `pause_sales_backfill_cron` flag
-2. **Reconcile counters** — updates `total_transactions` to match actual row counts
+The backfill script was rewritten with a **chunk-level audit log** (`bandcamp_sales_backfill_log`). Every API call writes a row — success or failure. This permanently eliminates false completions and makes progress verifiable.
 
-### Manual verification after completion
-1. Run `node scripts/verify-sales-vs-csv.mjs` against any CSV exports to verify completeness
-2. Cross-reference URLs is called automatically after each connection completes
+### How it works
+- **Mode A (full scan)**: For `pending`/`running`/`failed` connections — walks month-by-month from `coverage_start_date` to now. Logs every chunk.
+- **Mode B (retry gaps)**: For `partial` connections — queries the audit log for failed/missing chunks, processes only those.
+- **Completion is verified**: A connection is "completed" only when every expected chunk (from `coverage_start_date` to now) has a terminal-good log entry AND a cross-check of sales counts passes.
+- **Error tiers**: 429/5xx = transient (retry 3x), 400 = chunk failure (log and skip), 401/403 = connection failure (fail fast).
+- **Self-healing cron**: Detects stale "running" connections (>2h) and flips to "partial". Retries up to 3 failed chunks per run.
 
-### Ongoing maintenance (already deployed)
-The cron (`bandcamp-sales-backfill-cron`) is already updated to:
-- Check `pause_sales_backfill_cron` flag and skip if set
-- Use the token cache (reduced OAuth calls from 16/hr to 1/hr)
-- Filter non-numeric transaction IDs via `safeBigint`
-The daily sync (`bandcamp-sales-sync`) updates backfill state counters to prevent drift.
+### New table: `bandcamp_sales_backfill_log`
+Created by migration `20260407000000_backfill_audit_log.sql`. Columns include `workspace_id`, `connection_id`, `chunk_start`, `chunk_end`, `status`, `sales_returned`, `sales_inserted`, `http_status`, `error_message`, `attempt_number`, `started_at`, `finished_at`, `duration_ms`.
+
+### Frontend: BackfillAuditCard
+Replaces the old badge grids. Shows overall coverage %, per-account expandable table, year/month heatmap grid with color-coded cells (green=success, red=failed, gray=pending).
+
+### Running the script
+```bash
+node scripts/run-sales-backfill.mjs
+```
+Auto-pauses the cron on start, auto-unpauses on finish. Prints per-connection and final audit summaries.
 
 ---
 

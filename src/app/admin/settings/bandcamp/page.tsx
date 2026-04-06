@@ -19,12 +19,13 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { getUserContext } from "@/actions/auth";
 import {
   createBandcampConnection,
   deleteBandcampConnection,
   getBandcampAccounts,
+  getBandcampBackfillAudit,
   getBandcampSalesOverview,
   getBandcampScraperHealth,
   getBandcampTrending,
@@ -489,42 +490,7 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
         </CardContent>
       </Card>
 
-      {/* Row 7: Sales Backfill Progress */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Sales Backfill Progress</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            {(data.backfillProgress ?? []).map((b) => (
-              <div key={b.connectionId} className="flex items-center gap-2">
-                <Badge
-                  variant={
-                    b.status === "completed"
-                      ? "default"
-                      : b.status === "running"
-                        ? "secondary"
-                        : b.status === "failed"
-                          ? "destructive"
-                          : "outline"
-                  }
-                  className="text-xs"
-                >
-                  {b.status}
-                </Badge>
-                <span className="truncate text-xs">{b.bandName}</span>
-                {b.totalTransactions > 0 && (
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    ({b.totalTransactions.toLocaleString()})
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Row 8: Open Issues */}
+      {/* Row 7: Open Issues */}
       {data.reviewItems.length > 0 && (
         <Card>
           <CardHeader>
@@ -584,6 +550,229 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
             </Table>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Backfill Audit Card ─────────────────────────────────────────────────────
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function statusBadgeVariant(status: string) {
+  if (status === "completed") return "default" as const;
+  if (status === "partial") return "secondary" as const;
+  if (status === "running") return "outline" as const;
+  if (status === "failed") return "destructive" as const;
+  return "outline" as const;
+}
+
+function BackfillAuditCard({ workspaceId }: { workspaceId: string }) {
+  const { data, isLoading } = useAppQuery({
+    queryKey: queryKeys.bandcamp.backfillAudit(workspaceId),
+    queryFn: () => getBandcampBackfillAudit(workspaceId),
+    tier: CACHE_TIERS.SESSION,
+    enabled: !!workspaceId,
+  });
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (isLoading || !data) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Sales Data Coverage</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const { overall, accounts } = data;
+  const totalExpected = accounts.reduce(
+    (s: number, a: (typeof accounts)[0]) => s + a.monthGrid.length,
+    0,
+  );
+  const totalCovered = accounts.reduce(
+    (s: number, a: (typeof accounts)[0]) =>
+      s +
+      a.monthGrid.filter(
+        (c: (typeof a.monthGrid)[0]) => c.chunkStatus === "success" || c.chunkStatus === "skipped",
+      ).length,
+    0,
+  );
+  const overallPct = totalExpected > 0 ? Math.round((totalCovered / totalExpected) * 100) : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <BarChart3 className="h-4 w-4" />
+          Sales Data Coverage: {overallPct}%
+        </CardTitle>
+        <CardDescription>
+          {overall.totalConnections} accounts | {overall.completedCount} completed |{" "}
+          {overall.partialCount} partial | {overall.runningCount} running
+          {overall.failedChunkCount > 0 && (
+            <span className="text-destructive ml-1">
+              | {overall.failedChunkCount} failed chunks
+            </span>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-3 h-2 w-full rounded-full bg-muted overflow-hidden">
+          <div className="h-full bg-green-500 transition-all" style={{ width: `${overallPct}%` }} />
+        </div>
+
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[200px]">Account</TableHead>
+              <TableHead className="w-[90px]">Status</TableHead>
+              <TableHead className="w-[80px] text-right">Sales</TableHead>
+              <TableHead className="w-[80px] text-right">Coverage</TableHead>
+              <TableHead className="w-[60px] text-right">Failed</TableHead>
+              <TableHead className="w-[60px] text-right">Missing</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {accounts.map((acct: (typeof accounts)[0]) => {
+              const isOpen = expandedId === acct.connectionId;
+              return (
+                <React.Fragment key={acct.connectionId}>
+                  <TableRow
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => setExpandedId(isOpen ? null : acct.connectionId)}
+                  >
+                    <TableCell className="font-medium text-sm">{acct.bandName}</TableCell>
+                    <TableCell>
+                      <Badge variant={statusBadgeVariant(acct.status)} className="text-xs">
+                        {acct.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">
+                      {acct.totalSales.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">
+                      {acct.coveragePercent}%
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">
+                      {acct.failedChunks > 0 ? (
+                        <span className="text-destructive">{acct.failedChunks}</span>
+                      ) : (
+                        "0"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-sm">
+                      {(acct.missingChunks ?? 0) > 0 ? (
+                        <span className="text-muted-foreground">{acct.missingChunks}</span>
+                      ) : (
+                        "0"
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={6} className="p-0">
+                        <MonthHeatmap monthGrid={acct.monthGrid} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MonthHeatmap({
+  monthGrid,
+}: {
+  monthGrid: Array<{
+    year: number;
+    month: number;
+    chunkStatus: string;
+    salesCount: number;
+    error: string | null;
+  }>;
+}) {
+  const years = Array.from(new Set(monthGrid.map((c) => c.year))).sort();
+  if (years.length === 0) return <div className="p-3 text-xs text-muted-foreground">No data</div>;
+
+  const byYearMonth = new Map<string, (typeof monthGrid)[0]>();
+  for (const cell of monthGrid) byYearMonth.set(`${cell.year}-${cell.month}`, cell);
+
+  return (
+    <div className="p-3 overflow-x-auto">
+      <table className="w-full text-xs tabular-nums">
+        <thead>
+          <tr>
+            <th className="text-left font-medium text-muted-foreground w-[50px]">Year</th>
+            {MONTHS.map((m) => (
+              <th key={m} className="text-center font-medium text-muted-foreground w-[52px]">
+                {m}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {years.map((year) => (
+            <tr key={year}>
+              <td className="text-muted-foreground font-medium">{year}</td>
+              {Array.from({ length: 12 }, (_, i) => {
+                const cell = byYearMonth.get(`${year}-${i + 1}`);
+                if (!cell)
+                  return (
+                    <td key={i} className="text-center">
+                      -
+                    </td>
+                  );
+
+                let bg = "bg-muted/30";
+                let text = "-";
+                if (cell.chunkStatus === "success" && cell.salesCount > 0) {
+                  bg = "bg-green-100 dark:bg-green-900/30";
+                  text = String(cell.salesCount);
+                } else if (cell.chunkStatus === "success" || cell.chunkStatus === "skipped") {
+                  bg = "bg-green-50 dark:bg-green-950/20";
+                  text = "0";
+                } else if (cell.chunkStatus === "failed") {
+                  bg = "bg-red-100 dark:bg-red-900/30";
+                  text = "!";
+                }
+
+                return (
+                  <td
+                    key={i}
+                    className={`text-center rounded px-1 py-0.5 ${bg}`}
+                    title={cell.error ?? undefined}
+                  >
+                    {text}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {monthGrid.some((c) => c.chunkStatus === "failed") && (
+        <div className="mt-2 space-y-1">
+          <p className="text-xs font-medium text-destructive">Failed Chunks:</p>
+          {monthGrid
+            .filter((c) => c.chunkStatus === "failed")
+            .map((c) => (
+              <p key={`${c.year}-${c.month}`} className="text-xs text-muted-foreground pl-2">
+                {c.year}-{String(c.month).padStart(2, "0")}: {c.error ?? "Unknown error"}
+              </p>
+            ))}
+        </div>
       )}
     </div>
   );
@@ -750,35 +939,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         </Button>
       </div>
 
-      {/* Backfill status */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Backfill Status</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            {data.connections.map((conn) => (
-              <div key={conn.connectionId} className="flex items-center gap-2">
-                <Badge
-                  variant={
-                    conn.backfillStatus === "completed"
-                      ? "default"
-                      : conn.backfillStatus === "running"
-                        ? "secondary"
-                        : conn.backfillStatus === "failed"
-                          ? "destructive"
-                          : "outline"
-                  }
-                  className="text-xs"
-                >
-                  {conn.backfillStatus}
-                </Badge>
-                <span className="truncate text-xs">{conn.bandName}</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <BackfillAuditCard workspaceId={workspaceId} />
 
       {/* Filters + summary */}
       <div className="flex gap-3 items-center flex-wrap">

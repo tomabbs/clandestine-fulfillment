@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-04
+updated_at: 2026-04-07
 
 domains:
   - name: auth_and_access
@@ -81,6 +81,7 @@ domains:
       - credential and connection health
       - bandcamp scraper health dashboard (getBandcampScraperHealth)
       - bandcamp Sales Report API (backfill + daily sync)
+      - bandcamp sales backfill audit log (chunk-level tracking, verified completion)
       - bandcamp genre tags (HTML scraping + taxonomy matching)
       - bandcamp trending intelligence (dig_deeper API)
       - SKU reconciliation and auto-generation

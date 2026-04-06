@@ -51,7 +51,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bundle-availability-sweep` | `src/trigger/tasks/bundle-availability-sweep.ts` | `0 6 * * *` (daily 6am UTC) |
 | `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
 | `bandcamp-sales-sync` | `src/trigger/tasks/bandcamp-sales-sync.ts` | `0 5 * * *` (daily 5am UTC) |
-| `bandcamp-sales-backfill-cron` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | `*/10 * * * *` — processes backfill chunks for all connections with time guard (240s); each chunk downloads one year of sales history per connection via Sales Report API |
+| `bandcamp-sales-backfill-cron` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | `*/10 * * * *` — self-healing monitor: detects stale running connections (>2h), retries up to 3 failed chunks per run using sync sales_report API, reads bandcamp_sales_backfill_log for gap detection |
 
 ## Event/On-Demand Tasks
 
@@ -78,7 +78,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `discogs-initial-listing` | `src/trigger/tasks/discogs-initial-listing.ts` | `src/actions/discogs-admin.ts` (confirmMapping) |
 | `discogs-message-send` | `src/trigger/tasks/discogs-message-send.ts` | Support UI / staff |
 | `catalog-stats-refresh-demand` | `src/trigger/tasks/catalog-stats-refresh.ts` | Staff admin UI (on-demand) |
-| `bandcamp-sales-backfill` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | Staff admin UI (on-demand); self-triggers in yearly chunks |
+| `bandcamp-sales-backfill` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | Staff admin UI (on-demand); self-triggers in yearly chunks (DEPRECATED — use scripts/run-sales-backfill.mjs) |
 | `bundle-component-fanout` | `src/trigger/tasks/bundle-component-fanout.ts` | `bandcamp-sale-poll` (when bundle variant sold) |
 | `bandcamp-tag-backfill` | `src/trigger/tasks/bandcamp-tag-backfill.ts` | Staff admin UI (on-demand); scrapes album HTML for `<a class="tag">` genre tags |
 

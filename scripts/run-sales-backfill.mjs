@@ -1,14 +1,17 @@
 /**
- * One-off sales backfill script.
+ * Sales backfill script with chunk-level audit log.
  *
- * Processes ALL connections from their last_processed_date to present.
- * Refreshes the OAuth token ONCE, reuses it for all connections.
- * No cron overhead, no Trigger.dev task scheduling, no time limits.
+ * Two processing modes:
+ *   Mode A (full scan): cursor-based walk from coverage_start_date to now.
+ *                        For connections with status pending/running/failed.
+ *   Mode B (retry):     process only failed/missing chunks from the audit log.
+ *                        For connections with status partial.
+ *
+ * Every API call writes a row to bandcamp_sales_backfill_log. A connection
+ * is only marked "completed" when every expected chunk has a terminal-good
+ * log entry AND a cross-check of SUM(sales_inserted) vs actual DB rows passes.
  *
  * Usage: node scripts/run-sales-backfill.mjs
- *
- * Run this ONCE to complete the initial backfill. After that,
- * the daily bandcamp-sales-sync cron handles ongoing updates.
  */
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
@@ -25,17 +28,23 @@ if (!url || !key || !BC_CLIENT_ID || !BC_CLIENT_SECRET) {
 }
 const sb = createClient(url, key);
 
-const DELAY_MS = 3000; // 3 seconds between API calls — well under 50-per-10-sec limit
-const POLL_INTERVAL_MS = 3000;
-const MAX_POLL_ATTEMPTS = 120;
+// ── Configurable constants (tune empirically, don't hardcode into logic) ──
+const DELAY_MS = 3000;
+const RETRY_WAIT_429 = 60_000;
+const RETRY_WAIT_SERVER = 30_000;
+const RETRY_WAIT_NETWORK = 15_000;
+const RETRY_WAIT_TOKEN = 30_000;
+const MAX_CHUNK_RETRIES = 3;
+const SKIP_AHEAD_THRESHOLD = 6;
 
 let accessToken = null;
 let tokenExpiresAt = 0;
 
+// ── OAuth token management ──────────────────────────────────────────────────
+
 async function ensureToken() {
   if (accessToken && Date.now() < tokenExpiresAt - 300_000) return accessToken;
 
-  // Retry DB read up to 3 times — transient null reads killed connections in prior runs
   let creds = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data, error } = await sb
@@ -44,17 +53,16 @@ async function ensureToken() {
       .limit(1)
       .single();
     if (data) { creds = data; break; }
-    console.log(`  ⚠ Credentials query returned null (attempt ${attempt + 1}/3, error: ${error?.message ?? "none"}), retrying in 5s...`);
+    console.log(`  WARNING: Credentials query returned null (attempt ${attempt + 1}/3, error: ${error?.message ?? "none"}), retrying in 5s...`);
     await new Promise(r => setTimeout(r, 5000));
   }
-  if (!creds) throw new Error("Failed to read credentials after 3 attempts");
+  if (!creds) throw new Error("CREDENTIALS_UNAVAILABLE: Failed to read credentials after 3 attempts");
 
   if (creds.access_token && creds.token_expires_at) {
     const exp = new Date(creds.token_expires_at).getTime();
     if (Date.now() < exp - 300_000) {
       accessToken = creds.access_token;
       tokenExpiresAt = exp;
-      console.log("  Using cached token (expires in " + Math.round((exp - Date.now()) / 60000) + "m)");
       return accessToken;
     }
   }
@@ -80,7 +88,7 @@ async function ensureToken() {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Token refresh failed: ${res.status} ${text}`);
+    throw new Error(`TOKEN_REFRESH_FAILED: ${res.status} ${text}`);
   }
 
   const parsed = await res.json();
@@ -98,46 +106,17 @@ async function ensureToken() {
   return accessToken;
 }
 
-async function generateReport(bandId, startDate, endDate, token) {
-  const res = await fetch("https://bandcamp.com/api/sales/4/generate_sales_report", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ band_id: bandId, start_time: startDate, end_time: endDate, format: "json" }),
-  });
-  if (!res.ok) throw new Error(`generate_sales_report failed: ${res.status}`);
-  const data = await res.json();
-  if (data.error) throw new Error(`generate_sales_report error: ${data.error_message}`);
-  return data.token;
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function pollReport(reportToken, token) {
-  for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
-    const res = await fetch("https://bandcamp.com/api/sales/4/fetch_sales_report", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ token: reportToken }),
-    });
-    if (!res.ok) throw new Error(`fetch_sales_report failed: ${res.status}`);
-    const data = await res.json();
-    if (data.error && data.error_message === "Report hasn't generated yet") {
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-      continue;
-    }
-    if (data.error) throw new Error(`fetch_sales_report error: ${data.error_message}`);
-    return data.url;
-  }
-  throw new Error("Report poll timed out");
-}
-
+// Keep in sync with safeBigint in bandcamp-sales-backfill.ts and import-sales-csv.mjs
 function safeBigint(val) {
   if (val == null) return null;
   const s = String(val);
   if (/^\d+$/.test(s)) return parseInt(s, 10);
-  return null; // Non-numeric (e.g. "t878373461" payout records)
+  return null;
 }
 
 async function insertRows(workspaceId, connectionId, items) {
-  // Filter out items with non-numeric transaction IDs (payouts, transfers)
   const validItems = items.filter(item => {
     const txId = safeBigint(item.bandcamp_transaction_id);
     const txItemId = safeBigint(item.bandcamp_transaction_item_id);
@@ -148,6 +127,7 @@ async function insertRows(workspaceId, connectionId, items) {
 
   let inserted = 0;
   const batchSize = 100;
+  // Keep in sync with insertSalesRows in bandcamp-sales-backfill.ts
   for (let i = 0; i < validItems.length; i += batchSize) {
     const batch = validItems.slice(i, i + batchSize);
     const rows = batch.map(item => ({
@@ -219,27 +199,371 @@ async function insertRows(workspaceId, connectionId, items) {
   return inserted;
 }
 
+// ── Audit log helpers ───────────────────────────────────────────────────────
+
+async function getNextAttempt(connectionId, chunkStart) {
+  const { data } = await sb
+    .from("bandcamp_sales_backfill_log")
+    .select("attempt_number")
+    .eq("connection_id", connectionId)
+    .eq("chunk_start", chunkStart)
+    .order("attempt_number", { ascending: false })
+    .limit(1)
+    .single();
+  return (data?.attempt_number ?? 0) + 1;
+}
+
+async function logChunk(workspaceId, connectionId, chunkStart, chunkEnd, status, salesReturned, salesInserted, httpStatus, errorMessage, startedAt) {
+  const attempt = await getNextAttempt(connectionId, chunkStart);
+  const now = new Date();
+  await sb.from("bandcamp_sales_backfill_log").insert({
+    workspace_id: workspaceId,
+    connection_id: connectionId,
+    chunk_start: chunkStart,
+    chunk_end: chunkEnd,
+    status,
+    sales_returned: salesReturned,
+    sales_inserted: salesInserted,
+    http_status: httpStatus,
+    error_message: errorMessage,
+    attempt_number: attempt,
+    started_at: startedAt.toISOString(),
+    finished_at: now.toISOString(),
+    duration_ms: now.getTime() - startedAt.getTime(),
+  });
+}
+
+function buildExpectedChunks(coverageStart, now) {
+  const chunks = [];
+  let cursor = new Date(coverageStart);
+  cursor.setDate(1);
+  while (cursor < now) {
+    const end = new Date(cursor);
+    end.setMonth(end.getMonth() + 1);
+    chunks.push({
+      start: cursor.toISOString().slice(0, 10),
+      end: (end > now ? now : end).toISOString().slice(0, 10),
+    });
+    cursor = end;
+  }
+  return chunks;
+}
+
+async function getLatestAttempts(connectionId) {
+  const { data } = await sb
+    .from("bandcamp_sales_backfill_log")
+    .select("chunk_start, status, sales_inserted, error_message, attempt_number")
+    .eq("connection_id", connectionId)
+    .order("attempt_number", { ascending: false });
+
+  const map = new Map();
+  for (const row of data ?? []) {
+    const key = row.chunk_start;
+    if (!map.has(key)) map.set(key, row);
+  }
+  return map;
+}
+
+// ── Core chunk processor (shared between Mode A and Mode B) ─────────────────
+
+async function processChunk(conn, startStr, endStr) {
+  const chunkStartedAt = new Date();
+  let retries = 0;
+
+  while (retries < MAX_CHUNK_RETRIES) {
+    try {
+      const token = await ensureToken();
+      const res = await fetch("https://bandcamp.com/api/sales/4/sales_report", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ band_id: conn.band_id, start_time: startStr, end_time: endStr }),
+      });
+
+      if (res.status === 429) {
+        const retryAfter = parseInt(res.headers.get("Retry-After") ?? "60", 10);
+        process.stdout.write(`429 (waiting ${retryAfter}s)... `);
+        await new Promise(r => setTimeout(r, retryAfter * 1000));
+        retries++;
+        continue;
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, res.status, `Connection-level auth error: ${res.status}`, chunkStartedAt);
+        return { status: "connection_failed", httpStatus: res.status };
+      }
+
+      if (res.status >= 500) {
+        retries++;
+        if (retries >= MAX_CHUNK_RETRIES) {
+          await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, res.status, `Server error after ${MAX_CHUNK_RETRIES} retries: ${res.status}`, chunkStartedAt);
+          return { status: "chunk_failed", inserted: 0 };
+        }
+        process.stdout.write(`${res.status} (retry ${retries}/${MAX_CHUNK_RETRIES})... `);
+        await new Promise(r => setTimeout(r, RETRY_WAIT_SERVER));
+        continue;
+      }
+
+      if (!res.ok) {
+        await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, res.status, `Unexpected HTTP ${res.status}`, chunkStartedAt);
+        return { status: "chunk_failed", inserted: 0 };
+      }
+
+      const data = await res.json();
+      if (data.error) {
+        await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, 200, `API error: ${data.error_message}`, chunkStartedAt);
+        return { status: "chunk_failed", inserted: 0 };
+      }
+
+      const items = data.report ?? [];
+      const inserted = await insertRows(conn.workspace_id, conn.id, items);
+      await logChunk(conn.workspace_id, conn.id, startStr, endStr, "success", items.length, inserted, 200, null, chunkStartedAt);
+      return { status: "success", inserted, salesReturned: items.length };
+    } catch (err) {
+      const msg = err.message ?? String(err);
+
+      if (msg.includes("CREDENTIALS_UNAVAILABLE") || msg.includes("TOKEN_REFRESH_FAILED")) {
+        accessToken = null;
+        tokenExpiresAt = 0;
+        retries++;
+        if (retries >= MAX_CHUNK_RETRIES) {
+          await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, null, `Token error after ${MAX_CHUNK_RETRIES} retries: ${msg}`, chunkStartedAt);
+          return { status: "connection_failed", httpStatus: null };
+        }
+        process.stdout.write(`token error (retry ${retries}/${MAX_CHUNK_RETRIES})... `);
+        await new Promise(r => setTimeout(r, RETRY_WAIT_TOKEN));
+        continue;
+      }
+
+      if (msg.includes("fetch failed") || msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT")) {
+        retries++;
+        if (retries >= MAX_CHUNK_RETRIES) {
+          await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, null, `Network error after ${MAX_CHUNK_RETRIES} retries: ${msg}`, chunkStartedAt);
+          return { status: "chunk_failed", inserted: 0 };
+        }
+        process.stdout.write(`network error (retry ${retries}/${MAX_CHUNK_RETRIES})... `);
+        await new Promise(r => setTimeout(r, RETRY_WAIT_NETWORK));
+        continue;
+      }
+
+      await logChunk(conn.workspace_id, conn.id, startStr, endStr, "failed", 0, 0, null, msg.slice(0, 500), chunkStartedAt);
+      return { status: "chunk_failed", inserted: 0 };
+    }
+  }
+
+  return { status: "chunk_failed", inserted: 0 };
+}
+
+// ── Completion verification ─────────────────────────────────────────────────
+
+async function verifyCompletion(conn, coverageStart) {
+  const now = new Date();
+  const expected = buildExpectedChunks(coverageStart, now);
+  const latestAttempts = await getLatestAttempts(conn.id);
+
+  let covered = 0;
+  let failed = 0;
+  let missing = 0;
+  const failedChunks = [];
+
+  for (const chunk of expected) {
+    const log = latestAttempts.get(chunk.start);
+    if (!log) {
+      missing++;
+    } else if (log.status === "success" || log.status === "skipped") {
+      covered++;
+    } else {
+      failed++;
+      failedChunks.push({ start: chunk.start, error: log.error_message });
+    }
+  }
+
+  const { count: actualSales } = await sb
+    .from("bandcamp_sales")
+    .select("*", { count: "exact", head: true })
+    .eq("connection_id", conn.id);
+
+  const { data: logSum } = await sb
+    .from("bandcamp_sales_backfill_log")
+    .select("sales_inserted")
+    .eq("connection_id", conn.id)
+    .eq("status", "success");
+
+  const expectedFromLog = (logSum ?? []).reduce((s, r) => s + (r.sales_inserted ?? 0), 0);
+  const salesMismatch = Math.abs((actualSales ?? 0) - expectedFromLog) > 10;
+
+  const gaps = failed + missing;
+  const coveragePct = expected.length > 0 ? Math.round((covered / expected.length) * 100) : 0;
+
+  return { expected: expected.length, covered, failed, missing, gaps, failedChunks, coveragePct, actualSales: actualSales ?? 0, salesMismatch };
+}
+
+function printAuditSummary(connName, verification) {
+  const { expected, covered, failed, missing, gaps, failedChunks, coveragePct, actualSales, salesMismatch } = verification;
+  const status = gaps === 0 && !salesMismatch ? "COMPLETED" : "PARTIAL";
+  console.log(`\n  ${connName} — ${status}`);
+  console.log(`    Chunks: ${covered}/${expected} covered (${coveragePct}%)`);
+  if (failed > 0) console.log(`    Failed:  ${failed} (${failedChunks.map(f => f.start).join(", ")})`);
+  if (missing > 0) console.log(`    Missing: ${missing} (never attempted)`);
+  console.log(`    Sales in DB: ${actualSales.toLocaleString()}`);
+  if (salesMismatch) console.log(`    WARNING: sales count mismatch between log and DB`);
+  if (gaps > 0) console.log(`    -> Re-run to retry ${gaps} gap(s)`);
+}
+
+// ── Mode A: Full cursor-based scan ──────────────────────────────────────────
+
+async function modeAFullScan(conn, state, coverageStart) {
+  let cursor = state.last_processed_date
+    ? new Date(state.last_processed_date)
+    : new Date(coverageStart);
+  const now = new Date();
+  let connInserted = 0;
+  let consecutiveEmpty = 0;
+
+  while (cursor < now) {
+    if (consecutiveEmpty >= SKIP_AHEAD_THRESHOLD) {
+      const jumpTo = new Date(cursor);
+      jumpTo.setFullYear(jumpTo.getFullYear() + 1);
+      jumpTo.setMonth(0, 1);
+      if (jumpTo < now) {
+        const skipStart = cursor.toISOString().slice(0, 10);
+        const skipEnd = jumpTo.toISOString().slice(0, 10);
+        console.log(`  >> ${consecutiveEmpty} empty months — skipping to ${skipEnd}`);
+        await logChunk(conn.workspace_id, conn.id, skipStart, skipEnd, "skipped", 0, 0, null, `Skip-ahead: ${consecutiveEmpty} consecutive empty months`, new Date());
+        cursor = jumpTo;
+        consecutiveEmpty = 0;
+        await sb.from("bandcamp_sales_backfill_state").update({
+          last_processed_date: cursor.toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("connection_id", conn.id);
+        continue;
+      }
+    }
+
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setMonth(chunkEnd.getMonth() + 1);
+    const effectiveEnd = chunkEnd > now ? now : chunkEnd;
+
+    const startStr = cursor.toISOString().slice(0, 10);
+    const endStr = effectiveEnd.toISOString().slice(0, 10);
+    process.stdout.write(`  ${startStr} -> ${endStr} ... `);
+
+    const result = await processChunk(conn, startStr, endStr);
+
+    if (result.status === "connection_failed") {
+      console.log(`CONNECTION FAILED (${result.httpStatus})`);
+      await sb.from("bandcamp_sales_backfill_state").update({
+        status: "failed",
+        last_error: `Connection-level failure: HTTP ${result.httpStatus}`,
+        updated_at: new Date().toISOString(),
+      }).eq("connection_id", conn.id);
+      return { connInserted, aborted: true };
+    }
+
+    if (result.status === "chunk_failed") {
+      console.log("FAILED (logged, continuing)");
+      consecutiveEmpty = 0;
+    } else {
+      const salesCount = result.salesReturned ?? 0;
+      console.log(`${salesCount} sales (${result.inserted} new)`);
+      connInserted += result.inserted;
+      if (salesCount === 0) consecutiveEmpty++;
+      else consecutiveEmpty = 0;
+    }
+
+    await sb.from("bandcamp_sales_backfill_state").update({
+      last_processed_date: effectiveEnd.toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("connection_id", conn.id);
+
+    cursor = effectiveEnd;
+    await new Promise(r => setTimeout(r, DELAY_MS));
+  }
+
+  return { connInserted, aborted: false };
+}
+
+// ── Mode B: Retry failed + fill missing chunks ─────────────────────────────
+
+async function modeBRetryGaps(conn, coverageStart) {
+  const now = new Date();
+  const expected = buildExpectedChunks(coverageStart, now);
+  const latestAttempts = await getLatestAttempts(conn.id);
+
+  const gaps = [];
+  for (const chunk of expected) {
+    const log = latestAttempts.get(chunk.start);
+    if (!log || log.status === "failed") {
+      gaps.push(chunk);
+    }
+  }
+
+  if (gaps.length === 0) {
+    console.log("  No gaps found");
+    return { connInserted: 0 };
+  }
+
+  console.log(`  ${gaps.length} gap(s) to retry`);
+  let connInserted = 0;
+
+  for (const gap of gaps) {
+    process.stdout.write(`  ${gap.start} -> ${gap.end} ... `);
+    const result = await processChunk(conn, gap.start, gap.end);
+
+    if (result.status === "connection_failed") {
+      console.log(`CONNECTION FAILED (${result.httpStatus})`);
+      await sb.from("bandcamp_sales_backfill_state").update({
+        status: "failed",
+        last_error: `Connection-level failure: HTTP ${result.httpStatus}`,
+        updated_at: new Date().toISOString(),
+      }).eq("connection_id", conn.id);
+      return { connInserted, aborted: true };
+    }
+
+    if (result.status === "chunk_failed") {
+      console.log("STILL FAILED (logged)");
+    } else {
+      const salesCount = result.salesReturned ?? 0;
+      console.log(`${salesCount} sales (${result.inserted} new)`);
+      connInserted += result.inserted;
+    }
+
+    await new Promise(r => setTimeout(r, DELAY_MS));
+  }
+
+  return { connInserted, aborted: false };
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+
 async function main() {
-  console.log("═══════════════════════════════════════════════");
-  console.log("  ONE-OFF SALES BACKFILL");
+  console.log("=================================================");
+  console.log("  SALES BACKFILL WITH AUDIT LOG");
   console.log("  " + new Date().toISOString());
-  console.log("═══════════════════════════════════════════════\n");
+  console.log("=================================================\n");
+
+  // Pause the cron
+  const { data: wsSettings } = await sb.from("workspaces").select("id, bandcamp_scraper_settings").single();
+  if (wsSettings) {
+    const s = wsSettings.bandcamp_scraper_settings ?? {};
+    s.pause_sales_backfill_cron = true;
+    await sb.from("workspaces").update({ bandcamp_scraper_settings: s }).eq("id", wsSettings.id);
+    console.log("Cron PAUSED\n");
+  }
 
   const { data: connections } = await sb
     .from("bandcamp_connections")
-    .select("id, band_id, band_name, workspace_id")
+    .select("id, band_id, band_name, workspace_id, created_at")
     .eq("is_active", true)
     .order("band_name");
 
   console.log(`Found ${connections.length} active connections\n`);
 
   let totalInserted = 0;
-  let totalChunks = 0;
+  const summaries = [];
 
   for (const conn of connections) {
-    console.log(`\n── ${conn.band_name} ──`);
+    console.log(`\n-- ${conn.band_name} --`);
 
-    // Get or create backfill state
     let { data: state } = await sb
       .from("bandcamp_sales_backfill_state")
       .select("*")
@@ -255,23 +579,19 @@ async function main() {
         started_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
-      state = { last_processed_date: null, total_transactions: 0 };
+      state = { status: "pending", last_processed_date: null, total_transactions: 0, coverage_start_date: null };
     }
 
-    const { count: existingSales } = await sb
-      .from("bandcamp_sales")
-      .select("*", { count: "exact", head: true })
-      .eq("connection_id", conn.id);
+    const coverageStart = state.coverage_start_date ?? conn.created_at?.slice(0, 10) ?? "2010-01-01";
 
-    if (state.status === "completed" && (existingSales ?? 0) >= 10) {
-      console.log("  Already completed with", existingSales, "sales, skipping");
+    if (state.status === "completed") {
+      const { count: existingSales } = await sb
+        .from("bandcamp_sales")
+        .select("*", { count: "exact", head: true })
+        .eq("connection_id", conn.id);
+      console.log(`  Already completed with ${existingSales} sales, skipping`);
+      summaries.push({ name: conn.band_name, status: "completed", sales: existingSales ?? 0, coverage: 100, gaps: 0 });
       continue;
-    }
-
-    if (state.status === "completed" && (existingSales ?? 0) < 10) {
-      console.log("  Marked completed but only", existingSales, "sales -- re-processing from scratch");
-      state.last_processed_date = null;
-      state.total_transactions = existingSales ?? 0;
     }
 
     await sb.from("bandcamp_sales_backfill_state").update({
@@ -279,188 +599,62 @@ async function main() {
       updated_at: new Date().toISOString(),
     }).eq("connection_id", conn.id);
 
-    let cursor = state.last_processed_date
-      ? new Date(state.last_processed_date)
-      : new Date("2010-01-01");
-    const now = new Date();
-    let connInserted = 0;
-    let consecutiveEmpty = 0;
-
-    while (cursor < now) {
-      // Skip-ahead: if 6+ consecutive empty months, jump ahead a year
-      if (consecutiveEmpty >= 6) {
-        const jumpTo = new Date(cursor);
-        jumpTo.setFullYear(jumpTo.getFullYear() + 1);
-        jumpTo.setMonth(0, 1); // Jan 1 of next year
-        if (jumpTo < now) {
-          console.log(`  ⏩ ${consecutiveEmpty} empty months — skipping to ${jumpTo.toISOString().slice(0, 10)}`);
-          cursor = jumpTo;
-          consecutiveEmpty = 0;
-          // Update state so we don't re-walk these on restart
-          await sb.from("bandcamp_sales_backfill_state").update({
-            last_processed_date: cursor.toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq("connection_id", conn.id);
-          continue;
-        }
-      }
-
-      const chunkEnd = new Date(cursor);
-      chunkEnd.setMonth(chunkEnd.getMonth() + 1);
-      const effectiveEnd = chunkEnd > now ? now : chunkEnd;
-
-      const startStr = cursor.toISOString().slice(0, 10);
-      const endStr = effectiveEnd.toISOString().slice(0, 10);
-      process.stdout.write(`  ${startStr} -> ${endStr} ... `);
-
-      try {
-        const token = await ensureToken();
-
-        // Use SYNCHRONOUS sales_report API (not async generate/fetch which can truncate)
-        const res = await fetch("https://bandcamp.com/api/sales/4/sales_report", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ band_id: conn.band_id, start_time: startStr, end_time: endStr }),
-        });
-        if (res.status === 429) {
-          const retryAfter = parseInt(res.headers.get("Retry-After") ?? "60", 10);
-          console.log(`RATE LIMITED (429). Waiting ${retryAfter}s...`);
-          await new Promise(r => setTimeout(r, retryAfter * 1000));
-          continue;
-        }
-        if (!res.ok) throw new Error(`sales_report failed: ${res.status}`);
-        const data = await res.json();
-        if (data.error) throw new Error(`sales_report error: ${data.error_message}`);
-        const items = data.report ?? [];
-
-        const inserted = await insertRows(conn.workspace_id, conn.id, items);
-        connInserted += inserted;
-        totalInserted += inserted;
-        totalChunks++;
-
-        // Update state
-        const prevTotal = state.total_transactions ?? 0;
-        state.total_transactions = prevTotal + inserted;
-        await sb.from("bandcamp_sales_backfill_state").update({
-          last_processed_date: effectiveEnd.toISOString(),
-          total_transactions: state.total_transactions,
-          earliest_sale_date: items.length > 0 ? new Date(items[items.length - 1].date).toISOString() : undefined,
-          latest_sale_date: items.length > 0 ? new Date(items[0].date).toISOString() : undefined,
-          updated_at: new Date().toISOString(),
-        }).eq("connection_id", conn.id);
-
-        if (items.length === 0) {
-          consecutiveEmpty++;
-        } else {
-          consecutiveEmpty = 0;
-        }
-        console.log(`${items.length} sales (${inserted} new)`);
-      } catch (err) {
-        console.log(`ERROR: ${err.message}`);
-        if (err.message.includes("429") || err.message.includes("rate")) {
-          console.log("  Rate limited! Waiting 60 seconds...");
-          await new Promise(r => setTimeout(r, 60000));
-          continue;
-        }
-        if (err.message.includes("fetch failed") || err.message.includes("ECONNRESET") || err.message.includes("ETIMEDOUT")) {
-          console.log("  Network error, retrying in 15 seconds...");
-          await new Promise(r => setTimeout(r, 15000));
-          continue;
-        }
-        if (err.message.includes("refresh_token") || err.message.includes("Token refresh") || err.message.includes("credentials")) {
-          console.log("  Token error, clearing cache and retrying in 30 seconds...");
-          accessToken = null;
-          tokenExpiresAt = 0;
-          await new Promise(r => setTimeout(r, 30000));
-          continue;
-        }
-        // Other errors: update state and move to next connection
-        await sb.from("bandcamp_sales_backfill_state").update({
-          status: "failed",
-          last_error: String(err).slice(0, 500),
-          updated_at: new Date().toISOString(),
-        }).eq("connection_id", conn.id);
-        break;
-      }
-
-      cursor = effectiveEnd;
-      await new Promise(r => setTimeout(r, DELAY_MS));
+    let result;
+    if (state.status === "partial") {
+      console.log("  Mode B: retrying gaps only");
+      result = await modeBRetryGaps(conn, coverageStart);
+    } else {
+      console.log("  Mode A: full scan from", state.last_processed_date?.slice(0, 10) ?? coverageStart);
+      result = await modeAFullScan(conn, state, coverageStart);
     }
 
-    // Mark completed if we reached present
-    if (cursor >= now) {
-      await sb.from("bandcamp_sales_backfill_state").update({
-        status: "completed",
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq("connection_id", conn.id);
-      console.log(`  COMPLETED: ${connInserted} total sales for ${conn.band_name}`);
+    totalInserted += result.connInserted;
+
+    if (result.aborted) {
+      summaries.push({ name: conn.band_name, status: "failed", sales: 0, coverage: 0, gaps: -1 });
+      continue;
     }
+
+    const verification = await verifyCompletion(conn, coverageStart);
+    printAuditSummary(conn.band_name, verification);
+
+    const finalStatus = verification.gaps === 0 && !verification.salesMismatch ? "completed" : "partial";
+    await sb.from("bandcamp_sales_backfill_state").update({
+      status: finalStatus,
+      total_transactions: verification.actualSales,
+      ...(finalStatus === "completed" ? { completed_at: new Date().toISOString() } : {}),
+      last_error: verification.gaps > 0 ? `${verification.failed} failed + ${verification.missing} missing chunks` : null,
+      updated_at: new Date().toISOString(),
+    }).eq("connection_id", conn.id);
+
+    summaries.push({
+      name: conn.band_name,
+      status: finalStatus,
+      sales: verification.actualSales,
+      coverage: verification.coveragePct,
+      gaps: verification.gaps,
+    });
   }
 
-  // Cross-reference URLs
-  console.log("\n── Cross-referencing album URLs ──");
-  // Simple version: match subdomain+album_title from mappings to item_url from sales
-  const { data: mappings } = await sb
-    .from("bandcamp_product_mappings")
-    .select("id, bandcamp_album_title, bandcamp_subdomain")
-    .not("bandcamp_album_title", "is", null)
-    .not("bandcamp_subdomain", "is", null)
-    .is("bandcamp_url", null);
-
-  let urlsMatched = 0;
-  if (mappings?.length) {
-    const { data: albumSales } = await sb
-      .from("bandcamp_sales")
-      .select("item_url, item_name")
-      .eq("item_type", "album")
-      .not("item_url", "is", null)
-      .limit(5000);
-
-    const urlLookup = new Map();
-    for (const sale of albumSales ?? []) {
-      const match = sale.item_url.match(/https?:\/\/([^.]+)\.bandcamp\.com/);
-      if (!match) continue;
-      const k = match[1].toLowerCase() + "|" + (sale.item_name?.toLowerCase().trim() ?? "");
-      if (!urlLookup.has(k)) urlLookup.set(k, sale.item_url);
-    }
-
-    for (const m of mappings) {
-      const k = (m.bandcamp_subdomain?.toLowerCase() ?? "") + "|" + (m.bandcamp_album_title?.toLowerCase().trim() ?? "");
-      const u = urlLookup.get(k);
-      if (u) {
-        await sb.from("bandcamp_product_mappings").update({
-          bandcamp_url: u,
-          bandcamp_url_source: "orders_api",
-          updated_at: new Date().toISOString(),
-        }).eq("id", m.id);
-        urlsMatched++;
-      }
-    }
-  }
-  console.log(`  Matched ${urlsMatched} URLs from sales to mappings`);
-
-  // Unpause the cron now that the script is done
-  const { data: wsSettings } = await sb.from("workspaces").select("id, bandcamp_scraper_settings").single();
+  // Unpause the cron
   if (wsSettings) {
     const s = wsSettings.bandcamp_scraper_settings ?? {};
     delete s.pause_sales_backfill_cron;
     await sb.from("workspaces").update({ bandcamp_scraper_settings: s }).eq("id", wsSettings.id);
-    console.log("\nCron unpause flag CLEARED — cron will resume on next cycle");
+    console.log("\nCron UNPAUSED");
   }
 
-  // Reconcile counters
-  console.log("\n── Reconciling counters ──");
-  const { data: allStates } = await sb.from("bandcamp_sales_backfill_state").select("connection_id");
-  for (const s of allStates ?? []) {
-    const { count: actual } = await sb.from("bandcamp_sales").select("*", { count: "exact", head: true }).eq("connection_id", s.connection_id);
-    await sb.from("bandcamp_sales_backfill_state").update({ total_transactions: actual ?? 0, updated_at: new Date().toISOString() }).eq("connection_id", s.connection_id);
+  // Final summary
+  console.log("\n=================================================");
+  console.log("  FINAL AUDIT SUMMARY");
+  console.log("=================================================");
+  console.log(`\n  ${"Connection".padEnd(30)} ${"Status".padEnd(12)} ${"Sales".padStart(8)} ${"Coverage".padStart(9)} ${"Gaps".padStart(6)}`);
+  console.log("  " + "-".repeat(70));
+  for (const s of summaries) {
+    console.log(`  ${s.name.padEnd(30)} ${s.status.padEnd(12)} ${String(s.sales).padStart(8)} ${(s.coverage + "%").padStart(9)} ${String(s.gaps).padStart(6)}`);
   }
-  console.log("  Counters reconciled for", allStates?.length, "connections");
-
-  console.log("\n═══════════════════════════════════════════════");
-  console.log(`  DONE: ${totalInserted} sales inserted across ${totalChunks} chunks`);
-  console.log("═══════════════════════════════════════════════");
+  console.log(`\n  Total new sales inserted: ${totalInserted.toLocaleString()}`);
+  console.log("=================================================");
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

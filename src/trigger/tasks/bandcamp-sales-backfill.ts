@@ -1,13 +1,16 @@
 /**
- * Bandcamp sales backfill — cron-driven, resumable in yearly chunks.
+ * Bandcamp sales backfill — self-healing cron monitor.
  *
- * Pulls all-time sales history from the Sales Report API (v4) and stores
- * in bandcamp_sales. The cron schedule processes one chunk per connection
- * per run, cycling through all connections until all are complete.
+ * The cron runs every 10 minutes and:
+ *   1. Checks if the manual script is running (pause flag) and skips if so.
+ *   2. Detects stale "running" connections (>2 hours no new log) and flips to "partial".
+ *   3. For "partial" connections, retries up to 3 failed chunks per run using
+ *      the sync sales_report API (same code path as the manual script).
+ *   4. Does NOT do full scans (Mode A) — only targeted gap retries.
  *
- * NOTE: API-triggered tasks (.trigger()) never start on this Trigger.dev
- * project — they stay QUEUED and expire. Only cron-scheduled tasks work.
- * So the backfill runs as a cron (every 10 min) instead of self-triggering.
+ * The on-demand task is DEPRECATED. It is kept exported for the Trigger.dev
+ * registry but should not be triggered. All full backfill work goes through
+ * scripts/run-sales-backfill.mjs.
  */
 
 import { logger, schedules, task } from "@trigger.dev/sdk";
@@ -16,24 +19,13 @@ import {
   generateSalesReport,
   refreshBandcampToken,
   type SalesReportItem,
+  salesReport,
 } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
 
-async function pollForReport(
-  token: string,
-  accessToken: string,
-  maxAttempts = 60,
-): Promise<string> {
-  for (let i = 0; i < maxAttempts; i++) {
-    const result = await fetchSalesReport(token, accessToken);
-    if (result.ready) return result.url;
-    await new Promise((r) => setTimeout(r, 5000));
-  }
-  throw new Error("Sales report generation timed out");
-}
-
+// Keep in sync with safeBigint in scripts/run-sales-backfill.mjs
 function safeBigint(val: unknown): number | null {
   if (val == null) return null;
   const s = String(val);
@@ -41,13 +33,13 @@ function safeBigint(val: unknown): number | null {
   return null;
 }
 
+// Keep in sync with insertRows in scripts/run-sales-backfill.mjs
 async function insertSalesRows(
   supabase: ReturnType<typeof createServiceRoleClient>,
   workspaceId: string,
   connectionId: string,
   items: SalesReportItem[],
 ): Promise<number> {
-  // Filter out items with non-numeric transaction IDs (payouts, transfers have "t" prefix)
   const validItems = items.filter((item) => {
     return (
       safeBigint(item.bandcamp_transaction_id) !== null &&
@@ -132,207 +124,26 @@ async function insertSalesRows(
   return inserted;
 }
 
+/**
+ * DEPRECATED on-demand task. Kept for registry compatibility.
+ * All backfill work now goes through scripts/run-sales-backfill.mjs.
+ */
 export const bandcampSalesBackfillTask = task({
   id: "bandcamp-sales-backfill",
   maxDuration: 300,
   run: async (payload: { connectionId: string }) => {
-    const supabase = createServiceRoleClient();
-    const { connectionId } = payload;
-
-    const { data: conn } = await supabase
-      .from("bandcamp_connections")
-      .select("band_id, band_name, workspace_id")
-      .eq("id", connectionId)
-      .single();
-
-    if (!conn) throw new Error(`Connection ${connectionId} not found`);
-    const workspaceId = conn.workspace_id;
-
-    // Read existing state, then insert or update (never upsert -- upsert resets unspecified columns to defaults)
-    const { data: existingState } = await supabase
-      .from("bandcamp_sales_backfill_state")
-      .select("status, total_transactions, last_processed_date")
-      .eq("connection_id", connectionId)
-      .single();
-
-    if (!existingState) {
-      await supabase.from("bandcamp_sales_backfill_state").insert({
-        connection_id: connectionId,
-        workspace_id: workspaceId,
-        status: "running",
-        total_transactions: 0,
-        started_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-    } else {
-      await supabase
-        .from("bandcamp_sales_backfill_state")
-        .update({
-          status: "running",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("connection_id", connectionId);
-    }
-
-    const state = existingState ?? { last_processed_date: null, total_transactions: 0 };
-
-    const chunkStart = state?.last_processed_date
-      ? new Date(state.last_processed_date)
-      : new Date("2010-01-01");
-    const chunkEnd = new Date(chunkStart);
-    chunkEnd.setFullYear(chunkEnd.getFullYear() + 1);
-    const now = new Date();
-
-    if (chunkStart >= now) {
-      await supabase
-        .from("bandcamp_sales_backfill_state")
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("connection_id", connectionId);
-      return { status: "completed", connectionId };
-    }
-
-    const effectiveEnd = chunkEnd > now ? now : chunkEnd;
-
-    try {
-      const accessToken = await refreshBandcampToken(workspaceId);
-
-      const reportToken = await generateSalesReport(
-        conn.band_id,
-        accessToken,
-        chunkStart.toISOString().slice(0, 10),
-        effectiveEnd.toISOString().slice(0, 10),
-      );
-
-      const reportUrl = await pollForReport(reportToken, accessToken);
-
-      // Download the report
-      const reportResponse = await fetch(reportUrl);
-      if (!reportResponse.ok) throw new Error(`Report download failed: ${reportResponse.status}`);
-      const reportData = await reportResponse.json();
-      const items: SalesReportItem[] = Array.isArray(reportData)
-        ? reportData
-        : (reportData.report ?? []);
-
-      const inserted = await insertSalesRows(supabase, workspaceId, connectionId, items);
-
-      // Backfill catalog_number, upc, and item_url to mappings where we find matching SKUs
-      for (const item of items) {
-        if (item.sku && (item.catalog_number || item.upc || item.item_url)) {
-          const updateData: Record<string, unknown> = {};
-          if (item.catalog_number) updateData.bandcamp_catalog_number = item.catalog_number;
-          if (item.upc) updateData.bandcamp_upc = item.upc;
-          if (item.item_url) {
-            updateData.bandcamp_url = item.item_url;
-            updateData.bandcamp_url_source = "orders_api";
-          }
-
-          await supabase
-            .from("bandcamp_product_mappings")
-            .update(updateData)
-            .eq("workspace_id", workspaceId)
-            .is("bandcamp_catalog_number", null)
-            .eq("bandcamp_item_id", 0)
-            .then(
-              () => {},
-              (err) =>
-                logger.warn("Mapping enrichment failed (broad match)", {
-                  error: String(err),
-                  task: "bandcamp-sales-backfill",
-                  sku: item.sku,
-                }),
-            );
-
-          // Match by joining through variant SKU
-          const { data: variants } = await supabase
-            .from("warehouse_product_variants")
-            .select("id")
-            .eq("workspace_id", workspaceId)
-            .eq("sku", item.sku)
-            .limit(1);
-
-          if (variants?.length) {
-            await supabase
-              .from("bandcamp_product_mappings")
-              .update(updateData)
-              .eq("variant_id", variants[0].id)
-              .then(
-                () => {},
-                (err) =>
-                  logger.warn("Mapping enrichment failed (variant match)", {
-                    error: String(err),
-                    task: "bandcamp-sales-backfill",
-                    sku: item.sku,
-                    variantId: variants[0].id,
-                  }),
-              );
-          }
-        }
-      }
-
-      // Cross-reference album URLs from digital sales to physical merch mappings
-      const urlsMatched = await crossReferenceAlbumUrls(supabase, workspaceId);
-      if (urlsMatched > 0) {
-        logger.info("Cross-referenced album URLs", {
-          task: "bandcamp-sales-backfill",
-          urlsMatched,
-        });
-      }
-
-      // Update state
-      const prevTotal = state?.total_transactions ?? 0;
-      await supabase
-        .from("bandcamp_sales_backfill_state")
-        .update({
-          last_processed_date: effectiveEnd.toISOString(),
-          total_transactions: prevTotal + inserted,
-          earliest_sale_date:
-            items.length > 0 ? new Date(items[items.length - 1].date).toISOString() : undefined,
-          latest_sale_date: items.length > 0 ? new Date(items[0].date).toISOString() : undefined,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("connection_id", connectionId);
-
-      // Mark completed if we've reached the present
-      if (effectiveEnd >= now) {
-        await supabase
-          .from("bandcamp_sales_backfill_state")
-          .update({
-            status: "completed",
-            completed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("connection_id", connectionId);
-      }
-
-      return {
-        status: "chunk_done",
-        chunkStart: chunkStart.toISOString(),
-        chunkEnd: effectiveEnd.toISOString(),
-        inserted,
-        band: conn.band_name,
-      };
-    } catch (error) {
-      await supabase
-        .from("bandcamp_sales_backfill_state")
-        .update({
-          status: "failed",
-          last_error: String(error).slice(0, 500),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("connection_id", connectionId);
-      throw error;
-    }
+    logger.warn(
+      "bandcamp-sales-backfill task is DEPRECATED. Use scripts/run-sales-backfill.mjs instead.",
+      {
+        connectionId: payload.connectionId,
+      },
+    );
+    return { status: "deprecated", message: "Use scripts/run-sales-backfill.mjs" };
   },
 });
 
 /**
- * Cron schedule: process backfill chunks every 10 minutes.
- * Iterates ALL non-completed connections per run (up to a time limit),
- * running one yearly chunk per connection via triggerAndWait.
+ * Self-healing cron: retries failed chunks and detects stale connections.
  */
 export const bandcampSalesBackfillCron = schedules.task({
   id: "bandcamp-sales-backfill-cron",
@@ -341,7 +152,6 @@ export const bandcampSalesBackfillCron = schedules.task({
   run: async () => {
     const supabase = createServiceRoleClient();
 
-    // Check pause flag — skip if manual backfill script is running
     const { data: ws } = await supabase
       .from("workspaces")
       .select("bandcamp_scraper_settings")
@@ -353,54 +163,142 @@ export const bandcampSalesBackfillCron = schedules.task({
     }
 
     const workspaceIds = await getAllWorkspaceIds(supabase);
-    let processed = 0;
+    let chunksRetried = 0;
+    let staleFixed = 0;
     const startTime = Date.now();
-    const MAX_CRON_RUNTIME_MS = 240_000;
+    const MAX_RUNTIME_MS = 240_000;
+    const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 
     for (const workspaceId of workspaceIds) {
-      if (Date.now() - startTime > MAX_CRON_RUNTIME_MS) {
-        logger.info("Backfill cron: time limit reached, will continue next run", { processed });
-        break;
-      }
+      if (Date.now() - startTime > MAX_RUNTIME_MS) break;
 
       const { data: connections } = await supabase
         .from("bandcamp_connections")
-        .select("id, band_name")
+        .select("id, band_id, band_name")
         .eq("workspace_id", workspaceId)
         .eq("is_active", true);
 
       for (const conn of connections ?? []) {
-        if (Date.now() - startTime > MAX_CRON_RUNTIME_MS) {
-          logger.info("Backfill cron: time limit reached, will continue next run", { processed });
-          break;
-        }
+        if (Date.now() - startTime > MAX_RUNTIME_MS) break;
 
         const { data: bfState } = await supabase
           .from("bandcamp_sales_backfill_state")
-          .select("status")
+          .select("status, updated_at")
           .eq("connection_id", conn.id)
           .single();
 
-        if (bfState?.status === "completed") continue;
+        if (bfState?.status === "completed" || bfState?.status === "pending") continue;
 
-        try {
-          logger.info("Backfill cron: processing chunk", {
+        // Detect stale "running" — no updates for >2 hours
+        if (bfState?.status === "running" && bfState.updated_at) {
+          const lastUpdate = new Date(bfState.updated_at).getTime();
+          if (Date.now() - lastUpdate > STALE_THRESHOLD_MS) {
+            logger.warn("Backfill cron: stale running connection, flipping to partial", {
+              band: conn.band_name,
+              lastUpdate: bfState.updated_at,
+            });
+            await supabase
+              .from("bandcamp_sales_backfill_state")
+              .update({
+                status: "partial",
+                last_error: "Stale running detected by cron",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("connection_id", conn.id);
+            staleFixed++;
+            continue;
+          }
+          continue;
+        }
+
+        // For partial/failed: retry up to 3 failed chunks
+        if (bfState?.status === "partial" || bfState?.status === "failed") {
+          const { data: failedChunks } = await supabase
+            .from("bandcamp_sales_backfill_log")
+            .select("chunk_start, chunk_end, attempt_number")
+            .eq("connection_id", conn.id)
+            .eq("status", "failed")
+            .order("chunk_start")
+            .limit(3);
+
+          if (!failedChunks?.length) continue;
+
+          logger.info("Backfill cron: retrying failed chunks", {
             band: conn.band_name,
-            connectionId: conn.id,
+            chunks: failedChunks.length,
           });
-          const result = await bandcampSalesBackfillTask.triggerAndWait({ connectionId: conn.id });
-          logger.info("Backfill cron: chunk done", { band: conn.band_name, result });
-          processed++;
-        } catch (err) {
-          logger.error("Backfill cron: chunk failed", { band: conn.band_name, error: String(err) });
+
+          try {
+            const accessToken = await refreshBandcampToken(workspaceId);
+
+            for (const fc of failedChunks) {
+              if (Date.now() - startTime > MAX_RUNTIME_MS) break;
+
+              const chunkStartedAt = new Date();
+              const startStr = fc.chunk_start;
+              const endStr = fc.chunk_end;
+
+              try {
+                const items = await salesReport(conn.band_id, accessToken, startStr, endStr);
+                const inserted = await insertSalesRows(supabase, workspaceId, conn.id, items);
+
+                await supabase.from("bandcamp_sales_backfill_log").insert({
+                  workspace_id: workspaceId,
+                  connection_id: conn.id,
+                  chunk_start: startStr,
+                  chunk_end: endStr,
+                  status: "success",
+                  sales_returned: items.length,
+                  sales_inserted: inserted,
+                  http_status: 200,
+                  attempt_number: (fc.attempt_number ?? 0) + 1,
+                  started_at: chunkStartedAt.toISOString(),
+                  finished_at: new Date().toISOString(),
+                  duration_ms: Date.now() - chunkStartedAt.getTime(),
+                });
+
+                chunksRetried++;
+                logger.info("Backfill cron: chunk retry succeeded", {
+                  band: conn.band_name,
+                  chunk: startStr,
+                  inserted,
+                });
+              } catch (err) {
+                await supabase.from("bandcamp_sales_backfill_log").insert({
+                  workspace_id: workspaceId,
+                  connection_id: conn.id,
+                  chunk_start: startStr,
+                  chunk_end: endStr,
+                  status: "failed",
+                  sales_returned: 0,
+                  sales_inserted: 0,
+                  error_message: String(err).slice(0, 500),
+                  attempt_number: (fc.attempt_number ?? 0) + 1,
+                  started_at: chunkStartedAt.toISOString(),
+                  finished_at: new Date().toISOString(),
+                  duration_ms: Date.now() - chunkStartedAt.getTime(),
+                });
+
+                logger.warn("Backfill cron: chunk retry failed", {
+                  band: conn.band_name,
+                  chunk: startStr,
+                  error: String(err).slice(0, 200),
+                });
+              }
+
+              await new Promise((r) => setTimeout(r, 3000));
+            }
+          } catch (err) {
+            logger.error("Backfill cron: token refresh failed", {
+              band: conn.band_name,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
     }
 
-    if (processed === 0) {
-      logger.info("Backfill cron: all connections completed or no connections found");
-    }
-
-    return { processed, status: "all_done" };
+    logger.info("Backfill cron: run complete", { chunksRetried, staleFixed });
+    return { chunksRetried, staleFixed, status: "done" };
   },
 });
