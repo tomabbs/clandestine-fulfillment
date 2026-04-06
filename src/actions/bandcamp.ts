@@ -1,12 +1,15 @@
 "use server";
 
 import { z } from "zod/v4";
+import {
+  bandcampArtUrl,
+  type DigDeeperItem,
+  fetchDigDeeper,
+} from "@/lib/clients/bandcamp-discover";
 import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
-import { fetchDigDeeper, bandcampArtUrl, type DigDeeperItem } from "@/lib/clients/bandcamp-discover";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
-
-import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
+import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
 
 // Rule #48: No Server Action may call the Bandcamp API directly.
 // Force Sync MUST enqueue via Trigger task through the shared bandcampQueue.
@@ -688,10 +691,17 @@ export async function getBandcampSalesOverview(workspaceId: string) {
   // Per-item breakdown: group by item_name + artist + item_type + package
   // Paginate to fetch all rows (Supabase default limit is 1000)
   const allSales: Array<{
-    item_name: string | null; artist: string | null; item_type: string | null;
-    package: string | null; item_url: string | null; sku: string | null;
-    catalog_number: string | null; net_amount: string | null; quantity: number | null;
-    connection_id: string; currency: string | null;
+    item_name: string | null;
+    artist: string | null;
+    item_type: string | null;
+    package: string | null;
+    item_url: string | null;
+    sku: string | null;
+    catalog_number: string | null;
+    net_amount: string | null;
+    quantity: number | null;
+    connection_id: string;
+    currency: string | null;
   }> = [];
   let salesOffset = 0;
   const SALES_PAGE = 1000;
@@ -714,11 +724,16 @@ export async function getBandcampSalesOverview(workspaceId: string) {
   // Load tag data from mappings (join via variant SKU)
   const { data: tagMappings } = await supabase
     .from("bandcamp_product_mappings")
-    .select("bandcamp_tags, bandcamp_tag_norms, bandcamp_primary_genre, warehouse_product_variants!inner(sku)")
+    .select(
+      "bandcamp_tags, bandcamp_tag_norms, bandcamp_primary_genre, warehouse_product_variants!inner(sku)",
+    )
     .eq("workspace_id", workspaceId)
     .not("bandcamp_tag_norms", "is", null);
 
-  const tagBySku = new Map<string, { tags: string[]; tagNorms: string[]; primaryGenre: string | null }>();
+  const tagBySku = new Map<
+    string,
+    { tags: string[]; tagNorms: string[]; primaryGenre: string | null }
+  >();
   for (const m of tagMappings ?? []) {
     const sku = (m.warehouse_product_variants as unknown as { sku: string })?.sku;
     if (sku) {
@@ -767,7 +782,9 @@ export async function getBandcampSalesOverview(workspaceId: string) {
         existing.catalogNumber = sale.catalog_number;
     } else {
       const tagData = sale.sku ? tagBySku.get(sale.sku) : undefined;
-      const taxonomy = tagData?.tagNorms.length ? matchTagToTaxonomy(tagData.tagNorms) : { bcGenre: null, dspGenre: null, subGenre: null };
+      const taxonomy = tagData?.tagNorms.length
+        ? matchTagToTaxonomy(tagData.tagNorms)
+        : { bcGenre: null, dspGenre: null, subGenre: null };
 
       itemMap.set(key, {
         itemName: sale.item_name ?? "Unknown",
@@ -865,7 +882,12 @@ export async function getBandcampTrending(
   const cacheKey = JSON.stringify(params);
   const cached = trendingCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < TRENDING_CACHE_TTL_MS) {
-    return cached.data as { items: unknown[]; moreAvailable: boolean; formatSummary: { vinyl: number; cd: number; cassette: number; digital: number }; tagName?: string };
+    return cached.data as {
+      items: unknown[];
+      moreAvailable: boolean;
+      formatSummary: { vinyl: number; cd: number; cassette: number; digital: number };
+      tagName?: string;
+    };
   }
 
   const result = await fetchDigDeeper(params.tags, {
@@ -876,7 +898,11 @@ export async function getBandcampTrending(
 
   if (!result?.ok) {
     if (cached) return cached.data;
-    return { items: [], moreAvailable: false, formatSummary: { vinyl: 0, cd: 0, cassette: 0, digital: 0 } };
+    return {
+      items: [],
+      moreAvailable: false,
+      formatSummary: { vinyl: 0, cd: 0, cassette: 0, digital: 0 },
+    };
   }
 
   const supabase = createServiceRoleClient();
@@ -915,7 +941,10 @@ export async function getBandcampTrending(
     };
   });
 
-  let vinyl = 0, cd = 0, cassette = 0, digital = 0;
+  let vinyl = 0,
+    cd = 0,
+    cassette = 0,
+    digital = 0;
   for (const item of items) {
     const types = new Set(item.packages.map((p: { typeStr: string }) => p.typeStr));
     if (types.has("vinyl") || item.packages.some((p: { isVinyl: boolean }) => p.isVinyl)) vinyl++;

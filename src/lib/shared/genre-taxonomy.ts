@@ -801,13 +801,19 @@ export const BC_TO_DSP_ALIASES: Record<string, string> = {
   "hip-hop-rap": "Hip-Hop / Rap",
   "r-b-soul": "R&B",
   "spoken-word": "Spoken Word",
-  "experimental": "Alternative",
-  "acoustic": "Folk",
+  experimental: "Alternative",
+  acoustic: "Folk",
 };
 
 // Pre-computed normalized Sets for O(1) lookup
 function normalize(s: string): string {
-  return s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 export function normalizeTag(tag: string): string {
@@ -816,10 +822,12 @@ export function normalizeTag(tag: string): string {
 
 const BC_GENRES_SET = new Set(BC_GENRES.map(normalize));
 const DSP_GENRES_SET = new Set(DSP_GENRES.map(normalize));
-const DSP_GENRES_DISPLAY = new Map(DSP_GENRES.map(g => [normalize(g), g]));
+const DSP_GENRES_DISPLAY = new Map(DSP_GENRES.map((g) => [normalize(g), g]));
 const SUB_GENRES_SET = new Set(SUB_GENRES.map(normalize));
-const SUB_GENRES_DISPLAY = new Map(SUB_GENRES.map(g => [normalize(g), g]));
-const BC_ALIAS_NORMS = new Map(Object.entries(BC_TO_DSP_ALIASES).map(([k, v]) => [normalize(k), v]));
+const SUB_GENRES_DISPLAY = new Map(SUB_GENRES.map((g) => [normalize(g), g]));
+const BC_ALIAS_NORMS = new Map(
+  Object.entries(BC_TO_DSP_ALIASES).map(([k, v]) => [normalize(k), v]),
+);
 
 export interface TaxonomyMatch {
   bcGenre: string | null;

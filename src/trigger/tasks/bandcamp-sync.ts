@@ -20,9 +20,9 @@ import {
   parseBandcampPage,
 } from "@/lib/clients/bandcamp-scraper";
 import { productSetCreate } from "@/lib/clients/shopify-client";
-import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
@@ -1180,36 +1180,47 @@ export const bandcampSyncTask = task({
               const newOptionSkus = (merchItem.options ?? [])
                 .map((o) => o.sku)
                 .filter((s): s is string => !!s);
-              await supabase.from("bandcamp_product_mappings").insert({
-                workspace_id: workspaceId,
-                variant_id: existingVariant.id,
-                bandcamp_item_id: merchItem.package_id,
-                bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album") ? "album" : "package",
-                bandcamp_member_band_id: merchItem.member_band_id,
-                bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
-                bandcamp_type_name: merchItem.item_type,
-                bandcamp_new_date: merchItem.new_date,
-                bandcamp_url: merchItem.url ?? null,
-                bandcamp_url_source: merchItem.url ? "orders_api" : null,
-                bandcamp_subdomain: merchItem.subdomain ?? null,
-                bandcamp_album_title: merchItem.album_title ?? null,
-                bandcamp_price: merchItem.price ?? null,
-                bandcamp_currency: merchItem.currency ?? null,
-                bandcamp_is_set_price: merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : null,
-                bandcamp_options: merchItem.options ?? null,
-                bandcamp_origin_quantities: merchItem.origin_quantities ?? null,
-                bandcamp_option_skus: newOptionSkus.length > 0 ? newOptionSkus : null,
-                last_quantity_sold: merchItem.quantity_sold,
-                last_synced_at: new Date().toISOString(),
-                authority_status: "bandcamp_initial",
-                raw_api_data: merchItem,
-              }).then(
-                () => { itemsProcessed++; },
-                (err) => {
-                  logger.warn("Failed to create mapping for existing SKU", { error: String(err), sku: effectiveSku });
-                  itemsFailed++;
-                },
-              );
+              await supabase
+                .from("bandcamp_product_mappings")
+                .insert({
+                  workspace_id: workspaceId,
+                  variant_id: existingVariant.id,
+                  bandcamp_item_id: merchItem.package_id,
+                  bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album")
+                    ? "album"
+                    : "package",
+                  bandcamp_member_band_id: merchItem.member_band_id,
+                  bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
+                  bandcamp_type_name: merchItem.item_type,
+                  bandcamp_new_date: merchItem.new_date,
+                  bandcamp_url: merchItem.url ?? null,
+                  bandcamp_url_source: merchItem.url ? "orders_api" : null,
+                  bandcamp_subdomain: merchItem.subdomain ?? null,
+                  bandcamp_album_title: merchItem.album_title ?? null,
+                  bandcamp_price: merchItem.price ?? null,
+                  bandcamp_currency: merchItem.currency ?? null,
+                  bandcamp_is_set_price:
+                    merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : null,
+                  bandcamp_options: merchItem.options ?? null,
+                  bandcamp_origin_quantities: merchItem.origin_quantities ?? null,
+                  bandcamp_option_skus: newOptionSkus.length > 0 ? newOptionSkus : null,
+                  last_quantity_sold: merchItem.quantity_sold,
+                  last_synced_at: new Date().toISOString(),
+                  authority_status: "bandcamp_initial",
+                  raw_api_data: merchItem,
+                })
+                .then(
+                  () => {
+                    itemsProcessed++;
+                  },
+                  (err) => {
+                    logger.warn("Failed to create mapping for existing SKU", {
+                      error: String(err),
+                      sku: effectiveSku,
+                    });
+                    itemsFailed++;
+                  },
+                );
             } else {
               itemsProcessed++;
             }
@@ -1422,7 +1433,8 @@ export const bandcampSyncTask = task({
               bandcamp_album_title: merchItem.album_title ?? undefined,
               bandcamp_price: merchItem.price ?? undefined,
               bandcamp_currency: merchItem.currency ?? undefined,
-              bandcamp_is_set_price: merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : undefined,
+              bandcamp_is_set_price:
+                merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : undefined,
               bandcamp_options: merchItem.options ?? undefined,
               bandcamp_origin_quantities: merchItem.origin_quantities ?? undefined,
               bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? undefined,
@@ -1435,7 +1447,12 @@ export const bandcampSyncTask = task({
             .is("raw_api_data", null)
             .then(
               () => {},
-              (err) => logger.warn("Legacy mapping backfill failed", { error: String(err), task: "bandcamp-sync", packageId: merchItem.package_id }),
+              (err) =>
+                logger.warn("Legacy mapping backfill failed", {
+                  error: String(err),
+                  task: "bandcamp-sync",
+                  packageId: merchItem.package_id,
+                }),
             );
         }
 

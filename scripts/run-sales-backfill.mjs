@@ -33,17 +33,25 @@ let accessToken = null;
 let tokenExpiresAt = 0;
 
 async function ensureToken() {
-  if (accessToken && Date.now() < tokenExpiresAt - 60_000) return accessToken;
+  if (accessToken && Date.now() < tokenExpiresAt - 300_000) return accessToken;
 
-  const { data: creds } = await sb
-    .from("bandcamp_credentials")
-    .select("refresh_token, access_token, token_expires_at")
-    .limit(1)
-    .single();
+  // Retry DB read up to 3 times — transient null reads killed connections in prior runs
+  let creds = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await sb
+      .from("bandcamp_credentials")
+      .select("id, refresh_token, access_token, token_expires_at")
+      .limit(1)
+      .single();
+    if (data) { creds = data; break; }
+    console.log(`  ⚠ Credentials query returned null (attempt ${attempt + 1}/3, error: ${error?.message ?? "none"}), retrying in 5s...`);
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  if (!creds) throw new Error("Failed to read credentials after 3 attempts");
 
-  if (creds?.access_token && creds?.token_expires_at) {
+  if (creds.access_token && creds.token_expires_at) {
     const exp = new Date(creds.token_expires_at).getTime();
-    if (Date.now() < exp - 60_000) {
+    if (Date.now() < exp - 300_000) {
       accessToken = creds.access_token;
       tokenExpiresAt = exp;
       console.log("  Using cached token (expires in " + Math.round((exp - Date.now()) / 60000) + "m)");
@@ -63,6 +71,13 @@ async function ensureToken() {
     }),
   });
 
+  if (res.status === 429) {
+    const wait = parseInt(res.headers.get("Retry-After") ?? "60", 10);
+    console.log(`  OAuth rate limited (429). Waiting ${wait}s...`);
+    await new Promise(r => setTimeout(r, wait * 1000));
+    return ensureToken();
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Token refresh failed: ${res.status} ${text}`);
@@ -77,7 +92,7 @@ async function ensureToken() {
     refresh_token: parsed.refresh_token,
     token_expires_at: new Date(tokenExpiresAt).toISOString(),
     updated_at: new Date().toISOString(),
-  }).eq("refresh_token", creds.refresh_token);
+  }).eq("id", creds.id);
 
   console.log("  Token refreshed (valid for " + Math.round(parsed.expires_in / 60) + "m)");
   return accessToken;
@@ -269,9 +284,27 @@ async function main() {
       : new Date("2010-01-01");
     const now = new Date();
     let connInserted = 0;
+    let consecutiveEmpty = 0;
 
     while (cursor < now) {
-      // Use MONTHLY chunks for accuracy (yearly can miss data for high-volume labels)
+      // Skip-ahead: if 6+ consecutive empty months, jump ahead a year
+      if (consecutiveEmpty >= 6) {
+        const jumpTo = new Date(cursor);
+        jumpTo.setFullYear(jumpTo.getFullYear() + 1);
+        jumpTo.setMonth(0, 1); // Jan 1 of next year
+        if (jumpTo < now) {
+          console.log(`  ⏩ ${consecutiveEmpty} empty months — skipping to ${jumpTo.toISOString().slice(0, 10)}`);
+          cursor = jumpTo;
+          consecutiveEmpty = 0;
+          // Update state so we don't re-walk these on restart
+          await sb.from("bandcamp_sales_backfill_state").update({
+            last_processed_date: cursor.toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq("connection_id", conn.id);
+          continue;
+        }
+      }
+
       const chunkEnd = new Date(cursor);
       chunkEnd.setMonth(chunkEnd.getMonth() + 1);
       const effectiveEnd = chunkEnd > now ? now : chunkEnd;
@@ -289,6 +322,12 @@ async function main() {
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({ band_id: conn.band_id, start_time: startStr, end_time: endStr }),
         });
+        if (res.status === 429) {
+          const retryAfter = parseInt(res.headers.get("Retry-After") ?? "60", 10);
+          console.log(`RATE LIMITED (429). Waiting ${retryAfter}s...`);
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          continue;
+        }
         if (!res.ok) throw new Error(`sales_report failed: ${res.status}`);
         const data = await res.json();
         if (data.error) throw new Error(`sales_report error: ${data.error_message}`);
@@ -310,13 +349,30 @@ async function main() {
           updated_at: new Date().toISOString(),
         }).eq("connection_id", conn.id);
 
+        if (items.length === 0) {
+          consecutiveEmpty++;
+        } else {
+          consecutiveEmpty = 0;
+        }
         console.log(`${items.length} sales (${inserted} new)`);
       } catch (err) {
         console.log(`ERROR: ${err.message}`);
-        if (err.message.includes("429")) {
-          console.log("  Rate limited! Waiting 30 seconds...");
+        if (err.message.includes("429") || err.message.includes("rate")) {
+          console.log("  Rate limited! Waiting 60 seconds...");
+          await new Promise(r => setTimeout(r, 60000));
+          continue;
+        }
+        if (err.message.includes("fetch failed") || err.message.includes("ECONNRESET") || err.message.includes("ETIMEDOUT")) {
+          console.log("  Network error, retrying in 15 seconds...");
+          await new Promise(r => setTimeout(r, 15000));
+          continue;
+        }
+        if (err.message.includes("refresh_token") || err.message.includes("Token refresh") || err.message.includes("credentials")) {
+          console.log("  Token error, clearing cache and retrying in 30 seconds...");
+          accessToken = null;
+          tokenExpiresAt = 0;
           await new Promise(r => setTimeout(r, 30000));
-          continue; // Retry same chunk
+          continue;
         }
         // Other errors: update state and move to next connection
         await sb.from("bandcamp_sales_backfill_state").update({

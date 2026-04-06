@@ -11,8 +11,8 @@
 
 import { logger, task } from "@trigger.dev/sdk";
 import { fetchBandcampPage, parseBandcampPage } from "@/lib/clients/bandcamp-scraper";
-import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 
 const BATCH_SIZE = 50;

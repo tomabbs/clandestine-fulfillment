@@ -49,7 +49,10 @@ async function insertSalesRows(
 ): Promise<number> {
   // Filter out items with non-numeric transaction IDs (payouts, transfers have "t" prefix)
   const validItems = items.filter((item) => {
-    return safeBigint(item.bandcamp_transaction_id) !== null && safeBigint(item.bandcamp_transaction_item_id) !== null;
+    return (
+      safeBigint(item.bandcamp_transaction_id) !== null &&
+      safeBigint(item.bandcamp_transaction_item_id) !== null
+    );
   });
 
   let inserted = 0;
@@ -339,7 +342,11 @@ export const bandcampSalesBackfillCron = schedules.task({
     const supabase = createServiceRoleClient();
 
     // Check pause flag — skip if manual backfill script is running
-    const { data: ws } = await supabase.from("workspaces").select("bandcamp_scraper_settings").limit(1).single();
+    const { data: ws } = await supabase
+      .from("workspaces")
+      .select("bandcamp_scraper_settings")
+      .limit(1)
+      .single();
     if ((ws?.bandcamp_scraper_settings as Record<string, unknown>)?.pause_sales_backfill_cron) {
       logger.info("Backfill cron: PAUSED (pause_sales_backfill_cron flag set)");
       return { processed: 0, status: "paused" };

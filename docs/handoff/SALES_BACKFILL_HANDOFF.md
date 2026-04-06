@@ -1,22 +1,20 @@
 # Sales Backfill System — Full Handoff Document
 
-**Date:** 2026-04-05
+**Date:** 2026-04-06 (updated)
 **Session:** Full audit + remediation of Bandcamp sales data pipeline
-**Status:** PARTIALLY WORKING — 48,067 of ~200K+ expected sales captured (estimated 20-25% complete)
+**Status:** IN PROGRESS — full re-run with all fixes applied, cron paused, running clean
 
 ---
 
 ## 1. Executive Summary
 
-The Bandcamp sales backfill system is designed to pull all historical sales data from the Bandcamp Sales Report API (v4) and store it in the `bandcamp_sales` table. Over a 2-day debugging session, we identified and fixed 4 distinct bugs, but the system is still not capturing complete data for most connections. The root causes are now understood and documented here.
+The Bandcamp sales backfill system pulls all historical sales data from the Bandcamp Sales Report API (v4) and stores it in the `bandcamp_sales` table. Over a 3-day debugging session (2026-04-04 through 2026-04-06), we identified and fixed 9 distinct bugs plus 3 operational issues. A clean re-run of all 17 connections is now in progress with the cron paused and proper rate limiting.
 
-**Key numbers (as of 2026-04-05):**
+**Key numbers (as of 2026-04-06 ~03:15 UTC):**
 - Expected: ~200K+ total sales across 17 connections (Northern Spy alone has 41,831)
-- Actual in DB: 48,067
-- Northern Spy: 3,000 of 41,831 (7% coverage)
-- LEAVING RECORDS: 27,810 (best coverage)
-- True Panther: 9,087
-- 7 connections still at 0 or single-digit sales
+- Previous run (2026-04-05): 48,067 captured
+- Current re-run: in progress (Across the Horizon: 811, Birdwatcher: 855 completed; Egghunt in progress ~2023)
+- All 17 connections reset to start from scratch for clean data
 
 ---
 
@@ -72,21 +70,49 @@ The Bandcamp sales backfill system is designed to pull all historical sales data
 - **Commit:** `471cfa0`
 - **File:** `src/trigger/tasks/bandcamp-sync.ts` lines 1372-1395
 
+### Bug 8: Cron races with manual backfill script (FIXED 2026-04-06)
+- **Symptom:** Manual script processes a connection, then cron walks through empty years and marks it "completed" with 0 sales, overwriting the script's progress
+- **Root cause:** No coordination between cron and script — both write to `bandcamp_sales_backfill_state` independently
+- **Fix:** Added `pause_sales_backfill_cron` flag to `workspace.bandcamp_scraper_settings`. Cron checks the flag on every run and exits immediately if set. Script sets the flag on start and clears it on finish.
+- **Commit:** `ed2bed0`
+- **Files:** `src/trigger/tasks/bandcamp-sales-backfill.ts` (cron pause check), `scripts/run-sales-backfill.mjs` (set/clear flag + auto-unpause on finish)
+
+### Bug 9: API delay too short, triggering 429s (FIXED 2026-04-06)
+- **Symptom:** Script hit Bandcamp's rate limit (429) after processing a few connections, interrupting backfill
+- **Root cause:** Inter-request delay was 600ms — too fast for Bandcamp's ~50-per-10-sec limit when doing sustained bulk requests. A safe sustained rate is ~3 seconds between calls.
+- **Fix:** Increased `DELAY_MS` from 600ms to 3000ms. Added inline 429 detection from HTTP response status (not just thrown error string) with `Retry-After` header parsing and 60s wait. Added network error retry (15s) for `fetch failed`, `ECONNRESET`, `ETIMEDOUT`.
+- **Commit:** `ed2bed0`
+- **File:** `scripts/run-sales-backfill.mjs`
+
 ---
 
-## 3. Remaining Issue: Incomplete Sales Data
+## 3. Operational Improvements (2026-04-06)
 
-### What's happening
-The API backfill script (`scripts/run-sales-backfill.mjs`) uses monthly chunks with the synchronous `sales_report` API. It works correctly — when called, it returns the right data (verified: SUSS 2024 returns 66 items, NS Jan 2020 returns 647 items). But:
+### Skip-ahead for empty periods
+- **Problem:** Connections that started recently (e.g. Across the Horizon, est. 2025) were crawling through 192 empty months from 2010 at 3s each = ~10 minutes wasted per connection.
+- **Fix:** After 6 consecutive empty months, the script jumps ahead to Jan 1 of the next year and updates `last_processed_date` so restarts don't re-walk the gap.
+- **Impact:** "Across the Horizon" went from ~10 minutes to ~90 seconds (skipped 2010-2024 in seconds).
 
-1. **Rate limiting (429):** The script hits Bandcamp's rate limit after processing several connections. Bandcamp's undocumented limit is ~50 requests per 10 seconds. The script pauses 30 seconds on 429 but needs many months × many connections.
+### Auto-reconcile counters on completion
+- **Problem:** `total_transactions` in backfill state drifted from actual DB row counts due to multiple code paths (daily sync, manual script, cron) all writing independently.
+- **Fix:** Script reconciles all connection counters against actual `bandcamp_sales` row counts when it finishes.
 
-2. **Monthly chunks are slow:** Northern Spy has data from 2011-2026 = 180 monthly chunks. At ~10 seconds per chunk (including poll time), that's ~30 minutes for one connection. With 17 connections, full backfill takes 8+ hours.
+### Auto-unpause cron on completion
+- **Fix:** Script clears the `pause_sales_backfill_cron` flag after processing all connections, so the cron resumes automatically for ongoing daily maintenance.
 
-3. **Cron interference:** The `bandcamp-sales-backfill-cron` Trigger.dev task (every 10 min) competes with the standalone script. It uses the async `generate_sales_report` path which has its own issues.
+---
+
+## 4. Previous Issue: Incomplete Sales Data (now being resolved)
+
+### What was happening
+The API backfill script had three compounding problems:
+
+1. **Rate limiting (429):** Delay was 600ms — too fast for sustained bulk requests. Now fixed at 3000ms.
+2. **Cron interference:** The cron raced the script and marked connections "completed" prematurely. Now fixed with pause flag.
+3. **No skip-ahead:** Empty early years wasted API calls. Now fixed with 6-month skip-ahead.
 
 ### Verification against raw CSV
-Using `scripts/verify-sales-vs-csv.mjs` against the Northern Spy raw CSV export:
+Using `scripts/verify-sales-vs-csv.mjs` against the Northern Spy raw CSV export (pre-rerun):
 
 ```
 Northern Spy Records: 3,000 of 41,831 sales in DB (7%)
@@ -97,11 +123,11 @@ Northern Spy Records: 3,000 of 41,831 sales in DB (7%)
   CSV units:          42,091
 ```
 
-Every year from 2011-2026 has significant sales but the DB only has partial data from a few years.
+The current clean re-run is expected to capture all of these.
 
 ---
 
-## 4. Bandcamp Sales Report API Documentation
+## 5. Bandcamp Sales Report API Documentation
 
 ### Official Endpoints (documented at bandcamp.com/developer/sales)
 
@@ -169,21 +195,21 @@ Token expires in 1 hour. Only needs refreshing when expired.
 
 ---
 
-## 5. All Related Files
+## 6. All Related Files
 
 ### Trigger.dev Tasks
 
 | File | Task ID | Schedule | Purpose |
 |---|---|---|---|
-| `src/trigger/tasks/bandcamp-sales-backfill.ts` | `bandcamp-sales-backfill` | On-demand | Processes one yearly chunk for a single connection |
-| `src/trigger/tasks/bandcamp-sales-backfill.ts` | `bandcamp-sales-backfill-cron` | `*/10 * * * *` | Cron wrapper that iterates connections and calls the above |
+| `src/trigger/tasks/bandcamp-sales-backfill.ts` | `bandcamp-sales-backfill` | On-demand | Processes one monthly chunk for a single connection |
+| `src/trigger/tasks/bandcamp-sales-backfill.ts` | `bandcamp-sales-backfill-cron` | `*/10 * * * *` | Cron wrapper — checks pause flag, iterates connections. **Paused during manual backfill via workspace settings flag.** |
 | `src/trigger/tasks/bandcamp-sales-sync.ts` | `bandcamp-sales-sync` | `0 5 * * *` (daily) | Daily sync using synchronous `sales_report` for yesterday's sales |
 
 ### Scripts
 
 | File | Purpose | Usage |
 |---|---|---|
-| `scripts/run-sales-backfill.mjs` | One-off backfill using synchronous API with monthly chunks | `node scripts/run-sales-backfill.mjs` |
+| `scripts/run-sales-backfill.mjs` | Full backfill using synchronous API with monthly chunks, skip-ahead, auto-pause/unpause cron, auto-reconcile counters | `node scripts/run-sales-backfill.mjs` |
 | `scripts/reconcile-backfill-state.mjs` | Fix counter drift between state table and actual row counts | `node scripts/reconcile-backfill-state.mjs [--dry-run]` |
 | `scripts/verify-sales-vs-csv.mjs` | Compare DB sales against raw Bandcamp CSV export | `node scripts/verify-sales-vs-csv.mjs <csv-file> "<band name>"` |
 | `scripts/import-sales-csv.mjs` | Direct CSV import (not recommended — missing `transaction_item_id`) | `node scripts/import-sales-csv.mjs <csv-file> "<band name>"` |
@@ -206,7 +232,9 @@ Token expires in 1 hour. Only needs refreshing when expired.
 
 ---
 
-## 6. Current State (2026-04-05T20:50Z)
+## 7. State History
+
+### Previous state (2026-04-05T20:50Z)
 
 ```
 Connection                   band_id      Sales   Status      Last Processed
@@ -231,39 +259,49 @@ Xol Meissner                 3760430981       0   running     2011-01-01
 Total: 48,067 sales | Mappings: 1,413 | URLs: 1,226 | Tags: 143
 ```
 
----
+### Current state (2026-04-06T03:15Z) — clean re-run in progress
 
-## 7. Recommended Next Steps
+All 17 connections were reset to `pending` with `last_processed_date: null`. The script is running with:
+- Cron **paused** via `bandcamp_scraper_settings.pause_sales_backfill_cron`
+- API delay: **3 seconds** between calls (no 429s observed)
+- Skip-ahead: jumps 1 year after 6 consecutive empty months
+- Network retry: auto-retries on `fetch failed` / `ECONNRESET` / `ETIMEDOUT` with 15s wait
+- 429 retry: reads `Retry-After` header, waits 60s, retries same chunk
+- Deployed cron (`ed2bed0`) respects the pause flag
 
-### Priority 1: Complete the backfill
-The `scripts/run-sales-backfill.mjs` script works correctly with monthly chunks and the sync API. It needs to:
-1. **Run to completion** without hitting rate limits. Options:
-   - Add longer delays between API calls (2-3 seconds instead of 600ms)
-   - Run during off-peak hours
-   - Pause the `bandcamp-sales-backfill-cron` Trigger.dev task while the script runs
-2. **Re-run for connections that show "completed" with low sales** — the cron raced ahead and marked them done before data was captured
+```
+Connection                   Status         Progress
+Across the Horizon           COMPLETED      811 sales (was 971 — counter was inflated, now accurate)
+Birdwatcher Records          COMPLETED      855 sales
+Egghunt Records              RUNNING        ~2023 (processing)
+Remaining 14 connections     QUEUED         will process in order
+```
 
-### Priority 2: Disable the cron during manual backfill
-The `bandcamp-sales-backfill-cron` Trigger.dev task competes with the manual script and marks connections as "completed" prematurely. Either:
-- Disable it in the Trigger.dev dashboard temporarily
-- Or modify the cron to skip connections being processed by the script
-
-### Priority 3: After backfill completes
-1. Run `node scripts/reconcile-backfill-state.mjs` to fix all counters
-2. Run `node scripts/verify-sales-vs-csv.mjs` against any CSV exports to verify completeness
-3. Run `crossReferenceAlbumUrls` to populate bandcamp_url from sales data
-4. Deploy the fixed Trigger.dev tasks (`npx trigger.dev deploy`) so ongoing daily sync works correctly
-
-### Priority 4: Fix the Trigger.dev cron for ongoing maintenance
-After the one-time backfill is complete, the cron should be updated to:
-- Use the synchronous `sales_report` API (not async generate/fetch)
-- Use monthly chunks (not yearly)
-- Respect the token cache (already fixed)
-- Filter non-numeric transaction IDs (already fixed)
+Estimated runtime: 60-90 minutes for all 17 connections.
 
 ---
 
-## 8. What Worked vs What Didn't
+## 8. Recommended Next Steps
+
+### After this backfill completes (automated by the script)
+The script auto-runs these on completion:
+1. **Unpause cron** — clears `pause_sales_backfill_cron` flag
+2. **Reconcile counters** — updates `total_transactions` to match actual row counts
+
+### Manual verification after completion
+1. Run `node scripts/verify-sales-vs-csv.mjs` against any CSV exports to verify completeness
+2. Cross-reference URLs is called automatically after each connection completes
+
+### Ongoing maintenance (already deployed)
+The cron (`bandcamp-sales-backfill-cron`) is already updated to:
+- Check `pause_sales_backfill_cron` flag and skip if set
+- Use the token cache (reduced OAuth calls from 16/hr to 1/hr)
+- Filter non-numeric transaction IDs via `safeBigint`
+The daily sync (`bandcamp-sales-sync`) updates backfill state counters to prevent drift.
+
+---
+
+## 9. What Worked vs What Didn't
 
 ### Worked
 - Synchronous `sales_report` API (v4) with monthly chunks — returns complete data
@@ -273,6 +311,10 @@ After the one-time backfill is complete, the cron should be updated to:
 - Seeding script from SKU spreadsheet — created 1,413 mappings from 648
 - Genre tag extraction from HTML `<a class="tag">` elements
 - CSV verification script — reliable way to check completeness
+- **Cron pause flag** — simple workspace setting flag avoids race condition without needing to disable the cron in the Trigger.dev dashboard
+- **Skip-ahead logic** — 6 empty months → jump a year. Cut "Across the Horizon" from ~10 min to ~90 sec
+- **3-second API delay** — zero 429s observed vs previous runs hitting 429 within minutes at 600ms
+- **Auto-reconcile counters** — eliminates counter drift without manual script runs
 
 ### Didn't Work
 - Async `generate_sales_report` / `fetch_sales_report` — returned data but was harder to debug and slower
@@ -280,3 +322,16 @@ After the one-time backfill is complete, the cron should be updated to:
 - Cron-based backfill with `triggerAndWait` — race conditions with manual script, plus rate limiting
 - `ignoreDuplicates: true` — masked real errors (the bigint crash was hidden for weeks)
 - Counter-based progress tracking — drifts constantly from multiple code paths writing sales
+- **600ms API delay** — too fast for sustained bulk requests, triggered 429s after a few connections
+- **Running script without pausing cron** — cron marked connections "completed" with 0 sales, overwriting script progress
+- **Starting every connection from 2010** — most labels started 2015-2024, wasting 60+ API calls per connection on empty months
+
+---
+
+## 10. Lessons Learned
+
+1. **Always pause competing processes before running manual scripts.** The cron was the #1 source of data loss.
+2. **Rate limits need to be measured empirically, not assumed.** 600ms worked for small tests but failed at scale. 3000ms works for sustained bulk.
+3. **Skip-ahead is essential for bulk historical pulls.** Walking through empty months at 3s each turns a 60-min job into a 3-hour job.
+4. **Counters will always drift.** Reconcile against actual row counts, not cumulative additions.
+5. **Retry on network errors, don't fail.** Bandcamp connections drop occasionally — a 15s retry catches them without losing progress.

@@ -433,18 +433,17 @@ export function parseBandcampPage(html: string): ScrapedAlbumData | null {
     .sort((a, b) => a.trackNum - b.trackNum);
 
   // Extract tralbum_id from data-tralbum.id (the real album ID, NOT package_id)
-  const tralbumId = typeof (data as Record<string, unknown>).id === "number"
-    ? (data as Record<string, unknown>).id as number
-    : null;
+  const tralbumId =
+    typeof (data as Record<string, unknown>).id === "number"
+      ? ((data as Record<string, unknown>).id as number)
+      : null;
 
   // Extract genre tags from <a class="tag"> HTML elements (NOT from data-tralbum which lacks tags)
   let tags: string[] = [];
   let tagNorms: string[] = [];
   try {
     const tagMatches = html.match(/<a class="tag"[^>]*>([^<]+)<\/a>/g);
-    tags = (tagMatches ?? [])
-      .map((t) => t.replace(/<[^>]+>/g, "").trim())
-      .filter(Boolean);
+    tags = (tagMatches ?? []).map((t) => t.replace(/<[^>]+>/g, "").trim()).filter(Boolean);
     tagNorms = Array.from(new Set(tags.map(normalizeTag).filter(Boolean)));
   } catch {
     // Tag extraction is non-critical; continue without tags
