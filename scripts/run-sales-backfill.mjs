@@ -233,18 +233,26 @@ async function logChunk(workspaceId, connectionId, chunkStart, chunkEnd, status,
   });
 }
 
+function monthStr(year, month) {
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
 function buildExpectedChunks(coverageStart, now) {
   const chunks = [];
-  let cursor = new Date(coverageStart);
-  cursor.setDate(1);
-  while (cursor < now) {
-    const end = new Date(cursor);
-    end.setMonth(end.getMonth() + 1);
+  const startParts = coverageStart.slice(0, 7).split("-");
+  let y = parseInt(startParts[0], 10);
+  let m = parseInt(startParts[1], 10);
+  const nowY = now.getUTCFullYear();
+  const nowM = now.getUTCMonth() + 1;
+  while (y < nowY || (y === nowY && m <= nowM)) {
+    const nextM = m === 12 ? 1 : m + 1;
+    const nextY = m === 12 ? y + 1 : y;
     chunks.push({
-      start: cursor.toISOString().slice(0, 10),
-      end: (end > now ? now : end).toISOString().slice(0, 10),
+      start: monthStr(y, m),
+      end: monthStr(nextY, nextM),
     });
-    cursor = end;
+    y = nextY;
+    m = nextM;
   }
   return chunks;
 }
@@ -421,40 +429,38 @@ function printAuditSummary(connName, verification) {
 // ── Mode A: Full cursor-based scan ──────────────────────────────────────────
 
 async function modeAFullScan(conn, state, coverageStart) {
-  let cursor = state.last_processed_date
-    ? new Date(state.last_processed_date)
-    : new Date(coverageStart);
-  cursor.setDate(1); // always align to 1st of month
+  const lastDate = state.last_processed_date?.slice(0, 7) ?? coverageStart.slice(0, 7);
+  let curY = parseInt(lastDate.split("-")[0], 10);
+  let curM = parseInt(lastDate.split("-")[1], 10);
   const now = new Date();
+  const nowY = now.getUTCFullYear();
+  const nowM = now.getUTCMonth() + 1;
   let connInserted = 0;
   let consecutiveEmpty = 0;
 
-  while (cursor < now) {
+  while (curY < nowY || (curY === nowY && curM <= nowM)) {
     if (consecutiveEmpty >= SKIP_AHEAD_THRESHOLD) {
-      const jumpTo = new Date(cursor);
-      jumpTo.setFullYear(jumpTo.getFullYear() + 1);
-      jumpTo.setMonth(0, 1);
-      if (jumpTo < now) {
-        const skipStart = cursor.toISOString().slice(0, 10);
-        const skipEnd = jumpTo.toISOString().slice(0, 10);
+      const jumpY = curY + 1;
+      if (jumpY < nowY || (jumpY === nowY && 1 <= nowM)) {
+        const skipStart = monthStr(curY, curM);
+        const skipEnd = monthStr(jumpY, 1);
         console.log(`  >> ${consecutiveEmpty} empty months — skipping to ${skipEnd}`);
         await logChunk(conn.workspace_id, conn.id, skipStart, skipEnd, "skipped", 0, 0, null, `Skip-ahead: ${consecutiveEmpty} consecutive empty months`, new Date());
-        cursor = jumpTo;
+        curY = jumpY;
+        curM = 1;
         consecutiveEmpty = 0;
         await sb.from("bandcamp_sales_backfill_state").update({
-          last_processed_date: cursor.toISOString(),
+          last_processed_date: monthStr(curY, curM),
           updated_at: new Date().toISOString(),
         }).eq("connection_id", conn.id);
         continue;
       }
     }
 
-    const chunkEnd = new Date(cursor);
-    chunkEnd.setMonth(chunkEnd.getMonth() + 1);
-    const effectiveEnd = chunkEnd > now ? now : chunkEnd;
-
-    const startStr = cursor.toISOString().slice(0, 10);
-    const endStr = effectiveEnd.toISOString().slice(0, 10);
+    const startStr = monthStr(curY, curM);
+    const nextM = curM === 12 ? 1 : curM + 1;
+    const nextY = curM === 12 ? curY + 1 : curY;
+    const endStr = monthStr(nextY, nextM);
     process.stdout.write(`  ${startStr} -> ${endStr} ... `);
 
     const result = await processChunk(conn, startStr, endStr);
@@ -481,11 +487,12 @@ async function modeAFullScan(conn, state, coverageStart) {
     }
 
     await sb.from("bandcamp_sales_backfill_state").update({
-      last_processed_date: effectiveEnd.toISOString(),
+      last_processed_date: endStr,
       updated_at: new Date().toISOString(),
     }).eq("connection_id", conn.id);
 
-    cursor = effectiveEnd;
+    curY = nextY;
+    curM = nextM;
     await new Promise(r => setTimeout(r, DELAY_MS));
   }
 

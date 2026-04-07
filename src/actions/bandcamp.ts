@@ -874,17 +874,22 @@ export async function getBandcampBackfillAudit(workspaceId: string) {
     }
 
     const expectedChunks: Array<{ year: number; month: number; start: string; end: string }> = [];
-    const cursor = new Date(coverageStart);
-    cursor.setDate(1);
-    while (cursor < now) {
-      const y = cursor.getFullYear();
-      const m = cursor.getMonth() + 1;
-      const startStr = cursor.toISOString().slice(0, 10);
-      const endD = new Date(cursor);
-      endD.setMonth(endD.getMonth() + 1);
-      const endStr = (endD > now ? now : endD).toISOString().slice(0, 10);
-      expectedChunks.push({ year: y, month: m, start: startStr, end: endStr });
-      cursor.setMonth(cursor.getMonth() + 1);
+    const startParts = coverageStart.slice(0, 7).split("-");
+    let ey = Number.parseInt(startParts[0], 10);
+    let em = Number.parseInt(startParts[1], 10);
+    const nowY = now.getUTCFullYear();
+    const nowM = now.getUTCMonth() + 1;
+    while (ey < nowY || (ey === nowY && em <= nowM)) {
+      const nextM = em === 12 ? 1 : em + 1;
+      const nextY = em === 12 ? ey + 1 : ey;
+      expectedChunks.push({
+        year: ey,
+        month: em,
+        start: `${ey}-${String(em).padStart(2, "0")}-01`,
+        end: `${nextY}-${String(nextM).padStart(2, "0")}-01`,
+      });
+      ey = nextY;
+      em = nextM;
     }
 
     let covered = 0;
