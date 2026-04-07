@@ -250,14 +250,23 @@ function buildExpectedChunks(coverageStart, now) {
 }
 
 async function getLatestAttempts(connectionId) {
-  const { data } = await sb
-    .from("bandcamp_sales_backfill_log")
-    .select("chunk_start, status, sales_inserted, error_message, attempt_number")
-    .eq("connection_id", connectionId)
-    .order("attempt_number", { ascending: false });
+  const allRows = [];
+  let offset = 0;
+  while (true) {
+    const { data } = await sb
+      .from("bandcamp_sales_backfill_log")
+      .select("chunk_start, status, sales_inserted, error_message, attempt_number")
+      .eq("connection_id", connectionId)
+      .order("attempt_number", { ascending: false })
+      .range(offset, offset + 999);
+    if (!data?.length) break;
+    allRows.push(...data);
+    if (data.length < 1000) break;
+    offset += 1000;
+  }
 
   const map = new Map();
-  for (const row of data ?? []) {
+  for (const row of allRows) {
     const key = row.chunk_start;
     if (!map.has(key)) map.set(key, row);
   }
@@ -415,6 +424,7 @@ async function modeAFullScan(conn, state, coverageStart) {
   let cursor = state.last_processed_date
     ? new Date(state.last_processed_date)
     : new Date(coverageStart);
+  cursor.setDate(1); // always align to 1st of month
   const now = new Date();
   let connInserted = 0;
   let consecutiveEmpty = 0;

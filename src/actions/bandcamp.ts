@@ -813,13 +813,30 @@ export async function getBandcampBackfillAudit(workspaceId: string) {
 
   const stateMap = new Map((states ?? []).map((s) => [s.connection_id, s]));
 
-  const { data: allLogs } = await supabase
-    .from("bandcamp_sales_backfill_log")
-    .select(
-      "connection_id, chunk_start, status, sales_inserted, error_message, attempt_number, created_at",
-    )
-    .eq("workspace_id", workspaceId)
-    .order("attempt_number", { ascending: false });
+  const allLogs: Array<{
+    connection_id: string;
+    chunk_start: string;
+    status: string;
+    sales_inserted: number;
+    error_message: string | null;
+    attempt_number: number;
+    created_at: string;
+  }> = [];
+  let logOffset = 0;
+  while (true) {
+    const { data: page } = await supabase
+      .from("bandcamp_sales_backfill_log")
+      .select(
+        "connection_id, chunk_start, status, sales_inserted, error_message, attempt_number, created_at",
+      )
+      .eq("workspace_id", workspaceId)
+      .order("attempt_number", { ascending: false })
+      .range(logOffset, logOffset + 999);
+    if (!page?.length) break;
+    allLogs.push(...page);
+    if (page.length < 1000) break;
+    logOffset += 1000;
+  }
 
   const logsByConn = new Map<
     string,
