@@ -3,7 +3,6 @@
 import { ExternalLink, Loader2, Package, Search } from "lucide-react";
 import { useState } from "react";
 import { getShipStationOrders, type ShipStationOrder } from "@/actions/shipstation-orders";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {

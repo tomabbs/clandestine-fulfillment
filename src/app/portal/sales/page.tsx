@@ -7,16 +7,30 @@ import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 export default function SalesPage() {
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: ["portal", "sales"],
     queryFn: () => getSalesData(),
     tier: CACHE_TIERS.SESSION,
   });
 
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Sales</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load sales data."}
+        </p>
+      </div>
+    );
+  }
+
   if (isLoading || !data) {
     return (
-      <div className="p-6 flex items-center gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading sales...
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Sales</h1>
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading sales...
+        </div>
       </div>
     );
   }

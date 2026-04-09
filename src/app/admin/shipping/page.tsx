@@ -345,7 +345,7 @@ function ShipmentTableRow({
       >
         <td className="px-4 py-3">
           {shipment.ship_date
-            ? new Date(shipment.ship_date + "T12:00:00").toLocaleDateString()
+            ? new Date(`${shipment.ship_date}T12:00:00`).toLocaleDateString()
             : "---"}
         </td>
         <td className="px-4 py-3 font-mono text-xs">{displayOrderRef ?? "---"}</td>

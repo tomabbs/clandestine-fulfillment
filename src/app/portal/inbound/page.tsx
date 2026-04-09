@@ -119,7 +119,7 @@ function ShipmentCard({ shipment }: { shipment: InboundShipmentWithOrg }) {
             {shipment.carrier && <span>Carrier: {shipment.carrier}</span>}
             {shipment.expected_date && (
               <span>
-                Expected: {new Date(shipment.expected_date + "T12:00:00").toLocaleDateString()}
+                Expected: {new Date(`${shipment.expected_date}T12:00:00`).toLocaleDateString()}
               </span>
             )}
             <span>{shipment.item_count} item(s)</span>

@@ -40,7 +40,7 @@ export async function crossReferenceAlbumUrls(
   for (const sale of albumSales) {
     const match = sale.item_url.match(/https?:\/\/([^.]+)\.bandcamp\.com/);
     if (!match) continue;
-    const key = match[1].toLowerCase() + "|" + (sale.item_name?.toLowerCase().trim() ?? "");
+    const key = `${match[1].toLowerCase()}|${sale.item_name?.toLowerCase().trim() ?? ""}`;
     if (!urlLookup.has(key)) urlLookup.set(key, sale.item_url);
   }
 

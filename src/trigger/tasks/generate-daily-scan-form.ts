@@ -20,7 +20,7 @@ async function runScanForm(payload: { workspaceId?: string }): Promise<{
   message?: string;
 }> {
   const supabase = createServiceRoleClient();
-  const today = new Date().toISOString().split("T")[0]!;
+  const today = new Date().toISOString().split("T")[0] ?? "";
 
   // Find unbatched labels created today
   let query = supabase
@@ -52,7 +52,7 @@ async function runScanForm(payload: { workspaceId?: string }): Promise<{
     );
   }
 
-  const workspaceId = labels[0]!.workspace_id;
+  const workspaceId = labels[0]?.workspace_id;
 
   // Insert scan_forms record
   const { data: scanForm, error: insertError } = await supabase

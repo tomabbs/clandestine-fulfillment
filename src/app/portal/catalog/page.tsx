@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import { getClientReleases } from "@/actions/catalog";
 import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -108,12 +107,14 @@ export default function CatalogPage() {
 
   if (error) {
     return (
-      <div className="p-6">
+      <div className="p-6 space-y-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
         <Card>
-          <CardHeader>
-            <CardTitle>Releases</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-destructive">{(error as Error).message}</CardContent>
+          <CardContent className="py-8 text-center">
+            <p className="text-sm text-destructive">
+              {error instanceof Error ? error.message : "Failed to load catalog."}
+            </p>
+          </CardContent>
         </Card>
       </div>
     );

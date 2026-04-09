@@ -6,7 +6,6 @@ import { getClientShipments, getShipmentItems, getTrackingEvents } from "@/actio
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -157,7 +156,7 @@ export default function PortalShippingPage() {
 
                       <TableCell className="text-sm">
                         {shipment.ship_date
-                          ? new Date(shipment.ship_date + "T12:00:00").toLocaleDateString()
+                          ? new Date(`${shipment.ship_date}T12:00:00`).toLocaleDateString()
                           : "—"}
                       </TableCell>
                       <TableCell>

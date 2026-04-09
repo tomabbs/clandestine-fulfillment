@@ -243,7 +243,7 @@ export default function InboundDetailPage() {
               <span>
                 Expected:{" "}
                 {detail.expected_date
-                  ? new Date(detail.expected_date + "T12:00:00").toLocaleDateString()
+                  ? new Date(`${detail.expected_date}T12:00:00`).toLocaleDateString()
                   : "—"}
               </span>
               {detail.actual_arrival_date && (

@@ -84,6 +84,7 @@ function OrderDetail({ order }: { order: MailOrderRow }) {
           <div className="rounded border bg-background divide-y">
             {lineItems.map((li, i) => (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: JSONB line items have no stable unique ID
                 key={`${li.sku}-${i}`}
                 className="flex items-center justify-between px-3 py-2 text-sm"
               >

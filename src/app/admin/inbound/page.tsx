@@ -13,7 +13,6 @@ import {
   type PageSize,
   PaginationBar,
 } from "@/components/shared/pagination-bar";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
@@ -205,7 +204,7 @@ export default function AdminInboundPage() {
                     <td className="p-3">{shipment.org_name || "—"}</td>
                     <td className="p-3">
                       {shipment.expected_date
-                        ? new Date(shipment.expected_date + "T12:00:00").toLocaleDateString()
+                        ? new Date(`${shipment.expected_date}T12:00:00`).toLocaleDateString()
                         : "—"}
                     </td>
                     <td className="p-3">

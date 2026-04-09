@@ -1,5 +1,1 @@
-import { redirect } from "next/navigation";
-
-export default function ReleasesRedirect() {
-  redirect("/portal/catalog");
-}
+export { default } from "../catalog/page";

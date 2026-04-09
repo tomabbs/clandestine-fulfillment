@@ -146,7 +146,7 @@ async function markMainDiscogsFulfilled(
 
   if (!creds?.access_token) throw new Error("No Discogs master credentials configured");
 
-  const oauth = new OAuth({
+  const _oauth = new OAuth({
     consumer: {
       key: env().DISCOGS_CONSUMER_KEY,
       secret: env().DISCOGS_CONSUMER_SECRET,

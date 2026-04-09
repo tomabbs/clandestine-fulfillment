@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod/v4";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { createServerSupabaseClient } from "@/lib/server/supabase-server";
 
 const filtersSchema = z.object({
   page: z.number().int().positive().default(1),

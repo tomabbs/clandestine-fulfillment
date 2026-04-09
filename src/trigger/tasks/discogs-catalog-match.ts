@@ -96,7 +96,8 @@ export const discogsCatalogMatchTask = task({
           }
 
           if (releases.length > 0) {
-            const topRelease = releases[0]!;
+            const topRelease = releases[0];
+            if (!topRelease) continue;
 
             await supabase.from("discogs_product_mappings").upsert(
               {

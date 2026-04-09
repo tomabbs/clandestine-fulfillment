@@ -42,7 +42,7 @@ function makeHtml(currentExtra: Record<string, unknown> = {}, trackinfo: unknown
 // pkg.image_id is ALWAYS NULL on real Bandcamp pages.
 // Primary package image comes from arts[0].image_id.
 
-const FIXTURE_HTML = `<div data-tralbum="&quot;art_id&quot;:1234567890,&quot;is_preorder&quot;:false,&quot;album_is_preorder&quot;:false,&quot;current&quot;:{&quot;type&quot;:&quot;album&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;title&quot;:&quot;Test Album&quot;},&quot;packages&quot;:[{&quot;type_name&quot;:&quot;Compact Disc (CD)&quot;,&quot;type_id&quot;:1,&quot;sku&quot;:&quot;TA-CD-001&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:1110001},{&quot;image_id&quot;:1110002}]},{&quot;type_name&quot;:&quot;2 x Vinyl LP&quot;,&quot;type_id&quot;:15,&quot;sku&quot;:&quot;TA-LP-001&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:2220001}]}]"></div>`;
+const _FIXTURE_HTML = `<div data-tralbum="&quot;art_id&quot;:1234567890,&quot;is_preorder&quot;:false,&quot;album_is_preorder&quot;:false,&quot;current&quot;:{&quot;type&quot;:&quot;album&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;title&quot;:&quot;Test Album&quot;},&quot;packages&quot;:[{&quot;type_name&quot;:&quot;Compact Disc (CD)&quot;,&quot;type_id&quot;:1,&quot;sku&quot;:&quot;TA-CD-001&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:1110001},{&quot;image_id&quot;:1110002}]},{&quot;type_name&quot;:&quot;2 x Vinyl LP&quot;,&quot;type_id&quot;:15,&quot;sku&quot;:&quot;TA-LP-001&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:2220001}]}]"></div>`;
 
 // Properly formed data-tralbum with braces
 const FIXTURE_HTML_FULL = `<div data-tralbum="{&quot;art_id&quot;:1234567890,&quot;is_preorder&quot;:false,&quot;album_is_preorder&quot;:false,&quot;current&quot;:{&quot;type&quot;:&quot;album&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;title&quot;:&quot;Test Album&quot;},&quot;packages&quot;:[{&quot;type_name&quot;:&quot;Compact Disc (CD)&quot;,&quot;type_id&quot;:1,&quot;sku&quot;:&quot;TA-CD-001&quot;,&quot;release_date&quot;:&quot;01 Mar 2026 00:00:00 GMT&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:1110001},{&quot;image_id&quot;:1110002}]},{&quot;type_name&quot;:&quot;2 x Vinyl LP&quot;,&quot;type_id&quot;:15,&quot;sku&quot;:&quot;TA-LP-001&quot;,&quot;image_id&quot;:null,&quot;arts&quot;:[{&quot;image_id&quot;:2220001}]}]}"></div>`;
@@ -121,16 +121,16 @@ describe("parseBandcampPage — about / credits / upc", () => {
       }),
     );
     expect(result).not.toBeNull();
-    expect(result!.about).toBe("An incredible debut album.");
-    expect(result!.credits).toBe("Recorded by Jane Smith at Studio A.");
-    expect(result!.upc).toBe("703610875463");
+    expect(result?.about).toBe("An incredible debut album.");
+    expect(result?.credits).toBe("Recorded by Jane Smith at Studio A.");
+    expect(result?.upc).toBe("703610875463");
   });
 
   it("returns null for about/credits/upc when absent", () => {
     const result = parseBandcampPage(makeHtml());
-    expect(result!.about).toBeNull();
-    expect(result!.credits).toBeNull();
-    expect(result!.upc).toBeNull();
+    expect(result?.about).toBeNull();
+    expect(result?.credits).toBeNull();
+    expect(result?.upc).toBeNull();
   });
 
   it("trims leading/trailing whitespace", () => {
@@ -141,9 +141,9 @@ describe("parseBandcampPage — about / credits / upc", () => {
         upc: " 634457226203 ",
       }),
     );
-    expect(result!.about).toBe("Description with leading newlines.");
-    expect(result!.credits).toBe("Recorded by someone.");
-    expect(result!.upc).toBe("634457226203");
+    expect(result?.about).toBe("Description with leading newlines.");
+    expect(result?.credits).toBe("Recorded by someone.");
+    expect(result?.upc).toBe("634457226203");
   });
 });
 
@@ -156,28 +156,28 @@ describe("parseBandcampPage — trackinfo", () => {
 
   it("parses trackinfo into sorted ScrapedTrack array", () => {
     const result = parseBandcampPage(makeHtml({}, sampleTracks));
-    expect(result!.tracks).toHaveLength(3);
-    expect(result!.tracks[0].title).toBe("Opening Track");
-    expect(result!.tracks[0].trackNum).toBe(1);
-    expect(result!.tracks[2].title).toBe("Finale");
+    expect(result?.tracks).toHaveLength(3);
+    expect(result?.tracks[0].title).toBe("Opening Track");
+    expect(result?.tracks[0].trackNum).toBe(1);
+    expect(result?.tracks[2].title).toBe("Finale");
   });
 
   it("formats duration seconds as M:SS", () => {
     const result = parseBandcampPage(makeHtml({}, sampleTracks));
-    expect(result!.tracks[0].durationFormatted).toBe("3:45"); // 225s
-    expect(result!.tracks[1].durationFormatted).toBe("5:46"); // 345.621s → 346s
-    expect(result!.tracks[2].durationFormatted).toBe("1:12"); // 72.4s → 72s
+    expect(result?.tracks[0].durationFormatted).toBe("3:45"); // 225s
+    expect(result?.tracks[1].durationFormatted).toBe("5:46"); // 345.621s → 346s
+    expect(result?.tracks[2].durationFormatted).toBe("1:12"); // 72.4s → 72s
   });
 
   it("returns empty array when trackinfo absent", () => {
     const result = parseBandcampPage(makeHtml());
-    expect(result!.tracks).toEqual([]);
+    expect(result?.tracks).toEqual([]);
   });
 
   it("sorts tracks by track_num regardless of input order", () => {
     const shuffled = [sampleTracks[2], sampleTracks[0], sampleTracks[1]];
     const result = parseBandcampPage(makeHtml({}, shuffled));
-    expect(result!.tracks.map((t) => t.trackNum)).toEqual([1, 2, 3]);
+    expect(result?.tracks.map((t) => t.trackNum)).toEqual([1, 2, 3]);
   });
 
   it("skips tracks with missing title or duration", () => {
@@ -187,8 +187,8 @@ describe("parseBandcampPage — trackinfo", () => {
       { track_num: 3, title: "Also Good", duration: null },
     ];
     const result = parseBandcampPage(makeHtml({}, mixed));
-    expect(result!.tracks).toHaveLength(1);
-    expect(result!.tracks[0].title).toBe("Good Track");
+    expect(result?.tracks).toHaveLength(1);
+    expect(result?.tracks[0].title).toBe("Good Track");
   });
 });
 

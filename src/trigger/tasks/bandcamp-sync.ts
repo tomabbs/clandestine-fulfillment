@@ -12,8 +12,6 @@ import {
 import type { ScrapedAlbumData, ScrapedTrack } from "@/lib/clients/bandcamp-scraper";
 import {
   BandcampFetchError,
-  bandcampAlbumArtUrl,
-  bandcampMerchImageUrl,
   buildBandcampAlbumUrl,
   extractAlbumTitle,
   fetchBandcampPage,

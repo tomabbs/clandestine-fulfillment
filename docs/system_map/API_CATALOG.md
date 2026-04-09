@@ -14,13 +14,15 @@ Canonical catalog of request boundaries used for planning/build/audit.
 | `GET` | `/api/health` | `src/app/api/health/route.ts` | Runtime health endpoint |
 | `POST` | `/api/webhooks/shopify` | `src/app/api/webhooks/shopify/route.ts` | Shopify webhook ingest (inventory, orders) |
 | `POST` | `/api/webhooks/shopify/gdpr` | `src/app/api/webhooks/shopify/gdpr/route.ts` | Combined Shopify GDPR compliance handler (HMAC verified) |
+| `POST` | `/api/webhooks/shopify/gdpr/customers-data-request` | `src/app/api/webhooks/shopify/gdpr/customers-data-request/route.ts` | Shopify GDPR customers data request (HMAC verified, idempotent) |
+| `POST` | `/api/webhooks/shopify/gdpr/customers-redact` | `src/app/api/webhooks/shopify/gdpr/customers-redact/route.ts` | Shopify GDPR customer redact (HMAC verified, idempotent) |
+| `POST` | `/api/webhooks/shopify/gdpr/shop-redact` | `src/app/api/webhooks/shopify/gdpr/shop-redact/route.ts` | Shopify GDPR shop data redact (HMAC verified, idempotent) |
 | `POST` | `/api/webhooks/aftership` | `src/app/api/webhooks/aftership/route.ts` | AfterShip webhook ingest |
 | `POST` | `/api/webhooks/stripe` | `src/app/api/webhooks/stripe/route.ts` | Stripe billing webhooks |
 | `POST` | `/api/webhooks/resend-inbound` | `src/app/api/webhooks/resend-inbound/route.ts` | Resend inbound email hooks |
 | `POST` | `/api/webhooks/client-store` | `src/app/api/webhooks/client-store/route.ts` | Generic client store webhook ingress |
-| `GET` | `/api/oauth/shopify` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth initiation (client store connect) |
-| `GET` | `/api/oauth/shopify/callback` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth callback |
-| `GET` | `/api/oauth/woocommerce` | `src/app/api/oauth/woocommerce/route.ts` | WooCommerce OAuth initiation |
+| `GET` | `/api/oauth/shopify` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth initiation + callback (redirect_uri points here) |
+| `POST` | `/api/oauth/woocommerce` | `src/app/api/oauth/woocommerce/route.ts` | WooCommerce OAuth key delivery (receives credentials from portal-stores action) |
 | `POST` | `/api/oauth/woocommerce/callback` | `src/app/api/oauth/woocommerce/callback/route.ts` | WooCommerce OAuth 1.0a key delivery |
 | `GET` | `/api/oauth/squarespace` | `src/app/api/oauth/squarespace/route.ts` | Squarespace OAuth initiation |
 | `GET` | `/api/oauth/discogs` | `src/app/api/oauth/discogs/route.ts` | Discogs OAuth 1.0a initiation (client store connect) |
@@ -127,6 +129,18 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - File: `src/actions/discogs-admin.ts`
 - Key exports: `getDiscogsOverview`, `getDiscogsCredentials`, `saveDiscogsCredentials`, `getProductMappings`, `confirmMapping`, `rejectMapping`
 - All require `requireStaff()`.
+
+### Bandcamp Shipping
+
+- File: `src/actions/bandcamp-shipping.ts`
+- Exports: `setBandcampPaymentId`, `triggerBandcampMarkShipped`
+  - Staff-only. Sets Bandcamp payment ID on shipments and triggers mark-shipped task (Rule #48 compliant — enqueues via Trigger, never calls Bandcamp API directly).
+
+### Bundle Components
+
+- File: `src/actions/bundle-components.ts`
+- Exports: `getBundleComponents`, `setBundleComponents`, `removeBundleComponent`, `computeBundleAvailability`
+  - Bundle composition management with full-graph DFS cycle detection and MIN-based availability calculation.
 
 ### Integrations + Store Mapping
 

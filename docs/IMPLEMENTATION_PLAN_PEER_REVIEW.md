@@ -12,37 +12,38 @@
 
 ### App Architecture
 
-- **Two portals, not one:** All staff operations are under `src/app/admin/**`. All client-facing pages are under `src/app/portal/**`. There is NO `src/app/(dashboard)/` route group — that path does not exist in this project.
+- **Two portals, not one:** All staff operations are under `src/app/admin/`**. All client-facing pages are under `src/app/portal/**`. There is NO `src/app/(dashboard)/` route group — that path does not exist in this project.
 - **Auth pattern:** All server actions use `requireAuth()` from `src/lib/server/auth-context.ts`. This reads the Supabase session cookie, looks up the user record in the `users` table, and returns `{ userRecord, isStaff }`.
 - **Query pattern:** All client-side data fetching uses `useAppQuery`/`useAppMutation` from `src/lib/hooks/use-app-query.ts`. Raw `fetch()` or `useEffect` data loading is a pattern violation.
 
 ### The Two Shopify Contexts (Critical)
 
 1. **Clandestine's own Shopify** (`SHOPIFY_STORE_URL`, `SHOPIFY_ADMIN_API_TOKEN` in env): This is Clandestine's warehouse master store. Bandcamp product data is scraped → products created in this Shopify → becomes master inventory for the warehouse. Handled by `shopify-sync`, `shopify-full-backfill` Trigger tasks and the `src/lib/clients/shopify-client.ts` GraphQL client. **DO NOT TOUCH.**
-
 2. **Client store connections** (`client_store_connections` table): Each fulfillment client (e.g., Northern Spy, Egghunt) may have their own separate Shopify, Squarespace, or WooCommerce store. Orders flow in FROM those stores and inventory is pushed TO those stores. This is what the plan is about. Handled by `store-sync-client.ts`, `multi-store-inventory-push` Trigger task, `client-store-order-detect` Trigger task.
 
 ### What Is Already Fully Built (DO NOT REBUILD)
 
-| Feature | Files | Status |
-|---|---|---|
-| `client_store_connections` DB schema | `supabase/migrations/20260316000011_store_connections.sql` | ✅ Complete |
-| Staff admin UI for connections | `src/app/admin/settings/store-connections/page.tsx` | ✅ Complete |
-| Credential storage (secure, service-role) | `src/actions/client-store-credentials.ts` | ✅ Complete |
-| Shopify client-store sync engine | `src/lib/clients/store-sync-client.ts` — `createShopifySync()` | ✅ Complete |
-| WooCommerce client-store sync engine | `src/lib/clients/store-sync-client.ts` — `createWooCommerceSync()` | ✅ Complete |
-| Squarespace client-store sync engine | `src/lib/clients/store-sync-client.ts` — `createSquarespaceSync()` | ✅ Complete |
-| Client-store webhook ingress | `src/app/api/webhooks/client-store/route.ts` | ✅ Complete |
-| Inventory push cron (every 5 min) | `src/trigger/tasks/multi-store-inventory-push.ts` | ✅ Complete |
-| Order detection cron (every 10 min) | `src/trigger/tasks/client-store-order-detect.ts` | ✅ Complete |
-| AfterShip API client | `src/lib/clients/aftership-client.ts` | ✅ Complete |
-| AfterShip registration Trigger task | `src/trigger/tasks/aftership-register.ts` | ✅ Wired but missing customer email |
-| AfterShip webhook receiver | `src/app/api/webhooks/aftership/route.ts` | ✅ Complete |
-| Tracking event storage | `warehouse_tracking_events` table (in migrations) | ✅ Complete |
-| Tracking timeline UI | `src/components/shared/tracking-timeline.tsx` | ✅ Complete |
-| Bandcamp order sync | `src/trigger/tasks/bandcamp-order-sync.ts` | ✅ Complete |
-| Bandcamp mark-shipped (with tracking) | `src/trigger/tasks/bandcamp-mark-shipped.ts` | ✅ Complete |
-| Pirate Ship label import | `src/trigger/tasks/pirate-ship-import.ts` | ✅ Complete (CSV import) |
+
+| Feature                                   | Files                                                              | Status                             |
+| ----------------------------------------- | ------------------------------------------------------------------ | ---------------------------------- |
+| `client_store_connections` DB schema      | `supabase/migrations/20260316000011_store_connections.sql`         | ✅ Complete                         |
+| Staff admin UI for connections            | `src/app/admin/settings/store-connections/page.tsx`                | ✅ Complete                         |
+| Credential storage (secure, service-role) | `src/actions/client-store-credentials.ts`                          | ✅ Complete                         |
+| Shopify client-store sync engine          | `src/lib/clients/store-sync-client.ts` — `createShopifySync()`     | ✅ Complete                         |
+| WooCommerce client-store sync engine      | `src/lib/clients/store-sync-client.ts` — `createWooCommerceSync()` | ✅ Complete                         |
+| Squarespace client-store sync engine      | `src/lib/clients/store-sync-client.ts` — `createSquarespaceSync()` | ✅ Complete                         |
+| Client-store webhook ingress              | `src/app/api/webhooks/client-store/route.ts`                       | ✅ Complete                         |
+| Inventory push cron (every 5 min)         | `src/trigger/tasks/multi-store-inventory-push.ts`                  | ✅ Complete                         |
+| Order detection cron (every 10 min)       | `src/trigger/tasks/client-store-order-detect.ts`                   | ✅ Complete                         |
+| AfterShip API client                      | `src/lib/clients/aftership-client.ts`                              | ✅ Complete                         |
+| AfterShip registration Trigger task       | `src/trigger/tasks/aftership-register.ts`                          | ✅ Wired but missing customer email |
+| AfterShip webhook receiver                | `src/app/api/webhooks/aftership/route.ts`                          | ✅ Complete                         |
+| Tracking event storage                    | `warehouse_tracking_events` table (in migrations)                  | ✅ Complete                         |
+| Tracking timeline UI                      | `src/components/shared/tracking-timeline.tsx`                      | ✅ Complete                         |
+| Bandcamp order sync                       | `src/trigger/tasks/bandcamp-order-sync.ts`                         | ✅ Complete                         |
+| Bandcamp mark-shipped (with tracking)     | `src/trigger/tasks/bandcamp-mark-shipped.ts`                       | ✅ Complete                         |
+| Pirate Ship label import                  | `src/trigger/tasks/pirate-ship-import.ts`                          | ✅ Complete (CSV import)            |
+
 
 ### Critical Type Definitions (in `src/lib/shared/types.ts`)
 
@@ -131,6 +132,7 @@ OAuth callback routes like `/api/shopify/callback` do NOT match `/api/webhooks/`
 **⚠️ ISSUE [HIGH]: EasyPost would represent a parallel shipment creation path that bypasses ShipStation.** The existing flow assumes all shipments enter via ShipStation webhook. If EasyPost creates a shipment directly, it needs to either: (a) create a `warehouse_shipments` row directly, or (b) still go through ShipStation (not useful). The plan needs to specify exactly how EasyPost-created shipments write to the DB and trigger AfterShip registration.
 
 **💡 SUGGESTION:** Proposed integration flow for EasyPost label creation:
+
 1. Staff selects order in UI → clicks "Create Label" → server action calls EasyPost API
 2. EasyPost returns label URL + tracking number
 3. Server action creates `shipping_labels` row (new table)
@@ -143,6 +145,7 @@ OAuth callback routes like `/api/shopify/callback` do NOT match `/api/webhooks/`
 > **Plan says:** `shipping_tracking_events` table — new table to create.
 
 **⚠️ ISSUE [CRITICAL]: This table already exists as `warehouse_tracking_events`.** Creating `shipping_tracking_events` would be a duplicate. The existing table schema:
+
 ```sql
 -- From migrations:
 warehouse_tracking_events (
@@ -150,6 +153,7 @@ warehouse_tracking_events (
   location, event_time, source, created_at
 )
 ```
+
 The `source` column already distinguishes between `"aftership"` and other sources. EasyPost webhook events should write to `warehouse_tracking_events` with `source: "easypost"`.
 
 **💡 SUGGESTION:** Remove `shipping_tracking_events` from Part 3. Replace all references in the plan with `warehouse_tracking_events`. Update the EasyPost webhook handler design accordingly.
@@ -209,10 +213,11 @@ The `source` column already distinguishes between `"aftership"` and other source
 **⚠️ ISSUE [CRITICAL]: This route path does not exist in this app.** The Next.js app uses `src/app/admin/` for staff and `src/app/portal/` for clients. There is no `(dashboard)` route group. The onboarding wizard is a client-facing feature (clients connect their own stores), so it belongs in `src/app/portal/onboarding/page.tsx`.
 
 **💡 SUGGESTION:** Replace all references to `(dashboard)` with the correct paths:
+
 - Onboarding wizard: `src/app/portal/onboarding/page.tsx`
 - Connected stores settings: `src/app/portal/settings/stores/page.tsx`
 
-Also note: The middleware guards `/portal/*` to require `client` or `client_admin` roles. This is correct behavior for a self-service onboarding page.
+Also note: The middleware guards `/portal/`* to require `client` or `client_admin` roles. This is correct behavior for a self-service onboarding page.
 
 ---
 
@@ -229,15 +234,18 @@ Also note: The middleware guards `/portal/*` to require `client` or `client_admi
 > **Plan says:** AfterShip sends branded tracking page email to customer.
 
 **⚠️ ISSUE [HIGH]: Customer email is not currently passed to AfterShip.** The `aftership-register` Trigger task calls:
+
 ```typescript
 const tracking = await createTracking(shipment.tracking_number, shipment.carrier, {
   title: `Shipment ${shipment.id}`,
   orderId: shipment.order_id,
 });
 ```
+
 The `createTracking` function signature accepts `metadata` with `title` and `orderId` but NOT `customer_email`. AfterShip's API supports `customer_name` and `emails` fields in the tracking creation payload, but these are not passed. Without the customer email, AfterShip cannot send tracking notification emails to customers.
 
 **💡 SUGGESTION:** Patch `aftership-register.ts` to:
+
 1. Join `warehouse_orders` to get customer email from `label_data.shipTo.email` or a future dedicated column
 2. Pass `customer_email` to `createTracking`
 
@@ -283,6 +291,7 @@ EASYPOST_WEBHOOK_SECRET: z.string().min(1),
 **⚠️ ISSUE [HIGH]: Middleware is not in Phase 1 checklist.** OAuth callback routes will be blocked by middleware and redirect to `/login` unless middleware is patched first. This should be the first step in Phase 1, before any routes are built.
 
 **💡 SUGGESTION:** Add as Phase 1 Day 0 step:
+
 - Patch `middleware.ts` `PUBLIC_PATHS` to include `/api/shopify/callback`, `/api/woocommerce/callback`, `/api/squarespace/callback`, `/api/discogs/callback` — or use a more general pattern like `pathname.startsWith("/api/") && pathname.endsWith("/callback")`.
 
 ---
@@ -314,6 +323,7 @@ EASYPOST_WEBHOOK_SECRET: z.string().min(1),
 > **Plan says:** No mention of updating `src/lib/shared/types.ts`.
 
 **⚠️ ISSUE [CRITICAL]:** Adding Discogs as a platform requires updating:
+
 - `StorePlatform` union type (line 41)
 - `OrderSource` union type (line 30)
 
@@ -325,44 +335,52 @@ Without these updates, TypeScript will reject any Discogs connection records. Th
 
 ### 🔴 CRITICAL (Blocks implementation)
 
-| # | Issue | Location in Plan |
-|---|---|---|
-| C1 | `shipping_tracking_events` table already exists as `warehouse_tracking_events` | Part 3, Part 5 |
-| C2 | `StorePlatform` and `OrderSource` types don't include `"discogs"` | Part 1, Part 9 |
-| C3 | App routing uses `admin/` and `portal/`, not `(dashboard)/` | Parts 4, 9 |
-| C4 | Middleware does not allow OAuth callback routes — they redirect to login | Phase 1 checklist |
-| C5 | `shipping_labels` table has no RLS policies defined | Part 3 |
+
+| #   | Issue                                                                          | Location in Plan  |
+| --- | ------------------------------------------------------------------------------ | ----------------- |
+| C1  | `shipping_tracking_events` table already exists as `warehouse_tracking_events` | Part 3, Part 5    |
+| C2  | `StorePlatform` and `OrderSource` types don't include `"discogs"`              | Part 1, Part 9    |
+| C3  | App routing uses `admin/` and `portal/`, not `(dashboard)/`                    | Parts 4, 9        |
+| C4  | Middleware does not allow OAuth callback routes — they redirect to login       | Phase 1 checklist |
+| C5  | `shipping_labels` table has no RLS policies defined                            | Part 3            |
+
 
 ### 🟠 HIGH (Will cause failures if not addressed)
 
-| # | Issue | Location in Plan |
-|---|---|---|
-| H1 | Shopify OAuth marked "COMPLETE" — routes don't exist | Part 1 |
-| H2 | `refresh_token` column missing from `client_store_connections` — Squarespace breaks after 30 min | Parts 1, 3 |
-| H3 | Customer email not passed to AfterShip — branded tracking emails not sent | Part 5 |
-| H4 | New env vars not added to `serverEnvSchema` in `env.ts` | Part 7 |
-| H5 | EasyPost-created shipments need explicit flow to write to `warehouse_shipments` and trigger `aftership-register` | Part 5 |
-| H6 | `src/actions/shipping.ts` already exists with different exports — naming conflict | Part 9 |
-| H7 | `shipping_labels` has no `org_id` or `shipment_id` back-reference | Part 3 |
-| H8 | No plan for marking orders "fulfilled" back on source platforms after shipping | Part 5 |
+
+| #   | Issue                                                                                                            | Location in Plan |
+| --- | ---------------------------------------------------------------------------------------------------------------- | ---------------- |
+| H1  | Shopify OAuth marked "COMPLETE" — routes don't exist                                                             | Part 1           |
+| H2  | `refresh_token` column missing from `client_store_connections` — Squarespace breaks after 30 min                 | Parts 1, 3       |
+| H3  | Customer email not passed to AfterShip — branded tracking emails not sent                                        | Part 5           |
+| H4  | New env vars not added to `serverEnvSchema` in `env.ts`                                                          | Part 7           |
+| H5  | EasyPost-created shipments need explicit flow to write to `warehouse_shipments` and trigger `aftership-register` | Part 5           |
+| H6  | `src/actions/shipping.ts` already exists with different exports — naming conflict                                | Part 9           |
+| H7  | `shipping_labels` has no `org_id` or `shipment_id` back-reference                                                | Part 3           |
+| H8  | No plan for marking orders "fulfilled" back on source platforms after shipping                                   | Part 5           |
+
 
 ### 🟡 MEDIUM (Should be addressed before implementation)
 
-| # | Issue | Location in Plan |
-|---|---|---|
-| M1 | WooCommerce OAuth callback must be GET not POST | Part 1 |
-| M2 | Discogs OAuth 1.0a cannot share a utility with OAuth 2.0 | Phase 1 checklist |
-| M3 | Portal layout (`portal/layout.tsx`) needs onboarding redirect, not `(dashboard)/layout.tsx` | Part 4 |
-| M4 | Discogs should be deferred — adds significant complexity for unclear volume | Part 1 |
+
+| #   | Issue                                                                                       | Location in Plan  |
+| --- | ------------------------------------------------------------------------------------------- | ----------------- |
+| M1  | WooCommerce OAuth callback must be GET not POST                                             | Part 1            |
+| M2  | Discogs OAuth 1.0a cannot share a utility with OAuth 2.0                                    | Phase 1 checklist |
+| M3  | Portal layout (`portal/layout.tsx`) needs onboarding redirect, not `(dashboard)/layout.tsx` | Part 4            |
+| M4  | Discogs should be deferred — adds significant complexity for unclear volume                 | Part 1            |
+
 
 ### 🔵 INFORMATIONAL (No code change needed, plan text should clarify)
 
-| # | Issue | Location in Plan |
-|---|---|---|
-| I1 | Bandcamp is already fully integrated — no new work needed | Part 1 |
-| I2 | Pirate Ship is already built as a CSV import tool | Part 2 |
-| I3 | AfterShip tracking webhook, timeline UI, and `warehouse_tracking_events` are already built | Part 5 |
-| I4 | `store-sync-client.ts` Shopify, WooCommerce, Squarespace engines are already fully implemented | Implicit throughout |
+
+| #   | Issue                                                                                          | Location in Plan    |
+| --- | ---------------------------------------------------------------------------------------------- | ------------------- |
+| I1  | Bandcamp is already fully integrated — no new work needed                                      | Part 1              |
+| I2  | Pirate Ship is already built as a CSV import tool                                              | Part 2              |
+| I3  | AfterShip tracking webhook, timeline UI, and `warehouse_tracking_events` are already built     | Part 5              |
+| I4  | `store-sync-client.ts` Shopify, WooCommerce, Squarespace engines are already fully implemented | Implicit throughout |
+
 
 ---
 
@@ -381,6 +399,7 @@ After a label is created and tracking confirmed, each source platform needs the 
 ### Addition 2: Token Refresh Architecture for Squarespace
 
 Since Squarespace access tokens expire in 30 minutes, add:
+
 1. `refresh_token text` column on `client_store_connections`
 2. A `refreshSquarespaceToken(connectionId)` utility function
 3. Call it inline in `createSquarespaceSync()` in `store-sync-client.ts` before any API call if `token_expires_at < now() + 5 minutes`
@@ -421,13 +440,9 @@ Before any Phase 1 code:
 Before the next review iteration:
 
 1. **International shipping via EasyPost vs Pirate Ship:** The plan describes both. What is the threshold for manual Pirate Ship fallback? Is it per-client config or global? Who sets `use_international_fallback: true` — staff or client?
-
 2. **Discogs priority:** Is there enough Discogs order volume to warrant the complexity of OAuth 1.0a + a new platform? If < 5% of orders, recommend deferring to Phase 5+.
-
 3. **Client onboarding — who initiates?** Does the client self-connect (portal-side onboarding wizard), or does staff set up connections on behalf of clients (admin-side), or both? The current admin UI already allows staff to create connections manually.
-
 4. **Label creation UI:** Where in the admin UI does staff create labels? On the order detail page? On a dedicated shipping/fulfillment page? This affects which pages need new UI components.
-
 5. **Customer-facing tracking page:** AfterShip provides a hosted branded tracking page. Is the AfterShip page sufficient, or should there be a tracking page at a custom subdomain (e.g., `track.clandestinedistribution.com`)?
-
 6. **WooCommerce and Squarespace order volume:** These platforms require separate polling. Are any current clients on WooCommerce or Squarespace, or is this future-proofing?
+

@@ -424,15 +424,24 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
 export async function getBandcampScraperHealth(workspaceId: string) {
   const supabase = createServiceRoleClient();
 
-  // ── All mapping data for coverage calculations ──
-  const { data: mappings } = await supabase
-    .from("bandcamp_product_mappings")
-    .select(
-      "id, bandcamp_url, bandcamp_url_source, bandcamp_subdomain, bandcamp_album_title, bandcamp_price, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_options, bandcamp_origin_quantities, bandcamp_catalog_number, bandcamp_upc, raw_api_data, bandcamp_image_url, bandcamp_new_date",
-    )
-    .eq("workspace_id", workspaceId);
+  // ── All mapping data for coverage calculations (paginated to avoid 1000-row cap) ──
+  const mappings: Array<Record<string, unknown>> = [];
+  let mappingOffset = 0;
+  while (true) {
+    const { data: page } = await supabase
+      .from("bandcamp_product_mappings")
+      .select(
+        "id, bandcamp_url, bandcamp_url_source, bandcamp_subdomain, bandcamp_album_title, bandcamp_price, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_options, bandcamp_origin_quantities, bandcamp_catalog_number, bandcamp_upc, raw_api_data, bandcamp_image_url, bandcamp_new_date",
+      )
+      .eq("workspace_id", workspaceId)
+      .range(mappingOffset, mappingOffset + 999);
+    if (!page?.length) break;
+    mappings.push(...page);
+    if (page.length < 1000) break;
+    mappingOffset += 1000;
+  }
 
-  const t = mappings?.length ?? 0;
+  const t = mappings.length;
 
   // API data coverage
   const apiCoverage = {

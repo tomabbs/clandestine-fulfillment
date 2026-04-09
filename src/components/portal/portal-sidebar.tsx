@@ -4,7 +4,6 @@ import { createBrowserClient } from "@supabase/ssr";
 import {
   Disc3,
   DollarSign,
-  Home,
   LayoutDashboard,
   LogOut,
   MessageSquare,

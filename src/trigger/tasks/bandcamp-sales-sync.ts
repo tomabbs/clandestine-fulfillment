@@ -24,8 +24,8 @@ export const bandcampSalesSyncSchedule = schedules.task({
     let totalInserted = 0;
 
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const startTime = yesterday.toISOString().slice(0, 10) + " 00:00:00";
-    const endTime = new Date().toISOString().slice(0, 10) + " 00:00:00";
+    const startTime = `${yesterday.toISOString().slice(0, 10)} 00:00:00`;
+    const endTime = `${new Date().toISOString().slice(0, 10)} 00:00:00`;
 
     for (const workspaceId of workspaceIds) {
       const { data: connections } = await supabase

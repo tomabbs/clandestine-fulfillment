@@ -61,7 +61,8 @@ export const bandcampOrderSyncTask = task({
           }
 
           for (const [paymentId, orderItems] of Array.from(byPayment.entries())) {
-            const first = orderItems[0]!;
+            const first = orderItems[0];
+            if (!first) continue;
             const { data: existing } = await supabase
               .from("warehouse_orders")
               .select("id")

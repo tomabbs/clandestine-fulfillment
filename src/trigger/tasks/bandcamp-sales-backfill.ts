@@ -14,16 +14,9 @@
  */
 
 import { logger, schedules, task } from "@trigger.dev/sdk";
-import {
-  fetchSalesReport,
-  generateSalesReport,
-  refreshBandcampToken,
-  type SalesReportItem,
-  salesReport,
-} from "@/lib/clients/bandcamp";
+import { refreshBandcampToken, type SalesReportItem, salesReport } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
 
 // Keep in sync with safeBigint in scripts/run-sales-backfill.mjs
 function safeBigint(val: unknown): number | null {

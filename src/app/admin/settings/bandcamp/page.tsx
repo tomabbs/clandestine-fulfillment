@@ -729,6 +729,7 @@ function MonthHeatmap({
                 const cell = byYearMonth.get(`${year}-${i + 1}`);
                 if (!cell)
                   return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: month index in heatmap grid
                     <td key={i} className="text-center">
                       -
                     </td>
@@ -749,6 +750,7 @@ function MonthHeatmap({
 
                 return (
                   <td
+                    // biome-ignore lint/suspicious/noArrayIndexKey: month index in heatmap grid
                     key={i}
                     className={`text-center rounded px-1 py-0.5 ${bg}`}
                     title={cell.error ?? undefined}
@@ -1139,6 +1141,7 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
         </TableHeader>
         <TableBody>
           {pageItems.map((item, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: sales items may share connectionId+name+type
             <TableRow key={`${item.connectionId}-${item.itemName}-${item.itemType}-${i}`}>
               <TableCell className="text-sm max-w-[150px] truncate">{item.artist}</TableCell>
               <TableCell className="font-medium max-w-[250px] truncate">
@@ -1334,10 +1337,12 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {items.map((item, i) => (
           <Card
+            // biome-ignore lint/suspicious/noArrayIndexKey: trending API results have no stable ID
             key={`${item.url}-${i}`}
             className={item.isClientArtist ? "border-2 border-blue-500" : ""}
           >
             <div className="aspect-square relative overflow-hidden rounded-t-lg">
+              {/* biome-ignore lint/performance/noImgElement: external Bandcamp discover URLs */}
               <img
                 src={item.artUrl}
                 alt={`${item.artist} - ${item.title}`}
@@ -1384,6 +1389,7 @@ function TrendingTab({ workspaceId }: { workspaceId: string }) {
                   {item.genre}
                 </Badge>
                 {item.packages.map((p, j) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: package list has no stable ID
                   <Badge key={j} variant="secondary" className="text-xs">
                     {p.typeStr} ${p.price}
                   </Badge>

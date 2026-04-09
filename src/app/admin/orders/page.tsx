@@ -444,7 +444,7 @@ function CreateLabelPanel({
   const [showRates, setShowRates] = useState(false);
   const [selectedRateId, setSelectedRateId] = useState<string | null>(null);
   const [labelResult, setLabelResult] = useState<LabelResult | null>(null);
-  const [taskRunId, setTaskRunId] = useState<string | null>(null);
+  const [_taskRunId, setTaskRunId] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
 
   const ratesQuery = useAppQuery({
@@ -466,11 +466,11 @@ function CreateLabelPanel({
       }
       // result.shipmentId is the Trigger.dev run ID when using task path
       if (result.shipmentId) {
-        setTaskRunId(result.shipmentId);
+        const shipmentId = result.shipmentId;
+        setTaskRunId(shipmentId);
         setPolling(true);
-        // Poll for task completion
         const poll = async () => {
-          const status = await getLabelTaskStatus(result.shipmentId!);
+          const status = await getLabelTaskStatus(shipmentId);
           if (status.status === "completed" || status.status === "failed") {
             setPolling(false);
             setLabelResult(status.result ?? { success: false, error: "Unknown status" });

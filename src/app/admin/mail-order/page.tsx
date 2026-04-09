@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, MapPin, Package, Store } from "lucide-react";
+import { ChevronDown, ChevronRight, MapPin, Store } from "lucide-react";
 import { useState } from "react";
 import { getMailOrders } from "@/actions/mail-orders";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
@@ -97,6 +97,7 @@ function OrderDetail({ order }: { order: MailOrderRow }) {
           <div className="rounded border bg-background divide-y">
             {lineItems.map((li, i) => (
               <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: JSONB line items have no stable unique ID
                 key={`${li.sku}-${i}`}
                 className="flex items-center justify-between px-3 py-2 text-sm"
               >

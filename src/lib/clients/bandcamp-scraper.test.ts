@@ -106,16 +106,16 @@ describe("parseBandcampPage — about / credits / upc", () => {
     });
     const result = parseBandcampPage(html);
     expect(result).not.toBeNull();
-    expect(result!.about).toBe("An incredible debut album.");
-    expect(result!.credits).toBe("Recorded by Jane Smith at Studio A.");
-    expect(result!.upc).toBe("703610875463");
+    expect(result?.about).toBe("An incredible debut album.");
+    expect(result?.credits).toBe("Recorded by Jane Smith at Studio A.");
+    expect(result?.upc).toBe("703610875463");
   });
 
   it("returns null for about/credits/upc when absent", () => {
     const result = parseBandcampPage(makeHtml());
-    expect(result!.about).toBeNull();
-    expect(result!.credits).toBeNull();
-    expect(result!.upc).toBeNull();
+    expect(result?.about).toBeNull();
+    expect(result?.credits).toBeNull();
+    expect(result?.upc).toBeNull();
   });
 
   it("trims leading/trailing whitespace from about, credits, and upc", () => {
@@ -125,9 +125,9 @@ describe("parseBandcampPage — about / credits / upc", () => {
       upc: " 634457226203 ",
     });
     const result = parseBandcampPage(html);
-    expect(result!.about).toBe("Description with leading newlines.");
-    expect(result!.credits).toBe("Recorded by someone.");
-    expect(result!.upc).toBe("634457226203");
+    expect(result?.about).toBe("Description with leading newlines.");
+    expect(result?.credits).toBe("Recorded by someone.");
+    expect(result?.upc).toBe("634457226203");
   });
 });
 
@@ -140,29 +140,29 @@ describe("parseBandcampPage — trackinfo", () => {
 
   it("parses trackinfo into sorted ScrapedTrack array", () => {
     const result = parseBandcampPage(makeHtml({}, sampleTracks));
-    expect(result!.tracks).toHaveLength(3);
-    expect(result!.tracks[0].title).toBe("Opening Track");
-    expect(result!.tracks[0].trackNum).toBe(1);
-    expect(result!.tracks[1].title).toBe("Second Movement");
-    expect(result!.tracks[2].title).toBe("Finale");
+    expect(result?.tracks).toHaveLength(3);
+    expect(result?.tracks[0].title).toBe("Opening Track");
+    expect(result?.tracks[0].trackNum).toBe(1);
+    expect(result?.tracks[1].title).toBe("Second Movement");
+    expect(result?.tracks[2].title).toBe("Finale");
   });
 
   it("formats duration seconds as M:SS", () => {
     const result = parseBandcampPage(makeHtml({}, sampleTracks));
-    expect(result!.tracks[0].durationFormatted).toBe("3:45"); // 225s
-    expect(result!.tracks[1].durationFormatted).toBe("5:46"); // 345.621s rounds to 346s
-    expect(result!.tracks[2].durationFormatted).toBe("1:12"); // 72.4s rounds to 72s
+    expect(result?.tracks[0].durationFormatted).toBe("3:45"); // 225s
+    expect(result?.tracks[1].durationFormatted).toBe("5:46"); // 345.621s rounds to 346s
+    expect(result?.tracks[2].durationFormatted).toBe("1:12"); // 72.4s rounds to 72s
   });
 
   it("returns empty array when trackinfo absent", () => {
     const result = parseBandcampPage(makeHtml());
-    expect(result!.tracks).toEqual([]);
+    expect(result?.tracks).toEqual([]);
   });
 
   it("sorts tracks by track_num regardless of input order", () => {
     const shuffled = [sampleTracks[2], sampleTracks[0], sampleTracks[1]];
     const result = parseBandcampPage(makeHtml({}, shuffled));
-    expect(result!.tracks.map((t) => t.trackNum)).toEqual([1, 2, 3]);
+    expect(result?.tracks.map((t) => t.trackNum)).toEqual([1, 2, 3]);
   });
 
   it("skips tracks with missing title or duration", () => {
@@ -172,7 +172,7 @@ describe("parseBandcampPage — trackinfo", () => {
       { track_num: 3, title: "Also Good", duration: null }, // no duration — skipped
     ];
     const result = parseBandcampPage(makeHtml({}, mixed));
-    expect(result!.tracks).toHaveLength(1);
-    expect(result!.tracks[0].title).toBe("Good Track");
+    expect(result?.tracks).toHaveLength(1);
+    expect(result?.tracks[0].title).toBe("Good Track");
   });
 });

@@ -39,10 +39,10 @@ export default function CallbackHashPage() {
     // createBrowserClient (from @supabase/ssr) stores the session in
     // cookies, not localStorage — so /auth/callback/complete can read it
     // server-side via createServerClient.
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    );
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) throw new Error("Missing Supabase public env vars");
+    const supabase = createBrowserClient(url, key);
 
     supabase.auth
       .setSession({ access_token: accessToken, refresh_token: refreshToken })

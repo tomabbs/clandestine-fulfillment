@@ -52,6 +52,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
 | `bandcamp-sales-sync` | `src/trigger/tasks/bandcamp-sales-sync.ts` | `0 5 * * *` (daily 5am UTC) |
 | `bandcamp-sales-backfill-cron` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | `*/10 * * * *` — self-healing monitor: detects stale running connections (>2h), retries up to 3 failed chunks per run using sync sales_report API, reads bandcamp_sales_backfill_log for gap detection |
+| `mailorder-shopify-sync` | `src/trigger/tasks/mailorder-shopify-sync.ts` | `*/30 * * * *` — syncs paid Shopify orders into `mailorder_orders` for consignment billing. Splits multi-org orders by SKU → variant → product.org_id, creating one row per (order × org). Payout = subtotal × 0.5 (excludes shipping). Uses 2-min overlap window for cursor safety. |
 
 ## Event/On-Demand Tasks
 
@@ -86,7 +87,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 
 - **Inventory:** `process-shopify-webhook`, `process-client-store-webhook`, `multi-store-inventory-push`, `bandcamp-inventory-push`, `redis-backfill`
 - **Orders/shipments:** `client-store-order-detect`, `bandcamp-order-sync`, `bandcamp-mark-shipped`, `create-shipping-label`, `mark-platform-fulfilled`, `mark-mailorder-fulfilled`, `daily-scan-form`
-- **Mail-order (consignment):** `discogs-mailorder-sync`, `discogs-client-order-sync`, `mark-mailorder-fulfilled`
+- **Mail-order (consignment):** `discogs-mailorder-sync`, `discogs-client-order-sync`, `mark-mailorder-fulfilled`, `mailorder-shopify-sync`
 - **Discogs master catalog:** `discogs-catalog-match`, `discogs-initial-listing`, `discogs-listing-replenish`, `discogs-message-poll`, `discogs-message-send`
 - **Catalog/release readiness:** `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
 - **Billing/storage:** `monthly-billing`, `storage-calc`
@@ -100,6 +101,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 - **Bulk inventory bypass (Rule #59):** `shopify-sync` writes directly to Redis (bypasses `recordInventoryChange`) for performance during bulk pulls. Downstream fanout to client stores relies on the `multi-store-inventory-push` cron (≤5 min lag). This is intentional — not a bug.
 - **Discogs client orders:** `client-store-order-detect` explicitly skips Discogs connections; `discogs-client-order-sync` handles them separately due to OAuth 1.0a auth + different SKU/fanout requirements.
 - **Bandcamp sale → inventory chain:** `bandcamp-sale-poll` → `recordInventoryChange()` → Redis fanout → Postgres. Chain is fully instrumented. OQ3 verified 2026-03-28.
+- **Diagnostic tasks:** `debug-env` exists as a diagnostic task but is intentionally excluded from the task registry (`index.ts`). It can be triggered manually from the Trigger.dev dashboard.
 
 ## Audit Requirement
 

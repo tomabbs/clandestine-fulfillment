@@ -8,7 +8,6 @@ import {
   updateInventoryBuffer,
 } from "@/actions/inventory";
 import { PaginationBar } from "@/components/shared/pagination-bar";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {

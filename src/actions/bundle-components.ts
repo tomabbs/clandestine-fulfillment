@@ -71,8 +71,9 @@ export async function setBundleComponents(
     const visited = new Set<string>();
     const stack = [startComponentId];
     while (stack.length > 0) {
-      const node = stack.pop()!;
-      if (node === bundleVariantId) return true; // cycle detected
+      const node = stack.pop();
+      if (node === undefined) break;
+      if (node === bundleVariantId) return true;
       if (visited.has(node)) continue;
       visited.add(node);
       for (const child of graph.get(node) ?? []) stack.push(child);

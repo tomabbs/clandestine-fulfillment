@@ -26,8 +26,6 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 const PRODUCT_TYPES = ["LP", "CD", "Cassette", "Shirt", "Bundle", "Merch", "Other"];
 
-type ProductDetail = NonNullable<Awaited<ReturnType<typeof getClientProductDetail>>>;
-
 export default function PortalCatalogDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
