@@ -17,6 +17,7 @@ interface InventoryFilters {
   orgId?: string;
   format?: string;
   status?: string;
+  stockFilter?: "in_stock" | "out_of_stock";
   search?: string;
   page?: number;
   pageSize?: number;
@@ -133,6 +134,11 @@ export async function getInventoryLevels(
     query = query.or(
       `sku.ilike.%${filters.search}%,warehouse_product_variants.warehouse_products.title.ilike.%${filters.search}%`,
     );
+  }
+  if (filters.stockFilter === "in_stock") {
+    query = query.gt("available", 0);
+  } else if (filters.stockFilter === "out_of_stock") {
+    query = query.eq("available", 0);
   }
 
   query = query.range(offset, offset + pageSize - 1).order("sku", { ascending: true });
@@ -524,4 +530,41 @@ export async function updateWorkspaceDefaultBuffer(
 
   if (error) throw new Error(`Failed to update workspace buffer: ${error.message}`);
   return { success: true };
+}
+
+/**
+ * Export inventory to CSV. Returns the CSV string for client-side download.
+ * Staff-only. Supports all the same filters as getInventoryLevels.
+ */
+export async function exportInventoryCsv(filters: {
+  orgId?: string;
+  stockFilter?: "in_stock" | "out_of_stock";
+  format?: string;
+  status?: string;
+  search?: string;
+}): Promise<string> {
+  await requireStaff();
+  const result = await getInventoryLevels(
+    { ...filters, page: 1, pageSize: 10000 },
+    { bypassRls: true },
+  );
+
+  const header = "SKU,Product,Label,Format,Status,Available,Committed,Incoming,Safety Stock";
+  const lines = result.rows.map((row) => {
+    const safeTitle = `"${(row.productTitle ?? "").replace(/"/g, '""')}"`;
+    const safeOrg = `"${(row.orgName ?? "").replace(/"/g, '""')}"`;
+    return [
+      row.sku,
+      safeTitle,
+      safeOrg,
+      row.formatName ?? "",
+      row.status,
+      row.available,
+      row.committed,
+      row.incoming,
+      (row as { safetyStock?: number | null }).safetyStock ?? "",
+    ].join(",");
+  });
+
+  return [header, ...lines].join("\n");
 }

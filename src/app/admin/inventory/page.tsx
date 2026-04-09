@@ -1,15 +1,17 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Minus, Package, Plus } from "lucide-react";
+import { Download, ExternalLink, Minus, Package, Plus } from "lucide-react";
 import { useCallback, useState } from "react";
 import {
   adjustInventory,
+  exportInventoryCsv,
   getInventoryDetail,
   getInventoryLevels,
   updateInventoryBuffer,
   updateVariantFormat,
 } from "@/actions/inventory";
+import { getOrganizations } from "@/actions/organizations";
 import { EditableNumberCell, EditableSelectCell } from "@/components/shared/editable-cell";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
@@ -47,6 +49,7 @@ export default function InventoryPage() {
     orgId: "",
     format: "",
     status: "",
+    stockFilter: "" as "" | "in_stock" | "out_of_stock",
     search: "",
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -58,11 +61,19 @@ export default function InventoryPage() {
   } | null>(null);
   const [adjustDelta, setAdjustDelta] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
+  const [exporting, setExporting] = useState(false);
+
+  const { data: orgs } = useAppQuery({
+    queryKey: ["admin", "organizations"],
+    queryFn: () => getOrganizations(),
+    tier: CACHE_TIERS.SESSION,
+  });
 
   const queryFilters = {
     ...(filters.orgId && { orgId: filters.orgId }),
     ...(filters.format && { format: filters.format }),
     ...(filters.status && { status: filters.status }),
+    ...(filters.stockFilter && { stockFilter: filters.stockFilter }),
     ...(filters.search && { search: filters.search }),
     page: filters.page,
     pageSize: filters.pageSize,
@@ -110,18 +121,45 @@ export default function InventoryPage() {
           onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
           className="w-64"
         />
-        <Input
-          placeholder="Filter by org ID..."
+        <select
           value={filters.orgId}
           onChange={(e) => setFilters((f) => ({ ...f, orgId: e.target.value, page: 1 }))}
-          className="w-48"
-        />
-        <Input
-          placeholder="Filter by format..."
+          className="border-input bg-background h-9 rounded-md border px-3 text-sm min-w-[180px]"
+        >
+          <option value="">All clients</option>
+          {(orgs ?? []).map((org) => (
+            <option key={org.id} value={org.id}>
+              {org.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.stockFilter}
+          onChange={(e) =>
+            setFilters((f) => ({
+              ...f,
+              stockFilter: e.target.value as "" | "in_stock" | "out_of_stock",
+              page: 1,
+            }))
+          }
+          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+        >
+          <option value="">All stock levels</option>
+          <option value="in_stock">In stock</option>
+          <option value="out_of_stock">Out of stock</option>
+        </select>
+        <select
           value={filters.format}
           onChange={(e) => setFilters((f) => ({ ...f, format: e.target.value, page: 1 }))}
-          className="w-40"
-        />
+          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+        >
+          <option value="">All formats</option>
+          {FORMAT_OPTIONS.filter((f) => f.value).map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
         <select
           value={filters.status}
           onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
@@ -132,6 +170,36 @@ export default function InventoryPage() {
           <option value="draft">Draft</option>
           <option value="archived">Archived</option>
         </select>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={exporting}
+          onClick={async () => {
+            setExporting(true);
+            try {
+              const csv = await exportInventoryCsv({
+                orgId: filters.orgId || undefined,
+                stockFilter: filters.stockFilter || undefined,
+                format: filters.format || undefined,
+                status: filters.status || undefined,
+                search: filters.search || undefined,
+              });
+              const blob = new Blob([csv], { type: "text/csv" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              const orgName = orgs?.find((o) => o.id === filters.orgId)?.name ?? "all-clients";
+              a.href = url;
+              a.download = `inventory-${orgName.replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().split("T")[0]}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            } finally {
+              setExporting(false);
+            }
+          }}
+        >
+          <Download className="h-4 w-4 mr-1" />
+          {exporting ? "Exporting..." : "Export CSV"}
+        </Button>
       </div>
 
       {/* Table */}
