@@ -136,23 +136,41 @@ export const inboundProductCreate = task({
           continue;
         }
 
-        // Create variant
-        const { error: variantError } = await supabase.from("warehouse_product_variants").insert({
-          product_id: product.id,
-          workspace_id: shipment.workspace_id,
-          sku: item.sku,
-          shopify_variant_id: shopifyVariant?.id ?? null,
-          title: "Default Title",
-          weight_unit: "lb",
-        });
+        const { data: variant, error: variantError } = await supabase
+          .from("warehouse_product_variants")
+          .insert({
+            product_id: product.id,
+            workspace_id: shipment.workspace_id,
+            sku: item.sku,
+            shopify_variant_id: shopifyVariant?.id ?? null,
+            title: "Default Title",
+            weight_unit: "lb",
+          })
+          .select("id")
+          .single();
 
-        if (variantError) {
+        if (variantError || !variant) {
           results.push({
             itemId: item.id,
             productId: product.id,
-            error: `DB variant insert failed: ${variantError.message}`,
+            error: `DB variant insert failed: ${variantError?.message ?? "no data returned"}`,
           });
           continue;
+        }
+
+        const { error: levelError } = await supabase.from("warehouse_inventory_levels").insert({
+          variant_id: variant.id,
+          workspace_id: shipment.workspace_id,
+          sku: item.sku,
+          available: 0,
+          committed: 0,
+          incoming: item.expected_quantity ?? 0,
+        });
+
+        if (levelError) {
+          console.error(
+            `[inbound-product-create] Failed to create inventory level for SKU ${item.sku}: ${levelError.message}`,
+          );
         }
 
         results.push({ itemId: item.id, productId: product.id, error: null });

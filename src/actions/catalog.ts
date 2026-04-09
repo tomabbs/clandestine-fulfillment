@@ -1,8 +1,8 @@
 "use server";
 
 import { z } from "zod/v4";
-import { requireClient } from "@/lib/server/auth-context";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { requireAuth, requireClient } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 // === Zod Schemas (Rule #5: Zod for all boundaries) ===
 
@@ -42,15 +42,6 @@ const clientReleasesFiltersSchema = z.object({
   page: z.number().int().min(1).default(1),
   pageSize: z.union([z.literal(50), z.literal(100), z.literal(250)]).default(50),
 });
-
-// === Helper ===
-
-async function requireAuth() {
-  const supabase = await createServerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-  return { supabase, user: userData.user };
-}
 
 function isUnauthorizedError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
@@ -126,22 +117,33 @@ export async function searchProductVariants(query: string): Promise<
     currentStock: number | null;
   }>
 > {
-  // Autocomplete can fire during initial hydration; fail-soft instead of surfacing server errors.
+  let orgId: string | undefined;
   try {
-    await requireAuth();
+    const ctx = await requireClient();
+    orgId = ctx.orgId;
   } catch {
-    return [];
+    try {
+      await requireAuth();
+    } catch {
+      return [];
+    }
   }
   if (!query || query.length < 2) return [];
 
   const serviceClient = createServiceRoleClient();
   const term = `%${query}%`;
 
-  const { data: variants } = await serviceClient
+  let variantQuery = serviceClient
     .from("warehouse_product_variants")
     .select("id, sku, title, format_name, warehouse_products!inner(title)")
     .or(`sku.ilike.${term},title.ilike.${term},warehouse_products.title.ilike.${term}`)
     .limit(20);
+
+  if (orgId) {
+    variantQuery = variantQuery.eq("warehouse_products.org_id", orgId);
+  }
+
+  const { data: variants } = await variantQuery;
 
   if (!variants) return [];
 

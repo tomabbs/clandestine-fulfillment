@@ -361,6 +361,31 @@ export const sensorCheckTask = schedules.task({
         });
       }
 
+      // 11. catalog.unmapped_products — products with NULL org_id (CRIT-1 prevention)
+      try {
+        const { count } = await supabase
+          .from("warehouse_products")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .is("org_id", null);
+
+        const unmapped = count ?? 0;
+        readings.push({
+          sensorName: "catalog.unmapped_products",
+          status: unmapped > 10 ? "critical" : unmapped > 0 ? "warning" : "healthy",
+          value: { unmapped_count: unmapped },
+          message:
+            unmapped === 0 ? "All products mapped to orgs" : `${unmapped} products have no org_id`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "catalog.unmapped_products",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
       // Persist all readings
       if (readings.length > 0) {
         await supabase.from("sensor_readings").insert(

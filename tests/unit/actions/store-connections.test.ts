@@ -2,24 +2,39 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Mocks ---
 
-const mockGetUser = vi.fn();
-
-const mockServerClient = {
-  auth: { getUser: mockGetUser },
-  from: vi.fn(),
-};
-
+const mockFrom = vi.fn();
 const mockServiceFrom = vi.fn();
 const mockServiceClient = {
   from: mockServiceFrom,
 };
 
+vi.mock("@/lib/server/auth-context", () => ({
+  requireAuth: vi.fn(() =>
+    Promise.resolve({
+      supabase: { from: mockFrom },
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    }),
+  ),
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "user-1", workspaceId: "ws-1" })),
+  requireClient: vi.fn(() =>
+    Promise.resolve({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+  ),
+}));
+
 vi.mock("@/lib/server/supabase-server", () => ({
-  createServerSupabaseClient: async () => mockServerClient,
+  createServerSupabaseClient: async () => ({ auth: { getUser: vi.fn() }, from: vi.fn() }),
   createServiceRoleClient: () => mockServiceClient,
 }));
 
-// Import after mocks
 import {
   createStoreConnection,
   disableStoreConnection,
@@ -27,23 +42,37 @@ import {
   getStoreConnections,
   updateStoreConnection,
 } from "@/actions/store-connections";
+// Import after mocks
+import { requireAuth } from "@/lib/server/auth-context";
 
 describe("store-connections server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    vi.mocked(requireAuth).mockResolvedValue({
+      supabase: { from: mockFrom } as never,
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    });
   });
 
   // === Auth tests ===
 
   describe("authentication", () => {
     it("getStoreConnections throws when unauthenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(getStoreConnections()).rejects.toThrow("Unauthorized");
     });
 
     it("createStoreConnection throws when unauthenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(
         createStoreConnection({
           orgId: "org-1",
@@ -54,19 +83,19 @@ describe("store-connections server actions", () => {
     });
 
     it("updateStoreConnection throws when unauthenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(
         updateStoreConnection("conn-1", { storeUrl: "https://new.example.com" }),
       ).rejects.toThrow("Unauthorized");
     });
 
     it("disableStoreConnection throws when unauthenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(disableStoreConnection("conn-1")).rejects.toThrow("Unauthorized");
     });
 
     it("getSkuMappings throws when unauthenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(getSkuMappings("conn-1")).rejects.toThrow("Unauthorized");
     });
   });

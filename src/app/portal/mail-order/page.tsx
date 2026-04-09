@@ -135,7 +135,7 @@ export default function PortalMailOrderPage() {
   });
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: ["mail-orders", "portal", filters],
     queryFn: () => getClientMailOrders(filters),
     tier: CACHE_TIERS.SESSION,
@@ -146,6 +146,17 @@ export default function PortalMailOrderPage() {
     queryFn: () => getMailOrderPayoutSummary(),
     tier: CACHE_TIERS.SESSION,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Mail-Order</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">

@@ -1,6 +1,7 @@
 "use server";
 
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { requireAuth } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { type AutoMatchSuggestion, computeMatchSuggestions } from "@/lib/shared/store-match";
 import type { WarehouseShipstationStore } from "@/lib/shared/types";
 
@@ -18,13 +19,6 @@ export interface StoreMappingsResult {
 }
 
 // === Server Actions ===
-
-async function requireAuth() {
-  const supabase = await createServerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-  return userData.user;
-}
 
 export async function getStoreMappings(workspaceId: string): Promise<StoreMappingsResult> {
   await requireAuth();

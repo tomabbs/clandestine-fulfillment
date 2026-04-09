@@ -93,20 +93,24 @@ export default function PortalCatalogDetailPage() {
 
   if (!hydrated || isLoading) {
     return (
-      <div className="p-6 flex justify-center py-12 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
+        <div className="flex justify-center py-12 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
       </div>
     );
   }
 
   if (error || !product) {
     return (
-      <div className="p-6">
-        <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            Product not found or you don&apos;t have access to it.
-          </CardContent>
-        </Card>
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error
+            ? error.message
+            : "Product not found or you don\u2019t have access to it."}
+        </p>
       </div>
     );
   }

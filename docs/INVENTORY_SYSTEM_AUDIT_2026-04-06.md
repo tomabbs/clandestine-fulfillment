@@ -17,6 +17,7 @@
 7. [Background Jobs Schedule](#7-background-jobs-schedule)
 8. [Issues and Risks](#8-issues-and-risks)
 9. [Recommendations](#9-recommendations)
+10. [Bandcamp Live Inventory Seed Data (April 9, 2026)](#10-bandcamp-live-inventory-seed-data-april-9-2026)
 
 ---
 
@@ -1297,6 +1298,178 @@ Despite the function name `upsertProductsBulk`, it loops through products one at
 11. **Investigate draft product status.** Verify whether the Shopify store actually has 1,965 draft products or if the status sync is incorrect.
 
 12. **Unstick the Northern Spy backfill.** Reset the backfill state and re-run, or fix the stale-running detection to properly recover.
+
+---
+
+## 10. Bandcamp Live Inventory Seed Data (April 9, 2026)
+
+### Source File
+
+`~/Downloads/bandcamp-live-inventory-2026-04-09.xlsx` — exported from the Bandcamp API on April 9, 2026. This is a real-time snapshot of what Bandcamp currently reports as available inventory across all connected accounts.
+
+### File Structure
+
+| Column | Description |
+|--------|-------------|
+| `Account` | Bandcamp band/label name |
+| `Artist` | Bandcamp artist subdomain |
+| `Album` | Album/release title |
+| `Product Title` | Merch item title (e.g., "12\" Vinyl", "CD in Digipack") |
+| `Option/Variant` | Option-level variant (color, size) — present on 354 rows |
+| `SKU (Item)` | Item-level SKU — present on all 1,382 rows |
+| `SKU (Option)` | Option-level SKU — present on 354 rows |
+| `Catalog Number` | Bandcamp catalog number |
+| `Price` | Item price |
+| `Currency` | Currency code (USD) |
+| `Qty Available (LIVE)` | Current Bandcamp inventory. **This is the seed value.** |
+| `Qty Sold (LIVE)` | Cumulative units sold on Bandcamp |
+| `Release Date` | Bandcamp release date |
+| `Image URL` | Bandcamp thumbnail URL |
+| `Package ID` | Bandcamp `package_id` (used in `bandcamp_product_mappings.bandcamp_item_id`) |
+
+### Summary Statistics
+
+| Metric | Count |
+|--------|-------|
+| Total rows | 1,382 |
+| Unique accounts (bands) | 16 |
+| Unique item SKUs | 1,099 |
+| Unique SKUs (item + option) | 1,426 |
+| Items with positive stock | 683 |
+| Items with zero stock | 633 |
+| Items with NULL stock (tracking disabled on Bandcamp) | 66 |
+| **Total units in stock** | **35,341** |
+
+### Inventory by Account
+
+| Account | Items w/ Stock | Units | Zero | NULL | Total Items |
+|---------|---------------|-------|------|------|-------------|
+| LEAVING RECORDS | 153 | 11,049 | 184 | 19 | 356 |
+| Whited Sepulchre Records | 125 | 7,035 | 88 | 4 | 217 |
+| Northern Spy Records | 166 | 6,617 | 197 | 9 | 372 |
+| Lord Spikeheart | 47 | 3,604 | 4 | 0 | 51 |
+| True Panther | 31 | 3,015 | 47 | 7 | 85 |
+| Egghunt Records | 24 | 849 | 21 | 6 | 51 |
+| LILA | 18 | 842 | 9 | 1 | 28 |
+| NNA Tapes | 44 | 810 | 57 | 1 | 102 |
+| Birdwatcher Records | 9 | 454 | 7 | 9 | 25 |
+| SUSS | 47 | 454 | 17 | 0 | 64 |
+| Good Neighbor | 1 | 232 | 0 | 0 | 1 |
+| In The Pines | 15 | 149 | 2 | 3 | 20 |
+| Micah Thomas | 1 | 117 | 0 | 1 | 2 |
+| Nicole McCabe | 1 | 74 | 0 | 4 | 5 |
+| Matt McBane | 1 | 40 | 0 | 1 | 2 |
+| Xol Meissner | 0 | 0 | 0 | 1 | 1 |
+
+### Cross-Reference with Warehouse Database
+
+| Check | Result |
+|-------|--------|
+| XLSX item SKUs | 1,099 |
+| Matched to `warehouse_product_variants` | **1,080 (98.3%)** |
+| NOT matched (no variant row in DB) | 19 |
+| Of matched: has `warehouse_inventory_levels` row | 740 |
+| Of matched: NO `warehouse_inventory_levels` row | **340** |
+| Of those with levels: positive available | 425 |
+| Of those with levels: zero available | 315 |
+
+**Key findings:**
+- 98.3% of Bandcamp SKUs already exist as warehouse variants — the catalog is well-synced.
+- 19 SKUs exist in Bandcamp but NOT in the warehouse database at all (mostly merch items like t-shirts, stickers, and some older catalog numbers).
+- **340 SKUs exist as variants but have no inventory level row** — these are the items that need seed data most urgently, because the system has the product but no stock count.
+
+### Unmatched SKUs (19 items not in warehouse)
+
+These Bandcamp items have no corresponding `warehouse_product_variants` row:
+
+```
+00198704240478
+CS-EGGHUN-HELL-BLOCK
+CS-IN-THE-SAN-LORENZO
+CS-LEAVIN-ASHRAM
+CS-LEAVIN-BANANA-LIVE
+CS-LEAVIN-ELDERBERRY
+CS-NNA-TA-DANCE-AND
+CS-NNA-TA-THE-THIRTEEN
+CS-NORTHE-LOST-AND-FOU
+CS-NORTHE-REST-IN-FLEA
+EHSIF-CLR
+LP-LEAVIN-ELDERBERRY
+LP-NNA-TA-THE-THIRTEEN
+LP-NORTHE-REST-IN-FLEA
+LP-NORTHE-RIP
+MERCH-EGGHUN-HERE-S-TO-AL
+MERCH-EGGHUN-THE-FEELING-
+MERCH-IN-THE-STICKER-3-TO
+MERCH-MICAH--TIDE
+MERCH-NORTHE-PAISLEY
+```
+
+### NULL Qty Available (66 items)
+
+Bandcamp returns `NULL` for `qty_available` when inventory tracking is disabled for that item. These 66 items likely have unlimited stock on Bandcamp (digital-only, or physical items with tracking turned off). They should be reviewed during the warehouse count to determine if they need a finite stock number.
+
+### Top 20 Items by Bandcamp Stock
+
+| SKU | Available | Sold | Account | Product |
+|-----|-----------|------|---------|---------|
+| CD-NS-174 | 1,528 | 653 | Northern Spy Records | Triple CD |
+| HTN-U-V | 499 | 0 | LEAVING RECORDS | BLACK VINYL |
+| LA-TIS-TIS1 | 492 | 0 | True Panther | the infinite spine 12\" Clear Vinyl |
+| LP-WSR-044-1 | 487 | 23 | Whited Sepulchre Records | Limited Edition 12\" Vinyl |
+| M-MM-2BV | 469 | 0 | LEAVING RECORDS | 2LP BLACK VINYL |
+| SR-S-C | 460 | 4 | Northern Spy Records | CD |
+| LP-NS-175C | 450 | 46 | Northern Spy Records | Limited Edition 12\" \"Emulsive Return\" Variant LP |
+| LP-EHR-064C | 425 | 63 | Egghunt Records | Limited Edition \"Melted Cream\" color vinyl LP |
+| SG-LAUS-V | 412 | 0 | LEAVING RECORDS | VINYL |
+| LP-NS-177 | 410 | 89 | Northern Spy Records | Limited Edition 12\" \"Sun Slip\" Variant LP |
+| CD-NS-111 | 399 | 9 | Northern Spy Records | Maurice Louca - Elephantine CD |
+| 669158573523 | 387 | 0 | LEAVING RECORDS | BLACK VINYL |
+| L-IWT2-B2V | 367 | 0 | LEAVING RECORDS | BLACK 2LP VINYL |
+| LA-TCI-12VE | 297 | 0 | True Panther | 12\" Vinyl EP |
+| P-IDTG-LE12 | 296 | 4 | Whited Sepulchre Records | Limited Edition 12\" Vinyl |
+| P-IDTG-LECD | 294 | 6 | Whited Sepulchre Records | Limited Edition Compact Disc |
+| E-P-LE12 | 289 | 13 | Whited Sepulchre Records | Limited Edition 12\" Vinyl |
+| BDW-TI-BV | 287 | 0 | LEAVING RECORDS | BLACK VINYL |
+| CD-NS-177 | 273 | 27 | Northern Spy Records | Compact Disc |
+| TW-SW-V | 271 | 0 | LEAVING RECORDS | VINYL |
+
+### Seeding Plan: How to Use This Data
+
+The intention is to use this Bandcamp live inventory as the **initial seed** for the warehouse database, then follow up with a physical warehouse count to correct the numbers.
+
+**Phase 1: Seed from Bandcamp data**
+
+The seeding script needs to handle three categories:
+
+1. **740 SKUs with existing inventory levels** — These already have `warehouse_inventory_levels` rows. The seed should UPDATE `available` to the Bandcamp `Qty Available (LIVE)` value, overwriting any current placeholder values (e.g., the 999s). This is a bulk `UPDATE ... SET available = {bandcamp_qty} WHERE sku = {sku}`.
+
+2. **340 SKUs with variants but no inventory level** — These need `INSERT INTO warehouse_inventory_levels` with the Bandcamp quantity. The variant_id can be resolved by looking up `warehouse_product_variants` by SKU.
+
+3. **19 SKUs not in warehouse at all** — These need variant + product rows created first (or can be deferred until the Shopify sync picks them up). Most are merch items (t-shirts, stickers) that may not be in Shopify.
+
+4. **66 items with NULL qty_available** — These need manual review during the warehouse count. For seeding, either skip them (leave as 0) or set to a default pending count.
+
+After writing to Postgres, the same values must be written to Redis (`inv:{sku}`) to keep the projection in sync — or the weekly backfill can be triggered manually.
+
+**Key technical requirements for the seed script:**
+- Must use the service-role Supabase client (bypasses RLS)
+- Should NOT use `recordInventoryChange()` for bulk seeding — that path is for incremental changes with idempotency. Use direct `upsert()` like `shopify-sync` does (Rule #59 exception).
+- Must update Redis after Postgres writes
+- Should log a single `warehouse_inventory_activity` record with `source: "backfill"` and `correlation_id: "bandcamp-seed:2026-04-09"` for audit trail
+- Should produce a summary report: how many updated, inserted, skipped, and any errors
+
+**Phase 2: Physical warehouse count**
+
+After seeding, staff will do a physical count in the warehouse. The app's manual adjustment feature (`adjustInventory()` in `src/actions/inventory.ts`) can be used to correct individual SKUs, or a bulk import script can process a count spreadsheet. Each adjustment flows through `recordInventoryChange()` with `source: "manual"`, preserving the audit trail.
+
+**Phase 3: Ongoing sync**
+
+Once seeded and corrected, the existing cron jobs maintain sync:
+- Bandcamp sale poll (5 min) detects sales and decrements stock
+- Bandcamp inventory push (5 min) pushes warehouse stock TO Bandcamp
+- Shopify sync (15 min) pulls catalog changes FROM Shopify
+- Sensor check (5 min) detects and auto-heals Redis/Postgres drift
 
 ---
 

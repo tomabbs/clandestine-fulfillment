@@ -3,7 +3,7 @@
 import { Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { getInboundShipments, type InboundShipmentWithOrg } from "@/actions/inbound";
+import { getClientInboundShipments, type InboundShipmentWithOrg } from "@/actions/inbound";
 import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,14 +32,27 @@ export default function PortalInboundPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(50);
 
-  const { data, isLoading } = useAppQuery<{ data: InboundShipmentWithOrg[]; count: number }>({
-    queryKey: queryKeys.inbound.list({ page, pageSize, portal: true } as Record<string, unknown>),
-    queryFn: () => getInboundShipments({ page, pageSize }),
-    tier: CACHE_TIERS.SESSION,
-  });
+  const { data, isLoading, error } = useAppQuery<{ data: InboundShipmentWithOrg[]; count: number }>(
+    {
+      queryKey: queryKeys.inbound.list({ page, pageSize, portal: true } as Record<string, unknown>),
+      queryFn: () => getClientInboundShipments({ page, pageSize }),
+      tier: CACHE_TIERS.SESSION,
+    },
+  );
 
   const shipments = data?.data ?? [];
   const totalCount = data?.count ?? 0;
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Inbound Shipments</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">

@@ -245,6 +245,7 @@ async function upsertProductsBulk(
         workspace_id: workspaceId,
         sku: variant.sku,
         shopify_variant_id: variant.id,
+        shopify_inventory_item_id: variant.inventoryItem?.id ?? null,
         title: variant.title,
         price: parsedPrice,
         compare_at_price: variant.compareAtPrice ? Number.parseFloat(variant.compareAtPrice) : null,
@@ -303,19 +304,12 @@ async function upsertInventoryBulk(
   }>,
   workspaceId: string,
 ) {
-  // Look up variant_id and sku for each inventory item
   for (const level of levels) {
     const { data: variant } = await supabase
       .from("warehouse_product_variants")
       .select("id, sku")
       .eq("workspace_id", workspaceId)
-      .eq(
-        "shopify_variant_id",
-        level.inventoryItemId.replace(
-          "gid://shopify/InventoryItem/",
-          "gid://shopify/ProductVariant/",
-        ),
-      )
+      .eq("shopify_inventory_item_id", level.inventoryItemId)
       .single();
 
     if (!variant) continue;

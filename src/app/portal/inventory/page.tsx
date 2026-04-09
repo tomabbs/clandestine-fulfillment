@@ -39,7 +39,7 @@ export default function InventoryPage() {
   };
 
   // Explicitly scoped to client's own org via requireClient() in server action
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: queryKeys.inventory.list({ ...queryFilters, portal: true }),
     queryFn: () => getClientInventoryLevels(queryFilters),
     tier: CACHE_TIERS.REALTIME,
@@ -51,6 +51,17 @@ export default function InventoryPage() {
     tier: CACHE_TIERS.REALTIME,
     enabled: !!expandedSku,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-4">

@@ -1,7 +1,8 @@
 "use server";
 
 import { z } from "zod/v4";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireClient } from "@/lib/server/auth-context";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 const filtersSchema = z.object({
   page: z.number().int().positive().default(1),
@@ -52,7 +53,8 @@ export async function getMailOrders(rawFilters?: Partial<MailOrderFilters>) {
 /** Portal: list mail orders for the current client's org */
 export async function getClientMailOrders(rawFilters?: Partial<MailOrderFilters>) {
   const filters = filtersSchema.parse(rawFilters ?? {});
-  const supabase = await createServerSupabaseClient();
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
 
   const from = (filters.page - 1) * filters.pageSize;
   const to = from + filters.pageSize - 1;
@@ -63,6 +65,7 @@ export async function getClientMailOrders(rawFilters?: Partial<MailOrderFilters>
       "id, source, external_order_id, order_number, customer_name, customer_email, fulfillment_status, platform_fulfillment_status, subtotal, shipping_amount, total_price, currency, client_payout_amount, client_payout_status, line_items, shipping_address, created_at, synced_at",
       { count: "exact" },
     )
+    .eq("org_id", orgId)
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -80,17 +83,16 @@ export async function getClientMailOrders(rawFilters?: Partial<MailOrderFilters>
   };
 }
 
-/** Admin: get payout summary for the current month */
-export async function getMailOrderPayoutSummary(orgId?: string) {
-  const supabase = await createServerSupabaseClient();
+/** Portal: get payout summary for the current client's org */
+export async function getMailOrderPayoutSummary() {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
 
-  let query = supabase
+  const { data } = await supabase
     .from("mailorder_orders")
-    .select("client_payout_amount, client_payout_status");
+    .select("client_payout_amount, client_payout_status")
+    .eq("org_id", orgId);
 
-  if (orgId) query = query.eq("org_id", orgId);
-
-  const { data } = await query;
   const orders = data ?? [];
 
   const pending = orders.filter((o) => o.client_payout_status === "pending");

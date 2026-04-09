@@ -2,7 +2,7 @@
 
 import { tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
-import { requireAuth } from "@/lib/server/auth-context";
+import { requireAuth, requireClient } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { isValidTransition } from "@/lib/shared/inbound-transitions";
 import type {
@@ -84,6 +84,58 @@ export async function getInboundShipments(filters?: InboundFilters): Promise<{
   }
   if (parsed.dateTo) {
     query = query.lte("expected_date", parsed.dateTo);
+  }
+
+  const offset = (parsed.page - 1) * parsed.pageSize;
+  query = query
+    .order("created_at", { ascending: false })
+    .range(offset, offset + parsed.pageSize - 1);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    throw new Error(`Failed to fetch inbound shipments: ${error.message}`);
+  }
+
+  const mapped: InboundShipmentWithOrg[] = (data ?? []).map((row: Record<string, unknown>) => {
+    const org = row.organizations as { name: string } | null;
+    const items = row.warehouse_inbound_items as { id: string }[] | null;
+    const submitter = row.users as { name: string } | null;
+
+    const { organizations: _o, warehouse_inbound_items: _i, users: _u, ...shipment } = row;
+
+    return {
+      ...shipment,
+      org_name: org?.name ?? null,
+      item_count: items?.length ?? 0,
+      submitter_name: submitter?.name ?? null,
+    } as InboundShipmentWithOrg;
+  });
+
+  return { data: mapped, count: count ?? 0 };
+}
+
+/** Portal: list inbound shipments for the current client's org */
+export async function getClientInboundShipments(
+  filters?: Pick<InboundFilters, "page" | "pageSize" | "status">,
+): Promise<{
+  data: InboundShipmentWithOrg[];
+  count: number;
+}> {
+  const parsed = inboundFiltersSchema.parse(filters ?? {});
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  let query = supabase
+    .from("warehouse_inbound_shipments")
+    .select(
+      "*, organizations!inner(name), warehouse_inbound_items(id), users!warehouse_inbound_shipments_submitted_by_fkey(name)",
+      { count: "exact" },
+    )
+    .eq("org_id", orgId);
+
+  if (parsed.status) {
+    query = query.eq("status", parsed.status);
   }
 
   const offset = (parsed.page - 1) * parsed.pageSize;

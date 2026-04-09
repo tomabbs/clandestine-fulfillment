@@ -1,5 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("@/lib/server/auth-context", () => ({
+  requireAuth: vi.fn(() =>
+    Promise.resolve({
+      supabase: {},
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    }),
+  ),
+  requireClient: vi.fn(() =>
+    Promise.resolve({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+  ),
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "user-1", workspaceId: "ws-1" })),
+}));
+
 // Mock supabase
 const mockSelect = vi.fn();
 const mockFrom = vi.fn();
@@ -136,6 +158,7 @@ describe("inventory Server Actions", () => {
             available: 10,
             committed: 2,
             incoming: 5,
+            safety_stock: 3,
             warehouse_product_variants: {
               id: "v-1",
               title: "Black Vinyl",
@@ -169,6 +192,7 @@ describe("inventory Server Actions", () => {
         available: 10,
         committed: 2,
         incoming: 5,
+        safetyStock: 3,
         imageSrc: "https://img.example.com/1.jpg",
         bandcampUrl: "https://bc.example.com",
         status: "active",

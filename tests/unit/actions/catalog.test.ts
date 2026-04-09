@@ -2,26 +2,36 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Mocks ---
 
-const mockGetUser = vi.fn();
-
-const mockServerClient = {
-  auth: { getUser: mockGetUser },
-  from: vi.fn(),
-};
-
+const mockFrom = vi.fn();
 const mockServiceFrom = vi.fn();
 const mockServiceClient = {
   from: mockServiceFrom,
 };
 
 vi.mock("@/lib/server/auth-context", () => ({
-  requireClient: vi
-    .fn()
-    .mockResolvedValue({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+  requireAuth: vi.fn(() =>
+    Promise.resolve({
+      supabase: { from: mockFrom },
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    }),
+  ),
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "user-1", workspaceId: "ws-1" })),
+  requireClient: vi.fn(() =>
+    Promise.resolve({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+  ),
 }));
 
 vi.mock("@/lib/server/supabase-server", () => ({
-  createServerSupabaseClient: async () => mockServerClient,
+  createServerSupabaseClient: async () => ({ auth: { getUser: vi.fn() }, from: vi.fn() }),
   createServiceRoleClient: () => mockServiceClient,
 }));
 
@@ -37,7 +47,6 @@ vi.mock("@/lib/clients/shopify", () => ({
   productSet: (...args: unknown[]) => mockProductSet(...args),
 }));
 
-// Import after mocks
 import {
   getClientReleases,
   getProductDetail,
@@ -45,11 +54,25 @@ import {
   updateProduct,
   updateVariants,
 } from "@/actions/catalog";
+// Import after mocks
+import { requireAuth } from "@/lib/server/auth-context";
 
 describe("catalog server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    vi.mocked(requireAuth).mockResolvedValue({
+      supabase: { from: mockFrom } as never,
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    });
     mockServiceFrom.mockReset();
   });
 
@@ -57,7 +80,7 @@ describe("catalog server actions", () => {
 
   describe("authentication", () => {
     it("getProducts returns empty result when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(getProducts({ page: 1, pageSize: 50 })).resolves.toEqual({
         products: [],
         total: 0,
@@ -67,17 +90,17 @@ describe("catalog server actions", () => {
     });
 
     it("getProductDetail throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(getProductDetail("prod-1")).rejects.toThrow("Unauthorized");
     });
 
     it("updateProduct throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(updateProduct("prod-1", { title: "New" })).rejects.toThrow("Unauthorized");
     });
 
     it("updateVariants throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(
         updateVariants("prod-1", [{ id: "v-1", shopifyVariantId: "gid://1" }]),
       ).rejects.toThrow("Unauthorized");

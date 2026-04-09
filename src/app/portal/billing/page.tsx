@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import { getBillingSnapshotDetail, getBillingSnapshots } from "@/actions/billing";
+import { getClientBillingSnapshotDetail, getClientBillingSnapshots } from "@/actions/billing";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -39,12 +39,23 @@ export default function BillingPage() {
   const workspaceId = ctx?.workspaceId ?? "";
   const orgId = ctx?.orgId ?? "";
 
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: queryKeys.billing.snapshots({ orgId }),
-    queryFn: () => getBillingSnapshots({ workspaceId, orgId, pageSize: 50 }),
+    queryFn: () => getClientBillingSnapshots({ pageSize: 50 }),
     enabled: !!workspaceId && !!orgId,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   if (selectedId) {
     return <SnapshotDetail id={selectedId} onBack={() => setSelectedId(null)} />;
@@ -114,7 +125,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
     queryKey: ["billing", "snapshot-detail", id],
-    queryFn: () => getBillingSnapshotDetail(id),
+    queryFn: () => getClientBillingSnapshotDetail(id),
   });
 
   if (isLoading) {

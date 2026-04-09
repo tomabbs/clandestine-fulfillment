@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockFrom = vi.fn();
+const mockServiceFrom = vi.fn();
 
 vi.mock("@/lib/server/supabase-server", () => ({
   createServerSupabaseClient: vi.fn(async () => ({ from: mockFrom })),
+  createServiceRoleClient: vi.fn(() => ({ from: mockServiceFrom })),
+}));
+
+vi.mock("@/lib/server/auth-context", () => ({
+  requireClient: vi.fn(async () => ({ userId: "u-1", orgId: "org-1", workspaceId: "ws-1" })),
 }));
 
 import {
@@ -37,7 +43,7 @@ function makeListChain(
   return chain;
 }
 
-function makePayoutChain(result: { data: unknown[]; error: null }, orgScoped: boolean) {
+function _makePayoutChain(result: { data: unknown[]; error: null }, orgScoped: boolean) {
   const promise = Promise.resolve(result);
   const chain = {
     select: vi.fn(),
@@ -78,13 +84,22 @@ describe("mail-orders", () => {
   });
 
   describe("getClientMailOrders", () => {
-    it("returns results with org-scoped RLS", async () => {
+    it("returns results scoped to authenticated org", async () => {
       const rows = [{ id: "o1", order_number: "200" }];
-      makeListChain({ data: rows, count: 1, error: null });
+      const promise = Promise.resolve({ data: rows, count: 1, error: null });
+      const chain = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockReturnThis(),
+        range: vi.fn().mockReturnValue(promise),
+        ilike: vi.fn(),
+      };
+      mockServiceFrom.mockReturnValue(chain);
 
       const result = await getClientMailOrders();
 
-      expect(mockFrom).toHaveBeenCalledWith("mailorder_orders");
+      expect(mockServiceFrom).toHaveBeenCalledWith("mailorder_orders");
+      expect(chain.eq).toHaveBeenCalledWith("org_id", "org-1");
       expect(result.orders).toEqual(rows);
       expect(result.total).toBe(1);
       expect(result.page).toBe(1);
@@ -93,21 +108,24 @@ describe("mail-orders", () => {
   });
 
   describe("getMailOrderPayoutSummary", () => {
-    it("aggregates pending vs included payout amounts", async () => {
-      const chain = makePayoutChain(
-        {
-          data: [
-            { client_payout_amount: 10, client_payout_status: "pending" },
-            { client_payout_amount: 5, client_payout_status: "pending" },
-            { client_payout_amount: 100, client_payout_status: "included_in_snapshot" },
-          ],
-          error: null,
-        },
-        true,
-      );
+    it("aggregates pending vs included payout amounts scoped to org", async () => {
+      const promise = Promise.resolve({
+        data: [
+          { client_payout_amount: 10, client_payout_status: "pending" },
+          { client_payout_amount: 5, client_payout_status: "pending" },
+          { client_payout_amount: 100, client_payout_status: "included_in_snapshot" },
+        ],
+        error: null,
+      });
+      const chain = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnValue(promise),
+      };
+      mockServiceFrom.mockReturnValue(chain);
 
-      const result = await getMailOrderPayoutSummary("org-1");
+      const result = await getMailOrderPayoutSummary();
 
+      expect(mockServiceFrom).toHaveBeenCalledWith("mailorder_orders");
       expect(chain.eq).toHaveBeenCalledWith("org_id", "org-1");
       expect(result.totalPendingPayout).toBe(15);
       expect(result.totalIncludedPayout).toBe(100);
@@ -115,7 +133,12 @@ describe("mail-orders", () => {
     });
 
     it("returns zero when no orders", async () => {
-      makePayoutChain({ data: [], error: null }, false);
+      const promise = Promise.resolve({ data: [], error: null });
+      const chain = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnValue(promise),
+      };
+      mockServiceFrom.mockReturnValue(chain);
 
       const result = await getMailOrderPayoutSummary();
 

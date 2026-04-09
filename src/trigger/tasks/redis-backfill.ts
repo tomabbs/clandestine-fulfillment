@@ -9,7 +9,7 @@
  */
 
 import { schedules } from "@trigger.dev/sdk";
-import { setInventory } from "@/lib/clients/redis-inventory";
+import { getInventory, setInventory } from "@/lib/clients/redis-inventory";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
@@ -59,14 +59,20 @@ export const redisBackfillTask = schedules.task({
 
       let updated = 0;
       let skippedLiveWrites = 0;
+      let mismatches = 0;
 
       for (const level of levels) {
-        // Race condition protection (Rule #27):
-        // If a live write happened after our backfill started, skip it
         if (shouldSkipSku(level.last_redis_write_at, backfillStartedAt)) {
           skippedLiveWrites++;
           continue;
         }
+
+        const redis = await getInventory(level.sku);
+        const hasDrift =
+          redis.available !== level.available ||
+          redis.committed !== (level.committed ?? 0) ||
+          redis.incoming !== (level.incoming ?? 0);
+        if (hasDrift) mismatches++;
 
         await setInventory(level.sku, {
           available: level.available,
@@ -77,12 +83,11 @@ export const redisBackfillTask = schedules.task({
         updated++;
       }
 
-      // Log reconciliation stats
       const result: BackfillResult = {
         totalSkus: levels.length,
         updated,
         skippedLiveWrites,
-        mismatches: 0, // Future: compare Redis values before overwrite
+        mismatches,
       };
 
       await supabase.from("channel_sync_log").insert({

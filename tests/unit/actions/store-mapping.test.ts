@@ -3,28 +3,47 @@ import { computeMatchSuggestions } from "@/lib/shared/store-match";
 
 // --- Mocks ---
 
-const mockGetUser = vi.fn();
-const mockServerClient = {
-  auth: { getUser: mockGetUser },
-};
-
+const mockFrom = vi.fn();
 const mockServiceFrom = vi.fn();
 const mockServiceClient = {
   from: mockServiceFrom,
 };
 
+vi.mock("@/lib/server/auth-context", () => ({
+  requireAuth: vi.fn(() =>
+    Promise.resolve({
+      supabase: { from: mockFrom },
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    }),
+  ),
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "user-1", workspaceId: "ws-1" })),
+  requireClient: vi.fn(() =>
+    Promise.resolve({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+  ),
+}));
+
 vi.mock("@/lib/server/supabase-server", () => ({
-  createServerSupabaseClient: async () => mockServerClient,
+  createServerSupabaseClient: async () => ({ auth: { getUser: vi.fn() }, from: vi.fn() }),
   createServiceRoleClient: () => mockServiceClient,
 }));
 
-// Import after mocks
 import {
   autoMatchStores,
   getStoreMappings,
   unmapStore,
   updateStoreMapping,
 } from "@/actions/store-mapping";
+// Import after mocks
+import { requireAuth } from "@/lib/server/auth-context";
 
 // === computeMatchSuggestions unit tests (pure function, no mocks needed) ===
 
@@ -125,7 +144,19 @@ describe("computeMatchSuggestions", () => {
 describe("store mapping server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    vi.mocked(requireAuth).mockResolvedValue({
+      supabase: { from: mockFrom } as never,
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    });
   });
 
   describe("getStoreMappings", () => {
@@ -212,7 +243,7 @@ describe("store mapping server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(getStoreMappings("ws-1")).rejects.toThrow("Unauthorized");
     });
   });
@@ -231,7 +262,7 @@ describe("store mapping server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(updateStoreMapping("store-1", "org-1")).rejects.toThrow("Unauthorized");
     });
   });
@@ -249,7 +280,7 @@ describe("store mapping server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(unmapStore("store-1")).rejects.toThrow("Unauthorized");
     });
   });
@@ -309,7 +340,7 @@ describe("store mapping server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
       await expect(autoMatchStores("ws-1")).rejects.toThrow("Unauthorized");
     });
   });

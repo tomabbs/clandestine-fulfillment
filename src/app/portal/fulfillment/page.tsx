@@ -2,7 +2,7 @@
 
 import { CheckCircle, Package } from "lucide-react";
 import { useState } from "react";
-import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
+import { getClientOrderDetail, getClientOrders, getTrackingEvents } from "@/actions/orders";
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -20,24 +20,35 @@ import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
-type OrderRow = Awaited<ReturnType<typeof getOrders>>["orders"][number];
+type OrderRow = Awaited<ReturnType<typeof getClientOrders>>["orders"][number];
 
 export default function PortalFulfillmentPage() {
   const [filters, setFilters] = useState({ page: 1, pageSize: 50, status: "", search: "" });
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: queryKeys.orders.list({ ...filters, portal: true }),
-    queryFn: () => getOrders(filters),
+    queryFn: () => getClientOrders(filters),
     tier: CACHE_TIERS.SESSION,
   });
 
   const { data: detail, isLoading: detailLoading } = useAppQuery({
     queryKey: queryKeys.orders.detail(expandedId ?? ""),
-    queryFn: () => getOrderDetail(expandedId ?? ""),
+    queryFn: () => getClientOrderDetail(expandedId ?? ""),
     tier: CACHE_TIERS.SESSION,
     enabled: !!expandedId,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Fulfillment</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-4">
@@ -177,7 +188,11 @@ function FulfillmentStatusBadge({ status }: { status: string | null }) {
   return <Badge variant={c.variant}>{c.label}</Badge>;
 }
 
-function OrderExpandedDetail({ detail }: { detail: Awaited<ReturnType<typeof getOrderDetail>> }) {
+function OrderExpandedDetail({
+  detail,
+}: {
+  detail: Awaited<ReturnType<typeof getClientOrderDetail>>;
+}) {
   const { order, items, shipments } = detail;
   if (!order) return null;
 

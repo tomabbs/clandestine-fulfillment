@@ -1,7 +1,8 @@
 "use server";
 
 import { z } from "zod/v4";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { requireAuth } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type {
   ClientStoreConnection,
   ClientStoreSkuMapping,
@@ -31,15 +32,6 @@ const updateConnectionSchema = z.object({
   webhookUrl: z.string().url().nullable().optional(),
   webhookSecret: z.string().nullable().optional(),
 });
-
-// === Helper ===
-
-async function requireAuth() {
-  const supabase = await createServerSupabaseClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Unauthorized");
-  return { supabase, user: userData.user };
-}
 
 // === Server Actions ===
 

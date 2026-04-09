@@ -125,7 +125,7 @@ describe("recordInventoryChange", () => {
   });
 
   describe("error handling", () => {
-    it("returns success=false when Postgres RPC fails (Redis drift case)", async () => {
+    it("rolls back Redis and returns success=false when Postgres RPC fails", async () => {
       mockAdjustInventory.mockResolvedValue(8);
       mockRpc.mockResolvedValue({ error: { message: "DB connection error" } });
 
@@ -133,15 +133,19 @@ describe("recordInventoryChange", () => {
 
       expect(result).toEqual({
         success: false,
-        newQuantity: 8,
+        newQuantity: null,
         alreadyProcessed: false,
       });
-      expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining("Postgres RPC failed after Redis write"),
+      expect(mockAdjustInventory).toHaveBeenCalledTimes(2);
+      expect(mockAdjustInventory).toHaveBeenLastCalledWith(
+        "SKU-001",
+        "available",
+        2,
+        "wh:abc123:rollback",
       );
     });
 
-    it("handles Postgres RPC exception", async () => {
+    it("rolls back Redis on Postgres RPC exception", async () => {
       mockAdjustInventory.mockResolvedValue(8);
       mockRpc.mockRejectedValue(new Error("Network timeout"));
 
@@ -149,23 +153,33 @@ describe("recordInventoryChange", () => {
 
       expect(result).toEqual({
         success: false,
-        newQuantity: 8,
+        newQuantity: null,
         alreadyProcessed: false,
       });
-      expect(console.error).toHaveBeenCalledWith(
-        expect.stringContaining("Postgres RPC exception after Redis write"),
-        expect.any(Error),
+      expect(mockAdjustInventory).toHaveBeenCalledTimes(2);
+      expect(mockAdjustInventory).toHaveBeenLastCalledWith(
+        "SKU-001",
+        "available",
+        2,
+        "wh:abc123:rollback",
       );
     });
 
-    it("does NOT roll back Redis when Postgres fails (reconciliation sensor catches drift)", async () => {
-      mockAdjustInventory.mockResolvedValue(8);
+    it("logs critical error when Redis rollback also fails", async () => {
+      mockAdjustInventory.mockResolvedValueOnce(8).mockRejectedValueOnce(new Error("Redis down"));
       mockRpc.mockResolvedValue({ error: { message: "constraint violation" } });
 
-      await recordInventoryChange(baseParams);
+      const result = await recordInventoryChange(baseParams);
 
-      // Redis adjustInventory should have been called exactly once (no rollback call)
-      expect(mockAdjustInventory).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        success: false,
+        newQuantity: null,
+        alreadyProcessed: false,
+      });
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining("CRITICAL: Redis rollback also failed"),
+        expect.any(Error),
+      );
     });
   });
 });

@@ -2,21 +2,36 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // --- Mocks ---
 
-const mockGetUser = vi.fn();
 const mockFrom = vi.fn();
-
-const mockServerClient = {
-  auth: { getUser: mockGetUser },
-  from: mockFrom,
-};
-
 const mockServiceFrom = vi.fn();
 const mockServiceClient = {
   from: mockServiceFrom,
 };
 
+vi.mock("@/lib/server/auth-context", () => ({
+  requireAuth: vi.fn(() =>
+    Promise.resolve({
+      supabase: { from: mockFrom },
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    }),
+  ),
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "user-1", workspaceId: "ws-1" })),
+  requireClient: vi.fn(() =>
+    Promise.resolve({ userId: "user-1", orgId: "org-1", workspaceId: "ws-1" }),
+  ),
+}));
+
 vi.mock("@/lib/server/supabase-server", () => ({
-  createServerSupabaseClient: async () => mockServerClient,
+  createServerSupabaseClient: async () => ({ auth: { getUser: vi.fn() }, from: vi.fn() }),
   createServiceRoleClient: () => mockServiceClient,
 }));
 
@@ -25,7 +40,6 @@ vi.mock("@trigger.dev/sdk", () => ({
   tasks: { trigger: mockTrigger },
 }));
 
-// Import after mocks
 import {
   createBandcampConnection,
   deleteBandcampConnection,
@@ -33,45 +47,29 @@ import {
   getOrganizationsForWorkspace,
   triggerBandcampSync,
 } from "@/actions/bandcamp";
-
-// Helper: create a Supabase-style chainable mock for a table query returning a single row
-function mockSingleQuery(resolvedData: { data: unknown; error: unknown }) {
-  return {
-    select: vi.fn().mockReturnValue({
-      eq: vi.fn().mockReturnValue({
-        single: vi.fn().mockResolvedValue(resolvedData),
-      }),
-    }),
-  };
-}
-
-// Helper: mock the users table lookup that requireAuth() now performs.
-// Because requireAuth() uses createServiceRoleClient().from("users"),
-// this queues a mockReturnValueOnce for mockServiceFrom.
-function mockUserRecord(overrides?: { org_id?: string | null; workspace_id?: string }) {
-  mockServiceFrom.mockReturnValueOnce(
-    mockSingleQuery({
-      data: {
-        id: "internal-user-1",
-        org_id: overrides && "org_id" in overrides ? overrides.org_id : "default-org-id",
-        workspace_id: overrides?.workspace_id ?? "ws-1",
-      },
-      error: null,
-    }),
-  );
-}
+// Import after mocks
+import { requireAuth } from "@/lib/server/auth-context";
 
 describe("bandcamp server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-    // Default: no table mocks configured — calls to .from() will return undefined
-    // Use mockUserRecord() and mockServiceFrom.mockReturnValueOnce() to set up expectations
+    vi.mocked(requireAuth).mockResolvedValue({
+      supabase: { from: mockFrom } as never,
+      authUserId: "auth-1",
+      userRecord: {
+        id: "user-1",
+        workspace_id: "ws-1",
+        org_id: null,
+        role: "admin",
+        email: "admin@test.com",
+        name: "Admin",
+      },
+      isStaff: true,
+    });
   });
 
   describe("triggerBandcampSync", () => {
     it("enqueues a bandcamp-sync task via Trigger (Rule #48)", async () => {
-      mockUserRecord();
       mockTrigger.mockResolvedValue({ id: "run-123" });
 
       const result = await triggerBandcampSync("ws-1");
@@ -81,7 +79,7 @@ describe("bandcamp server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
 
       await expect(triggerBandcampSync("ws-1")).rejects.toThrow("Unauthorized");
     });
@@ -89,7 +87,6 @@ describe("bandcamp server actions", () => {
 
   describe("getBandcampAccounts", () => {
     it("returns accounts with member count and merch count", async () => {
-      mockUserRecord();
       mockServiceFrom
         .mockReturnValueOnce({
           select: vi.fn().mockReturnValue({
@@ -132,7 +129,7 @@ describe("bandcamp server actions", () => {
     });
 
     it("returns empty list when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
 
       await expect(getBandcampAccounts("ws-1")).resolves.toEqual([]);
     });
@@ -142,8 +139,6 @@ describe("bandcamp server actions", () => {
     it("creates a connection with org_id properly set", async () => {
       const orgId = "11111111-1111-4111-a111-111111111111";
       const wsId = "22222222-2222-4222-a222-222222222222";
-
-      mockUserRecord({ org_id: orgId, workspace_id: wsId });
 
       // Mock org lookup
       mockServiceFrom.mockReturnValueOnce({
@@ -194,7 +189,6 @@ describe("bandcamp server actions", () => {
     });
 
     it("throws when org is not found", async () => {
-      mockUserRecord({ org_id: "11111111-1111-4111-a111-111111111111" });
       mockServiceFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
@@ -214,7 +208,6 @@ describe("bandcamp server actions", () => {
     });
 
     it("throws when org belongs to a different workspace", async () => {
-      mockUserRecord({ org_id: "11111111-1111-4111-a111-111111111111" });
       mockServiceFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
@@ -240,8 +233,6 @@ describe("bandcamp server actions", () => {
     });
 
     it("rejects when org_id is omitted (Zod validation)", async () => {
-      mockUserRecord({ org_id: null });
-
       await expect(
         createBandcampConnection({
           workspaceId: "22222222-2222-4222-a222-222222222222",
@@ -252,8 +243,6 @@ describe("bandcamp server actions", () => {
     });
 
     it("rejects when org_id is empty string (invalid UUID)", async () => {
-      mockUserRecord({ org_id: null });
-
       await expect(
         createBandcampConnection({
           workspaceId: "22222222-2222-4222-a222-222222222222",
@@ -265,7 +254,7 @@ describe("bandcamp server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
 
       await expect(
         createBandcampConnection({
@@ -283,7 +272,6 @@ describe("bandcamp server actions", () => {
 
   describe("deleteBandcampConnection", () => {
     it("soft-deletes by setting is_active to false", async () => {
-      mockUserRecord();
       const mockUpdate = vi.fn().mockReturnValue({
         eq: vi.fn().mockResolvedValue({ error: null }),
       });
@@ -298,7 +286,7 @@ describe("bandcamp server actions", () => {
     });
 
     it("throws when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
 
       await expect(
         deleteBandcampConnection({ connectionId: "33333333-3333-4333-a333-333333333333" }),
@@ -308,7 +296,6 @@ describe("bandcamp server actions", () => {
 
   describe("getOrganizationsForWorkspace", () => {
     it("returns organizations sorted by name", async () => {
-      mockUserRecord();
       const mockOrder = vi.fn().mockResolvedValue({
         data: [
           { id: "org-1", name: "Alpha Records" },
@@ -331,7 +318,7 @@ describe("bandcamp server actions", () => {
     });
 
     it("returns empty list when user is not authenticated", async () => {
-      mockGetUser.mockResolvedValue({ data: { user: null } });
+      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
 
       await expect(getOrganizationsForWorkspace("ws-1")).resolves.toEqual([]);
     });

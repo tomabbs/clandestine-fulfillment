@@ -1,8 +1,15 @@
 "use server";
 
-import { requireClient } from "@/lib/server/auth-context";
+import { z } from "zod/v4";
+import { requireAuth, requireClient, requireStaff } from "@/lib/server/auth-context";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+
+const adjustInventorySchema = z.object({
+  sku: z.string().min(1),
+  delta: z.number().int(),
+  reason: z.string().min(1),
+});
 
 // === Types ===
 
@@ -26,6 +33,7 @@ interface InventoryRow {
   available: number;
   committed: number;
   incoming: number;
+  safetyStock: number | null;
   imageSrc: string | null;
   bandcampUrl: string | null;
   status: string;
@@ -89,6 +97,7 @@ export async function getInventoryLevels(
       available,
       committed,
       incoming,
+      safety_stock,
       warehouse_product_variants!inner (
         id,
         product_id,
@@ -140,6 +149,7 @@ export async function getInventoryLevels(
       available,
       committed,
       incoming,
+      safety_stock,
       warehouse_product_variants!inner (
         id,
         product_id,
@@ -210,6 +220,7 @@ export async function getInventoryLevels(
       available: row.available as number,
       committed: row.committed as number,
       incoming: row.incoming as number,
+      safetyStock: (row.safety_stock as number | null) ?? null,
       imageSrc: (firstImage?.src as string) ?? null,
       bandcampUrl: variant.bandcamp_url as string | null,
       status: product.status as string,
@@ -233,6 +244,7 @@ export async function adjustInventory(
   delta: number,
   reason: string,
 ): Promise<{ success: boolean; newQuantity: number | null }> {
+  const validated = adjustInventorySchema.parse({ sku, delta, reason });
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -251,11 +263,11 @@ export async function adjustInventory(
 
   const result = await recordInventoryChange({
     workspaceId: userData.workspace_id,
-    sku,
-    delta,
+    sku: validated.sku,
+    delta: validated.delta,
     source: "manual",
     correlationId,
-    metadata: { reason, adjusted_by: user.id },
+    metadata: { reason: validated.reason, adjusted_by: user.id },
   });
 
   return { success: result.success, newQuantity: result.newQuantity };
@@ -265,13 +277,14 @@ export async function adjustInventory(
  * Single SKU detail: warehouse level, locations, recent activity.
  */
 export async function getInventoryDetail(sku: string): Promise<InventoryDetailResult> {
+  const { userRecord } = await requireAuth();
   const supabase = await createServerSupabaseClient();
 
-  // Fetch inventory level
   const { data: levelData, error: levelError } = await supabase
     .from("warehouse_inventory_levels")
     .select("sku, available, committed, incoming, variant_id")
     .eq("sku", sku)
+    .eq("workspace_id", userRecord.workspace_id)
     .single();
 
   if (levelError || !levelData) {
@@ -407,7 +420,8 @@ export async function getClientInventoryLevels(
       warehouse_inventory_levels (
         available,
         committed,
-        incoming
+        incoming,
+        safety_stock
       )
     `,
     { count: "exact" },
@@ -456,6 +470,7 @@ export async function getClientInventoryLevels(
       available: (level?.available as number) ?? 0,
       committed: (level?.committed as number) ?? 0,
       incoming: (level?.incoming as number) ?? 0,
+      safetyStock: (level?.safety_stock as number | null) ?? null,
       imageSrc: (firstImage?.src as string) ?? null,
       bandcampUrl: row.bandcamp_url as string | null,
       status: product.status as string,
@@ -478,17 +493,13 @@ export async function updateInventoryBuffer(
   sku: string,
   safetyStock: number | null,
 ): Promise<{ success: boolean }> {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
-
+  const { workspaceId } = await requireStaff();
   const serviceClient = createServiceRoleClient();
   const { error } = await serviceClient
     .from("warehouse_inventory_levels")
     .update({ safety_stock: safetyStock, updated_at: new Date().toISOString() })
-    .eq("sku", sku);
+    .eq("sku", sku)
+    .eq("workspace_id", workspaceId);
 
   if (error) throw new Error(`Failed to update buffer: ${error.message}`);
   return { success: true };
@@ -502,11 +513,8 @@ export async function updateWorkspaceDefaultBuffer(
   workspaceId: string,
   defaultSafetyStock: number,
 ): Promise<{ success: boolean }> {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
+  const { workspaceId: authWorkspaceId } = await requireStaff();
+  if (workspaceId !== authWorkspaceId) throw new Error("Workspace mismatch");
 
   const serviceClient = createServiceRoleClient();
   const { error } = await serviceClient

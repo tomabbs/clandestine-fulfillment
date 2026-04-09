@@ -1,22 +1,24 @@
 "use server";
 
 import { z } from "zod";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireClient } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 export async function getPortalSettings() {
-  const supabase = await createServerSupabaseClient();
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
 
   const { data: org } = await supabase
     .from("organizations")
     .select("id, name, billing_email")
-    .limit(1)
+    .eq("id", orgId)
     .single();
 
   const { data: connections } = await supabase
     .from("client_store_connections")
-    .select("id, platform, store_url, connection_status, last_webhook_at");
+    .select("id, platform, store_url, connection_status, last_webhook_at")
+    .eq("org_id", orgId);
 
-  // Fetch notification preferences from portal_admin_settings
   let notificationPreferences = { email_enabled: true };
   if (org) {
     const { data: adminSettings } = await supabase
@@ -43,21 +45,13 @@ const updateNotificationPreferencesSchema = z.object({
 
 export async function updateNotificationPreferences(rawData: { email_enabled: boolean }) {
   const parsed = updateNotificationPreferencesSchema.parse(rawData);
-  const supabase = await createServerSupabaseClient();
+  const { orgId, workspaceId } = await requireClient();
+  const supabase = createServiceRoleClient();
 
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("id, workspace_id")
-    .limit(1)
-    .single();
-
-  if (!org) throw new Error("Organization not found");
-
-  // Fetch existing settings to merge
   const { data: existing } = await supabase
     .from("portal_admin_settings")
     .select("id, settings")
-    .eq("org_id", org.id)
+    .eq("org_id", orgId)
     .maybeSingle();
 
   const mergedSettings = {
@@ -69,13 +63,14 @@ export async function updateNotificationPreferences(rawData: { email_enabled: bo
     const { error } = await supabase
       .from("portal_admin_settings")
       .update({ settings: mergedSettings, updated_at: new Date().toISOString() })
-      .eq("id", existing.id);
+      .eq("id", existing.id)
+      .eq("org_id", orgId);
     if (error) throw new Error(error.message);
   } else {
     const { error } = await supabase.from("portal_admin_settings").insert({
       id: crypto.randomUUID(),
-      workspace_id: org.workspace_id,
-      org_id: org.id,
+      workspace_id: workspaceId,
+      org_id: orgId,
       settings: mergedSettings,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

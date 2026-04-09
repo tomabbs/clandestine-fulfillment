@@ -1,33 +1,38 @@
 "use server";
 
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { requireClient } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { parseOnboardingState } from "@/lib/shared/onboarding";
 
 export async function getPortalDashboard() {
-  const supabase = await createServerSupabaseClient();
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
 
-  const { data: orgs } = await supabase
+  const { data: org } = await supabase
     .from("organizations")
     .select("id, name, onboarding_state")
-    .limit(1)
+    .eq("id", orgId)
     .single();
 
-  const org = orgs;
-  const orgId = org?.id;
   const onboardingSteps = parseOnboardingState(
     (org?.onboarding_state as Record<string, unknown>) ?? null,
   );
 
   const [variantCount, inventorySum, inboundCount, supportCount] = await Promise.all([
-    supabase.from("warehouse_product_variants").select("id", { count: "exact", head: true }),
-    supabase.from("warehouse_inventory_levels").select("available"),
+    supabase
+      .from("warehouse_product_variants")
+      .select("id", { count: "exact", head: true })
+      .eq("warehouse_products.org_id", orgId),
+    supabase.from("warehouse_inventory_levels").select("available").eq("org_id", orgId),
     supabase
       .from("warehouse_inbound_shipments")
       .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
       .in("status", ["expected", "arrived", "checking_in"]),
     supabase
       .from("support_conversations")
       .select("id", { count: "exact", head: true })
+      .eq("org_id", orgId)
       .in("status", ["open", "waiting_on_staff"]),
   ]);
 
@@ -36,15 +41,10 @@ export async function getPortalDashboard() {
     0,
   );
 
-  const { data: recentActivity } = await supabase
-    .from("warehouse_inventory_activity")
-    .select("id, sku, delta, source, created_at")
-    .order("created_at", { ascending: false })
-    .limit(10);
-
   const { data: connections } = await supabase
     .from("client_store_connections")
     .select("id, platform, store_url, connection_status, last_webhook_at, last_poll_at")
+    .eq("org_id", orgId)
     .eq("connection_status", "active");
 
   return {
@@ -57,7 +57,6 @@ export async function getPortalDashboard() {
       pendingInbound: inboundCount.count ?? 0,
       openSupport: supportCount.count ?? 0,
     },
-    recentActivity: recentActivity ?? [],
     connections: connections ?? [],
   };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle, Circle, Loader2, Minus, Plus } from "lucide-react";
+import { CheckCircle, Circle, Loader2 } from "lucide-react";
 import { getPortalDashboard } from "@/actions/portal-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,11 +8,22 @@ import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 export default function PortalHomePage() {
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: ["portal", "dashboard"],
     queryFn: () => getPortalDashboard(),
     tier: CACHE_TIERS.SESSION,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading || !data) {
     return (
@@ -99,37 +110,26 @@ export default function PortalHomePage() {
         </Card>
       )}
 
-      {/* Recent activity */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {data.recentActivity.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No recent activity.</p>
-          ) : (
+      {/* Store connections */}
+      {data.connections.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Connected Stores</CardTitle>
+          </CardHeader>
+          <CardContent>
             <div className="space-y-2">
-              {data.recentActivity.map((a) => (
-                <div key={a.id} className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2">
-                    {a.delta > 0 ? (
-                      <Plus className="h-3 w-3 text-green-600" />
-                    ) : (
-                      <Minus className="h-3 w-3 text-red-600" />
-                    )}
-                    <span className="font-mono text-xs">{a.sku}</span>
-                    <span className="text-muted-foreground">{a.source}</span>
-                    <span className="font-mono">{a.delta > 0 ? `+${a.delta}` : a.delta}</span>
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(a.created_at).toLocaleDateString()}
+              {data.connections.map((c) => (
+                <div key={c.id} className="flex items-center justify-between text-sm">
+                  <span className="capitalize">{c.platform}</span>
+                  <span className="text-muted-foreground text-xs truncate max-w-[200px]">
+                    {c.store_url}
                   </span>
                 </div>
               ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

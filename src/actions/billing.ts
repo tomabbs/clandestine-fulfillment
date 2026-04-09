@@ -1,5 +1,6 @@
 "use server";
 
+import { requireClient } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import type {
   WarehouseBillingAdjustment,
@@ -187,6 +188,75 @@ export async function getBillingSnapshotDetail(id: string) {
       .from("warehouse_billing_snapshots")
       .select("*, organizations!inner(name)")
       .eq("id", id)
+      .single(),
+    supabase
+      .from("warehouse_billing_adjustments")
+      .select("*")
+      .eq("snapshot_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (snapshotResult.error) throw new Error(snapshotResult.error.message);
+
+  return {
+    snapshot: snapshotResult.data as WarehouseBillingSnapshot & {
+      organizations: { name: string };
+    },
+    adjustments: (adjustmentsResult.data ?? []) as WarehouseBillingAdjustment[],
+  };
+}
+
+// === Portal (Client) Billing ===
+
+/** Portal: list billing snapshots for the current client's org */
+export async function getClientBillingSnapshots(filters?: {
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const { orgId, workspaceId } = await requireClient();
+  const supabase = createServiceRoleClient();
+  const page = filters?.page ?? 1;
+  const pageSize = filters?.pageSize ?? 50;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from("warehouse_billing_snapshots")
+    .select("*, organizations!inner(name)", { count: "exact" })
+    .eq("workspace_id", workspaceId)
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (filters?.status) {
+    query = query.eq("status", filters.status);
+  }
+
+  const { data, error, count } = await query;
+  if (error) throw new Error(error.message);
+
+  return {
+    snapshots: (data ?? []) as (WarehouseBillingSnapshot & {
+      organizations: { name: string };
+    })[],
+    total: count ?? 0,
+    page,
+    pageSize,
+  };
+}
+
+/** Portal: get billing snapshot detail with ownership verification */
+export async function getClientBillingSnapshotDetail(id: string) {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const [snapshotResult, adjustmentsResult] = await Promise.all([
+    supabase
+      .from("warehouse_billing_snapshots")
+      .select("*, organizations!inner(name)")
+      .eq("id", id)
+      .eq("org_id", orgId)
       .single(),
     supabase
       .from("warehouse_billing_adjustments")

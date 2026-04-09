@@ -1,10 +1,8 @@
 "use server";
 
 import { z } from "zod/v4";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
-
-// Rule #48: No Server Action may call the Bandcamp API directly.
-// Mark shipped is done via Trigger task (bandcampMarkShippedTask).
+import { requireStaff } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 const setPaymentIdSchema = z.object({
   shipmentId: z.string().uuid(),
@@ -15,30 +13,6 @@ const triggerSyncSchema = z.object({
   shipmentId: z.string().uuid(),
 });
 
-async function requireStaffAuth() {
-  const supabase = await createServerSupabaseClient();
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) throw new Error("Unauthorized");
-
-  const serviceClient = createServiceRoleClient();
-  const { data: userRecord } = await serviceClient
-    .from("users")
-    .select("role")
-    .eq("auth_user_id", data.user.id)
-    .single();
-
-  const staffRoles = [
-    "admin",
-    "super_admin",
-    "label_staff",
-    "label_management",
-    "warehouse_manager",
-  ];
-  if (!userRecord || !staffRoles.includes(userRecord.role as string)) {
-    throw new Error("Staff access required");
-  }
-}
-
 /**
  * Set or clear bandcamp_payment_id on a shipment.
  * When set + tracking_number exists, the cron or manual trigger will sync to Bandcamp.
@@ -47,7 +21,7 @@ export async function setBandcampPaymentId(raw: {
   shipmentId: string;
   bandcampPaymentId: number | null;
 }): Promise<{ success: true }> {
-  await requireStaffAuth();
+  await requireStaff();
   const { shipmentId, bandcampPaymentId } = setPaymentIdSchema.parse(raw);
   const serviceClient = createServiceRoleClient();
 
@@ -75,7 +49,7 @@ export async function setBandcampPaymentId(raw: {
 export async function triggerBandcampMarkShipped(raw: {
   shipmentId: string;
 }): Promise<{ taskRunId: string }> {
-  await requireStaffAuth();
+  await requireStaff();
   const { shipmentId } = triggerSyncSchema.parse(raw);
   const serviceClient = createServiceRoleClient();
 

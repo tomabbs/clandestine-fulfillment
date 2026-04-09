@@ -65,7 +65,7 @@ export default function PortalSupportPage() {
 }
 
 function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }) {
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: queryKeys.support.conversations({}),
     queryFn: () => getConversations({}),
     tier: CACHE_TIERS.REALTIME,
@@ -82,6 +82,17 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
     orgId: viewer?.orgId ?? null,
     currentPage: "/portal/support",
   });
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Support</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

@@ -26,7 +26,7 @@ export default function PortalShippingPage() {
   const [filters, setFilters] = useState({ page: 1, pageSize: 50, status: "", carrier: "" });
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: queryKeys.shipments.list({ ...filters, portal: true }),
     queryFn: () => getClientShipments(filters),
     tier: CACHE_TIERS.SESSION,
@@ -38,6 +38,17 @@ export default function PortalShippingPage() {
     tier: CACHE_TIERS.SESSION,
     enabled: !!expandedId,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Shipping</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-4">

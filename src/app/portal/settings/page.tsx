@@ -15,11 +15,22 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 type Connection = Awaited<ReturnType<typeof getPortalSettings>>["connections"][number];
 
 export default function PortalSettingsPage() {
-  const { data, isLoading } = useAppQuery({
+  const { data, isLoading, error } = useAppQuery({
     queryKey: ["portal", "settings"],
     queryFn: () => getPortalSettings(),
     tier: CACHE_TIERS.SESSION,
   });
+
+  if (error) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Failed to load data."}
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading || !data) {
     return (

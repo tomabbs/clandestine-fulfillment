@@ -42,7 +42,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `storage-calc` | `src/trigger/tasks/storage-calc.ts` | `0 1 1 * *` (America/New_York) |
 | `redis-backfill` | `src/trigger/tasks/redis-backfill.ts` | `0 3 * * 2` (America/New_York) |
 | `daily-scan-form` | `src/trigger/tasks/generate-daily-scan-form.ts` | `0 17 * * 1-6` (America/New_York) |
-| `oauth-state-cleanup` | `src/trigger/tasks/oauth-state-cleanup.ts` | `0 3 * * *` |
+| `oauth-state-cleanup` | `src/trigger/tasks/oauth-state-cleanup.ts` | `*/15 * * * *` |
 | `discogs-listing-replenish` | `src/trigger/tasks/discogs-listing-replenish.ts` | `0 * * * *` (hourly) |
 | `discogs-mailorder-sync` | `src/trigger/tasks/discogs-mailorder-sync.ts` | `*/10 * * * *` |
 | `discogs-client-order-sync` | `src/trigger/tasks/discogs-client-order-sync.ts` | `*/10 * * * *` |

@@ -1,5 +1,6 @@
 "use server";
 
+import { requireClient } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 
 export async function getOrders(filters: {
@@ -64,6 +65,84 @@ export async function getOrderDetail(orderId: string) {
     }> | null) ?? [];
 
   // Merge: prefer normalised warehouse_order_items rows; fall back to JSONB
+  const resolvedItems =
+    (items ?? []).length > 0
+      ? (items ?? [])
+      : lineItemsJson.map((li, i) => ({
+          id: `jsonb-${i}`,
+          order_id: orderId,
+          sku: li.sku ?? null,
+          title: li.title ?? null,
+          quantity: li.quantity ?? 1,
+          price: li.price ?? null,
+        }));
+
+  return {
+    order,
+    items: resolvedItems,
+    shipments: shipments ?? [],
+  };
+}
+
+/** Portal: list orders for the current client's org */
+export async function getClientOrders(filters: {
+  page?: number;
+  pageSize?: number;
+  status?: string;
+  search?: string;
+}) {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 50;
+  const offset = (page - 1) * pageSize;
+
+  let query = supabase
+    .from("warehouse_orders")
+    .select("*", { count: "exact" })
+    .eq("org_id", orgId)
+    .order("created_at", { ascending: false })
+    .range(offset, offset + pageSize - 1);
+
+  if (filters.status) query = query.eq("fulfillment_status", filters.status);
+  if (filters.search) query = query.ilike("order_number", `%${filters.search}%`);
+
+  const { data, count } = await query;
+  return { orders: data ?? [], total: count ?? 0, page, pageSize };
+}
+
+/** Portal: get order detail with ownership verification */
+export async function getClientOrderDetail(orderId: string) {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const { data: order } = await supabase
+    .from("warehouse_orders")
+    .select("*")
+    .eq("id", orderId)
+    .eq("org_id", orgId)
+    .single();
+
+  if (!order) throw new Error("Order not found");
+
+  const { data: items } = await supabase
+    .from("warehouse_order_items")
+    .select("*")
+    .eq("order_id", orderId);
+
+  const { data: shipments } = await supabase
+    .from("warehouse_shipments")
+    .select("id, tracking_number, carrier, status, ship_date")
+    .eq("order_id", orderId);
+
+  const lineItemsJson =
+    (order?.line_items as Array<{
+      sku?: string;
+      title?: string;
+      quantity?: number;
+      price?: number;
+    }> | null) ?? [];
+
   const resolvedItems =
     (items ?? []).length > 0
       ? (items ?? [])

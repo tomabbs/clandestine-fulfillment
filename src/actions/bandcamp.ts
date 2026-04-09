@@ -7,7 +7,8 @@ import {
   fetchDigDeeper,
 } from "@/lib/clients/bandcamp-discover";
 import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { requireAuth } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
 
@@ -27,28 +28,6 @@ const createConnectionSchema = z.object({
 const deleteConnectionSchema = z.object({
   connectionId: z.string().uuid(),
 });
-
-// === Helper ===
-
-async function requireAuth() {
-  const supabase = await createServerSupabaseClient();
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error("Unauthorized");
-
-  // Fetch the user's record to get org_id and workspace_id
-  const serviceClient = createServiceRoleClient();
-  const { data: userRecord, error: userError } = await serviceClient
-    .from("users")
-    .select("id, org_id, workspace_id")
-    .eq("auth_user_id", authData.user.id)
-    .single();
-
-  if (userError || !userRecord) {
-    throw new Error("User record not found");
-  }
-
-  return { supabase, user: authData.user, userRecord };
-}
 
 // === Connection management ===
 

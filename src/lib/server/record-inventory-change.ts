@@ -25,26 +25,23 @@ interface RecordInventoryChangeResult {
  * (1) acquire correlationId (passed in)
  * (2) Redis HINCRBY via adjustInventory with SETNX guard (Rule #47)
  * (3) Postgres RPC record_inventory_change_txn in single transaction (Rule #64)
- * (4) return result
+ * (4) enqueue fanout (non-blocking)
  *
- * If Redis write succeeds but Postgres fails, log error — periodic reconciliation sensor catches drift.
+ * If step 3 fails after step 2, Redis is rolled back immediately via a compensating
+ * adjustInventory call with a :rollback correlation ID. The sensor-check auto-heal
+ * (every 5 min) is a secondary safety net, not the primary recovery mechanism.
  */
 export async function recordInventoryChange(
   params: RecordInventoryChangeParams,
 ): Promise<RecordInventoryChangeResult> {
   const { workspaceId, sku, delta, source, correlationId, metadata } = params;
 
-  // Step 1: correlationId is already acquired (passed as parameter)
-
-  // Step 2: Redis HINCRBY with SETNX idempotency guard (Rule #47)
   const redisResult = await adjustInventory(sku, "available", delta, correlationId);
 
   if (redisResult === null) {
-    // Already processed — idempotency key existed
     return { success: true, newQuantity: null, alreadyProcessed: true };
   }
 
-  // Step 3: Postgres RPC in a single ACID transaction (Rule #64)
   try {
     const supabase = createServiceRoleClient();
     const { error } = await supabase.rpc("record_inventory_change_txn", {
@@ -56,25 +53,25 @@ export async function recordInventoryChange(
       p_metadata: metadata ?? {},
     });
 
-    if (error) {
-      // Redis write succeeded but Postgres failed.
-      // Log error — periodic reconciliation sensor catches drift (Rule #27).
-      console.error(
-        `[recordInventoryChange] Postgres RPC failed after Redis write. ` +
-          `SKU=${sku} delta=${delta} correlationId=${correlationId} error=${error.message}`,
-      );
-      return { success: false, newQuantity: redisResult, alreadyProcessed: false };
-    }
+    if (error) throw error;
   } catch (err) {
+    try {
+      await adjustInventory(sku, "available", -delta, `${correlationId}:rollback`);
+    } catch (rollbackErr) {
+      console.error(
+        `[recordInventoryChange] CRITICAL: Redis rollback also failed. ` +
+          `SKU=${sku} delta=${delta} correlationId=${correlationId}`,
+        rollbackErr,
+      );
+    }
     console.error(
-      `[recordInventoryChange] Postgres RPC exception after Redis write. ` +
+      `[recordInventoryChange] Postgres failed, Redis rolled back. ` +
         `SKU=${sku} delta=${delta} correlationId=${correlationId}`,
       err,
     );
-    return { success: false, newQuantity: redisResult, alreadyProcessed: false };
+    return { success: false, newQuantity: null, alreadyProcessed: false };
   }
 
-  // Step 4: enqueue fanout (Rule #43) — non-blocking, best-effort
   try {
     const { fanoutInventoryChange } = await import("@/lib/server/inventory-fanout");
     fanoutInventoryChange(workspaceId, sku, redisResult).catch((err) => {
