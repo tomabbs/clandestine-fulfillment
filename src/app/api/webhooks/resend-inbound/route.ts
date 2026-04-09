@@ -73,19 +73,21 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // Rule #62: Dedup via webhook_events INSERT ON CONFLICT
-  const { data: dedupRow } = await supabase
+  const { data: dedupRow, error: dedupError } = await supabase
     .from("webhook_events")
     .insert({
       workspace_id: workspaceId,
       platform: "resend",
       external_webhook_id: svixId,
-      payload: JSON.parse(rawBody),
+      metadata: JSON.parse(rawBody),
     })
     .select("id")
     .single();
 
   if (!dedupRow) {
-    // Already processed — return 200 OK immediately
+    if (dedupError && !dedupError.message?.includes("duplicate")) {
+      console.error("webhook_events insert failed:", dedupError.message);
+    }
     return NextResponse.json({ ok: true });
   }
 
