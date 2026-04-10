@@ -74,7 +74,7 @@ export async function recordInventoryChange(
 
   try {
     const { fanoutInventoryChange } = await import("@/lib/server/inventory-fanout");
-    fanoutInventoryChange(workspaceId, sku, redisResult).catch((err) => {
+    fanoutInventoryChange(workspaceId, sku, redisResult, delta, correlationId).catch((err) => {
       console.error(`[recordInventoryChange] Fanout failed for SKU=${sku}:`, err);
     });
   } catch {
