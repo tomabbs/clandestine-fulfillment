@@ -383,6 +383,56 @@ export async function productSetCreate(input: Record<string, unknown>): Promise<
 // Mutations — EDIT via productUpdate + productVariantsBulkUpdate (Rule #1)
 // ---------------------------------------------------------------------------
 
+/**
+ * Normalise a Shopify product ID to GID format.
+ * Accepts either numeric ("123") or full GID ("gid://shopify/Product/123").
+ */
+function toProductGid(id: string): string {
+  return id.startsWith("gid://") ? id : `gid://shopify/Product/${id}`;
+}
+
+/**
+ * Add media (images) to an existing Shopify product.
+ * Use this instead of productUpdate+images — that field was removed in 2024-01.
+ *
+ * API version: 2026-01+
+ * Mutation: productCreateMedia
+ */
+export async function productCreateMedia(
+  shopifyProductId: string,
+  media: Array<{ originalSource: string; alt?: string | null; mediaContentType?: "IMAGE" }>,
+): Promise<void> {
+  if (media.length === 0) return;
+
+  const mutation = `
+    mutation ProductCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media { id status }
+        mediaUserErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    productCreateMedia: {
+      media: Array<{ id: string; status: string }>;
+      mediaUserErrors: Array<{ field: string[]; message: string }>;
+    };
+  }>(mutation, {
+    productId: toProductGid(shopifyProductId),
+    media: media.map((m) => ({
+      originalSource: m.originalSource,
+      alt: m.alt ?? "",
+      mediaContentType: m.mediaContentType ?? "IMAGE",
+    })),
+  });
+
+  if (data.productCreateMedia.mediaUserErrors.length > 0) {
+    throw new Error(
+      `productCreateMedia errors: ${data.productCreateMedia.mediaUserErrors.map((e) => e.message).join(", ")}`,
+    );
+  }
+}
+
 export async function productUpdate(input: Record<string, unknown>): Promise<{ id: string }> {
   const mutation = `
     mutation ProductUpdate($input: ProductInput!) {

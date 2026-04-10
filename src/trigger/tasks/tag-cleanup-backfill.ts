@@ -1,12 +1,12 @@
 /**
  * Tag cleanup backfill — manual trigger only.
  *
- * Scans the entire catalog and fixes Pre-Orders / New Releases tags
+ * Scans the entire catalog and fixes Pre-Order / New Releases tags
  * based on current dates and street_date.
  *
  * Tag rules:
- *   street_date > today             → Pre-Orders YES, New Releases YES
- *   street_date <= today             → Pre-Orders NO
+ *   street_date > today             → Pre-Order YES, New Releases YES
+ *   street_date <= today             → Pre-Order NO
  *   street_date + 45 days <= today   → New Releases NO
  *   street_date + 45 days > today    → New Releases leave as-is
  */
@@ -73,7 +73,7 @@ export const tagCleanupBackfillTask = task({
         if (!streetDate) continue;
 
         const tags = (product.tags as string[]) ?? [];
-        const hasPO = tags.includes("Pre-Orders");
+        const hasPO = tags.includes("Pre-Order");
         const hasNR = tags.includes("New Releases");
         const isFuture = streetDate > today;
         const isPast45 = streetDate <= cutoff45Str;
@@ -81,9 +81,9 @@ export const tagCleanupBackfillTask = task({
         const tagsToAdd: string[] = [];
         const tagsToRemoveList: string[] = [];
 
-        // Pre-Orders: should have if future, should NOT have if past
-        if (isFuture && !hasPO) tagsToAdd.push("Pre-Orders");
-        if (!isFuture && hasPO) tagsToRemoveList.push("Pre-Orders");
+        // Pre-Order: should have if future, should NOT have if past
+        if (isFuture && !hasPO) tagsToAdd.push("Pre-Order");
+        if (!isFuture && hasPO) tagsToRemoveList.push("Pre-Order");
 
         // New Releases: should NOT have if 45+ days past street_date
         if (isPast45 && hasNR) tagsToRemoveList.push("New Releases");
@@ -119,8 +119,8 @@ export const tagCleanupBackfillTask = task({
           .update({ tags: updatedTags, updated_at: new Date().toISOString() })
           .eq("id", product.id);
 
-        if (tagsToAdd.includes("Pre-Orders")) preorderAdded++;
-        if (tagsToRemoveList.includes("Pre-Orders")) preorderRemoved++;
+        if (tagsToAdd.includes("Pre-Order")) preorderAdded++;
+        if (tagsToRemoveList.includes("Pre-Order")) preorderRemoved++;
         if (tagsToRemoveList.includes("New Releases")) newReleaseRemoved++;
       }
     }

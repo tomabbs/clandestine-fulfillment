@@ -196,16 +196,25 @@ export async function getBandcampAccounts(workspaceId: string): Promise<
 
   if (error) throw new Error(`Failed to fetch Bandcamp accounts: ${error.message}`);
 
-  // Get mapping counts per connection's org
+  // Get mapping counts per connection using bandcamp_member_band_id
   const results = await Promise.all(
     (connections ?? []).map(async (conn) => {
       const cache = conn.member_bands_cache as Record<string, unknown> | null;
-      const memberBands = (cache?.member_bands as unknown[]) ?? [];
+      const memberBands = (cache?.member_bands as Array<{ band_id?: number }>) ?? [];
+      const memberBandIds = memberBands.map((m) => m.band_id).filter(Boolean);
 
-      const { count } = await serviceClient
-        .from("bandcamp_product_mappings")
-        .select("id", { count: "exact", head: true })
-        .eq("workspace_id", workspaceId);
+      let count: number | null;
+      if (memberBandIds.length > 0) {
+        ({ count } = await serviceClient
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .in("bandcamp_member_band_id", memberBandIds));
+      } else {
+        ({ count } = await serviceClient
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .eq("bandcamp_member_band_id", conn.band_id));
+      }
 
       return {
         ...conn,

@@ -2,7 +2,7 @@
  * Pre-order setup — event trigger.
  *
  * Called when bandcamp-sync or inbound-product-create detects a future street_date.
- * Adds "Pre-Orders" and "New Releases" tags to the Shopify product, sets is_preorder = true,
+ * Adds "Pre-Order" and "New Releases" tags to the Shopify product, sets is_preorder = true,
  * and syncs warehouse_products.tags so the warehouse dashboard stays accurate.
  *
  * §21 decision: We do NOT use Shopify selling plans for pre-orders. Tags only.
@@ -39,11 +39,11 @@ export const preorderSetupTask = task({
 
     if (product?.shopify_product_id) {
       try {
-        await tagsAdd(product.shopify_product_id, ["Pre-Orders", "New Releases"]);
+        await tagsAdd(product.shopify_product_id, ["Pre-Order", "New Releases"]);
 
         // Sync tags to local DB immediately — avoids lag in warehouse dashboard (GAP-4)
         const currentTags = (product.tags as string[]) ?? [];
-        const newTags = Array.from(new Set([...currentTags, "Pre-Orders", "New Releases"]));
+        const newTags = Array.from(new Set([...currentTags, "Pre-Order", "New Releases"]));
         await supabase
           .from("warehouse_products")
           .update({ tags: newTags, updated_at: new Date().toISOString() })
@@ -98,7 +98,7 @@ export const preorderSetupTask = task({
               category: "preorder_setup",
               severity: "high",
               title: `Pre-order tag setup failed: ${variant.sku}`,
-              description: `Failed to add Pre-Orders tag to Shopify product. Error: ${errorMsg}`,
+              description: `Failed to add Pre-Order tag to Shopify product. Error: ${errorMsg}`,
               metadata: {
                 variant_id: variant.id,
                 sku: variant.sku,

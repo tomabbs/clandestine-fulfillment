@@ -395,7 +395,7 @@ function TagCleanupButton() {
         Sync All Tags
       </Button>
       <p className="text-sm text-muted-foreground">
-        Scans all products and fixes Pre-Orders / New Releases tags based on street dates
+        Scans all products and fixes Pre-Order / New Releases tags based on street dates
       </p>
       {tagMut.isSuccess && <span className="text-sm text-green-600">Triggered successfully</span>}
     </div>

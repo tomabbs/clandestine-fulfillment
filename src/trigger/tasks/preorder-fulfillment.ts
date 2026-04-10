@@ -148,7 +148,7 @@ export const preorderReleaseVariantTask = task({
 
 /**
  * Release a single pre-order variant:
- * 1. Remove "Pre-Orders" tag from Shopify (best-effort)
+ * 1. Remove "Pre-Order" tag from Shopify (best-effort)
  * 2. Sync warehouse_products.tags in DB
  * 3. Set is_preorder = false
  * 4. FIFO-allocate orders to available inventory
@@ -166,25 +166,25 @@ async function releaseVariant(
     .eq("id", variant.product_id)
     .single();
 
-  // Remove "Pre-Orders" tag from Shopify and sync local DB (GAP-4)
+  // Remove "Pre-Order" tag from Shopify and sync local DB (GAP-4)
   if (product?.shopify_product_id) {
     try {
-      await tagsRemove(product.shopify_product_id, ["Pre-Orders"]);
+      await tagsRemove(product.shopify_product_id, ["Pre-Order"]);
 
       const currentTags = (product.tags as string[]) ?? [];
-      const updatedTags = currentTags.filter((t) => t !== "Pre-Orders");
+      const updatedTags = currentTags.filter((t) => t !== "Pre-Order");
       await supabase
         .from("warehouse_products")
         .update({ tags: updatedTags, updated_at: new Date().toISOString() })
         .eq("id", product.id);
 
-      logger.info("releaseVariant: Pre-Orders tag removed", {
+      logger.info("releaseVariant: Pre-Order tag removed", {
         variantId: variant.id,
         sku: variant.sku,
         shopifyProductId: product.shopify_product_id,
       });
     } catch (err) {
-      logger.warn("releaseVariant: failed to remove Pre-Orders tag from Shopify", {
+      logger.warn("releaseVariant: failed to remove Pre-Order tag from Shopify", {
         variantId: variant.id,
         sku: variant.sku,
         shopifyProductId: product.shopify_product_id,

@@ -102,14 +102,14 @@ export async function uploadProductImage(
 
   if (insertErr || !image) throw new Error(`Failed to save image: ${insertErr?.message}`);
 
-  // Push to Shopify if connected (non-blocking — Shopify failure doesn't roll back)
+  // Push to Shopify if connected (non-blocking — Shopify failure doesn't roll back).
+  // productUpdate+images was removed in 2024-01; use productCreateMedia instead.
   if (product.shopify_product_id) {
     try {
-      const { productUpdate } = await import("@/lib/clients/shopify-client");
-      await productUpdate({
-        id: product.shopify_product_id,
-        images: [{ src: publicUrl, altText: data.alt ?? "" }],
-      });
+      const { productCreateMedia } = await import("@/lib/clients/shopify-client");
+      await productCreateMedia(product.shopify_product_id, [
+        { originalSource: publicUrl, alt: data.alt ?? "", mediaContentType: "IMAGE" },
+      ]);
     } catch {
       // Shopify push is best-effort; image is saved locally regardless
     }

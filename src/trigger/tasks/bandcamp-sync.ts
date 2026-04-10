@@ -17,7 +17,7 @@ import {
   fetchBandcampPage,
   parseBandcampPage,
 } from "@/lib/clients/bandcamp-scraper";
-import { productSetCreate } from "@/lib/clients/shopify-client";
+import { productCreateMedia, productSetCreate } from "@/lib/clients/shopify-client";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
@@ -713,12 +713,37 @@ async function storeScrapedImages(
     return;
   }
 
-  // Sync to product.images JSONB for legacy compatibility
+  // Sync to product.images JSONB for legacy compatibility and get shopify_product_id
   const { data: product } = await supabase
     .from("warehouse_products")
-    .select("images")
+    .select("images, shopify_product_id")
     .eq("id", productId)
     .single();
+
+  // Push new images to Shopify (best-effort — DB is the source of truth)
+  if (product?.shopify_product_id) {
+    try {
+      await productCreateMedia(
+        product.shopify_product_id,
+        imagesToInsert.map((img) => ({
+          originalSource: img.src,
+          alt: img.alt,
+          mediaContentType: "IMAGE" as const,
+        })),
+      );
+      logger.info("Pushed scraped images to Shopify", {
+        productId,
+        shopifyProductId: product.shopify_product_id,
+        imageCount: imagesToInsert.length,
+      });
+    } catch (err) {
+      logger.warn("Failed to push scraped images to Shopify (DB already updated)", {
+        productId,
+        shopifyProductId: product.shopify_product_id,
+        error: String(err),
+      });
+    }
+  }
 
   const existingJson =
     (product?.images as Array<{ src: string; alt?: string; position?: number }> | null) ?? [];
@@ -1132,17 +1157,37 @@ export const bandcampSyncTask = task({
                 .eq("product_id", existingVar.product_id);
 
               if ((imgCount ?? 0) === 0) {
+                const imgSrc = bandcampImageUrl(merchItem.image_url) as string;
                 await supabase.from("warehouse_product_images").insert({
                   product_id: existingVar.product_id,
                   workspace_id: workspaceId,
-                  src: bandcampImageUrl(merchItem.image_url),
+                  src: imgSrc,
                   alt: merchItem.title,
                   position: 0,
                 });
                 await supabase
                   .from("warehouse_products")
-                  .update({ images: [{ src: bandcampImageUrl(merchItem.image_url) }] })
+                  .update({ images: [{ src: imgSrc }] })
                   .eq("id", existingVar.product_id);
+
+                // Push to Shopify (best-effort)
+                const { data: prod } = await supabase
+                  .from("warehouse_products")
+                  .select("shopify_product_id")
+                  .eq("id", existingVar.product_id)
+                  .single();
+                if (prod?.shopify_product_id) {
+                  try {
+                    await productCreateMedia(prod.shopify_product_id, [
+                      { originalSource: imgSrc, alt: merchItem.title, mediaContentType: "IMAGE" },
+                    ]);
+                  } catch (err) {
+                    logger.warn("Failed to push backfilled image to Shopify", {
+                      productId: existingVar.product_id,
+                      error: String(err),
+                    });
+                  }
+                }
               }
             }
           }
@@ -1222,7 +1267,7 @@ export const bandcampSyncTask = task({
           );
           const tags: string[] = [];
           if (merchItem.new_date && new Date(merchItem.new_date) > new Date()) {
-            tags.push("Pre-Orders", "New Releases");
+            tags.push("Pre-Order", "New Releases");
           }
 
           const { data: existingVariant } = await supabase
@@ -1393,7 +1438,7 @@ export const bandcampSyncTask = task({
               cost: bcCost,
               bandcamp_url: merchItem.url ?? null,
               street_date: merchItem.new_date,
-              is_preorder: tags.includes("Pre-Orders"),
+              is_preorder: tags.includes("Pre-Order"),
             })
             .select("id")
             .single();
@@ -1466,7 +1511,7 @@ export const bandcampSyncTask = task({
               raw_api_data: merchItem,
             });
 
-            if (tags.includes("Pre-Orders")) {
+            if (tags.includes("Pre-Order")) {
               await preorderSetupTask.trigger({
                 variant_id: newVariant.id,
                 workspace_id: workspaceId,
