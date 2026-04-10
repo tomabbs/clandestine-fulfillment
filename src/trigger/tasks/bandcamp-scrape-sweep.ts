@@ -77,6 +77,8 @@ export const bandcampScrapeSweepTask = schedules.task({
       // Group 2 removed — URLs now come from the Bandcamp API, not construction.
 
       // ── Group 3: has URL + art but missing about/credits/tracks (enrichment) ──
+      // Skip apparel/merch — they never have about/credits/tracks on Bandcamp.
+      // Safety valve: items with null category are still scraped (not yet classified).
       const { data: g3All } = await supabase
         .from("bandcamp_product_mappings")
         .select("id, bandcamp_url, variant_id, raw_api_data")
@@ -84,6 +86,7 @@ export const bandcampScrapeSweepTask = schedules.task({
         .not("bandcamp_url", "is", null)
         .is("bandcamp_about", null)
         .not("bandcamp_art_url", "is", null)
+        .or("product_category.is.null,product_category.not.in.(apparel,merch)")
         .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
         .limit(200);
 

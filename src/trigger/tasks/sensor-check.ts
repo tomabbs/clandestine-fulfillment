@@ -466,6 +466,66 @@ export const sensorCheckTask = schedules.task({
         });
       }
 
+      // bundle.component_unavailable — bundles with out-of-stock components
+      try {
+        const { data: bundleComponents } = await supabase
+          .from("bundle_components")
+          .select(
+            "bundle_variant_id, component_variant_id, quantity, warehouse_product_variants!component_variant_id(sku)",
+          )
+          .eq("workspace_id", workspaceId);
+
+        if (bundleComponents?.length) {
+          const componentVariantIds = bundleComponents.map((bc) => bc.component_variant_id);
+          const { data: levels } = await supabase
+            .from("warehouse_inventory_levels")
+            .select("variant_id, available")
+            .in("variant_id", componentVariantIds);
+
+          const levelMap = new Map(
+            (levels ?? []).map((l) => [l.variant_id, l.available as number]),
+          );
+          const affectedBundles = new Set<string>();
+          const zeroComponents: string[] = [];
+
+          for (const bc of bundleComponents) {
+            const available = levelMap.get(bc.component_variant_id) ?? 0;
+            if (available <= 0) {
+              affectedBundles.add(bc.bundle_variant_id);
+              const sku =
+                (bc.warehouse_product_variants as unknown as { sku: string } | null)?.sku ??
+                bc.component_variant_id;
+              if (!zeroComponents.includes(sku)) zeroComponents.push(sku);
+            }
+          }
+
+          const affected = affectedBundles.size;
+          readings.push({
+            sensorName: "bundle.component_unavailable",
+            status: affected > 3 ? "critical" : affected > 0 ? "warning" : "healthy",
+            value: { bundles_affected: affected, zero_components: zeroComponents.slice(0, 10) },
+            message:
+              affected === 0
+                ? "All bundle components in stock"
+                : `${affected} bundle(s) have out-of-stock components: ${zeroComponents.slice(0, 5).join(", ")}`,
+          });
+        } else {
+          readings.push({
+            sensorName: "bundle.component_unavailable",
+            status: "healthy",
+            value: { bundles_affected: 0 },
+            message: "No bundles configured",
+          });
+        }
+      } catch {
+        readings.push({
+          sensorName: "bundle.component_unavailable",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
       // Persist all readings
       if (readings.length > 0) {
         await supabase.from("sensor_readings").insert(

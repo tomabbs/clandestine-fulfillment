@@ -22,6 +22,7 @@ import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { deriveStreetDateAndPreorder, isFutureReleaseDate } from "@/lib/shared/preorder-dates";
+import { classifyProduct } from "@/lib/shared/product-categories";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
@@ -1301,6 +1302,11 @@ export const bandcampSyncTask = task({
                   bandcamp_member_band_id: merchItem.member_band_id,
                   bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
                   bandcamp_type_name: merchItem.item_type,
+                  product_category: classifyProduct(
+                    merchItem.item_type ?? null,
+                    merchItem.url ?? null,
+                    merchItem.title ?? null,
+                  ),
                   bandcamp_new_date: merchItem.new_date,
                   bandcamp_url: merchItem.url ?? null,
                   bandcamp_url_source: merchItem.url ? "orders_api" : null,
@@ -1493,6 +1499,11 @@ export const bandcampSyncTask = task({
               bandcamp_member_band_id: merchItem.member_band_id,
               bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
               bandcamp_type_name: merchItem.item_type,
+              product_category: classifyProduct(
+                merchItem.item_type ?? null,
+                merchItem.url ?? null,
+                merchItem.title ?? null,
+              ),
               bandcamp_new_date: merchItem.new_date,
               bandcamp_url: merchItem.url ?? null,
               bandcamp_url_source: merchItem.url ? "orders_api" : null,

@@ -7,6 +7,7 @@
  */
 
 import { task, tasks } from "@trigger.dev/sdk";
+import { triggerBundleFanout } from "@/lib/server/bundles";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
@@ -174,6 +175,7 @@ async function handleOrderCreated(
     // This loop is NOT atomic — partial failures are recorded in warehouse_review_queue.
     // floor_violation (medium) = expected stock-short; system_fault (high) = needs investigation.
     const platform = event.platform as string;
+    const bundleCache = new Map<string, boolean>();
     const decrementResults: {
       sku: string;
       delta: number;
@@ -222,6 +224,19 @@ async function handleOrderCreated(
 
       if (result.success || result.alreadyProcessed) {
         decrementResults.push({ sku: warehouseSku, delta: -qty, status: "ok" });
+
+        if (result.success && !result.alreadyProcessed && qty > 0 && mapping?.variant_id) {
+          const fanout = await triggerBundleFanout({
+            variantId: mapping.variant_id,
+            soldQuantity: qty,
+            workspaceId,
+            correlationBase: `store-order:${event.id}:${warehouseSku}`,
+            cache: bundleCache,
+          });
+          if (fanout.error) {
+            console.error("[process-client-store-webhook] Bundle fanout failed:", fanout.error);
+          }
+        }
       } else if ((result as { reason?: string }).reason === "floor_violation") {
         decrementResults.push({
           sku: warehouseSku,

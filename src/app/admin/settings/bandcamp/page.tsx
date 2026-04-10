@@ -170,6 +170,20 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
   };
   const scraper = data.scraperCoverage ?? { artUrl: 0, about: 0, credits: 0, tracks: 0 };
   const sales = data.salesCoverage ?? { catalogNumber: 0, upc: 0 };
+  const albumFmt = data.albumFormatCoverage ?? {
+    total: 0,
+    about: 0,
+    credits: 0,
+    tracks: 0,
+    art: 0,
+    tags: 0,
+    byType: { vinyl: 0, cd: 0, cassette: 0 },
+  };
+  const nonAlbumItems = data.nonAlbumCoverage ?? {
+    total: 0,
+    art: 0,
+    byCategory: { apparel: 0, merch: 0, bundle: 0, other: 0 },
+  };
   const urls = data.urlSources ?? { scraper_verified: 0, constructed: 0, orders_api: 0, none: 0 };
   const totalWithUrl = data.totalWithUrl ?? 0;
   const scrapeStats = data.scrapeStats ?? { total: 0, success: 0, failed: 0, blocked: 0 };
@@ -423,9 +437,10 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Scraper Enrichment</CardTitle>
+            <CardTitle className="text-base">Album Format Enrichment</CardTitle>
             <CardDescription>
-              From HTML page (data-tralbum). Only items with a resolved URL get scraped.
+              {albumFmt.total} album products (Vinyl {albumFmt.byType.vinyl}, CD{" "}
+              {albumFmt.byType.cd}, Cassette {albumFmt.byType.cassette})
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -438,10 +453,15 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <CompletenessRow label="Album Cover (hi-res)" have={scraper.artUrl} total={t} />
-                <CompletenessRow label="About / Description" have={scraper.about} total={t} />
-                <CompletenessRow label="Credits" have={scraper.credits} total={t} />
-                <CompletenessRow label="Track List" have={scraper.tracks} total={t} />
+                <CompletenessRow
+                  label="About / Description"
+                  have={albumFmt.about}
+                  total={albumFmt.total}
+                />
+                <CompletenessRow label="Credits" have={albumFmt.credits} total={albumFmt.total} />
+                <CompletenessRow label="Track List" have={albumFmt.tracks} total={albumFmt.total} />
+                <CompletenessRow label="Album Cover" have={albumFmt.art} total={albumFmt.total} />
+                <CompletenessRow label="Genre Tags" have={albumFmt.tags} total={albumFmt.total} />
               </TableBody>
             </Table>
             <div className="mt-3 border-t pt-3">
@@ -455,6 +475,46 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
                 </TableBody>
               </Table>
             </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Merch & Apparel</CardTitle>
+            <CardDescription>{nonAlbumItems.total} non-album items</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Apparel</span>
+                <span className="font-medium">{nonAlbumItems.byCategory.apparel}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Merch</span>
+                <span className="font-medium">{nonAlbumItems.byCategory.merch}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Bundles</span>
+                <span className="font-medium">{nonAlbumItems.byCategory.bundle}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Other</span>
+                <span className="font-medium">{nonAlbumItems.byCategory.other}</span>
+              </div>
+            </div>
+            <div className="mt-3 border-t pt-3">
+              <Table>
+                <TableBody>
+                  <CompletenessRow
+                    label="Product Art"
+                    have={nonAlbumItems.art}
+                    total={nonAlbumItems.total}
+                  />
+                </TableBody>
+              </Table>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Album-specific fields (about, credits, tracks, tags) are N/A for merch items.
+            </p>
           </CardContent>
         </Card>
       </div>

@@ -419,7 +419,7 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     const { data: page } = await supabase
       .from("bandcamp_product_mappings")
       .select(
-        "id, bandcamp_url, bandcamp_url_source, bandcamp_subdomain, bandcamp_album_title, bandcamp_price, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_options, bandcamp_origin_quantities, bandcamp_catalog_number, bandcamp_upc, raw_api_data, bandcamp_image_url, bandcamp_new_date",
+        "id, bandcamp_url, bandcamp_url_source, bandcamp_subdomain, bandcamp_album_title, bandcamp_price, bandcamp_art_url, bandcamp_about, bandcamp_credits, bandcamp_tracks, bandcamp_options, bandcamp_origin_quantities, bandcamp_catalog_number, bandcamp_upc, raw_api_data, bandcamp_image_url, bandcamp_new_date, product_category, bandcamp_tags",
       )
       .eq("workspace_id", workspaceId)
       .range(mappingOffset, mappingOffset + 999);
@@ -455,6 +455,41 @@ export async function getBandcampScraperHealth(workspaceId: string) {
   const salesCoverage = {
     catalogNumber: mappings?.filter((m) => m.bandcamp_catalog_number).length ?? 0,
     upc: mappings?.filter((m) => m.bandcamp_upc).length ?? 0,
+  };
+
+  // Per-category coverage
+  const albumFormats = mappings.filter((m) =>
+    ["vinyl", "cd", "cassette"].includes(m.product_category as string),
+  );
+  const nonAlbum = mappings.filter((m) =>
+    ["apparel", "merch", "bundle", "other"].includes((m.product_category as string) ?? "other"),
+  );
+  const albumFormatCoverage = {
+    total: albumFormats.length,
+    about: albumFormats.filter((m) => m.bandcamp_about && m.bandcamp_about !== "").length,
+    credits: albumFormats.filter((m) => m.bandcamp_credits && m.bandcamp_credits !== "").length,
+    tracks: albumFormats.filter((m) => m.bandcamp_tracks).length,
+    art: albumFormats.filter((m) => m.bandcamp_art_url).length,
+    tags: albumFormats.filter((m) => {
+      const tags = m.bandcamp_tags as string[] | null;
+      return tags && tags.length > 0;
+    }).length,
+    byType: {
+      vinyl: albumFormats.filter((m) => m.product_category === "vinyl").length,
+      cd: albumFormats.filter((m) => m.product_category === "cd").length,
+      cassette: albumFormats.filter((m) => m.product_category === "cassette").length,
+    },
+  };
+  const nonAlbumCoverage = {
+    total: nonAlbum.length,
+    art: nonAlbum.filter((m) => m.bandcamp_art_url).length,
+    byCategory: {
+      apparel: nonAlbum.filter((m) => m.product_category === "apparel").length,
+      merch: nonAlbum.filter((m) => m.product_category === "merch").length,
+      bundle: nonAlbum.filter((m) => m.product_category === "bundle").length,
+      other: nonAlbum.filter((m) => m.product_category === "other" || m.product_category == null)
+        .length,
+    },
   };
 
   // URL breakdown by source
@@ -574,6 +609,8 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     apiCoverage,
     scraperCoverage,
     salesCoverage,
+    albumFormatCoverage,
+    nonAlbumCoverage,
     urlSources,
     totalWithUrl,
     syncPipeline,

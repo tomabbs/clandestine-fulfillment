@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-07
+updated_at: 2026-04-10
 
 journeys:
   - id: staff_client_invite
@@ -143,3 +143,20 @@ journeys:
       - 3-tier genre taxonomy matching (BC, DSP, Sub) with alias map
       - Trending tab shows dig_deeper results with client-artist highlighting
       - 3-minute server cache on trending queries
+
+  - id: bundle_inventory_management
+    area: admin_catalog
+    paths:
+      - src/app/admin/catalog/bundles/page.tsx
+      - src/actions/bundle-components.ts
+      - src/lib/server/bundles.ts
+      - src/trigger/tasks/bundle-component-fanout.ts
+      - src/trigger/tasks/bundle-availability-sweep.ts
+      - src/trigger/tasks/sensor-check.ts
+    status: green
+    checks:
+      - bundle management page shows all bundles with effective availability
+      - computeBundleAvailability returns constraining component
+      - bundle.component_unavailable sensor detects zero-stock components
+      - client-store webhook triggers bundle-component-fanout for bundle sales
+      - setBundleComponents validates component SKUs and creates missing inventory levels

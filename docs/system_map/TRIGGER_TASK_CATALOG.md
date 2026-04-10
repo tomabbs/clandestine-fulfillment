@@ -92,7 +92,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 - **Discogs master catalog:** `discogs-catalog-match`, `discogs-initial-listing`, `discogs-listing-replenish`, `discogs-message-poll`, `discogs-message-send`
 - **Catalog/release readiness:** `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
 - **Billing/storage:** `monthly-billing`, `storage-calc`
-- **Scraper observability:** `sensor-check` now includes `bandcamp.merch_sync_log_stale`, `bandcamp.scraper_review_open`, `bandcamp.scrape_block_rate` sensors from `channel_sync_log` + `warehouse_review_queue`. Index: `idx_channel_sync_log_sensor` on `(workspace_id, sync_type, created_at DESC) WHERE status = 'completed'`. `bandcamp-scrape-page` logs per-scrape outcome (HTTP status, retryAfterSeconds) to `channel_sync_log` sync_type `scrape_page`.
+- **Scraper observability:** `sensor-check` now includes `bandcamp.merch_sync_log_stale`, `bandcamp.scraper_review_open`, `bandcamp.scrape_block_rate`, `bundle.component_unavailable` sensors from `channel_sync_log` + `warehouse_review_queue`. Index: `idx_channel_sync_log_sensor` on `(workspace_id, sync_type, created_at DESC) WHERE status = 'completed'`. `bandcamp-scrape-page` logs per-scrape outcome (HTTP status, retryAfterSeconds) to `channel_sync_log` sync_type `scrape_page`.
 - **Support/reliability:** `support-escalation`, `sensor-check`, `tag-cleanup-backfill`
   - `support-escalation` uses conversation status + read markers (`staff_last_read_at`, `client_last_read_at`) and cooldown timestamps (`last_staff_escalated_at`, `last_client_reminded_at`) to prevent reminder spam during active chat sessions
 - **OAuth hygiene:** `oauth-state-cleanup`

@@ -47,6 +47,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `getDashboardStats`
   - `getGeneralSettings`, `getIntegrationStatus`, `getHealthData`
   - `triggerSensorCheck`, `triggerTagCleanup`
+- Admin page: `/admin/catalog/bundles` — bundle management
 
 ### Clients + Users + Organizations
 
@@ -139,7 +140,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
 ### Bundle Components
 
 - File: `src/actions/bundle-components.ts`
-- Exports: `getBundleComponents`, `setBundleComponents`, `removeBundleComponent`, `computeBundleAvailability`
+- Exports: `getBundleComponents`, `setBundleComponents`, `removeBundleComponent`, `computeBundleAvailability`, `listBundles` (workspace-level bundle list with effective availability)
   - Bundle composition management with full-graph DFS cycle detection and MIN-based availability calculation.
 
 ### Integrations + Store Mapping
@@ -153,6 +154,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/pirate-ship.ts`
   - `src/actions/preorders.ts`
 - Key exports:
+  - bundle-components: `listBundles` (workspace-level bundle list with effective availability; see `src/actions/bundle-components.ts`)
   - trigger kickoffs/status: `triggerShopifySync`, `triggerFullBackfill`, `getShopifySyncStatus`, `triggerBandcampSync`, `getBandcampSyncStatus`, `triggerBandcampConnectionBackfill`
   - Bandcamp connection management: `createBandcampConnection`, `deleteBandcampConnection`, `getBandcampAccounts`, `getBandcampMappings`, `getOrganizationsForWorkspace`
   - scraper observability: `getBandcampScraperHealth` (log-backed activity, catalog completeness, sensor readings, block rate, review queue)

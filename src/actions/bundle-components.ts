@@ -90,6 +90,53 @@ export async function setBundleComponents(
     }
   }
 
+  // Validate component variants exist, have SKUs, and have inventory levels
+  if (parsed.length > 0) {
+    const componentIds = parsed.map((c) => c.componentVariantId);
+    const { data: componentVariants } = await supabase
+      .from("warehouse_product_variants")
+      .select("id, sku")
+      .in("id", componentIds);
+
+    const foundIds = new Set((componentVariants ?? []).map((v) => v.id));
+    const missingSku: string[] = [];
+
+    for (const c of parsed) {
+      if (!foundIds.has(c.componentVariantId)) {
+        throw new Error(`Component variant ${c.componentVariantId} does not exist`);
+      }
+      const v = (componentVariants ?? []).find((cv) => cv.id === c.componentVariantId);
+      if (!v?.sku) missingSku.push(c.componentVariantId);
+    }
+
+    if (missingSku.length > 0) {
+      console.warn("[setBundleComponents] Components without SKU:", missingSku);
+    }
+
+    // Ensure inventory levels exist for all components (create with available=0 if missing)
+    const { data: existingLevels } = await supabase
+      .from("warehouse_inventory_levels")
+      .select("variant_id")
+      .in("variant_id", componentIds);
+
+    const hasLevel = new Set((existingLevels ?? []).map((l) => l.variant_id));
+    const needLevel = componentIds.filter((id) => !hasLevel.has(id));
+    if (needLevel.length > 0) {
+      const v = (componentVariants ?? []).filter((cv) => needLevel.includes(cv.id));
+      for (const cv of v) {
+        await supabase.from("warehouse_inventory_levels").upsert(
+          {
+            workspace_id: variant.workspace_id,
+            variant_id: cv.id,
+            sku: cv.sku ?? "",
+            available: 0,
+          },
+          { onConflict: "variant_id" },
+        );
+      }
+    }
+  }
+
   // Atomic replace: delete existing, insert new
   await supabase.from("bundle_components").delete().eq("bundle_variant_id", bundleVariantId);
 
@@ -177,4 +224,75 @@ export async function computeBundleAvailability(bundleVariantId: string, workspa
     constrainedBy,
     components: componentDetails,
   };
+}
+
+export async function listBundles(workspaceId: string) {
+  await requireAuth();
+  const supabase = createServiceRoleClient();
+
+  const { data: components } = await supabase
+    .from("bundle_components")
+    .select("bundle_variant_id, component_variant_id, quantity")
+    .eq("workspace_id", workspaceId);
+
+  if (!components?.length) return [];
+
+  const bundleVariantIds = Array.from(new Set(components.map((c) => c.bundle_variant_id)));
+
+  const { data: bundleVariants } = await supabase
+    .from("warehouse_product_variants")
+    .select("id, sku, title, product_id, warehouse_products(title)")
+    .in("id", bundleVariantIds);
+
+  const allVariantIds = [...bundleVariantIds, ...components.map((c) => c.component_variant_id)];
+  const { data: levels } = await supabase
+    .from("warehouse_inventory_levels")
+    .select("variant_id, available")
+    .in("variant_id", Array.from(new Set(allVariantIds)));
+
+  const levelMap = new Map((levels ?? []).map((l) => [l.variant_id, l.available as number]));
+
+  const { data: ws } = await supabase
+    .from("workspaces")
+    .select("default_safety_stock")
+    .eq("id", workspaceId)
+    .single();
+  const defaultSafety = ws?.default_safety_stock ?? 3;
+
+  return bundleVariantIds.map((bvId) => {
+    const bv = (bundleVariants ?? []).find((v) => v.id === bvId);
+    const comps = components.filter((c) => c.bundle_variant_id === bvId);
+    const bundleAvailable = levelMap.get(bvId) ?? 0;
+
+    let componentMin = bundleAvailable;
+    let constrainingSku: string | null = null;
+    for (const comp of comps) {
+      const compAvail = levelMap.get(comp.component_variant_id) ?? 0;
+      const contribution = Math.floor(compAvail / comp.quantity);
+      if (contribution < componentMin) {
+        componentMin = contribution;
+        const compVariant = (bundleVariants ?? []).find((v) => v.id === comp.component_variant_id);
+        constrainingSku = compVariant?.sku ?? comp.component_variant_id;
+      }
+    }
+
+    const effective = Math.max(0, Math.min(bundleAvailable, componentMin) - defaultSafety);
+    const productTitle = (bv?.warehouse_products as unknown as { title: string } | null)?.title;
+
+    return {
+      bundleVariantId: bvId,
+      sku: bv?.sku ?? "",
+      title: productTitle ?? bv?.title ?? "",
+      componentCount: comps.length,
+      bundleStock: bundleAvailable,
+      effectiveAvailable: effective,
+      constrainedBy: constrainingSku,
+      status:
+        effective > 5
+          ? ("available" as const)
+          : effective > 0
+            ? ("low" as const)
+            : ("unavailable" as const),
+    };
+  });
 }

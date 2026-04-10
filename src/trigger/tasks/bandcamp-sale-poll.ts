@@ -9,10 +9,10 @@
 import { schedules, tasks } from "@trigger.dev/sdk";
 import { getMerchDetails, refreshBandcampToken } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
+import { triggerBundleFanout } from "@/lib/server/bundles";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
-import { bundleComponentFanoutTask } from "@/trigger/tasks/bundle-component-fanout";
 
 export const bandcampSalePollTask = schedules.task({
   id: "bandcamp-sale-poll",
@@ -96,25 +96,12 @@ export const bandcampSalePollTask = schedules.task({
                     /* non-critical — cron covers it */
                   });
 
-                  // If this variant is a bundle, decrement component inventory
-                  const { data: bundleCheck } = await supabase
-                    .from("bundle_components")
-                    .select("id")
-                    .eq("bundle_variant_id", mapping.variant_id)
-                    .limit(1);
-
-                  if (bundleCheck?.length) {
-                    await bundleComponentFanoutTask
-                      .trigger({
-                        bundleVariantId: mapping.variant_id,
-                        soldQuantity: Math.abs(delta),
-                        workspaceId,
-                        correlationBase: correlationId,
-                      })
-                      .catch(() => {
-                        /* non-critical — review queue will surface failures */
-                      });
-                  }
+                  await triggerBundleFanout({
+                    variantId: mapping.variant_id,
+                    soldQuantity: Math.abs(delta),
+                    workspaceId,
+                    correlationBase: correlationId,
+                  });
                 }
 
                 salesDetected++;
