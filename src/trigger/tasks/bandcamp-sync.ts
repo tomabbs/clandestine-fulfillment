@@ -965,8 +965,58 @@ export const bandcampSyncTask = task({
             .eq("id", variantId)
             .single();
 
+          // Preorder detection runs for ALL authority levels — a warehouse_reviewed product
+          // can still become a preorder when Bandcamp publishes a future release date.
+          // This is intentionally separate from the bandcamp_initial operational block below.
+          if (existingVar) {
+            const preorderDerived = deriveStreetDateAndPreorder({
+              scraperReleaseDate: mapping?.bandcamp_release_date,
+              merchNewDate: merchItem.new_date,
+              bandcampIsPreorder: mapping?.bandcamp_is_preorder,
+              currentStreetDate: existingVar.street_date,
+              authorityStatus, // honours warehouse authority for overwrite rules
+            });
+
+            const preorderUpdates: Record<string, unknown> = {};
+
+            // Always correct street_date when scraper has a better future date —
+            // bandcamp_new_date (listing date) is frequently wrong for preorders
+            if (
+              preorderDerived.street_date &&
+              preorderDerived.street_date !== existingVar.street_date &&
+              mapping?.bandcamp_release_date // only when scraper date is the source
+            ) {
+              preorderUpdates.street_date = preorderDerived.street_date;
+            }
+
+            if (preorderDerived.is_preorder !== existingVar.is_preorder) {
+              preorderUpdates.is_preorder = preorderDerived.is_preorder;
+            }
+
+            if (Object.keys(preorderUpdates).length > 0) {
+              preorderUpdates.updated_at = new Date().toISOString();
+              await supabase
+                .from("warehouse_product_variants")
+                .update(preorderUpdates)
+                .eq("id", variantId);
+
+              if (preorderUpdates.is_preorder === true) {
+                await preorderSetupTask.trigger({
+                  variant_id: variantId,
+                  workspace_id: workspaceId,
+                });
+                logger.info("Triggered preorder-setup (all-authority path)", {
+                  variantId,
+                  sku: existingVar.sku,
+                  authorityStatus,
+                  releaseDate: preorderDerived.street_date,
+                });
+              }
+            }
+          }
+
           if (existingVar && authorityStatus === "bandcamp_initial") {
-            // Bandcamp owns operational fields during initial ingest
+            // Bandcamp owns operational fields during initial ingest only
             const updates: Record<string, unknown> = {};
 
             // SKU overwrite with audit trail
@@ -1026,34 +1076,10 @@ export const bandcampSyncTask = task({
                 100;
             }
 
-            // Street date + preorder flag — use canonical helper (§16.4 fix)
-            // Priority: scraper bandcamp_release_date > API bandcamp_new_date > merchItem.new_date
-            const derived = deriveStreetDateAndPreorder({
-              scraperReleaseDate: mapping?.bandcamp_release_date,
-              apiNewDate: null, // not stored separately; scraper owns this now
-              merchNewDate: merchItem.new_date,
-              bandcampIsPreorder: mapping?.bandcamp_is_preorder,
-              currentStreetDate: existingVar.street_date,
-              authorityStatus,
-            });
-
-            if (derived.street_date && derived.street_date !== existingVar.street_date) {
-              updates.street_date = derived.street_date;
-            }
-            if (derived.is_preorder !== existingVar.is_preorder) {
-              updates.is_preorder = derived.is_preorder;
-            }
-
+            // Street date — for bandcamp_initial only; all-authority preorder path is above
             if (Object.keys(updates).length > 0) {
               updates.updated_at = new Date().toISOString();
               await supabase.from("warehouse_product_variants").update(updates).eq("id", variantId);
-
-              if (updates.is_preorder === true) {
-                await preorderSetupTask.trigger({
-                  variant_id: variantId,
-                  workspace_id: workspaceId,
-                });
-              }
             }
 
             // Inventory seeding: if warehouse is 0 and Bandcamp has stock, seed once
