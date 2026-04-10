@@ -296,6 +296,18 @@ async function upsertProductsBulk(
       variantCount++;
     }
 
+    // Check if product ended up with zero variants (SKU collisions moved them elsewhere)
+    const { count: variantCount2 } = await supabase
+      .from("warehouse_product_variants")
+      .select("id", { count: "exact", head: true })
+      .eq("product_id", dbProduct.id);
+
+    if ((variantCount2 ?? 0) === 0) {
+      await supabase.from("warehouse_product_images").delete().eq("product_id", dbProduct.id);
+      await supabase.from("warehouse_products").delete().eq("id", dbProduct.id);
+      continue;
+    }
+
     // Upsert images — uses unique index on shopify_image_id
     const firstImageUrl = await upsertImagesBulk(
       supabase,
