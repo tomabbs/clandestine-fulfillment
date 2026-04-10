@@ -13,6 +13,7 @@ import { schedules } from "@trigger.dev/sdk";
 import { getInventory, setInventory } from "@/lib/clients/redis-inventory";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { getTodayNY } from "@/lib/shared/preorder-dates";
 import {
   criticalItemsStatus,
   driftStatus,
@@ -429,6 +430,36 @@ export const sensorCheckTask = schedules.task({
       } catch {
         readings.push({
           sensorName: "catalog.title_format",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // catalog.preorder_missed — variants still marked is_preorder with past street_date
+      try {
+        const today = getTodayNY();
+        const { count: pastDueCount } = await supabase
+          .from("warehouse_product_variants")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .eq("is_preorder", true)
+          .not("street_date", "is", null)
+          .lte("street_date", today);
+
+        const missed = pastDueCount ?? 0;
+        readings.push({
+          sensorName: "catalog.preorder_missed",
+          status: missed > 0 ? "warning" : "healthy",
+          value: { past_due_preorders: missed },
+          message:
+            missed === 0
+              ? "No overdue preorders"
+              : `${missed} variant(s) still marked is_preorder but street_date has passed`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "catalog.preorder_missed",
           status: "healthy",
           value: {},
           message: "Check skipped",

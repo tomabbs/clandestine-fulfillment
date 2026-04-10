@@ -1,5 +1,5 @@
 /**
- * Pre-order fulfillment — runs daily at 6 AM EST.
+ * Pre-order fulfillment — runs 2× daily at 6 AM and 6 PM EST.
  *
  * Rule #69: FIFO allocation. ORDER BY warehouse_orders.created_at ASC.
  * When available stock hits 0, remaining orders stay pending and a
@@ -7,32 +7,35 @@
  *
  * Rule #7: Uses createServiceRoleClient().
  * Rule #12: Task payload is IDs only.
+ * §21: Tags-only model (no selling plans).
  */
 
-import { schedules } from "@trigger.dev/sdk";
+import { logger, schedules, task } from "@trigger.dev/sdk";
 import { tagsRemove } from "@/lib/clients/shopify-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { getTodayNY, isDaysAfterRelease } from "@/lib/shared/preorder-dates";
 import { allocatePreorders } from "@/trigger/lib/preorder-allocation";
 
 export const preorderFulfillmentTask = schedules.task({
   id: "preorder-fulfillment",
   cron: {
-    pattern: "0 6 * * *",
+    // Run at 6 AM and 6 PM Eastern — catches midnight-release items earlier
+    pattern: "0 6,18 * * *",
     timezone: "America/New_York",
   },
   maxDuration: 300,
   run: async (_payload, { ctx }) => {
     const supabase = createServiceRoleClient();
     const workspaceIds = await getAllWorkspaceIds(supabase);
-    const today = new Date().toISOString().split("T")[0];
+    const today = getTodayNY();
 
     let variantsReleased = 0;
     let ordersAllocated = 0;
     let shortShipments = 0;
 
     for (const workspaceId of workspaceIds) {
-      // Find all pre-order variants past their street date
+      // Find all pre-order variants on or past their street date
       const { data: variants } = await supabase
         .from("warehouse_product_variants")
         .select("id, sku, product_id, street_date")
@@ -49,7 +52,6 @@ export const preorderFulfillmentTask = schedules.task({
         if (result.isShortShipment) shortShipments++;
       }
 
-      // Log to channel_sync_log
       await supabase.from("channel_sync_log").insert({
         workspace_id: workspaceId,
         channel: "preorder",
@@ -64,26 +66,30 @@ export const preorderFulfillmentTask = schedules.task({
 
     // --- "New Releases" tag cleanup (45 days after street_date) ---
     let newReleasesRemoved = 0;
-    const cutoff45 = new Date();
-    cutoff45.setDate(cutoff45.getDate() - 45);
-    const cutoff45Str = cutoff45.toISOString().split("T")[0];
 
     for (const workspaceId of workspaceIds) {
-      const { data: staleProducts } = await supabase
+      const { data: staleVariants } = await supabase
         .from("warehouse_product_variants")
-        .select("product_id")
+        .select("product_id, street_date")
         .eq("workspace_id", workspaceId)
-        .not("street_date", "is", null)
-        .lte("street_date", cutoff45Str);
+        .not("street_date", "is", null);
 
-      if (!staleProducts || staleProducts.length === 0) continue;
+      if (!staleVariants) continue;
 
-      const productIds = Array.from(new Set(staleProducts.map((v) => v.product_id)));
+      const staleProductIds = Array.from(
+        new Set(
+          staleVariants
+            .filter((v) => isDaysAfterRelease(v.street_date, 45))
+            .map((v) => v.product_id),
+        ),
+      );
+
+      if (staleProductIds.length === 0) continue;
 
       const { data: products } = await supabase
         .from("warehouse_products")
         .select("id, shopify_product_id, tags")
-        .in("id", productIds)
+        .in("id", staleProductIds)
         .contains("tags", ["New Releases"]);
 
       for (const product of products ?? []) {
@@ -93,8 +99,12 @@ export const preorderFulfillmentTask = schedules.task({
         if (product.shopify_product_id) {
           try {
             await tagsRemove(product.shopify_product_id, ["New Releases"]);
-          } catch {
-            // Best-effort — don't fail the run
+          } catch (err) {
+            logger.warn("Failed to remove New Releases tag from Shopify", {
+              productId: product.id,
+              shopifyProductId: product.shopify_product_id,
+              error: String(err),
+            });
           }
         }
 
@@ -111,37 +121,85 @@ export const preorderFulfillmentTask = schedules.task({
   },
 });
 
+/**
+ * Manual single-variant release task.
+ *
+ * Triggered by manualRelease() server action.
+ * Releases exactly one variant instead of running the full scheduled job.
+ * Avoids triggering a 300s job to release a single item (HIGH-3 fix).
+ */
+export const preorderReleaseVariantTask = task({
+  id: "preorder-release-variant",
+  maxDuration: 60,
+  run: async (payload: { variant_id: string; workspace_id: string }) => {
+    const supabase = createServiceRoleClient();
+
+    const { data: variant } = await supabase
+      .from("warehouse_product_variants")
+      .select("id, sku, product_id, street_date")
+      .eq("id", payload.variant_id)
+      .single();
+
+    if (!variant) throw new Error(`Variant ${payload.variant_id} not found`);
+
+    return await releaseVariant(supabase, variant, payload.workspace_id, "manual");
+  },
+});
+
+/**
+ * Release a single pre-order variant:
+ * 1. Remove "Pre-Orders" tag from Shopify (best-effort)
+ * 2. Sync warehouse_products.tags in DB
+ * 3. Set is_preorder = false
+ * 4. FIFO-allocate orders to available inventory
+ * 5. Create review queue item on short shipment
+ */
 async function releaseVariant(
   supabase: ReturnType<typeof createServiceRoleClient>,
   variant: { id: string; sku: string; product_id: string; street_date: string | null },
   workspaceId: string,
   runId: string,
 ) {
-  // Get Shopify product ID for tag/selling plan operations
   const { data: product } = await supabase
     .from("warehouse_products")
-    .select("shopify_product_id")
+    .select("id, shopify_product_id, tags")
     .eq("id", variant.product_id)
     .single();
 
-  // Remove selling plan from Shopify (best-effort — don't crash if Shopify errors)
+  // Remove "Pre-Orders" tag from Shopify and sync local DB (GAP-4)
   if (product?.shopify_product_id) {
     try {
-      // Look for selling plan groups associated with this product
-      // In practice you'd store the selling_plan_group_id on the variant or product
       await tagsRemove(product.shopify_product_id, ["Pre-Orders"]);
-    } catch {
-      // Log but don't fail the whole run
+
+      const currentTags = (product.tags as string[]) ?? [];
+      const updatedTags = currentTags.filter((t) => t !== "Pre-Orders");
+      await supabase
+        .from("warehouse_products")
+        .update({ tags: updatedTags, updated_at: new Date().toISOString() })
+        .eq("id", product.id);
+
+      logger.info("releaseVariant: Pre-Orders tag removed", {
+        variantId: variant.id,
+        sku: variant.sku,
+        shopifyProductId: product.shopify_product_id,
+      });
+    } catch (err) {
+      logger.warn("releaseVariant: failed to remove Pre-Orders tag from Shopify", {
+        variantId: variant.id,
+        sku: variant.sku,
+        shopifyProductId: product.shopify_product_id,
+        error: String(err),
+      });
     }
   }
 
-  // Set is_preorder = false on the variant
+  // Clear is_preorder flag
   await supabase
     .from("warehouse_product_variants")
     .update({ is_preorder: false, updated_at: new Date().toISOString() })
     .eq("id", variant.id);
 
-  // Get available inventory for this SKU
+  // Get available inventory
   const { data: inventoryLevel } = await supabase
     .from("warehouse_inventory_levels")
     .select("available")
@@ -151,13 +209,12 @@ async function releaseVariant(
 
   const availableStock = inventoryLevel?.available ?? 0;
 
-  // Find pending pre-orders for this variant's SKU, ordered by created_at ASC (FIFO)
+  // FIFO pending orders for this SKU
   const { data: pendingOrders } = await supabase
     .from("warehouse_orders")
     .select("id, created_at")
     .eq("workspace_id", workspaceId)
     .eq("is_preorder", true)
-    .lte("street_date", variant.street_date ?? new Date().toISOString().split("T")[0])
     .is("fulfillment_status", null)
     .order("created_at", { ascending: true });
 
@@ -165,7 +222,6 @@ async function releaseVariant(
     return { ordersAllocated: 0, isShortShipment: false };
   }
 
-  // Get order item quantities for each order matching this SKU
   const orderIds = pendingOrders.map((o) => o.id);
   const { data: orderItems } = await supabase
     .from("warehouse_order_items")
@@ -178,7 +234,6 @@ async function releaseVariant(
     quantityByOrder.set(item.order_id, (quantityByOrder.get(item.order_id) ?? 0) + item.quantity);
   }
 
-  // Find already-allocated orders (idempotency — don't double-allocate on re-run)
   const { data: alreadyAllocated } = await supabase
     .from("warehouse_orders")
     .select("id")
@@ -187,36 +242,29 @@ async function releaseVariant(
 
   const alreadyAllocatedIds = new Set((alreadyAllocated ?? []).map((o) => o.id));
 
-  // Build allocation input
   const allocationInput = pendingOrders.map((order) => ({
     id: order.id,
     created_at: order.created_at,
     quantity: quantityByOrder.get(order.id) ?? 1,
   }));
 
-  // FIFO allocation (Rule #69)
   const allocation = allocatePreorders(allocationInput, availableStock, alreadyAllocatedIds);
 
-  // Update allocated orders to ready_to_ship
   if (allocation.allocated.length > 0) {
     const allocatedIds = allocation.allocated.map((a) => a.orderId);
     await supabase
       .from("warehouse_orders")
-      .update({
-        fulfillment_status: "ready_to_ship",
-        updated_at: new Date().toISOString(),
-      })
+      .update({ fulfillment_status: "ready_to_ship", updated_at: new Date().toISOString() })
       .in("id", allocatedIds);
   }
 
-  // Create review queue item for short shipment
   if (allocation.isShortShipment) {
     await supabase.from("warehouse_review_queue").insert({
       workspace_id: workspaceId,
       category: "short_shipment",
       severity: "critical",
       title: `Short shipment: ${variant.sku}`,
-      description: `Pre-order release for ${variant.sku} (street date: ${variant.street_date}). ${allocation.totalAllocated} units allocated to ${allocation.allocated.length} orders. ${allocation.totalUnallocated} units short across ${allocation.unallocated.length} orders.`,
+      description: `Pre-order release for ${variant.sku} (street date: ${variant.street_date}). ${allocation.totalAllocated} units allocated, ${allocation.totalUnallocated} units short.`,
       metadata: {
         sku: variant.sku,
         variant_id: variant.id,
@@ -237,9 +285,3 @@ async function releaseVariant(
     isShortShipment: allocation.isShortShipment,
   };
 }
-
-/**
- * Release a single variant manually (called by manualRelease server action).
- * Exported for use by the server action via tasks.trigger.
- */
-export { releaseVariant as _releaseVariantForTesting };

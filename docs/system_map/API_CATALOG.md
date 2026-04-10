@@ -163,7 +163,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - SKU management: `updateSku` (push SKUs to Bandcamp, behind feature flag)
   - store connections and mappings: connection CRUD/test + mapping and reprocess ops
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`
-  - preorder tools: `getPreorderProducts`, `manualRelease`, `getPreorderAllocationPreview`
+  - preorder tools: `getPreorderProducts`, `manualRelease` (triggers `preorder-release-variant` for single-variant release — NOT the full fulfillment job), `getPreorderAllocationPreview`
 
 ## Audit Requirement
 

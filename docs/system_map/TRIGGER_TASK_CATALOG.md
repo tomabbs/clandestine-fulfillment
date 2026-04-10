@@ -37,7 +37,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `client-store-order-detect` | `src/trigger/tasks/client-store-order-detect.ts` | `*/10 * * * *` |
 | `multi-store-inventory-push` | `src/trigger/tasks/multi-store-inventory-push.ts` | `*/5 * * * *` |
 | `sensor-check` | `src/trigger/tasks/sensor-check.ts` | `*/5 * * * *` |
-| `preorder-fulfillment` | `src/trigger/tasks/preorder-fulfillment.ts` | `0 6 * * *` (America/New_York) |
+| `preorder-fulfillment` | `src/trigger/tasks/preorder-fulfillment.ts` | `0 6,18 * * *` (America/New_York) — 2×/day; tags-only model (no selling plans, §21) |
 | `monthly-billing` | `src/trigger/tasks/monthly-billing.ts` | `0 2 1 * *` (America/New_York) |
 | `storage-calc` | `src/trigger/tasks/storage-calc.ts` | `0 1 1 * *` (America/New_York) |
 | `redis-backfill` | `src/trigger/tasks/redis-backfill.ts` | `0 3 * * 2` (America/New_York) |
@@ -70,7 +70,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `inbound-product-create` | `src/trigger/tasks/inbound-product-create.ts` | `src/actions/inbound.ts` |
 | `inbound-checkin-complete` | `src/trigger/tasks/inbound-checkin-complete.ts` | `src/actions/inbound.ts` |
 | `tag-cleanup-backfill` | `src/trigger/tasks/tag-cleanup-backfill.ts` | `src/actions/admin-settings.ts` |
-| `preorder-setup` | `src/trigger/tasks/preorder-setup.ts` | `bandcamp-sync` / scraper paths |
+| `preorder-setup` | `src/trigger/tasks/preorder-setup.ts` | `bandcamp-sync` / scraper paths — adds Pre-Orders + New Releases tags to Shopify, syncs `warehouse_products.tags`, logs failures to `channel_sync_log` + review queue |
+| `preorder-release-variant` | `src/trigger/tasks/preorder-fulfillment.ts` | `src/actions/preorders.ts::manualRelease` — single-variant targeted release (not the full daily job) |
 | `debug-env` | `src/trigger/tasks/debug-env.ts` | manual diagnostics |
 | `create-shipping-label` | `src/trigger/tasks/create-shipping-label.ts` | `src/actions/shipping.ts` (createOrderLabel) |
 | `mark-platform-fulfilled` | `src/trigger/tasks/mark-platform-fulfilled.ts` | `create-shipping-label` |

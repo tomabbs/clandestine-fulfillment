@@ -78,7 +78,23 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
 }
 
 export async function manualRelease(variantId: string) {
-  const handle = await tasks.trigger("preorder-fulfillment", {});
+  const supabase = await createServerSupabaseClient();
+
+  // Fetch workspace_id — required by the task payload
+  const { data: variant } = await supabase
+    .from("warehouse_product_variants")
+    .select("workspace_id")
+    .eq("id", variantId)
+    .single();
+
+  if (!variant) return { error: "Variant not found" };
+
+  // Trigger single-variant release task (HIGH-3 fix: not the full scheduled job)
+  const handle = await tasks.trigger("preorder-release-variant", {
+    variant_id: variantId,
+    workspace_id: variant.workspace_id,
+  });
+
   return { runId: handle.id, variantId };
 }
 

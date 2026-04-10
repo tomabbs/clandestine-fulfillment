@@ -20,7 +20,7 @@ export { inboundProductCreate } from "./inbound-product-create";
 export { monthlyBillingTask } from "./monthly-billing";
 export { multiStoreInventoryPushTask } from "./multi-store-inventory-push";
 export { pirateShipImportTask } from "./pirate-ship-import";
-export { preorderFulfillmentTask } from "./preorder-fulfillment";
+export { preorderFulfillmentTask, preorderReleaseVariantTask } from "./preorder-fulfillment";
 export { preorderSetupTask } from "./preorder-setup";
 export { processClientStoreWebhookTask } from "./process-client-store-webhook";
 export { processShopifyWebhookTask } from "./process-shopify-webhook";

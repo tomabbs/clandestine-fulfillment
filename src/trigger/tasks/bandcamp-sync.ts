@@ -21,6 +21,7 @@ import { productSetCreate } from "@/lib/clients/shopify-client";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
+import { deriveStreetDateAndPreorder, isFutureReleaseDate } from "@/lib/shared/preorder-dates";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
@@ -279,7 +280,7 @@ export const bandcampScrapePageTask = task({
       // Propagate to linked variant
       const { data: mapping } = await supabase
         .from("bandcamp_product_mappings")
-        .select("variant_id")
+        .select("variant_id, authority_status")
         .eq("id", payload.mappingId)
         .single();
 
@@ -293,10 +294,20 @@ export const bandcampScrapePageTask = task({
         if (variant) {
           const updates: Record<string, unknown> = {};
 
-          if (scraped.releaseDate && !variant.street_date) {
-            updates.street_date = scraped.releaseDate.toISOString().slice(0, 10);
+          // Always refresh street_date from scraper when Bandcamp is still authority
+          // (previously only set when empty — this fixes the scraper-path detection gap)
+          const scrapedDate = scraped.releaseDate
+            ? scraped.releaseDate.toISOString().slice(0, 10)
+            : null;
+          const isInitialAuthority =
+            !mapping.authority_status || mapping.authority_status === "bandcamp_initial";
+          if (scrapedDate && (isInitialAuthority || !variant.street_date)) {
+            updates.street_date = scrapedDate;
           }
-          if (scraped.isPreorder && !variant.is_preorder) {
+
+          const effectiveDate = (updates.street_date as string | undefined) ?? variant.street_date;
+          const shouldBePreorder = scraped.isPreorder || isFutureReleaseDate(effectiveDate);
+          if (shouldBePreorder && !variant.is_preorder) {
             updates.is_preorder = true;
           }
 
@@ -939,10 +950,10 @@ export const bandcampSyncTask = task({
             continue;
           }
 
-          // Read current mapping authority and variant state for conditional updates
+          // Read current mapping authority + scraped preorder data for conditional updates
           const { data: mapping } = await supabase
             .from("bandcamp_product_mappings")
-            .select("authority_status")
+            .select("authority_status, bandcamp_release_date, bandcamp_is_preorder")
             .eq("variant_id", variantId)
             .single();
 
@@ -1015,22 +1026,22 @@ export const bandcampSyncTask = task({
                 100;
             }
 
-            // Street date — always set from API during bandcamp_initial
-            if (merchItem.new_date) {
-              updates.street_date = merchItem.new_date;
-            }
+            // Street date + preorder flag — use canonical helper (§16.4 fix)
+            // Priority: scraper bandcamp_release_date > API bandcamp_new_date > merchItem.new_date
+            const derived = deriveStreetDateAndPreorder({
+              scraperReleaseDate: mapping?.bandcamp_release_date,
+              apiNewDate: null, // not stored separately; scraper owns this now
+              merchNewDate: merchItem.new_date,
+              bandcampIsPreorder: mapping?.bandcamp_is_preorder,
+              currentStreetDate: existingVar.street_date,
+              authorityStatus,
+            });
 
-            // Pre-order flag
-            const effectiveDate =
-              (updates.street_date as string | undefined) ?? existingVar.street_date;
-            if (effectiveDate && new Date(effectiveDate) > new Date()) {
-              updates.is_preorder = true;
-            } else if (
-              existingVar.is_preorder &&
-              effectiveDate &&
-              new Date(effectiveDate) <= new Date()
-            ) {
-              updates.is_preorder = false;
+            if (derived.street_date && derived.street_date !== existingVar.street_date) {
+              updates.street_date = derived.street_date;
+            }
+            if (derived.is_preorder !== existingVar.is_preorder) {
+              updates.is_preorder = derived.is_preorder;
             }
 
             if (Object.keys(updates).length > 0) {
