@@ -57,7 +57,7 @@ tests/
 5. **Zod for all boundaries.** Form inputs, API responses, webhook payloads, env vars — all validated with Zod.
 6. **Every Server Action file MUST have a companion .test.ts file** in tests/unit/actions/.
 7. **Supabase service_role for Trigger tasks.** Never use anon key in background jobs.
-8. **One Shopify product per SKU.** Bandcamp merch variants become separate Shopify products, NOT Shopify variants.
+8. **One Shopify product per SKU for music formats.** LPs, CDs, cassettes, vinyl — each format gets its own product listing in the DB and Shopify, even if they're for the same album. Exception: **sized items** (shirts, apparel with S/M/L/XL) are ONE product with multiple variants (one SKU per size). Color variants of vinyl (black vs limited edition) are separate products.
 9. **Bandcamp token serialization.** ALL Bandcamp tasks (`bandcamp-sync`, `bandcamp-inventory-push`, `bandcamp-sale-poll`) must use the **EXACT SAME shared queue instance**: `export const bandcampQueue = queue({ name: "bandcamp-api", concurrencyLimit: 1 });` in a shared file (e.g. `src/trigger/lib/bandcamp-queue.ts`). Setting concurrencyLimit on individual task definitions does NOT prevent them from running simultaneously — only a shared named queue does.
 10. **Type exports live in src/lib/shared/types.ts.** All shared types in one place.
 11. **Wave 1 output is FROZEN for Wave 2+.** No Wave 2 window modifies types.ts, middleware.ts, supabase-server.ts, layout files, or migration files. If a Wave 2 feature needs a shared primitive changed, flag it for the merge review — do not change it in the worktree.
