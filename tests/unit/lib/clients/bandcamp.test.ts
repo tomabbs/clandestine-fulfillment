@@ -26,6 +26,7 @@ vi.stubGlobal("fetch", mockFetch);
 import {
   assembleBandcampTitle,
   matchSkuToVariants,
+  normalizeFormat,
   refreshBandcampToken,
 } from "@/lib/clients/bandcamp";
 
@@ -126,19 +127,66 @@ describe("bandcamp client", () => {
     });
   });
 
-  describe("assembleBandcampTitle", () => {
-    it("builds title with artist and item", () => {
-      expect(assembleBandcampTitle("Artist", "Album", "LP")).toBe("Artist - LP");
+  describe("normalizeFormat", () => {
+    it("normalizes vinyl variants to LP", () => {
+      expect(normalizeFormat("Vinyl LP")).toBe("LP");
+      expect(normalizeFormat('12" Vinyl')).toBe("LP");
+      expect(normalizeFormat("2 x Vinyl LP")).toBe("LP");
+      expect(normalizeFormat("150gm Colored Vinyl LP")).toBe("LP");
     });
 
-    it("keeps artist even when album matches item", () => {
-      expect(assembleBandcampTitle("Artist", "Same Title", "Same Title")).toBe(
-        "Artist - Same Title",
+    it("normalizes cassette variants", () => {
+      expect(normalizeFormat("Cassette")).toBe("Cassette");
+      expect(normalizeFormat("CASSETTE")).toBe("Cassette");
+      expect(normalizeFormat("Limited Edition Cassette")).toBe("Cassette");
+    });
+
+    it("normalizes CD variants", () => {
+      expect(normalizeFormat("Compact Disc (CD)")).toBe("CD");
+      expect(normalizeFormat("CD in Digipack")).toBe("CD");
+      expect(normalizeFormat("Digipak CD")).toBe("CD");
+    });
+
+    it("returns null for non-music formats", () => {
+      expect(normalizeFormat("T-Shirt/Shirt")).toBeNull();
+      expect(normalizeFormat("Bag")).toBeNull();
+      expect(normalizeFormat("Poster/Print")).toBeNull();
+      expect(normalizeFormat(null)).toBeNull();
+      expect(normalizeFormat(undefined)).toBeNull();
+    });
+  });
+
+  describe("assembleBandcampTitle", () => {
+    it("builds title with artist, album, and format", () => {
+      expect(assembleBandcampTitle("Lionmilk", "Visions in Paraíso", "CASSETTE", "Cassette")).toBe(
+        "Lionmilk - Visions in Paraíso Cassette",
       );
     });
 
-    it("keeps artist when album is null", () => {
-      expect(assembleBandcampTitle("Artist", null, "CD")).toBe("Artist - CD");
+    it("builds title with artist and album but no format", () => {
+      expect(assembleBandcampTitle("Artist", "Album Title", "LP")).toBe("Artist - Album Title");
+    });
+
+    it("omits format when format is null", () => {
+      expect(assembleBandcampTitle("Artist", "Album", "LP", null)).toBe("Artist - Album");
+    });
+
+    it("includes format even when itemTitle equals formatType", () => {
+      expect(assembleBandcampTitle("Artist", "Album", "Cassette", "Cassette")).toBe(
+        "Artist - Album Cassette",
+      );
+    });
+
+    it("omits format when album already contains it", () => {
+      expect(assembleBandcampTitle("Artist", "Album Vinyl LP", "VINYL", "Vinyl LP")).toBe(
+        "Artist - Album Vinyl LP",
+      );
+    });
+
+    it("uses item title for merch without album", () => {
+      expect(assembleBandcampTitle("LEAVING RECORDS", null, "Rainbow Bridge Magnet")).toBe(
+        "LEAVING RECORDS - Rainbow Bridge Magnet",
+      );
     });
 
     it("uses item alone when artist matches item", () => {
@@ -147,6 +195,17 @@ describe("bandcamp client", () => {
 
     it("uses item alone when artist is empty", () => {
       expect(assembleBandcampTitle("", null, "Some Item")).toBe("Some Item");
+    });
+
+    it("uses normalized format from normalizeFormat", () => {
+      expect(
+        assembleBandcampTitle(
+          "Nico Georis",
+          "Music Belongs To The Universe",
+          "BLACK VINYL",
+          "Vinyl LP",
+        ),
+      ).toBe("Nico Georis - Music Belongs To The Universe LP");
     });
   });
 

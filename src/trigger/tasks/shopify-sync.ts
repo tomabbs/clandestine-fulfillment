@@ -175,8 +175,15 @@ async function upsertProductsBulk(
   let latestUpdate: string | null = null;
   const inventoryItemIds: string[] = [];
 
+  const { data: bcMappings } = await supabase
+    .from("bandcamp_product_mappings")
+    .select("variant_id, authority_status")
+    .eq("workspace_id", workspaceId)
+    .in("authority_status", ["warehouse_reviewed", "warehouse_locked"]);
+
+  const warehouseAuthorityVariants = new Set((bcMappings ?? []).map((m) => m.variant_id as string));
+
   for (const product of products) {
-    // Determine org_id from existing product or skip if not found
     const { data: existingProduct } = await supabase
       .from("warehouse_products")
       .select("org_id")
@@ -185,15 +192,35 @@ async function upsertProductsBulk(
       .single();
 
     const orgId = existingProduct?.org_id;
-    if (!orgId) continue; // Skip products not mapped to an org
+    if (!orgId) continue;
 
-    // Upsert product
+    let warehouseOwnsTitle = false;
+    if (warehouseAuthorityVariants.size > 0 && existingProduct) {
+      const { data: dbProd } = await supabase
+        .from("warehouse_products")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .eq("shopify_product_id", product.id)
+        .single();
+
+      if (dbProd) {
+        const { data: productVariants } = await supabase
+          .from("warehouse_product_variants")
+          .select("id")
+          .eq("product_id", dbProd.id);
+
+        warehouseOwnsTitle = (productVariants ?? []).some((v) =>
+          warehouseAuthorityVariants.has(v.id),
+        );
+      }
+    }
+
     await supabase.from("warehouse_products").upsert(
       {
         workspace_id: workspaceId,
         org_id: orgId,
         shopify_product_id: product.id,
-        title: product.title,
+        ...(!warehouseOwnsTitle && { title: product.title }),
         vendor: product.vendor,
         product_type: product.productType,
         status: product.status.toLowerCase() as "active" | "draft" | "archived",

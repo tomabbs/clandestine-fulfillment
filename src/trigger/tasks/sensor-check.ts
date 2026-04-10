@@ -386,6 +386,55 @@ export const sensorCheckTask = schedules.task({
         });
       }
 
+      // 12. catalog.title_format — detect products using label name as artist
+      try {
+        const { data: conns } = await supabase
+          .from("bandcamp_connections")
+          .select("band_id, band_name")
+          .eq("workspace_id", workspaceId)
+          .eq("is_active", true);
+
+        if (conns?.length) {
+          const labelNames = conns
+            .map((c) => (c.band_name as string)?.toUpperCase())
+            .filter(Boolean);
+          const { data: bcProducts } = await supabase
+            .from("warehouse_products")
+            .select("title")
+            .eq("workspace_id", workspaceId)
+            .limit(500);
+
+          let wrongArtist = 0;
+          for (const p of bcProducts ?? []) {
+            const upperTitle = ((p as { title?: string }).title ?? "").toUpperCase();
+            for (let li = 0; li < labelNames.length; li++) {
+              const label = labelNames[li];
+              if (label && upperTitle.startsWith(`${label} - `)) {
+                wrongArtist++;
+                break;
+              }
+            }
+          }
+
+          readings.push({
+            sensorName: "catalog.title_format",
+            status: wrongArtist > 10 ? "critical" : wrongArtist > 0 ? "warning" : "healthy",
+            value: { wrong_artist_count: wrongArtist, sample_size: (bcProducts ?? []).length },
+            message:
+              wrongArtist === 0
+                ? "No label-as-artist titles detected"
+                : `${wrongArtist} products may use label name as artist in title`,
+          });
+        }
+      } catch {
+        readings.push({
+          sensorName: "catalog.title_format",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
       // Persist all readings
       if (readings.length > 0) {
         await supabase.from("sensor_readings").insert(

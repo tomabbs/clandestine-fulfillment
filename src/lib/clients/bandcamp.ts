@@ -415,25 +415,47 @@ export function bandcampImageUrl(url: string | null | undefined): string | null 
   return url.replace(/_\d+\.jpg$/, "_10.jpg");
 }
 
+// === Format normalization ===
+
+export function normalizeFormat(itemType: string | null | undefined): string | null {
+  if (!itemType) return null;
+  const t = itemType.toLowerCase().trim();
+  if (t.includes("vinyl") || t === "lp" || t.includes("2xlp")) return "LP";
+  if (t.includes("cassette") || t === "tape" || t.includes("ltd. cassette")) return "Cassette";
+  if (t.includes("cd") || t.includes("compact disc") || t.includes("digipak")) return "CD";
+  if (t.includes('7"') || t.includes("7-inch")) return '7"';
+  if (t.includes("shirt") || t.includes("apparel") || t.includes("hoodie")) return null;
+  if (t.includes("poster") || t.includes("bag") || t.includes("hat") || t.includes("zine"))
+    return null;
+  return null;
+}
+
 // === Title assembly for Shopify product creation ===
 
 /**
  * Build a product title from Bandcamp merch item metadata.
  *
- * Artist name is the band/performer — MUST be in the title for identification.
+ * Naming schema: "{Artist} - {Album Title} {Format}" for music releases.
+ * For merch without albums: "{Artist} - {Item Title}".
  * Vendor/org is stored separately and should NOT be duplicated here.
- *
- * Format:
- *   - "{artistName} - {itemTitle}" when artist exists and differs from itemTitle
- *   - "{itemTitle}" when artist is empty, null, or same as itemTitle
  */
 export function assembleBandcampTitle(
   artistName: string,
-  _albumTitle: string | null | undefined,
+  albumTitle: string | null | undefined,
   itemTitle: string,
+  formatType?: string | null,
 ): string {
   const artist = artistName?.trim();
-  if (artist && artist !== itemTitle) {
+  if (!artist) return itemTitle;
+
+  if (albumTitle?.trim()) {
+    const album = albumTitle.trim();
+    const format = normalizeFormat(formatType);
+    const needsFormat = format && !album.includes(format);
+    return needsFormat ? `${artist} - ${album} ${format}` : `${artist} - ${album}`;
+  }
+
+  if (artist !== itemTitle) {
     return `${artist} - ${itemTitle}`;
   }
   return itemTitle;

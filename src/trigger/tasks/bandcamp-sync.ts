@@ -1139,7 +1139,11 @@ export const bandcampSyncTask = task({
           true;
 
         for (const merchItem of unmatched) {
-          const artistName = band?.name ?? connection.band_name ?? "Unknown Artist";
+          const memberBand = merchItem.member_band_id
+            ? bandLookup.get(merchItem.member_band_id)
+            : null;
+          const artistName =
+            memberBand?.name ?? band?.name ?? connection.band_name ?? "Unknown Artist";
 
           // Auto-generate SKU if missing
           let effectiveSku = merchItem.sku;
@@ -1173,7 +1177,12 @@ export const bandcampSyncTask = task({
             }
           }
 
-          const title = assembleBandcampTitle(artistName, merchItem.album_title, merchItem.title);
+          const title = assembleBandcampTitle(
+            artistName,
+            merchItem.album_title,
+            merchItem.title,
+            merchItem.item_type,
+          );
           const tags: string[] = [];
           if (merchItem.new_date && new Date(merchItem.new_date) > new Date()) {
             tags.push("Pre-Orders", "New Releases");
