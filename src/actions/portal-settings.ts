@@ -3,6 +3,8 @@
 import { z } from "zod";
 import { requireClient } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import type { VisiblePages } from "@/lib/shared/portal-pages";
+import { TOGGLEABLE_PAGES, isPageVisible } from "@/lib/shared/portal-pages";
 
 export async function getPortalSettings() {
   const { orgId } = await requireClient();
@@ -77,4 +79,29 @@ export async function updateNotificationPreferences(rawData: { email_enabled: bo
     });
     if (error) throw new Error(error.message);
   }
+}
+
+/**
+ * Returns the resolved visible_pages map for the current client's org.
+ * Missing keys default to true (all pages visible unless explicitly hidden).
+ */
+export async function getVisiblePages(): Promise<Record<string, boolean>> {
+  const { orgId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const { data: adminSettings } = await supabase
+    .from("portal_admin_settings")
+    .select("settings")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  const raw = (adminSettings?.settings as Record<string, unknown>)?.visible_pages as
+    | VisiblePages
+    | undefined;
+
+  const result: Record<string, boolean> = {};
+  for (const page of TOGGLEABLE_PAGES) {
+    result[page.key] = isPageVisible(raw, page.key);
+  }
+  return result;
 }

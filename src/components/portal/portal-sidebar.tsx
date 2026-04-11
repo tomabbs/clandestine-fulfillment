@@ -18,7 +18,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getVisiblePages } from "@/actions/portal-settings";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -39,23 +40,30 @@ import {
 } from "@/components/ui/sidebar";
 
 const NAV_ITEMS = [
-  { title: "Home", href: "/portal", icon: LayoutDashboard },
-  { title: "Connected Stores", href: "/portal/stores", icon: Store },
-  { title: "Inventory", href: "/portal/inventory", icon: Package },
-  { title: "Catalog", href: "/portal/catalog", icon: Disc3 },
-  { title: "Inbound", href: "/portal/inbound", icon: PackagePlus },
-  { title: "Fulfillment", href: "/portal/fulfillment", icon: ShoppingCart },
-  { title: "Mail-Order", href: "/portal/mail-order", icon: DollarSign },
-  { title: "Shipping", href: "/portal/shipping", icon: Truck },
-  { title: "Sales", href: "/portal/sales", icon: TrendingUp },
-  { title: "Billing", href: "/portal/billing", icon: Receipt },
-  { title: "Support", href: "/portal/support", icon: MessageSquare },
-  { title: "Settings", href: "/portal/settings", icon: Settings },
+  { title: "Home", href: "/portal", icon: LayoutDashboard, alwaysVisible: true },
+  { title: "Connected Stores", href: "/portal/stores", icon: Store, key: "stores" },
+  { title: "Inventory", href: "/portal/inventory", icon: Package, key: "inventory" },
+  { title: "Catalog", href: "/portal/catalog", icon: Disc3, key: "catalog" },
+  { title: "Inbound", href: "/portal/inbound", icon: PackagePlus, key: "inbound" },
+  { title: "Fulfillment", href: "/portal/fulfillment", icon: ShoppingCart, key: "fulfillment" },
+  { title: "Mail-Order", href: "/portal/mail-order", icon: DollarSign, key: "mail-order" },
+  { title: "Shipping", href: "/portal/shipping", icon: Truck, key: "shipping" },
+  { title: "Sales", href: "/portal/sales", icon: TrendingUp, key: "sales" },
+  { title: "Billing", href: "/portal/billing", icon: Receipt, key: "billing" },
+  { title: "Support", href: "/portal/support", icon: MessageSquare, key: "support" },
+  { title: "Settings", href: "/portal/settings", icon: Settings, alwaysVisible: true },
 ] as const;
 
 export function PortalSidebar() {
   const pathname = usePathname();
   const supabaseRef = useRef<ReturnType<typeof createBrowserClient> | null>(null);
+  const [visiblePages, setVisiblePages] = useState<Record<string, boolean> | null>(null);
+
+  useEffect(() => {
+    getVisiblePages()
+      .then(setVisiblePages)
+      .catch(() => setVisiblePages(null));
+  }, []);
 
   function getSupabase() {
     if (!supabaseRef.current) {
@@ -82,7 +90,11 @@ export function PortalSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV_ITEMS.map((item) => (
+              {NAV_ITEMS.filter((item) => {
+                if ("alwaysVisible" in item) return true;
+                if (!visiblePages) return true;
+                return visiblePages[item.key] !== false;
+              }).map((item) => (
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     render={<Link href={item.href} />}

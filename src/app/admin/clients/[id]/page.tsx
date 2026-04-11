@@ -31,6 +31,7 @@ import {
   getClientUsers,
   removeClientSupportEmail,
   updateClient,
+  updateClientPageVisibility,
   updateOnboardingStep,
 } from "@/actions/clients";
 import {
@@ -64,8 +65,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { TOGGLEABLE_PAGES } from "@/lib/shared/portal-pages";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -878,23 +881,8 @@ function SettingsTab({ orgId }: { orgId: string }) {
       {/* Merge Organization */}
       <MergeOrgCard orgId={orgId} />
 
-      {/* Portal toggles */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Portal Settings</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {Object.keys(portalSettings).length === 0 ? (
-            <p className="text-sm text-muted-foreground">Default portal configuration.</p>
-          ) : (
-            <dl className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-              {Object.entries(portalSettings).map(([key, value]) => (
-                <SettingsField key={key} label={key.replace(/_/g, " ")} value={String(value)} />
-              ))}
-            </dl>
-          )}
-        </CardContent>
-      </Card>
+      {/* Portal page visibility */}
+      <PortalPageVisibilityCard orgId={orgId} portalSettings={portalSettings} />
 
       {/* Support email routing */}
       <SupportEmailsCard orgId={orgId} />
@@ -949,6 +937,65 @@ function SettingsField({
         {value ?? <span className="text-muted-foreground italic">Not set</span>}
       </dd>
     </div>
+  );
+}
+
+function PortalPageVisibilityCard({
+  orgId,
+  portalSettings,
+}: {
+  orgId: string;
+  portalSettings: Record<string, unknown>;
+}) {
+  const rawVisiblePages = (portalSettings.visible_pages ?? {}) as Record<string, boolean>;
+
+  const resolvedPages = TOGGLEABLE_PAGES.map((page) => ({
+    ...page,
+    visible: rawVisiblePages[page.key] !== false,
+  }));
+
+  const visibilityMut = useAppMutation({
+    mutationFn: (nextPages: Record<string, boolean>) =>
+      updateClientPageVisibility(orgId, nextPages),
+    invalidateKeys: [queryKeys.clients.settings(orgId)],
+  });
+
+  function handleToggle(key: string, checked: boolean) {
+    const next = { ...rawVisiblePages };
+    for (const page of TOGGLEABLE_PAGES) {
+      if (next[page.key] === undefined) next[page.key] = true;
+    }
+    next[key] = checked;
+    visibilityMut.mutate(next);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Portal Page Visibility</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground mb-4">
+          Control which pages this client can see in their portal. Home and Settings are always
+          visible.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          {resolvedPages.map((page) => (
+            <label
+              key={page.key}
+              className="flex items-center justify-between rounded-md border px-4 py-3"
+            >
+              <span className="text-sm font-medium">{page.title}</span>
+              <Switch
+                checked={page.visible}
+                onCheckedChange={(checked: boolean) => handleToggle(page.key, checked)}
+                disabled={visibilityMut.isPending}
+              />
+            </label>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

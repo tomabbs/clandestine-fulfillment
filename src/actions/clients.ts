@@ -695,3 +695,42 @@ export async function removeClientSupportEmail(mappingId: string) {
   if (error) return { success: false, error: error.message };
   return { success: true };
 }
+
+// === Portal page visibility ===
+
+export async function updateClientPageVisibility(
+  orgId: string,
+  visiblePages: Record<string, boolean>,
+) {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: existing } = await supabase
+    .from("portal_admin_settings")
+    .select("id, settings")
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  const currentSettings = (existing?.settings as Record<string, unknown>) ?? {};
+  const mergedSettings = { ...currentSettings, visible_pages: visiblePages };
+
+  if (existing) {
+    const { error } = await supabase
+      .from("portal_admin_settings")
+      .update({ settings: mergedSettings, updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
+    if (error) throw new Error(`Failed to update page visibility: ${error.message}`);
+  } else {
+    const { data: workspace } = await supabase.from("workspaces").select("id").limit(1).single();
+    if (!workspace) throw new Error("No workspace found");
+
+    const { error } = await supabase.from("portal_admin_settings").insert({
+      workspace_id: workspace.id,
+      org_id: orgId,
+      settings: mergedSettings,
+    });
+    if (error) throw new Error(`Failed to create page visibility: ${error.message}`);
+  }
+
+  return { success: true };
+}
