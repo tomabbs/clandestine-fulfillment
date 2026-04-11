@@ -21,10 +21,11 @@ config({ path: ".env.local" });
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const SHOPIFY_STORE = process.env.SHOPIFY_STORE_DOMAIN;
-const SHOPIFY_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-if (!url || !key || !SHOPIFY_STORE || !SHOPIFY_TOKEN) {
-  console.error("Missing env vars");
+const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
+const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_API_TOKEN;
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION ?? "2026-01";
+if (!url || !key || !SHOPIFY_STORE_URL || !SHOPIFY_TOKEN) {
+  console.error("Missing env vars (need NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SHOPIFY_STORE_URL, SHOPIFY_ADMIN_API_TOKEN)");
   process.exit(1);
 }
 
@@ -33,7 +34,7 @@ const isDryRun = !process.argv.includes("--apply");
 const step = (process.argv.find(a => a.startsWith("--step="))?.split("=")[1]) ?? "all";
 const limit = parseInt(process.argv.find(a => a.startsWith("--limit="))?.split("=")[1] ?? "9999", 10);
 
-const SHOPIFY_ENDPOINT = `https://${SHOPIFY_STORE}/admin/api/2026-01/graphql.json`;
+const SHOPIFY_ENDPOINT = `${SHOPIFY_STORE_URL}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 const DELAY_MS = 600;
 
 async function shopifyGql(query, variables) {
@@ -98,12 +99,14 @@ async function main() {
         let invItemId = variant.shopify_inventory_item_id;
 
         if (!invItemId && variant.shopify_variant_id) {
-          // Query Shopify for the inventory item ID
+          const variantGid = variant.shopify_variant_id.startsWith("gid://")
+            ? variant.shopify_variant_id
+            : `gid://shopify/ProductVariant/${variant.shopify_variant_id}`;
           const vData = await shopifyGql(`
             query GetVariantInvItem($id: ID!) {
               productVariant(id: $id) { inventoryItem { id } }
             }
-          `, { id: variant.shopify_variant_id });
+          `, { id: variantGid });
           invItemId = vData?.productVariant?.inventoryItem?.id;
 
           if (invItemId) {
@@ -115,22 +118,22 @@ async function main() {
         }
 
         if (invItemId) {
-          const costAmount = variant.cost ? String(variant.cost) : null;
+          const costVal = variant.cost ? Number(variant.cost) : null;
           if (isDryRun) {
-            console.log(`  [DRY] ${variant.sku}: tracked=true, cost=${costAmount}`);
+            console.log(`  [DRY] ${variant.sku}: tracked=true, cost=${costVal}`);
           } else {
             await shopifyGql(`
-              mutation InvItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+              mutation InvItemUpdate($id: ID!, $input: InventoryItemInput!) {
                 inventoryItemUpdate(id: $id, input: $input) {
-                  inventoryItem { id tracked }
-                  userErrors { field message }
+                  inventoryItem { id tracked unitCost { amount } }
+                  userErrors { message }
                 }
               }
             `, {
               id: invItemId,
               input: {
                 tracked: true,
-                ...(costAmount ? { cost: { amount: costAmount, currencyCode: "USD" } } : {}),
+                ...(costVal != null ? { cost: costVal } : {}),
               },
             });
             await new Promise(r => setTimeout(r, DELAY_MS));

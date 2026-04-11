@@ -607,26 +607,26 @@ export async function sellingPlanGroupDelete(id: string): Promise<void> {
 
 export async function inventoryItemUpdate(
   inventoryItemId: string,
-  input: { tracked?: boolean; cost?: { amount: string; currencyCode: string } },
+  input: { tracked?: boolean; cost?: number },
 ): Promise<void> {
   const mutation = `
-    mutation InventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+    mutation InventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
       inventoryItemUpdate(id: $id, input: $input) {
-        inventoryItem { id tracked unitCost { amount currencyCode } }
-        userErrors { field message }
+        inventoryItem { id tracked unitCost { amount } }
+        userErrors { message }
       }
     }
   `;
   const data = await shopifyGraphQL<{
     inventoryItemUpdate: {
       inventoryItem: { id: string } | null;
-      userErrors: Array<{ field: string[]; message: string }>;
+      userErrors: Array<{ message: string }>;
     };
   }>(mutation, {
     id: inventoryItemId,
     input: {
       ...(input.tracked != null ? { tracked: input.tracked } : {}),
-      ...(input.cost ? { cost: input.cost } : {}),
+      ...(input.cost != null ? { cost: input.cost } : {}),
     },
   });
 
