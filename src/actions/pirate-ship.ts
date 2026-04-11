@@ -30,10 +30,10 @@ export async function initiateImport(storagePath: string, fileName: string) {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // Get user's workspace
+  // Get user's workspace and internal user ID
   const { data: userData } = await supabase
     .from("users")
-    .select("workspace_id")
+    .select("id, workspace_id")
     .eq("auth_user_id", user.id)
     .single();
 
@@ -47,7 +47,7 @@ export async function initiateImport(storagePath: string, fileName: string) {
       file_name: input.fileName,
       storage_path: input.storagePath,
       status: "pending",
-      uploaded_by: user.id,
+      uploaded_by: userData.id,
     })
     .select("id")
     .single();
