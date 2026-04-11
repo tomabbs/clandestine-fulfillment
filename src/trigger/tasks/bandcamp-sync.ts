@@ -17,12 +17,18 @@ import {
   fetchBandcampPage,
   parseBandcampPage,
 } from "@/lib/clients/bandcamp-scraper";
-import { productCreateMedia, productSetCreate } from "@/lib/clients/shopify-client";
+import {
+  findOrCreateCollection,
+  productCreateMedia,
+  productSetCreate,
+  publishToSafeChannels,
+} from "@/lib/clients/shopify-client";
+import { buildShopifyVariantInput } from "@/lib/clients/shopify-variant-input";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { deriveStreetDateAndPreorder, isFutureReleaseDate } from "@/lib/shared/preorder-dates";
-import { classifyProduct } from "@/lib/shared/product-categories";
+import { CATEGORY_DEFAULT_WEIGHTS, classifyProduct } from "@/lib/shared/product-categories";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
@@ -1342,6 +1348,24 @@ export const bandcampSyncTask = task({
             continue;
           }
 
+          const bcPrice = merchItem.price ?? null;
+          const bcCurrency = (merchItem.currency as string) ?? "USD";
+          const bcCost = bcPrice != null ? Math.round(bcPrice * 0.5 * 100) / 100 : null;
+          const bcBarcode =
+            ((merchItem as Record<string, unknown>).barcode as string | null) ?? null;
+          const productCategory = classifyProduct(
+            merchItem.item_type ?? null,
+            merchItem.url ?? null,
+            merchItem.title ?? null,
+          );
+
+          let collectionId: string | null = null;
+          try {
+            collectionId = await findOrCreateCollection(band?.name ?? connection.band_name);
+          } catch {
+            // Non-critical — product still gets created without collection
+          }
+
           let shopifyProductId: string | null = null;
           try {
             shopifyProductId = await productSetCreate({
@@ -1350,13 +1374,17 @@ export const bandcampSyncTask = task({
               vendor: band?.name ?? connection.band_name,
               productType: merchItem.item_type ?? "Merch",
               tags,
+              ...(collectionId ? { collections: [collectionId] } : {}),
               productOptions: [{ name: "Title", values: [{ name: "Default Title" }] }],
               variants: [
-                {
-                  optionValues: [{ optionName: "Title", name: "Default Title" }],
+                buildShopifyVariantInput({
                   sku: effectiveSku,
-                  inventoryPolicy: "DENY",
-                },
+                  price: bcPrice,
+                  cost: bcCost,
+                  currency: bcCurrency,
+                  barcode: bcBarcode,
+                  category: productCategory,
+                }),
               ],
               ...(bandcampImageUrl(merchItem.image_url)
                 ? {
@@ -1370,6 +1398,14 @@ export const bandcampSyncTask = task({
                 : {}),
             });
             logger.info("Created Shopify DRAFT product", { sku: effectiveSku, shopifyProductId });
+
+            if (shopifyProductId) {
+              try {
+                await publishToSafeChannels(shopifyProductId);
+              } catch {
+                // Non-critical — product created but not published
+              }
+            }
           } catch (shopifyError) {
             logger.error("Failed to create Shopify product, continuing with warehouse-only", {
               sku: effectiveSku,
@@ -1431,8 +1467,6 @@ export const bandcampSyncTask = task({
             });
           }
 
-          const bcPrice = merchItem.price ?? null;
-          const bcCost = bcPrice != null ? Math.round(bcPrice * 0.5 * 100) / 100 : null;
           const { data: newVariant } = await supabase
             .from("warehouse_product_variants")
             .insert({
@@ -1442,6 +1476,8 @@ export const bandcampSyncTask = task({
               title: merchItem.title,
               price: bcPrice,
               cost: bcCost,
+              weight: CATEGORY_DEFAULT_WEIGHTS[productCategory]?.value ?? 0.5,
+              weight_unit: "lb",
               bandcamp_url: merchItem.url ?? null,
               street_date: merchItem.new_date,
               is_preorder: tags.includes("Pre-Order"),

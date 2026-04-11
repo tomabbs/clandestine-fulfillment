@@ -600,3 +600,170 @@ export async function sellingPlanGroupDelete(id: string): Promise<void> {
   `;
   await shopifyGraphQL(mutation, { id });
 }
+
+// ---------------------------------------------------------------------------
+// Inventory Item Update (tracked, cost)
+// ---------------------------------------------------------------------------
+
+export async function inventoryItemUpdate(
+  inventoryItemId: string,
+  input: { tracked?: boolean; cost?: { amount: string; currencyCode: string } },
+): Promise<void> {
+  const mutation = `
+    mutation InventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+      inventoryItemUpdate(id: $id, input: $input) {
+        inventoryItem { id tracked unitCost { amount currencyCode } }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    inventoryItemUpdate: {
+      inventoryItem: { id: string } | null;
+      userErrors: Array<{ field: string[]; message: string }>;
+    };
+  }>(mutation, {
+    id: inventoryItemId,
+    input: {
+      ...(input.tracked != null ? { tracked: input.tracked } : {}),
+      ...(input.cost ? { cost: input.cost } : {}),
+    },
+  });
+
+  if (data.inventoryItemUpdate.userErrors.length > 0) {
+    throw new Error(
+      `inventoryItemUpdate errors: ${data.inventoryItemUpdate.userErrors.map((e) => e.message).join(", ")}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Collections
+// ---------------------------------------------------------------------------
+
+export async function collectionCreate(title: string): Promise<string> {
+  const mutation = `
+    mutation CollectionCreate($input: CollectionInput!) {
+      collectionCreate(input: $input) {
+        collection { id title }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    collectionCreate: {
+      collection: { id: string; title: string } | null;
+      userErrors: Array<{ field: string[]; message: string }>;
+    };
+  }>(mutation, { input: { title } });
+
+  if (data.collectionCreate.userErrors.length > 0) {
+    throw new Error(
+      `collectionCreate errors: ${data.collectionCreate.userErrors.map((e) => e.message).join(", ")}`,
+    );
+  }
+  if (!data.collectionCreate.collection) {
+    throw new Error("collectionCreate returned no collection");
+  }
+  return data.collectionCreate.collection.id;
+}
+
+export async function collectionAddProducts(
+  collectionId: string,
+  productIds: string[],
+): Promise<void> {
+  if (productIds.length === 0) return;
+  const mutation = `
+    mutation CollectionAddProducts($id: ID!, $productIds: [ID!]!) {
+      collectionAddProducts(id: $id, productIds: $productIds) {
+        collection { id }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    collectionAddProducts: {
+      collection: { id: string } | null;
+      userErrors: Array<{ field: string[]; message: string }>;
+    };
+  }>(mutation, { id: collectionId, productIds });
+
+  const realErrors = (data.collectionAddProducts.userErrors ?? []).filter(
+    (e) => !e.message.includes("already"),
+  );
+  if (realErrors.length > 0) {
+    throw new Error(`collectionAddProducts errors: ${realErrors.map((e) => e.message).join(", ")}`);
+  }
+}
+
+const collectionCache = new Map<string, string>();
+
+export async function findOrCreateCollection(vendorName: string): Promise<string> {
+  if (collectionCache.has(vendorName)) return collectionCache.get(vendorName)!;
+
+  const escaped = vendorName.replace(/'/g, "\\\\'");
+  const data = await shopifyGraphQL<{
+    collections: { edges: Array<{ node: { id: string; title: string } }> };
+  }>(`{ collections(first: 10, query: "title:'${escaped}'") { edges { node { id title } } } }`);
+
+  const exactMatch = data.collections.edges.find(
+    (e) => e.node.title.toLowerCase() === vendorName.toLowerCase(),
+  );
+  if (exactMatch) {
+    collectionCache.set(vendorName, exactMatch.node.id);
+    return exactMatch.node.id;
+  }
+
+  const stripped = vendorName.replace(/\s+(Records|Music|Label|Tapes|Sound)$/i, "");
+  if (stripped !== vendorName) {
+    const fuzzyMatch = data.collections.edges.find(
+      (e) => e.node.title.toLowerCase() === stripped.toLowerCase(),
+    );
+    if (fuzzyMatch) {
+      collectionCache.set(vendorName, fuzzyMatch.node.id);
+      return fuzzyMatch.node.id;
+    }
+  }
+
+  const newId = await collectionCreate(vendorName);
+  collectionCache.set(vendorName, newId);
+  return newId;
+}
+
+// ---------------------------------------------------------------------------
+// Publishing
+// ---------------------------------------------------------------------------
+
+const SAFE_CHANNEL_NAMES = ["Online Store", "Shop"];
+let cachedPublications: Array<{ id: string; name: string }> | null = null;
+
+export async function getPublicationIds(): Promise<Array<{ id: string; name: string }>> {
+  if (cachedPublications) return cachedPublications;
+  const data = await shopifyGraphQL<{
+    channels: { edges: Array<{ node: { id: string; name: string } }> };
+  }>("{ channels(first: 20) { edges { node { id name } } } }");
+  cachedPublications = data.channels.edges.map((e) => ({
+    id: e.node.id.replace("/Channel/", "/Publication/"),
+    name: e.node.name,
+  }));
+  return cachedPublications;
+}
+
+export async function publishToSafeChannels(shopifyProductId: string): Promise<void> {
+  const allPubs = await getPublicationIds();
+  const safePubs = allPubs.filter((p) => SAFE_CHANNEL_NAMES.includes(p.name));
+  if (safePubs.length === 0) return;
+
+  const mutation = `
+    mutation PublishablePublish($id: ID!, $input: [PublicationInput!]!) {
+      publishablePublish(id: $id, input: $input) {
+        publishable { ... on Product { id } }
+        userErrors { field message }
+      }
+    }
+  `;
+  await shopifyGraphQL(mutation, {
+    id: toProductGid(shopifyProductId),
+    input: safePubs.map((p) => ({ publicationId: p.id })),
+  });
+}

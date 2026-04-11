@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-10
+updated_at: 2026-04-11
 
 domains:
   - name: auth_and_access
@@ -87,6 +87,7 @@ domains:
       - bandcamp trending intelligence (dig_deeper API)
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
+      - Shopify product sync completeness (tracking, cost, weight, collections, publishing)
 
   - name: database_and_rls
     paths:

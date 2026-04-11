@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-10
+updated_at: 2026-04-11
 
 journeys:
   - id: staff_client_invite
@@ -105,6 +105,21 @@ journeys:
       - webhook ingress mapped to trigger tasks
       - retries and idempotency paths documented
       - troubleshooting requires trigger touchpoint review
+
+  - id: shopify_product_completeness
+    area: integrations_async
+    paths:
+      - src/trigger/tasks/bandcamp-sync.ts
+      - src/lib/clients/shopify-client.ts
+      - src/lib/clients/shopify-variant-input.ts
+      - src/lib/shared/product-categories.ts
+    status: green
+    checks:
+      - productSetCreate includes price, cost, tracked, weight, barcode, collection
+      - publishToSafeChannels called after product creation (Online Store + Shop)
+      - buildShopifyVariantInput helper used for consistent variant shape
+      - CATEGORY_DEFAULT_WEIGHTS provides weight defaults by product type
+      - write_publications scope added to Shopify app config
 
   - id: bandcamp_sales_data
     area: admin_settings

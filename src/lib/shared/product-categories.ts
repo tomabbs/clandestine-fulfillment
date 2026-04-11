@@ -63,3 +63,13 @@ export const CATEGORY_EXPECTED_FIELDS: Record<
 
 export const ALBUM_FORMAT_CATEGORIES: ProductCategory[] = ["vinyl", "cd", "cassette"];
 export const NON_ALBUM_CATEGORIES: ProductCategory[] = ["apparel", "merch", "bundle", "other"];
+
+export const CATEGORY_DEFAULT_WEIGHTS: Record<ProductCategory, { value: number; unit: string }> = {
+  vinyl: { value: 1.0, unit: "POUNDS" },
+  cd: { value: 0.25, unit: "POUNDS" },
+  cassette: { value: 0.2, unit: "POUNDS" },
+  apparel: { value: 0.5, unit: "POUNDS" },
+  merch: { value: 0.3, unit: "POUNDS" },
+  bundle: { value: 1.5, unit: "POUNDS" },
+  other: { value: 0.5, unit: "POUNDS" },
+};

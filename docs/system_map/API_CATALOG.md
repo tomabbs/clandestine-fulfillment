@@ -166,6 +166,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - store connections and mappings: connection CRUD/test + mapping and reprocess ops
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`
   - preorder tools: `getPreorderProducts`, `manualRelease` (triggers `preorder-release-variant` for single-variant release — NOT the full fulfillment job), `getPreorderAllocationPreview`
+  - Shopify client additions: `inventoryItemUpdate`, `collectionCreate`, `collectionAddProducts`, `findOrCreateCollection`, `publishToSafeChannels`, `getPublicationIds` (all in `src/lib/clients/shopify-client.ts`). Variant input helper: `buildShopifyVariantInput` in `src/lib/clients/shopify-variant-input.ts`.
 
 ## Audit Requirement
 

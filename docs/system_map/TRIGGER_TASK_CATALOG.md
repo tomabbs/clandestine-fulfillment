@@ -31,7 +31,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bandcamp-sale-poll` | `src/trigger/tasks/bandcamp-sale-poll.ts` | `*/5 * * * *` |
 | `bandcamp-inventory-push` | `src/trigger/tasks/bandcamp-inventory-push.ts` | `*/5 * * * *` |
 | `bandcamp-scrape-sweep` | `src/trigger/tasks/bandcamp-scrape-sweep.ts` | `*/10 * * * *` |
-| `bandcamp-sync-cron` | `src/trigger/tasks/bandcamp-sync.ts` | `*/30 * * * *` |
+| `bandcamp-sync-cron` | `src/trigger/tasks/bandcamp-sync.ts` | `*/30 * * * *` — Product creation now includes: price, cost (50% of Bandcamp price), inventory tracking (tracked=true), weight (category default), vendor collection assignment, and publishing to Online Store + Shop channels. |
 | `bandcamp-order-sync-cron` | `src/trigger/tasks/bandcamp-order-sync.ts` | `0 */6 * * *` |
 | `bandcamp-mark-shipped-cron` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `*/15 * * * *` |
 | `client-store-order-detect` | `src/trigger/tasks/client-store-order-detect.ts` | `*/10 * * * *` |

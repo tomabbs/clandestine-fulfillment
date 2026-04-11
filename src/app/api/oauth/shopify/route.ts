@@ -13,7 +13,7 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
 const SHOPIFY_SCOPES =
-  "read_products,write_products,read_inventory,write_inventory,read_orders,write_orders,read_fulfillments,write_fulfillments";
+  "read_products,write_products,read_inventory,write_inventory,read_orders,write_orders,read_fulfillments,write_fulfillments,write_publications";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
