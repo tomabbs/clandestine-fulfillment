@@ -37,7 +37,11 @@ function readZipEntries(buf: Buffer): ZipEntry[] {
     const localSig = buf.readUInt32LE(localHeaderOffset);
     if (localSig === 0x04034b50) {
       const compressionMethod = buf.readUInt16LE(localHeaderOffset + 8);
-      const compressedSize = buf.readUInt32LE(localHeaderOffset + 18);
+      const localCompressedSize = buf.readUInt32LE(localHeaderOffset + 18);
+      // When the data descriptor flag (bit 3) is set, local header sizes are 0.
+      // Fall back to the central directory sizes which are always correct.
+      const cdCompressedSize = buf.readUInt32LE(offset + 20);
+      const compressedSize = localCompressedSize || cdCompressedSize;
       const localNameLen = buf.readUInt16LE(localHeaderOffset + 26);
       const localExtraLen = buf.readUInt16LE(localHeaderOffset + 28);
       const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
