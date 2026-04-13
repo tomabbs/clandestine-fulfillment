@@ -76,7 +76,9 @@ function getCarrierTrackingUrl(
 
 function formatCurrency(value: number | null | undefined): string {
   if (value == null) return "$0.00";
-  return `$${value.toFixed(2)}`;
+  const abs = Math.abs(value);
+  const core = `$${abs.toFixed(2)}`;
+  return value < 0 ? `-${core}` : core;
 }
 
 // === Main Page ===
@@ -622,7 +624,9 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
             const charged =
               (shipment as { customer_shipping_charged?: number | null })
                 .customer_shipping_charged ?? null;
-            const gap = charged != null ? charged - costBreakdown.postage : null;
+            /** Customer shipping collected minus total fulfillment cost (postage + materials + pick/pack + …). */
+            const fulfillmentDiff =
+              charged != null ? charged - costBreakdown.total : null;
             return (
               <dl className="text-sm space-y-1">
                 {charged != null && (
@@ -659,17 +663,14 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
                   <dt>Total Cost</dt>
                   <dd className="font-mono">{formatCurrency(costBreakdown.total)}</dd>
                 </div>
-                {gap != null && (
+                {fulfillmentDiff != null && (
                   <div
                     className={`flex justify-between border-t pt-1 font-medium ${
-                      gap >= 0 ? "text-green-700" : "text-red-600"
+                      fulfillmentDiff >= 0 ? "text-green-700" : "text-red-600"
                     }`}
                   >
-                    <dt>Shipping difference</dt>
-                    <dd className="font-mono">
-                      {gap >= 0 ? "+" : ""}
-                      {formatCurrency(gap)}
-                    </dd>
+                    <dt>Fulfillment difference</dt>
+                    <dd className="font-mono">{formatCurrency(fulfillmentDiff)}</dd>
                   </div>
                 )}
               </dl>
