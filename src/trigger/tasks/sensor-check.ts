@@ -286,6 +286,193 @@ export const sensorCheckTask = schedules.task({
         });
       }
 
+      // 7a. bandcamp.active_errors — active/probation mappings with recent failures
+      try {
+        const { count } = await supabase
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .in("scrape_status", ["active", "probation"])
+          .gte("consecutive_failures", 1);
+        const errorCount = count ?? 0;
+        readings.push({
+          sensorName: "bandcamp.active_errors",
+          status: errorCount >= 50 ? "critical" : errorCount >= 20 ? "warning" : "healthy",
+          value: { count: errorCount },
+          message: `${errorCount} active/probation mappings with failures`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.active_errors",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7b. bandcamp.dead_urls — total dead mappings
+      try {
+        const { count } = await supabase
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .eq("scrape_status", "dead");
+        const deadCount = count ?? 0;
+        readings.push({
+          sensorName: "bandcamp.dead_urls",
+          status: deadCount >= 100 ? "warning" : "healthy",
+          value: { count: deadCount },
+          message: `${deadCount} dead URLs`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.dead_urls",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7c. bandcamp.domains_circuit_open — domains with open circuit breakers
+      try {
+        const { data: openCircuits } = await supabase
+          .from("bandcamp_domain_health")
+          .select("subdomain, cooldown_until, effective_rps")
+          .eq("workspace_id", workspaceId)
+          .eq("state", "open");
+        const openCount = openCircuits?.length ?? 0;
+        readings.push({
+          sensorName: "bandcamp.domains_circuit_open",
+          status: openCount >= 3 ? "critical" : openCount >= 1 ? "warning" : "healthy",
+          value: {
+            count: openCount,
+            domains: (openCircuits ?? []).map((d) => ({
+              subdomain: d.subdomain,
+              cooldown_remaining: d.cooldown_until
+                ? Math.max(0, Math.round((new Date(d.cooldown_until as string).getTime() - Date.now()) / 1000))
+                : null,
+              effective_rps: d.effective_rps,
+            })),
+          },
+          message: openCount === 0 ? "All circuits closed" : `${openCount} domains with open circuits`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.domains_circuit_open",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7d. bandcamp.success_rate_24h — scrape success rate excluding dead mappings
+      try {
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { data: recent } = await supabase
+          .from("channel_sync_log")
+          .select("status")
+          .eq("workspace_id", workspaceId)
+          .eq("channel", "bandcamp")
+          .eq("sync_type", "scrape_page")
+          .gte("completed_at", oneDayAgo);
+        const total = recent?.length ?? 0;
+        const succeeded = recent?.filter((r) => r.status === "completed").length ?? 0;
+        const rate = total > 0 ? succeeded / total : 1;
+        readings.push({
+          sensorName: "bandcamp.success_rate_24h",
+          status: rate < 0.5 ? "critical" : rate < 0.8 ? "warning" : "healthy",
+          value: { total, succeeded, rate: Math.round(rate * 100) },
+          message: `${Math.round(rate * 100)}% success rate (${succeeded}/${total})`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.success_rate_24h",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7e. bandcamp.reconcile_resolved_24h — items resolved by reconciliation recently
+      try {
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const { count } = await supabase
+          .from("warehouse_review_queue")
+          .select("id", { count: "exact", head: true })
+          .eq("category", "bandcamp_scraper")
+          .eq("status", "resolved")
+          .gte("resolved_at", oneDayAgo);
+        const resolvedCount = count ?? 0;
+        readings.push({
+          sensorName: "bandcamp.reconcile_resolved_24h",
+          status: "healthy",
+          value: { count: resolvedCount },
+          message: `${resolvedCount} items auto-resolved in last 24h`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.reconcile_resolved_24h",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7f. bandcamp.category_coverage — mappings with vs without product_category
+      try {
+        const { count: total } = await supabase
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId);
+        const { count: withCat } = await supabase
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .not("product_category", "is", null);
+        const totalCount = total ?? 0;
+        const catCount = withCat ?? 0;
+        const coverage = totalCount > 0 ? catCount / totalCount : 1;
+        readings.push({
+          sensorName: "bandcamp.category_coverage",
+          status: coverage < 0.8 ? "warning" : "healthy",
+          value: { total: totalCount, categorized: catCount, coverage: Math.round(coverage * 100) },
+          message: `${Math.round(coverage * 100)}% of mappings categorized (${catCount}/${totalCount})`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.category_coverage",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
+      // 7g. bandcamp.stale_mappings — active mappings not scraped in 7+ days
+      try {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { count } = await supabase
+          .from("bandcamp_product_mappings")
+          .select("id", { count: "exact", head: true })
+          .eq("workspace_id", workspaceId)
+          .eq("scrape_status", "active")
+          .not("bandcamp_url", "is", null)
+          .or(`last_scrape_attempt_at.is.null,last_scrape_attempt_at.lt.${sevenDaysAgo}`);
+        const staleCount = count ?? 0;
+        readings.push({
+          sensorName: "bandcamp.stale_mappings",
+          status: staleCount >= 100 ? "warning" : "healthy",
+          value: { count: staleCount },
+          message: `${staleCount} active mappings not scraped in 7+ days`,
+        });
+      } catch {
+        readings.push({
+          sensorName: "bandcamp.stale_mappings",
+          status: "healthy",
+          value: {},
+          message: "Check skipped",
+        });
+      }
+
       // 8. webhook.silence (Rule #17)
       try {
         const { data: conns } = await supabase

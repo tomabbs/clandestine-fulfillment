@@ -10,6 +10,7 @@ import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
 import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
+import { classifyProduct } from "@/lib/shared/product-categories";
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
 
 // Rule #48: No Server Action may call the Bandcamp API directly.
@@ -314,7 +315,7 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
   const memberBandIds = Array.from(memberBandSubdomain.keys());
   const { data: pending } = await serviceClient
     .from("bandcamp_product_mappings")
-    .select("id, bandcamp_url, variant_id, bandcamp_member_band_id")
+    .select("id, bandcamp_url, variant_id, bandcamp_member_band_id, product_category, bandcamp_type_name")
     .eq("workspace_id", conn.workspace_id)
     .in("bandcamp_member_band_id", memberBandIds)
     .or("bandcamp_type_name.is.null,bandcamp_about.is.null");
@@ -382,12 +383,16 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
       if (!urlWritten) continue;
     }
 
+    const cat = m.product_category ?? classifyProduct(
+      m.bandcamp_type_name, scrapeUrl, null,
+    );
     await bandcampScrapePageTask.trigger({
       url: scrapeUrl,
       mappingId: m.id,
       workspaceId: conn.workspace_id,
       urlIsConstructed: !m.bandcamp_url,
       urlSource: m.bandcamp_url ? "orders_api" : "constructed",
+      productCategory: cat,
     });
     triggered++;
   }

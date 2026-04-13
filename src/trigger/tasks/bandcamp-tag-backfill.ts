@@ -36,7 +36,8 @@ export const bandcampTagBackfillTask = task({
         .select("id, bandcamp_url, bandcamp_tags")
         .not("bandcamp_url", "is", null)
         .is("bandcamp_tags", null)
-        .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
+        .in("scrape_status", ["active", "probation"])
+        .not("product_category", "in", '("apparel","merch")')
         .order("id", { ascending: true })
         .limit(BATCH_SIZE);
 

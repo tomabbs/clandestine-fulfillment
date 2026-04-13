@@ -30,10 +30,24 @@ import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { deriveStreetDateAndPreorder, isFutureReleaseDate } from "@/lib/shared/preorder-dates";
-import { CATEGORY_DEFAULT_WEIGHTS, classifyProduct } from "@/lib/shared/product-categories";
+import {
+  CATEGORY_DEFAULT_WEIGHTS,
+  CATEGORY_EXPECTED_FIELDS,
+  classifyProduct,
+  isAlbumLinkedBundle,
+  type ProductCategory,
+} from "@/lib/shared/product-categories";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
+import {
+  calculateDelayMs,
+  checkCircuitBreaker,
+  classifyFailureReason,
+  extractSubdomain,
+  recordCircuitFailure,
+  recordCircuitSuccess,
+} from "@/trigger/lib/domain-circuit-breaker";
 import { preorderSetupTask } from "@/trigger/tasks/preorder-setup";
 
 // ─── SKU generation for items without one ─────────────────────────────────────
@@ -222,8 +236,32 @@ export const bandcampScrapePageTask = task({
     urlIsConstructed?: boolean;
     albumTitle?: string;
     urlSource?: "orders_api" | "constructed" | "manual";
+    productCategory?: string | null;
+    isDeadUrlProbe?: boolean;
   }) => {
     const supabase = createServiceRoleClient();
+    const subdomain = extractSubdomain(payload.url);
+
+    // Circuit breaker guard — skip if domain is in cooldown
+    if (subdomain) {
+      const { allowed, effectiveRps } = await checkCircuitBreaker(
+        supabase, payload.workspaceId, subdomain,
+        { ignoreOpen: payload.isDeadUrlProbe ?? false },
+      );
+      if (!allowed) {
+        logger.info("Circuit breaker open, skipping scrape", {
+          subdomain, url: payload.url, mappingId: payload.mappingId,
+        });
+        return { success: false, reason: "circuit_open", subdomain };
+      }
+
+      // Adaptive delay based on AIMD-computed RPS
+      const delayMs = calculateDelayMs(effectiveRps);
+      if (delayMs > 200) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+
     try {
       // Record attempt time before fetching — tracks even if task crashes mid-run
       await supabase
@@ -236,55 +274,129 @@ export const bandcampScrapePageTask = task({
 
       if (!scraped) {
         // data-tralbum attribute not found — may not be an album page
-        await supabase.from("warehouse_review_queue").upsert(
-          {
-            workspace_id: payload.workspaceId,
-            org_id: null,
-            category: "bandcamp_scraper",
-            severity: "medium" as const,
-            title: "data-tralbum attribute not found",
-            description: `Could not parse data-tralbum from ${payload.url}. Page may not be an album page.`,
-            metadata: { url: payload.url, mappingId: payload.mappingId },
-            status: "open" as const,
-            group_key: `bc_no_tralbum_${payload.mappingId}`,
-            occurrence_count: 1,
-          },
-          { onConflict: "group_key", ignoreDuplicates: false },
-        );
-        // Count toward Group 1 sweep cap — otherwise this mapping is re-triggered forever and starves the queue.
-        await supabase.rpc("increment_bandcamp_scrape_failures", {
+        const cat = (payload.productCategory ?? "other") as ProductCategory;
+        const expectsTracks = CATEGORY_EXPECTED_FIELDS[cat]?.tracks ?? false;
+
+        // Only flag as error when we EXPECT album data for this category
+        if (expectsTracks && !payload.isDeadUrlProbe) {
+          await supabase.from("warehouse_review_queue").upsert(
+            {
+              workspace_id: payload.workspaceId,
+              org_id: null,
+              category: "bandcamp_scraper",
+              severity: "medium" as const,
+              title: "data-tralbum attribute not found",
+              description: `Could not parse data-tralbum from ${payload.url}. Page may not be an album page.`,
+              metadata: { url: payload.url, mappingId: payload.mappingId },
+              status: "open" as const,
+              group_key: `bc_no_tralbum_${payload.mappingId}`,
+              occurrence_count: 1,
+            },
+            { onConflict: "group_key", ignoreDuplicates: false },
+          );
+        }
+
+        // Track consecutive failures + update mapping state
+        await supabase
+          .from("bandcamp_product_mappings")
+          .update({
+            last_failure_reason: "parse_failure",
+            last_http_status: 200,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", payload.mappingId);
+        await supabase.rpc("increment_consecutive_failures", {
           p_mapping_id: payload.mappingId,
         });
+        if (subdomain) {
+          await recordCircuitSuccess(supabase, payload.workspaceId, subdomain);
+        }
         return { success: false, reason: "no_tralbum" };
       }
 
-      // Write scraped metadata — update mapping with all data-tralbum fields + tags
+      // Write scraped metadata — category-gated enrichment
+      if (!payload.productCategory) {
+        logger.warn("Missing productCategory in scrape payload — defaulting to album expectations", {
+          mappingId: payload.mappingId, url: payload.url,
+        });
+      }
+      const category = (payload.productCategory ?? "other") as ProductCategory;
+      const expectations = CATEGORY_EXPECTED_FIELDS[category] ?? CATEGORY_EXPECTED_FIELDS.other;
+
       const tagMatch = scraped.tagNorms.length > 0 ? matchTagToTaxonomy(scraped.tagNorms) : null;
+
+      // Revival semantics: dead -> probation (not active), probation/active -> active
+      const { data: currentMapping } = await supabase
+        .from("bandcamp_product_mappings")
+        .select("scrape_status")
+        .eq("id", payload.mappingId)
+        .single();
+      const currentStatus = currentMapping?.scrape_status ?? "active";
+      const newScrapeStatus = currentStatus === "dead" ? "probation" : "active";
+
+      const mappingUpdate: Record<string, unknown> = {
+        scrape_failure_count: 0,
+        consecutive_failures: 0,
+        scrape_status: newScrapeStatus,
+        last_failure_reason: null,
+        last_http_status: null,
+        bandcamp_url: payload.url,
+        bandcamp_url_source: "scraper_verified",
+        bandcamp_art_url: scraped.albumArtUrl,
+        bandcamp_tralbum_id: scraped.tralbumId,
+        last_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Album-specific fields: only write when category expects them
+      if (expectations.about) {
+        // For bundles at /album/ URLs, validate data-tralbum actually had content
+        if (category === "bundle" && !isAlbumLinkedBundle(payload.url, category)) {
+          // Standalone merch bundle — art only, skip album fields
+        } else {
+          mappingUpdate.bandcamp_type_name = scraped.packages[0]?.typeName ?? null;
+          mappingUpdate.bandcamp_new_date = scraped.releaseDate
+            ? scraped.releaseDate.toISOString().slice(0, 10)
+            : null;
+          mappingUpdate.bandcamp_release_date = scraped.releaseDate?.toISOString() ?? null;
+          mappingUpdate.bandcamp_is_preorder = scraped.isPreorder;
+          mappingUpdate.bandcamp_about = scraped.about;
+          mappingUpdate.bandcamp_credits = scraped.credits;
+          mappingUpdate.bandcamp_tracks = scraped.tracks.length > 0 ? scraped.tracks : null;
+          mappingUpdate.bandcamp_upc = scraped.upc;
+        }
+      }
+
+      if (expectations.tags) {
+        mappingUpdate.bandcamp_tags = scraped.tags.length > 0 ? scraped.tags : null;
+        mappingUpdate.bandcamp_tag_norms = scraped.tagNorms.length > 0 ? scraped.tagNorms : null;
+        mappingUpdate.bandcamp_primary_genre = tagMatch?.bcGenre ?? null;
+        mappingUpdate.bandcamp_tags_fetched_at = scraped.tags.length > 0 ? new Date().toISOString() : null;
+      }
+
       const { error: updateErr } = await supabase
         .from("bandcamp_product_mappings")
-        .update({
-          scrape_failure_count: 0,
-          bandcamp_url: payload.url,
-          bandcamp_url_source: "scraper_verified",
-          bandcamp_type_name: scraped.packages[0]?.typeName ?? null,
-          bandcamp_new_date: scraped.releaseDate
-            ? scraped.releaseDate.toISOString().slice(0, 10)
-            : null,
-          bandcamp_release_date: scraped.releaseDate?.toISOString() ?? null,
-          bandcamp_is_preorder: scraped.isPreorder,
-          bandcamp_art_url: scraped.albumArtUrl,
-          bandcamp_about: scraped.about,
-          bandcamp_credits: scraped.credits,
-          bandcamp_tracks: scraped.tracks.length > 0 ? scraped.tracks : null,
-          bandcamp_tags: scraped.tags.length > 0 ? scraped.tags : null,
-          bandcamp_tag_norms: scraped.tagNorms.length > 0 ? scraped.tagNorms : null,
-          bandcamp_primary_genre: tagMatch?.bcGenre ?? null,
-          bandcamp_tralbum_id: scraped.tralbumId,
-          bandcamp_tags_fetched_at: scraped.tags.length > 0 ? new Date().toISOString() : null,
-          last_synced_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(mappingUpdate)
         .eq("id", payload.mappingId);
+
+      // Inline reconciliation: auto-resolve open review queue items for this mapping
+      const { data: resolved } = await supabase
+        .from("warehouse_review_queue")
+        .update({ status: "resolved", resolved_at: new Date().toISOString() })
+        .eq("category", "bandcamp_scraper")
+        .eq("status", "open")
+        .like("group_key", `%${payload.mappingId}%`)
+        .select("id");
+      if (resolved && resolved.length > 0) {
+        logger.info("Auto-resolved review queue items on scrape success", {
+          mappingId: payload.mappingId, resolvedCount: resolved.length,
+        });
+      }
+
+      // Record circuit breaker success (AIMD additive increase)
+      if (subdomain) {
+        await recordCircuitSuccess(supabase, payload.workspaceId, subdomain);
+      }
 
       // Propagate to linked variant
       const { data: mapping } = await supabase
@@ -431,7 +543,9 @@ export const bandcampScrapePageTask = task({
         }
       }
 
-      if (scraped.metadataIncomplete) {
+      if (scraped.metadataIncomplete && expectations.tracks) {
+        // Only flag as incomplete when we EXPECT tracks/packages for this category
+        // (merch/apparel will always have 0 packages — that's correct, not incomplete)
         await supabase.from("warehouse_review_queue").upsert(
           {
             workspace_id: payload.workspaceId,
@@ -483,12 +597,14 @@ export const bandcampScrapePageTask = task({
       const httpStatus = error instanceof BandcampFetchError ? error.status : undefined;
       const retryAfterSec =
         error instanceof BandcampFetchError ? error.retryAfterSeconds : undefined;
+      const failureReason = classifyFailureReason(httpStatus, error);
 
       logger.error("Scrape failed", {
         url: payload.url,
         urlIsConstructed: payload.urlIsConstructed,
         status: httpStatus,
         retryAfterSeconds: retryAfterSec,
+        failureReason,
         error: String(error),
       });
 
@@ -510,6 +626,7 @@ export const bandcampScrapePageTask = task({
             httpStatus,
             retryAfterSeconds: retryAfterSec,
             urlIsConstructed: payload.urlIsConstructed,
+            failureReason,
           },
         })
         .then(
@@ -522,8 +639,44 @@ export const bandcampScrapePageTask = task({
             }),
         );
 
+      // Step 1: Update mapping state FIRST (consecutive_failures, scrape_status)
+      await supabase
+        .from("bandcamp_product_mappings")
+        .update({
+          last_failure_reason: failureReason,
+          last_http_status: httpStatus ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", payload.mappingId);
+
+      const { data: failResult } = await supabase.rpc("increment_consecutive_failures", {
+        p_mapping_id: payload.mappingId,
+      });
+      const mappingRow = Array.isArray(failResult) ? failResult[0] : failResult;
+      const newStatus = mappingRow?.new_status;
+      const newCount = mappingRow?.new_count;
+
+      if (newStatus === "dead") {
+        logger.warn("Mapping marked DEAD", {
+          mappingId: payload.mappingId, url: payload.url, consecutiveFailures: newCount,
+        });
+      } else if (newStatus === "probation") {
+        logger.info("Mapping entered probation", {
+          mappingId: payload.mappingId, consecutiveFailures: newCount,
+        });
+      }
+
+      // Step 2: Update domain state (circuit breaker)
+      if (subdomain) {
+        await recordCircuitFailure(supabase, payload.workspaceId, subdomain, httpStatus);
+      }
+
+      // Dead URL probes: suppress review queue items, only track failures
+      if (payload.isDeadUrlProbe) {
+        return { success: false, reason: "dead_probe_failed", httpStatus, consecutiveFailures: newCount };
+      }
+
       if (is404 && payload.urlIsConstructed) {
-        // Constructed slug was wrong — log for manual correction, don't retry
         await supabase.from("warehouse_review_queue").upsert(
           {
             workspace_id: payload.workspaceId,
@@ -543,21 +696,12 @@ export const bandcampScrapePageTask = task({
           },
           { onConflict: "group_key", ignoreDuplicates: false },
         );
-        // Increment failure count so Group 1 sweep eventually stops re-queueing this item
-        await supabase.rpc("increment_bandcamp_scrape_failures", {
-          p_mapping_id: payload.mappingId,
-        });
         return { success: false, reason: "404_constructed_url" };
       }
 
-      // Non-404 or API-sourced URL failures → throw so Trigger.dev retries
-      // For all BandcampFetchError (any HTTP error from Bandcamp including 403/429 blocking
-      // from cloud server IPs), log to review queue instead of silently retrying forever.
-      // This provides visibility + stops the retry loop for known permanent failures.
       if (error instanceof BandcampFetchError) {
-        const httpStatus = error.status;
         const isBlockedByCloudflare =
-          httpStatus === 403 || httpStatus === 408 || httpStatus === 429 || httpStatus === 503;
+          (httpStatus ?? 0) === 403 || (httpStatus ?? 0) === 408 || (httpStatus ?? 0) === 429 || (httpStatus ?? 0) === 503;
 
         await supabase.from("warehouse_review_queue").upsert(
           {
@@ -581,13 +725,6 @@ export const bandcampScrapePageTask = task({
           { onConflict: "group_key", ignoreDuplicates: false },
         );
 
-        // Increment failure count for all HTTP errors (including 408 timeout from AbortSignal)
-        // After 5 failures, Group 1 sweep stops re-queueing this item
-        await supabase.rpc("increment_bandcamp_scrape_failures", {
-          p_mapping_id: payload.mappingId,
-        });
-
-        // Don't retry cloud-blocking errors — they won't resolve on retry
         if (isBlockedByCloudflare) {
           return { success: false, reason: `blocked_http_${httpStatus}` };
         }
@@ -811,7 +948,7 @@ async function triggerScrapeIfNeeded(
   // URL comes from the API (merchItem.url), never constructed.
   const { data: mapping } = await supabase
     .from("bandcamp_product_mappings")
-    .select("id, bandcamp_url, bandcamp_about")
+    .select("id, bandcamp_url, bandcamp_about, product_category, bandcamp_type_name")
     .eq("variant_id", variantId)
     .single();
 
@@ -823,6 +960,10 @@ async function triggerScrapeIfNeeded(
   const scrapeUrl = (merchItem.url as string | null) ?? mapping.bandcamp_url;
   if (!scrapeUrl) return;
 
+  const cat = mapping.product_category ?? classifyProduct(
+    mapping.bandcamp_type_name, scrapeUrl, merchItem.album_title ?? null,
+  );
+
   await bandcampScrapePageTask.trigger({
     url: scrapeUrl,
     mappingId: mapping.id,
@@ -830,6 +971,7 @@ async function triggerScrapeIfNeeded(
     urlIsConstructed: false,
     albumTitle: merchItem.album_title ?? undefined,
     urlSource: "orders_api",
+    productCategory: cat,
   });
 }
 
@@ -984,6 +1126,13 @@ export const bandcampSyncTask = task({
             updated_at: new Date().toISOString(),
             raw_api_data: merchItem,
           };
+
+          // Classify product category from API data
+          upsertPayload.product_category = classifyProduct(
+            merchItem.item_type ?? null,
+            merchItem.url ?? null,
+            merchItem.title ?? null,
+          );
 
           // Only overwrite URL if the API actually provides one — avoid nullifying
           // URLs that were set by the sales backfill or scraper
@@ -1745,15 +1894,14 @@ export const bandcampSyncTask = task({
       const sweepDiagStartedAt = new Date().toISOString();
 
       // Group 1: has URL, missing type_name — needs scraping.
-      // Skip items with 5+ failures to prevent infinite re-queueing of
-      // Cloudflare-blocked or permanently-broken URLs.
+      // Only pick active/probation mappings (dead URLs are handled by reconciliation probes).
       const { data: withUrlNoType } = await supabase
         .from("bandcamp_product_mappings")
-        .select("id, bandcamp_url")
+        .select("id, bandcamp_url, product_category, bandcamp_type_name")
         .eq("workspace_id", workspaceId)
         .not("bandcamp_url", "is", null)
         .is("bandcamp_type_name", null)
-        .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
+        .in("scrape_status", ["active", "probation"])
         .limit(100);
 
       const g1SweepSelected = withUrlNoType?.length ?? 0;
@@ -1771,12 +1919,16 @@ export const bandcampSyncTask = task({
             logger.warn("Sweep group 1: cleared bad URL slug", { mappingId: pm.id, url: pm.bandcamp_url });
             continue;
           }
+          const cat = pm.product_category ?? classifyProduct(
+            pm.bandcamp_type_name, pm.bandcamp_url, null,
+          );
           await bandcampScrapePageTask.trigger({
             url: pm.bandcamp_url as string,
             mappingId: pm.id,
             workspaceId,
             urlIsConstructed: false,
             urlSource: "orders_api",
+            productCategory: cat,
           });
           g1SweepTriggered++;
         }
@@ -1939,6 +2091,7 @@ export const bandcampSyncTask = task({
             continue;
           }
 
+          const g2Cat = classifyProduct(null, scrapeUrl, albumTitle ?? null);
           await bandcampScrapePageTask.trigger({
             url: scrapeUrl,
             mappingId: pm.id,
@@ -1946,6 +2099,7 @@ export const bandcampSyncTask = task({
             urlIsConstructed: true,
             albumTitle: albumTitle ?? undefined,
             urlSource: "constructed",
+            productCategory: g2Cat,
           });
           g2SweepTriggered++;
         }
@@ -1956,14 +2110,17 @@ export const bandcampSyncTask = task({
 
       // Group 3: already scraped (has art_url) but missing about/credits/upc/tracks.
       // These were scraped before this feature was added — backfill on subsequent runs.
-      // Limit 100/run to match scrape-sweep cron pacing.
+      // Only active/probation mappings (dead handled by reconciliation probes).
+      // Only album-format categories (merch/apparel don't have about).
       const { data: scrapedNoAbout } = await supabase
         .from("bandcamp_product_mappings")
-        .select("id, bandcamp_url")
+        .select("id, bandcamp_url, product_category, bandcamp_type_name")
         .eq("workspace_id", workspaceId)
         .not("bandcamp_art_url", "is", null)
         .is("bandcamp_about", null)
         .not("bandcamp_url", "is", null)
+        .in("scrape_status", ["active", "probation"])
+        .not("product_category", "in", '("apparel","merch")')
         .limit(100);
 
       const g3SweepSelected = scrapedNoAbout?.length ?? 0;
@@ -1973,12 +2130,16 @@ export const bandcampSyncTask = task({
           `Sweep group 3: ${scrapedNoAbout.length} already-scraped mappings missing about/credits/upc`,
         );
         for (const pm of scrapedNoAbout) {
+          const g3Cat = pm.product_category ?? classifyProduct(
+            pm.bandcamp_type_name, pm.bandcamp_url, null,
+          );
           await bandcampScrapePageTask.trigger({
             url: pm.bandcamp_url as string,
             mappingId: pm.id,
             workspaceId,
             urlIsConstructed: false,
             urlSource: "orders_api",
+            productCategory: g3Cat,
           });
           g3SweepTriggered++;
         }

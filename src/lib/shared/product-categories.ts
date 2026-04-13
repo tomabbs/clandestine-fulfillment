@@ -64,6 +64,19 @@ export const CATEGORY_EXPECTED_FIELDS: Record<
 export const ALBUM_FORMAT_CATEGORIES: ProductCategory[] = ["vinyl", "cd", "cassette"];
 export const NON_ALBUM_CATEGORIES: ProductCategory[] = ["apparel", "merch", "bundle", "other"];
 
+export function isAlbumLinkedBundle(
+  url: string | null,
+  category: string | null,
+): boolean {
+  if (category !== "bundle") return false;
+  if (!url) return false;
+  try {
+    return new URL(url).pathname.startsWith("/album/");
+  } catch {
+    return false;
+  }
+}
+
 export const CATEGORY_DEFAULT_WEIGHTS: Record<ProductCategory, { value: number; unit: string }> = {
   vinyl: { value: 1.0, unit: "POUNDS" },
   cd: { value: 0.25, unit: "POUNDS" },

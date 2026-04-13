@@ -84,12 +84,19 @@ journeys:
       - src/trigger/lib/sensors.ts
       - src/trigger/tasks/bandcamp-sync.ts
       - src/trigger/tasks/bandcamp-scrape-sweep.ts
+      - src/trigger/tasks/scraper-reconcile.ts
+      - src/trigger/lib/domain-circuit-breaker.ts
       - src/lib/clients/bandcamp-scraper.ts
+      - src/lib/shared/product-categories.ts
     status: green
     checks:
       - scraper health tab shows log-backed activity near-real-time
       - catalog completeness shows snapshot-backed have/missing with computed_at
       - sensor readings for merch_sync_stale, scraper_review_open, scrape_block_rate
+      - 7 segmented sensors active_errors, dead_urls, circuits_open, success_rate_24h, reconcile_resolved, category_coverage, stale_mappings
+      - per-domain circuit breaker (bandcamp_domain_health, composite PK workspace_id+subdomain)
+      - dead URL lifecycle (active/probation/dead on bandcamp_product_mappings)
+      - scraper-reconcile runs every 6h, auto-resolves review items, probes dead URLs monthly
       - review queue items link to /admin/catalog/{id}
       - Zod schemas use .passthrough() for data-tralbum resilience
       - 429 Retry-After header parsed and persisted to channel_sync_log

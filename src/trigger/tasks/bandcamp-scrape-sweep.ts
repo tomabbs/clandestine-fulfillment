@@ -16,6 +16,7 @@
 import { logger, schedules } from "@trigger.dev/sdk";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { classifyProduct } from "@/lib/shared/product-categories";
 import { bandcampSweepQueue } from "@/trigger/lib/bandcamp-sweep-queue";
 import { bandcampScrapePageTask } from "@/trigger/tasks/bandcamp-sync";
 
@@ -43,14 +44,14 @@ export const bandcampScrapeSweepTask = schedules.task({
       let g3Oos = 0;
 
       // ── Group 1: has URL, missing type_name (enrichment scrape) ────────────
-      // Priority pass: in-stock items first
+      // Only active/probation mappings — dead handled by reconciliation probes
       const { data: g1All } = await supabase
         .from("bandcamp_product_mappings")
-        .select("id, bandcamp_url, variant_id, raw_api_data")
+        .select("id, bandcamp_url, variant_id, raw_api_data, product_category, bandcamp_type_name")
         .eq("workspace_id", workspaceId)
         .not("bandcamp_url", "is", null)
         .is("bandcamp_type_name", null)
-        .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
+        .in("scrape_status", ["active", "probation"])
         .limit(200);
 
       const g1Prioritized = await prioritizeByStock(
@@ -61,12 +62,16 @@ export const bandcampScrapeSweepTask = schedules.task({
       );
 
       for (const pm of g1Prioritized.items) {
+        const cat = pm.product_category ?? classifyProduct(
+          pm.bandcamp_type_name, pm.bandcamp_url, null,
+        );
         await bandcampScrapePageTask.trigger({
           url: pm.bandcamp_url as string,
           mappingId: pm.id,
           workspaceId,
           urlIsConstructed: false,
           urlSource: "orders_api",
+          productCategory: cat,
         });
         triggered++;
         g1Triggered++;
@@ -81,13 +86,13 @@ export const bandcampScrapeSweepTask = schedules.task({
       // Safety valve: items with null category are still scraped (not yet classified).
       const { data: g3All } = await supabase
         .from("bandcamp_product_mappings")
-        .select("id, bandcamp_url, variant_id, raw_api_data")
+        .select("id, bandcamp_url, variant_id, raw_api_data, product_category, bandcamp_type_name")
         .eq("workspace_id", workspaceId)
         .not("bandcamp_url", "is", null)
         .is("bandcamp_about", null)
         .not("bandcamp_art_url", "is", null)
         .or("product_category.is.null,product_category.not.in.(apparel,merch)")
-        .or("scrape_failure_count.is.null,scrape_failure_count.lt.5")
+        .in("scrape_status", ["active", "probation"])
         .limit(200);
 
       const g3Prioritized = await prioritizeByStock(
@@ -98,12 +103,16 @@ export const bandcampScrapeSweepTask = schedules.task({
       );
 
       for (const pm of g3Prioritized.items) {
+        const cat = pm.product_category ?? classifyProduct(
+          pm.bandcamp_type_name, pm.bandcamp_url, null,
+        );
         await bandcampScrapePageTask.trigger({
           url: pm.bandcamp_url as string,
           mappingId: pm.id,
           workspaceId,
           urlIsConstructed: false,
           urlSource: "orders_api",
+          productCategory: cat,
         });
         triggered++;
         g3Triggered++;
@@ -159,6 +168,8 @@ interface MappingRow {
   bandcamp_url: string | null;
   variant_id: string;
   raw_api_data: Record<string, unknown> | null;
+  product_category: string | null;
+  bandcamp_type_name: string | null;
 }
 
 async function prioritizeByStock(

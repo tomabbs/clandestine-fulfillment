@@ -52,6 +52,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
 | `bandcamp-sales-sync` | `src/trigger/tasks/bandcamp-sales-sync.ts` | `0 5 * * *` (daily 5am UTC) |
 | `bandcamp-sales-backfill-cron` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | `*/10 * * * *` — self-healing monitor: detects stale running connections (>2h), retries up to 3 failed chunks per run using sync sales_report API, reads bandcamp_sales_backfill_log for gap detection |
+| `scraper-reconcile` | `src/trigger/tasks/scraper-reconcile.ts` | `0 */6 * * *` — bulk review queue reconciliation: stale-success cleanup, category-mismatch resolution, dead URL lifecycle enforcement, monthly dead URL probes (bypass circuit breaker, suppress review items), category backfill, metrics emission to `sensor_readings` |
 | `mailorder-shopify-sync` | `src/trigger/tasks/mailorder-shopify-sync.ts` | `*/30 * * * *` — syncs paid Shopify orders into `mailorder_orders` for consignment billing. Splits multi-org orders by SKU → variant → product.org_id, creating one row per (order × org). Payout = subtotal × 0.5 (excludes shipping). Uses 2-min overlap window for cursor safety. |
 
 ## Event/On-Demand Tasks
@@ -63,7 +64,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `aftership-register` | `src/trigger/tasks/aftership-register.ts` | `create-shipping-label` |
 | `shopify-full-backfill` | `src/trigger/tasks/shopify-full-backfill.ts` | `src/actions/shopify.ts` |
 | `bandcamp-sync` | `src/trigger/tasks/bandcamp-sync.ts` | `src/actions/bandcamp.ts`, `bandcamp-sync-cron` |
-| `bandcamp-scrape-page` | `src/trigger/tasks/bandcamp-sync.ts` | `bandcamp-sync` |
+| `bandcamp-scrape-page` | `src/trigger/tasks/bandcamp-sync.ts` | `bandcamp-sync`, `bandcamp-scrape-sweep`, `scraper-reconcile`, `src/actions/bandcamp.ts` — **hardened 2026-04-14**: category-gated enrichment, per-domain circuit breaker (DB-backed AIMD), dead URL lifecycle (active/probation/dead), inline review queue auto-resolve, adaptive rate limiting |
 | `bandcamp-order-sync` | `src/trigger/tasks/bandcamp-order-sync.ts` | `bandcamp-order-sync-cron` — persists `warehouse_orders.shipping_cost` from Bandcamp line shipping, stores per-line `shipping` in `line_items` JSON, repairs existing orders missing `shipping_cost` when API returns shipping |
 | `bandcamp-mark-shipped` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `src/actions/bandcamp-shipping.ts`, `bandcamp-mark-shipped-cron` |
 | `pirate-ship-import` | `src/trigger/tasks/pirate-ship-import.ts` | `src/actions/pirate-ship.ts` — **rewritten 2026-04-13**: multi-tier org matching (exact order → ilike fallback → alias → review queue), two-layer tracking dedup (pre-check + 23505 catch), auto-links `order_id` + copies `bandcamp_payment_id`, creates real `warehouse_shipment_items` from order line items, `label_source='pirate_ship'`, import-level metrics in `errors` JSONB, writes `sensor_readings` on failure |
