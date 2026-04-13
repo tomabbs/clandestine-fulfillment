@@ -92,6 +92,7 @@ domains:
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
       - Shopify product sync completeness (tracking, cost, weight, collections, publishing)
+      - Shopify image sync invariants: `productSetCreate` MUST use `files: [FileSetInput!]` (NOT `media`) for images in ProductSetInput (2024-10+). `storeScrapedImages` pushes Bandcamp art via `productCreateMedia`. `upsertImagesBulk` in shopify-sync hydrates `warehouse_product_images` rows with `shopify_image_id` for deduplication. `shopify-image-backfill` task repairs historical data gaps (JSONB→table backfill + Bandcamp art push for imageless products).
 
   - name: database_and_rls
     paths:

@@ -107,6 +107,21 @@ export async function triggerTagCleanup() {
   return { runId: handle.id };
 }
 
+/**
+ * Trigger the shopify-image-backfill task (manual, admin-only).
+ *
+ * Fixes two historical data gaps:
+ * 1. Products synced from Shopify before warehouse_product_images rows were
+ *    properly hydrated — backfills the table from images JSONB.
+ * 2. Products created via bandcamp-sync that got no Shopify image due to the
+ *    `media` vs `files` ProductSetInput field bug — pushes bandcamp_art_url
+ *    via productCreateMedia.
+ */
+export async function triggerShopifyImageBackfill(): Promise<{ runId: string }> {
+  const handle = await tasks.trigger("shopify-image-backfill", {});
+  return { runId: handle.id };
+}
+
 // === Pipeline Health ===
 
 export async function getShippingBillingHealth() {

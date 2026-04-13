@@ -1584,12 +1584,15 @@ export const bandcampSyncTask = task({
                   category: productCategory,
                 }),
               ],
+              // Shopify ProductSetInput uses `files: [FileSetInput!]` (2024-10+).
+              // `media` is not a valid field on ProductSetInput and is silently ignored —
+              // passing it caused all Bandcamp-synced products to be created without images.
               ...(bandcampImageUrl(merchItem.image_url)
                 ? {
-                    media: [
+                    files: [
                       {
                         originalSource: bandcampImageUrl(merchItem.image_url),
-                        mediaContentType: "IMAGE",
+                        alt: title,
                       },
                     ],
                   }
@@ -2090,7 +2093,12 @@ export const bandcampSyncTask = task({
                 severity: "low" as const,
                 title: `Cannot resolve Bandcamp URL: no subdomain for member_band_id ${memberBandId}`,
                 description: `Mapping ${pm.id} (${vInfo.productTitle}) has member_band_id ${memberBandId} which does not match any active connection or member_bands_cache. Set bandcamp_url manually to enable scraping.`,
-                metadata: { mappingId: pm.id, memberBandId, productName: vInfo.productTitle, sku: vInfo.sku },
+                metadata: {
+                  mappingId: pm.id,
+                  memberBandId,
+                  productName: vInfo.productTitle,
+                  sku: vInfo.sku,
+                },
                 status: "open" as const,
                 group_key: `bc_unresolvable_${pm.id}`,
                 occurrence_count: 1,

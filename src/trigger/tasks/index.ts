@@ -27,6 +27,7 @@ export { processShopifyWebhookTask } from "./process-shopify-webhook";
 export { redisBackfillTask } from "./redis-backfill";
 export { sensorCheckTask } from "./sensor-check";
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
+export { shopifyImageBackfillTask } from "./shopify-image-backfill";
 export { shopifyOrderSyncTask } from "./shopify-order-sync";
 export { shopifySyncTask } from "./shopify-sync";
 export { storageCalcTask } from "./storage-calc";
