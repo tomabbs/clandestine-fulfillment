@@ -173,14 +173,26 @@ const PIRATE_SHIP_COLUMNS = {
     "address",
     "address 1",
     "street",
+    "street 1",
     "address line 1",
     "ship to - address 1",
     "ship to address",
+    "ship to address line 1",
+    "recipient address 1",
+    "delivery address line 1",
   ],
   recipientAddress2: ["address 2", "address line 2", "apt", "suite", "ship to - address 2"],
   recipientCity: ["city", "ship to city", "ship to - city"],
   recipientState: ["state", "province", "ship to state", "ship to - state"],
-  recipientZip: ["zip", "postal code", "zip code", "ship to zip", "ship to - zip/postal"],
+  recipientZip: [
+    "zip",
+    "postal code",
+    "zip code",
+    "ship to zip",
+    "ship to - zip/postal",
+    "ship to postal code",
+    "postcode",
+  ],
   recipientCountry: ["country", "country code", "ship to country", "ship to - country"],
   // International / customs fields
   customsDescription: [
@@ -204,16 +216,30 @@ const PIRATE_SHIP_COLUMNS = {
 
 type ColumnKey = keyof typeof PIRATE_SHIP_COLUMNS;
 
+/** Normalize header text so Pirate Ship export variants (hyphens, NBSP) still match aliases. */
+export function normalizePirateShipHeader(h: string): string {
+  return h
+    .toLowerCase()
+    .trim()
+    .replace(/\u00a0/g, " ")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 function buildColumnMap(headerRow: string[]): Map<ColumnKey, number> {
   const map = new Map<ColumnKey, number>();
-  const normalizedHeaders = headerRow.map((h) => h.toLowerCase().trim());
+  const normalizedHeaders = headerRow.map((h) => normalizePirateShipHeader(h));
 
   for (const [key, aliases] of Object.entries(PIRATE_SHIP_COLUMNS) as [
     ColumnKey,
     readonly string[],
   ][]) {
     for (const alias of aliases) {
-      const idx = normalizedHeaders.indexOf(alias);
+      const a = normalizePirateShipHeader(alias);
+      let idx = normalizedHeaders.indexOf(a);
+      if (idx === -1 && a.length >= 10) {
+        idx = normalizedHeaders.findIndex((h) => h === a || h.includes(a));
+      }
       if (idx !== -1) {
         map.set(key, idx);
         break;

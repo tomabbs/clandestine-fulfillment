@@ -47,12 +47,64 @@ interface LabelDataAddress {
   phone?: string | null;
 }
 
+function firstNonEmpty(raw: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = raw[k];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return null;
+}
+
+/** Normalize shipTo / recipient objects (Pirate Ship uses address1 + zip; UI expects street1 + postalCode). */
+function normalizeLabelRecipient(raw: Record<string, unknown>): LabelDataAddress {
+  return {
+    name: firstNonEmpty(raw, ["name", "first_name", "firstName"]) ?? null,
+    company: firstNonEmpty(raw, ["company"]) ?? null,
+    street1:
+      firstNonEmpty(raw, ["street1", "address1", "address_1", "line1", "address_line1"]) ?? null,
+    street2:
+      firstNonEmpty(raw, ["street2", "address2", "address_2", "line2", "address_line2"]) ?? null,
+    city: firstNonEmpty(raw, ["city"]) ?? null,
+    state: firstNonEmpty(raw, ["state", "province", "region"]) ?? null,
+    postalCode:
+      firstNonEmpty(raw, ["postalCode", "zip", "postal_code", "postcode", "zipcode"]) ?? null,
+    country: firstNonEmpty(raw, ["country", "country_code", "countryCode"]) ?? null,
+    phone: firstNonEmpty(raw, ["phone"]) ?? null,
+  };
+}
+
+function recipientFromOrderShippingAddress(addr: Record<string, unknown>): LabelDataAddress {
+  return normalizeLabelRecipient(addr);
+}
+
+function mergeRecipients(
+  fromLabel: LabelDataAddress | null,
+  fromOrder: LabelDataAddress | null,
+): LabelDataAddress | null {
+  if (!fromLabel && !fromOrder) return null;
+  if (!fromLabel) return fromOrder;
+  if (!fromOrder) return fromLabel;
+  return {
+    name: fromLabel.name ?? fromOrder.name ?? null,
+    company: fromLabel.company ?? fromOrder.company ?? null,
+    street1: fromLabel.street1 ?? fromOrder.street1 ?? null,
+    street2: fromLabel.street2 ?? fromOrder.street2 ?? null,
+    city: fromLabel.city ?? fromOrder.city ?? null,
+    state: fromLabel.state ?? fromOrder.state ?? null,
+    postalCode: fromLabel.postalCode ?? fromOrder.postalCode ?? null,
+    country: fromLabel.country ?? fromOrder.country ?? null,
+    phone: fromLabel.phone ?? fromOrder.phone ?? null,
+  };
+}
+
 function extractRecipient(labelData: Record<string, unknown> | null): LabelDataAddress | null {
   if (!labelData) return null;
-  // ShipStation stores recipient under shipTo
-  if (labelData.shipTo) return labelData.shipTo as LabelDataAddress;
-  // Pirate Ship stores recipient under recipient
-  if (labelData.recipient) return labelData.recipient as LabelDataAddress;
+  if (labelData.shipTo && typeof labelData.shipTo === "object") {
+    return normalizeLabelRecipient(labelData.shipTo as Record<string, unknown>);
+  }
+  if (labelData.recipient && typeof labelData.recipient === "object") {
+    return normalizeLabelRecipient(labelData.recipient as Record<string, unknown>);
+  }
   return null;
 }
 
@@ -80,7 +132,7 @@ export async function getShipments(filters: GetShipmentsFilters) {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number), warehouse_shipment_items(id)",
+      "id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost), warehouse_shipment_items(id, quantity)",
       { count: "exact" },
     );
 
@@ -169,7 +221,9 @@ export async function getShipmentDetail(id: string) {
   const [shipmentResult, itemsResult, eventsResult] = await Promise.all([
     supabase
       .from("warehouse_shipments")
-      .select("*, organizations(name), warehouse_orders(order_number)")
+      .select(
+        "*, organizations(name), warehouse_orders(order_number, shipping_address, shipping_cost)",
+      )
       .eq("id", id)
       .single(),
     supabase
@@ -188,8 +242,27 @@ export async function getShipmentDetail(id: string) {
     throw new Error(`Shipment not found: ${shipmentResult.error.message}`);
   }
 
-  const shipment = shipmentResult.data;
+  let shipment = shipmentResult.data;
   const items = itemsResult.data ?? [];
+
+  const orderJoin = shipment.warehouse_orders as {
+    order_number: string | null;
+    shipping_address: Record<string, unknown> | null;
+    shipping_cost: number | string | null;
+  } | null;
+
+  let recipient = extractRecipient(shipment.label_data as Record<string, unknown> | null);
+  const orderAddr = orderJoin?.shipping_address;
+  if (orderAddr && typeof orderAddr === "object" && !Array.isArray(orderAddr)) {
+    recipient = mergeRecipients(recipient, recipientFromOrderShippingAddress(orderAddr));
+  }
+
+  if (shipment.customer_shipping_charged == null && orderJoin?.shipping_cost != null) {
+    const oc = Number(orderJoin.shipping_cost);
+    if (!Number.isNaN(oc)) {
+      shipment = { ...shipment, customer_shipping_charged: oc };
+    }
+  }
 
   // Compute cost breakdown by looking up format costs for each item's SKU
   const skus = Array.from(new Set(items.map((i) => i.sku)));
@@ -270,7 +343,6 @@ export async function getShipmentDetail(id: string) {
   const postage = shipment.shipping_cost ?? 0;
   const totalCost = postage + totalPickPack + totalMaterials;
 
-  const recipient = extractRecipient(shipment.label_data as Record<string, unknown> | null);
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
 
   return {

@@ -340,17 +340,24 @@ function ShipmentTableRow({
 
   const clientName = (shipment.organizations as unknown as { name: string } | null)?.name ?? null;
 
-  // Use total_units (physical units shipped), not line count
-  const itemCount = (shipment as ShipmentRow & { total_units?: number | null }).total_units ?? 0;
+  const lineItems = (
+    shipment as ShipmentRow & { warehouse_shipment_items?: Array<{ quantity?: number | null }> }
+  ).warehouse_shipment_items;
+  const unitsFromLines = lineItems?.reduce((s, row) => s + (Number(row.quantity) || 0), 0) ?? 0;
+  const storedUnits = (shipment as ShipmentRow & { total_units?: number | null }).total_units ?? 0;
+  // Pirate Ship imports may omit total_units; prefer summed line quantities when higher
+  const itemCount = Math.max(storedUnits, unitsFromLines);
 
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
   const carrierLabel = getCarrierLabel(shipment.carrier);
   const labelSource = (shipment as ShipmentRow & { label_source?: string | null }).label_source;
 
-  // Shipping gap indicator
+  const orderShippingCost =
+    (shipment.warehouse_orders as { shipping_cost?: number | null } | null)?.shipping_cost ?? null;
+  // Shipping gap indicator — prefer snapshot on shipment; fall back to order shipping (e.g. Pirate Ship import)
   const customerCharged =
     (shipment as ShipmentRow & { customer_shipping_charged?: number | null })
-      .customer_shipping_charged ?? null;
+      .customer_shipping_charged ?? (orderShippingCost != null ? Number(orderShippingCost) : null);
   const postage = shipment.shipping_cost ?? null;
   const shippingGap = customerCharged != null && postage != null ? customerCharged - postage : null;
 
@@ -625,8 +632,7 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
               (shipment as { customer_shipping_charged?: number | null })
                 .customer_shipping_charged ?? null;
             /** Customer shipping collected minus total fulfillment cost (postage + materials + pick/pack + …). */
-            const fulfillmentDiff =
-              charged != null ? charged - costBreakdown.total : null;
+            const fulfillmentDiff = charged != null ? charged - costBreakdown.total : null;
             return (
               <dl className="text-sm space-y-1">
                 {charged != null && (

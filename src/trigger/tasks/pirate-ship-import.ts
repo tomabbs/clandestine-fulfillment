@@ -1,5 +1,5 @@
 import { logger, task } from "@trigger.dev/sdk";
-import { type ParsedShipmentWithMatch, parseXlsx } from "@/lib/clients/pirate-ship-parser";
+import { parseXlsx } from "@/lib/clients/pirate-ship-parser";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { normalizeOrderNumber } from "@/lib/shared/order-utils";
 
@@ -94,6 +94,7 @@ export const pirateShipImportTask = task({
         order_number: string;
         bandcamp_payment_id: number | null;
         line_items: LineItem[] | null;
+        shipping_cost: number | string | null;
       };
 
       const labelData = (shipment: (typeof parsed.shipments)[number]) => ({
@@ -118,6 +119,9 @@ export const pirateShipImportTask = task({
         shipment: (typeof parsed.shipments)[number],
         orgIdOverride?: string,
       ): Promise<"created" | "duplicate"> => {
+        const customerCharged =
+          matchedOrder.shipping_cost != null ? Number(matchedOrder.shipping_cost) : null;
+
         const { data: newShipment, error: shipmentError } = await supabase
           .from("warehouse_shipments")
           .insert({
@@ -130,6 +134,8 @@ export const pirateShipImportTask = task({
             service: shipment.service,
             ship_date: shipment.shipDate,
             shipping_cost: shipment.cost,
+            customer_shipping_charged:
+              customerCharged != null && !Number.isNaN(customerCharged) ? customerCharged : null,
             weight: shipment.weight,
             status: "shipped",
             label_source: "pirate_ship",
@@ -152,6 +158,8 @@ export const pirateShipImportTask = task({
             .select("sku, quantity, title, variant_title")
             .eq("order_id", matchedOrder.id);
 
+          let totalUnits = 0;
+
           if (orderItems?.length) {
             await supabase.from("warehouse_shipment_items").insert(
               orderItems.map((item, idx) => ({
@@ -164,6 +172,7 @@ export const pirateShipImportTask = task({
                 item_index: idx,
               })),
             );
+            totalUnits = orderItems.reduce((s, i) => s + Number(i.quantity ?? 0), 0);
             metrics.created_with_items++;
           } else if (matchedOrder.line_items?.length) {
             // Fallback: use JSONB line_items on the order (common for Bandcamp orders)
@@ -178,10 +187,18 @@ export const pirateShipImportTask = task({
                 item_index: idx,
               })),
             );
+            totalUnits = matchedOrder.line_items.reduce((s, i) => s + Number(i.quantity ?? 1), 0);
             metrics.created_with_items++;
           } else {
             logger.warn(`Order ${matchedOrder.id} matched but has 0 line items`);
             metrics.created_without_items++;
+          }
+
+          if (totalUnits > 0) {
+            await supabase
+              .from("warehouse_shipments")
+              .update({ total_units: totalUnits })
+              .eq("id", newShipment.id);
           }
         }
 
@@ -215,7 +232,7 @@ export const pirateShipImportTask = task({
           if (normalized) {
             const { data: exactMatch } = await supabase
               .from("warehouse_orders")
-              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
+              .select("id, org_id, order_number, bandcamp_payment_id, line_items, shipping_cost")
               .eq("workspace_id", workspaceId)
               .eq("order_number", normalized)
               .maybeSingle();
@@ -225,15 +242,14 @@ export const pirateShipImportTask = task({
             if (!matchedOrder) {
               const { data: candidates } = await supabase
                 .from("warehouse_orders")
-              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
-              .eq("workspace_id", workspaceId)
-              .ilike("order_number", `%${normalized}%`)
-              .limit(5);
+                .select("id, org_id, order_number, bandcamp_payment_id, line_items, shipping_cost")
+                .eq("workspace_id", workspaceId)
+                .ilike("order_number", `%${normalized}%`)
+                .limit(5);
 
               matchedOrder =
-                candidates?.find(
-                  (o) => normalizeOrderNumber(o.order_number) === normalized,
-                ) ?? null;
+                candidates?.find((o) => normalizeOrderNumber(o.order_number) === normalized) ??
+                null;
             }
 
             if (matchedOrder) matchSource = "order";
@@ -247,12 +263,12 @@ export const pirateShipImportTask = task({
             if (email) {
               const { data: emailMatch } = await supabase
                 .from("warehouse_orders")
-              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
-              .eq("workspace_id", workspaceId)
-              .ilike("customer_email", email)
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle();
+                .select("id, org_id, order_number, bandcamp_payment_id, line_items, shipping_cost")
+                .eq("workspace_id", workspaceId)
+                .ilike("customer_email", email)
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
               if (emailMatch) {
                 matchedOrder = emailMatch;
@@ -263,11 +279,11 @@ export const pirateShipImportTask = task({
             if (!matchedOrder && customerName) {
               const { data: nameMatches } = await supabase
                 .from("warehouse_orders")
-              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
-              .eq("workspace_id", workspaceId)
-              .ilike("customer_name", customerName)
-              .order("created_at", { ascending: false })
-              .limit(1);
+                .select("id, org_id, order_number, bandcamp_payment_id, line_items, shipping_cost")
+                .eq("workspace_id", workspaceId)
+                .ilike("customer_name", customerName)
+                .order("created_at", { ascending: false })
+                .limit(1);
 
               if (nameMatches?.length) {
                 matchedOrder = nameMatches[0];
@@ -278,11 +294,9 @@ export const pirateShipImportTask = task({
 
           // --- Tier 3: Org name alias matching (for bulk/label-to-label shipments) ---
           if (!matchedOrder) {
-            const recipientLower = (
-              shipment.recipientName ??
-              shipment.recipientCompany ??
-              ""
-            ).toLowerCase().trim();
+            const recipientLower = (shipment.recipientName ?? shipment.recipientCompany ?? "")
+              .toLowerCase()
+              .trim();
 
             if (recipientLower) {
               const { data: orgs } = await supabase
@@ -292,7 +306,11 @@ export const pirateShipImportTask = task({
 
               const aliasMatch = orgs?.find((o) => {
                 const orgLower = o.name.toLowerCase().trim();
-                return orgLower === recipientLower || recipientLower.includes(orgLower) || orgLower.includes(recipientLower);
+                return (
+                  orgLower === recipientLower ||
+                  recipientLower.includes(orgLower) ||
+                  orgLower.includes(recipientLower)
+                );
               });
 
               if (aliasMatch) {

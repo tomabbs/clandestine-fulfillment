@@ -263,6 +263,64 @@ describe("shipping server actions", () => {
       expect(result.costBreakdown.materials).toBe(1.0);
       expect(result.costBreakdown.total).toBe(16.0);
     });
+
+    it("normalizes Pirate Ship label_data recipient address1/zip into street1/postalCode", async () => {
+      const shipmentId = "550e8400-e29b-41d4-a716-446655440001";
+
+      mockFrom.mockImplementation((table) => {
+        if (table === "warehouse_shipments") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: {
+                    id: shipmentId,
+                    tracking_number: "AH0Y1",
+                    carrier: "Asendia",
+                    shipping_cost: 10,
+                    label_data: {
+                      recipient: {
+                        name: "International Buyer",
+                        address1: "456 Rue Example",
+                        city: "Paris",
+                        zip: "75001",
+                        country: "FR",
+                      },
+                    },
+                    warehouse_orders: null,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_shipment_items") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_tracking_events") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        return { select: mockSelect };
+      });
+
+      const result = await getShipmentDetail(shipmentId);
+      expect(result.recipient?.street1).toBe("456 Rue Example");
+      expect(result.recipient?.postalCode).toBe("75001");
+      expect(result.recipient?.country).toBe("FR");
+    });
   });
 
   describe("exportShipmentsCsv", () => {
