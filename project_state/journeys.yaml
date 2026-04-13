@@ -211,3 +211,12 @@ journeys:
       - monthly-billing pre-flight check verifies storage_fee exists
       - billing snapshot warnings embedded in snapshot_data
       - sensor_readings written on task completion/failure
+
+  - id: list_pagination_session_prefs
+    area: ui
+    paths:
+      - src/lib/shared/list-pagination-preference.ts
+      - src/lib/hooks/use-list-pagination-preference.ts
+    status: green
+    checks:
+      - rows-per-page and current page restore from sessionStorage per list route after detail navigation

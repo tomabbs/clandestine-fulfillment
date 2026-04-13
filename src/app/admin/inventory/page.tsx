@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -54,6 +55,7 @@ export default function InventoryPage() {
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
   });
+  useListPaginationPreference("admin/inventory", filters, setFilters);
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [adjustDialog, setAdjustDialog] = useState<{
     sku: string;

@@ -52,6 +52,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { BC_GENRES } from "@/lib/shared/genre-taxonomy";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -864,6 +865,13 @@ function SalesHistoryTab({ workspaceId }: { workspaceId: string }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+  useListPaginationPreferenceSplit(
+    "admin/settings/bandcamp/sales-history",
+    page,
+    pageSize,
+    setPage,
+    setPageSize,
+  );
 
   const { data, isLoading, refetch, isFetching } = useAppQuery({
     queryKey: queryKeys.bandcamp.salesOverview(workspaceId),

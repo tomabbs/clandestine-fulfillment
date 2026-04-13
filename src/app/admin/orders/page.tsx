@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -48,6 +49,7 @@ export default function AdminOrdersPage() {
     search: "",
     orgId: "",
   });
+  useListPaginationPreference("admin/orders", filters, setFilters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({

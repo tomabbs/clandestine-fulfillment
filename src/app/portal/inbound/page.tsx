@@ -4,10 +4,15 @@ import { Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { getClientInboundShipments, type InboundShipmentWithOrg } from "@/actions/inbound";
-import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PaginationBar,
+} from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import type { InboundStatus } from "@/lib/shared/types";
@@ -30,7 +35,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function PortalInboundPage() {
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(50);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+  useListPaginationPreferenceSplit("portal/inbound", page, pageSize, setPage, setPageSize);
 
   const { data, isLoading, error } = useAppQuery<{ data: InboundShipmentWithOrg[]; count: number }>(
     {

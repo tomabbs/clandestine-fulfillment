@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -46,6 +47,7 @@ export default function AdminInboundPage() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+  useListPaginationPreferenceSplit("admin/inbound", page, pageSize, setPage, setPageSize);
 
   const filters: InboundFilters = {
     status: activeTab === "all" ? undefined : (activeTab as InboundFilters["status"]),

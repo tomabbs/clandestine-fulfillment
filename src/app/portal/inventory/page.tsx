@@ -7,7 +7,7 @@ import {
   getInventoryDetail,
   updateInventoryBuffer,
 } from "@/actions/inventory";
-import { PaginationBar } from "@/components/shared/pagination-bar";
+import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -27,8 +28,9 @@ export default function InventoryPage() {
     format: "",
     search: "",
     page: 1,
-    pageSize: 50,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
+  useListPaginationPreference("portal/inventory", filters, setFilters);
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
 
   const queryFilters = {

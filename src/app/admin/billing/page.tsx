@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import type { WarehouseBillingRule, WarehouseFormatCost } from "@/lib/shared/types";
@@ -157,6 +158,7 @@ function StatusBadge({ status }: { status: string }) {
 function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+  useListPaginationPreferenceSplit("admin/billing/snapshots", page, pageSize, setPage, setPageSize);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({

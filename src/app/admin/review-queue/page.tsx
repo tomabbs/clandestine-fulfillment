@@ -28,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -58,6 +59,7 @@ export default function ReviewQueuePage() {
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE as PageSize,
   });
+  useListPaginationPreference("admin/review-queue", filters, setFilters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [assignInput, setAssignInput] = useState("");

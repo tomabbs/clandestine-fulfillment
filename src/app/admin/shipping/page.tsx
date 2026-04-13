@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -85,6 +86,7 @@ export default function ShippingPage() {
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
   });
+  useListPaginationPreference("admin/shipping", filters, setFilters);
   const [searchInput, setSearchInput] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -633,19 +635,6 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
                   <dt>Postage</dt>
                   <dd className="font-mono">{formatCurrency(costBreakdown.postage)}</dd>
                 </div>
-                {gap != null && (
-                  <div
-                    className={`flex justify-between border-t pt-1 font-medium ${
-                      gap >= 0 ? "text-green-700" : "text-red-600"
-                    }`}
-                  >
-                    <dt>Shipping difference</dt>
-                    <dd className="font-mono">
-                      {gap >= 0 ? "+" : ""}
-                      {formatCurrency(gap)}
-                    </dd>
-                  </div>
-                )}
                 <div className="flex justify-between">
                   <dt>Materials</dt>
                   <dd className="font-mono">{formatCurrency(costBreakdown.materials)}</dd>
@@ -667,9 +656,22 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
                   </div>
                 )}
                 <div className="flex justify-between border-t pt-1 font-medium">
-                  <dt>Total Clandestine Cost</dt>
+                  <dt>Total Cost</dt>
                   <dd className="font-mono">{formatCurrency(costBreakdown.total)}</dd>
                 </div>
+                {gap != null && (
+                  <div
+                    className={`flex justify-between border-t pt-1 font-medium ${
+                      gap >= 0 ? "text-green-700" : "text-red-600"
+                    }`}
+                  >
+                    <dt>Shipping difference</dt>
+                    <dd className="font-mono">
+                      {gap >= 0 ? "+" : ""}
+                      {formatCurrency(gap)}
+                    </dd>
+                  </div>
+                )}
               </dl>
             );
           })()}

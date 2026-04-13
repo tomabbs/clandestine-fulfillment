@@ -3,7 +3,7 @@
 import { ChevronDown, ChevronRight, DollarSign, MapPin } from "lucide-react";
 import { useState } from "react";
 import { getClientMailOrders, getMailOrderPayoutSummary } from "@/actions/mail-orders";
-import { PaginationBar } from "@/components/shared/pagination-bar";
+import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 type MailOrderRow = Awaited<ReturnType<typeof getClientMailOrders>>["orders"][number];
@@ -129,10 +130,11 @@ function OrderDetail({ order }: { order: MailOrderRow }) {
 export default function PortalMailOrderPage() {
   const [filters, setFilters] = useState({
     page: 1,
-    pageSize: 50,
+    pageSize: DEFAULT_PAGE_SIZE,
     status: "",
     payoutStatus: "",
   });
+  useListPaginationPreference("portal/mail-order", filters, setFilters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useAppQuery({

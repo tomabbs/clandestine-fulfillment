@@ -3,7 +3,7 @@
 import { CheckCircle, Package } from "lucide-react";
 import { useState } from "react";
 import { getClientOrderDetail, getClientOrders, getTrackingEvents } from "@/actions/orders";
-import { PaginationBar } from "@/components/shared/pagination-bar";
+import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -17,13 +17,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 type OrderRow = Awaited<ReturnType<typeof getClientOrders>>["orders"][number];
 
 export default function PortalFulfillmentPage() {
-  const [filters, setFilters] = useState({ page: 1, pageSize: 50, status: "", search: "" });
+  const [filters, setFilters] = useState({
+    page: 1,
+    pageSize: DEFAULT_PAGE_SIZE,
+    status: "",
+    search: "",
+  });
+  useListPaginationPreference("portal/fulfillment", filters, setFilters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useAppQuery({

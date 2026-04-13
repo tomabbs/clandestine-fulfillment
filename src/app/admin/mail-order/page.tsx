@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 type MailOrderRow = Awaited<ReturnType<typeof getMailOrders>>["orders"][number];
@@ -155,6 +156,7 @@ export default function AdminMailOrderPage() {
     status: "",
     payoutStatus: "",
   });
+  useListPaginationPreference("admin/mail-order", filters, setFilters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading } = useAppQuery({

@@ -5,7 +5,11 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getClientReleases } from "@/actions/catalog";
-import { type PageSize, PaginationBar } from "@/components/shared/pagination-bar";
+import {
+  DEFAULT_PAGE_SIZE,
+  type PageSize,
+  PaginationBar,
+} from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -17,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -77,7 +82,8 @@ export default function CatalogPage() {
   const router = useRouter();
   const [hydrated, setHydrated] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<PageSize>(50);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
+  useListPaginationPreferenceSplit("portal/catalog", page, pageSize, setPage, setPageSize);
 
   const { data, isLoading, error } = useAppQuery({
     queryKey: [...queryKeys.clientReleases.list(), page, pageSize],

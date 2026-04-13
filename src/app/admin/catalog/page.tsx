@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
+import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -63,6 +64,8 @@ export default function CatalogPage() {
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
   });
+
+  useListPaginationPreference("admin/catalog", filters, setFilters);
 
   const queryFilters = {
     ...(filters.orgId && { orgId: filters.orgId }),
