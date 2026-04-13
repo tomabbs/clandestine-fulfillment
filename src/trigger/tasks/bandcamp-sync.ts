@@ -245,12 +245,16 @@ export const bandcampScrapePageTask = task({
     // Circuit breaker guard — skip if domain is in cooldown
     if (subdomain) {
       const { allowed, effectiveRps } = await checkCircuitBreaker(
-        supabase, payload.workspaceId, subdomain,
+        supabase,
+        payload.workspaceId,
+        subdomain,
         { ignoreOpen: payload.isDeadUrlProbe ?? false },
       );
       if (!allowed) {
         logger.info("Circuit breaker open, skipping scrape", {
-          subdomain, url: payload.url, mappingId: payload.mappingId,
+          subdomain,
+          url: payload.url,
+          mappingId: payload.mappingId,
         });
         return { success: false, reason: "circuit_open", subdomain };
       }
@@ -316,9 +320,13 @@ export const bandcampScrapePageTask = task({
 
       // Write scraped metadata — category-gated enrichment
       if (!payload.productCategory) {
-        logger.warn("Missing productCategory in scrape payload — defaulting to album expectations", {
-          mappingId: payload.mappingId, url: payload.url,
-        });
+        logger.warn(
+          "Missing productCategory in scrape payload — defaulting to album expectations",
+          {
+            mappingId: payload.mappingId,
+            url: payload.url,
+          },
+        );
       }
       const category = (payload.productCategory ?? "other") as ProductCategory;
       const expectations = CATEGORY_EXPECTED_FIELDS[category] ?? CATEGORY_EXPECTED_FIELDS.other;
@@ -371,7 +379,8 @@ export const bandcampScrapePageTask = task({
         mappingUpdate.bandcamp_tags = scraped.tags.length > 0 ? scraped.tags : null;
         mappingUpdate.bandcamp_tag_norms = scraped.tagNorms.length > 0 ? scraped.tagNorms : null;
         mappingUpdate.bandcamp_primary_genre = tagMatch?.bcGenre ?? null;
-        mappingUpdate.bandcamp_tags_fetched_at = scraped.tags.length > 0 ? new Date().toISOString() : null;
+        mappingUpdate.bandcamp_tags_fetched_at =
+          scraped.tags.length > 0 ? new Date().toISOString() : null;
       }
 
       const { error: updateErr } = await supabase
@@ -389,7 +398,8 @@ export const bandcampScrapePageTask = task({
         .select("id");
       if (resolved && resolved.length > 0) {
         logger.info("Auto-resolved review queue items on scrape success", {
-          mappingId: payload.mappingId, resolvedCount: resolved.length,
+          mappingId: payload.mappingId,
+          resolvedCount: resolved.length,
         });
       }
 
@@ -658,11 +668,14 @@ export const bandcampScrapePageTask = task({
 
       if (newStatus === "dead") {
         logger.warn("Mapping marked DEAD", {
-          mappingId: payload.mappingId, url: payload.url, consecutiveFailures: newCount,
+          mappingId: payload.mappingId,
+          url: payload.url,
+          consecutiveFailures: newCount,
         });
       } else if (newStatus === "probation") {
         logger.info("Mapping entered probation", {
-          mappingId: payload.mappingId, consecutiveFailures: newCount,
+          mappingId: payload.mappingId,
+          consecutiveFailures: newCount,
         });
       }
 
@@ -673,7 +686,12 @@ export const bandcampScrapePageTask = task({
 
       // Dead URL probes: suppress review queue items, only track failures
       if (payload.isDeadUrlProbe) {
-        return { success: false, reason: "dead_probe_failed", httpStatus, consecutiveFailures: newCount };
+        return {
+          success: false,
+          reason: "dead_probe_failed",
+          httpStatus,
+          consecutiveFailures: newCount,
+        };
       }
 
       if (is404 && payload.urlIsConstructed) {
@@ -701,7 +719,10 @@ export const bandcampScrapePageTask = task({
 
       if (error instanceof BandcampFetchError) {
         const isBlockedByCloudflare =
-          (httpStatus ?? 0) === 403 || (httpStatus ?? 0) === 408 || (httpStatus ?? 0) === 429 || (httpStatus ?? 0) === 503;
+          (httpStatus ?? 0) === 403 ||
+          (httpStatus ?? 0) === 408 ||
+          (httpStatus ?? 0) === 429 ||
+          (httpStatus ?? 0) === 503;
 
         await supabase.from("warehouse_review_queue").upsert(
           {
@@ -767,7 +788,10 @@ async function storeScrapedImages(
   // entirely to avoid cross-pollinating album art across unrelated products.
   if (expectedAlbumTitle && scraped.title) {
     const normalize = (s: string) =>
-      s.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .trim();
     const expected = normalize(expectedAlbumTitle);
     const actual = normalize(scraped.title);
     if (expected && actual && !actual.includes(expected) && !expected.includes(actual)) {
@@ -960,9 +984,9 @@ async function triggerScrapeIfNeeded(
   const scrapeUrl = (merchItem.url as string | null) ?? mapping.bandcamp_url;
   if (!scrapeUrl) return;
 
-  const cat = mapping.product_category ?? classifyProduct(
-    mapping.bandcamp_type_name, scrapeUrl, merchItem.album_title ?? null,
-  );
+  const cat =
+    mapping.product_category ??
+    classifyProduct(mapping.bandcamp_type_name, scrapeUrl, merchItem.album_title ?? null);
 
   await bandcampScrapePageTask.trigger({
     url: scrapeUrl,
@@ -1022,7 +1046,8 @@ export const bandcampSyncTask = task({
         if (band.member_bands) {
           for (const mb of band.member_bands) {
             bandLookup.set(mb.band_id, { ...mb, member_bands: [] });
-            if (mb.subdomain) subdomainLookup.set(mb.subdomain.toLowerCase(), { ...mb, member_bands: [] });
+            if (mb.subdomain)
+              subdomainLookup.set(mb.subdomain.toLowerCase(), { ...mb, member_bands: [] });
           }
         }
       }
@@ -1398,8 +1423,7 @@ export const bandcampSyncTask = task({
           // Prefer subdomain-resolved artist when member_band_id points to the
           // label itself (or is absent). This prevents albums from inheriting
           // the label name as the artist.
-          const isLabelMemberBand =
-            memberBand && band && memberBand.band_id === band.band_id;
+          const isLabelMemberBand = memberBand && band && memberBand.band_id === band.band_id;
           const artistName =
             (!isLabelMemberBand && memberBand?.name) ||
             subdomainBand?.name ||
@@ -1597,8 +1621,7 @@ export const bandcampSyncTask = task({
                     `query V($id: ID!) { product(id: $id) { variants(first: 1) { nodes { inventoryItem { id } } } } }`,
                     { id: shopifyProductId },
                   );
-                  const invItemId =
-                    varData?.product?.variants?.nodes?.[0]?.inventoryItem?.id;
+                  const invItemId = varData?.product?.variants?.nodes?.[0]?.inventoryItem?.id;
                   if (invItemId) {
                     await inventoryItemUpdate(invItemId, {
                       measurement: { weight: { value: weight.value, unit: weight.unit } },
@@ -1914,14 +1937,20 @@ export const bandcampSyncTask = task({
           if (!urlSlug || urlSlug.length < 2 || /^-+$/.test(urlSlug)) {
             await supabase
               .from("bandcamp_product_mappings")
-              .update({ bandcamp_url: null, bandcamp_url_source: null, updated_at: new Date().toISOString() })
+              .update({
+                bandcamp_url: null,
+                bandcamp_url_source: null,
+                updated_at: new Date().toISOString(),
+              })
               .eq("id", pm.id);
-            logger.warn("Sweep group 1: cleared bad URL slug", { mappingId: pm.id, url: pm.bandcamp_url });
+            logger.warn("Sweep group 1: cleared bad URL slug", {
+              mappingId: pm.id,
+              url: pm.bandcamp_url,
+            });
             continue;
           }
-          const cat = pm.product_category ?? classifyProduct(
-            pm.bandcamp_type_name, pm.bandcamp_url, null,
-          );
+          const cat =
+            pm.product_category ?? classifyProduct(pm.bandcamp_type_name, pm.bandcamp_url, null);
           await bandcampScrapePageTask.trigger({
             url: pm.bandcamp_url as string,
             mappingId: pm.id,
@@ -1934,7 +1963,10 @@ export const bandcampSyncTask = task({
         }
       }
 
-      // Group 2: no URL — construct from band subdomain + product title.
+      // Group 2: no URL — LAST RESORT URL construction from band subdomain + product title.
+      //
+      // Priority: sales crossref (97% match) > manual entry > construction (causes ~75% of errors).
+      // Only construct URLs for IN-STOCK items. OOS items without a URL are not worth the error noise.
       //
       // FIX (2026-04-01): Original code used org_id as the Map key, but ALL 17 connections
       // share org_id: 382a91dd (Clandestine Distribution). Map overwrites duplicates →
@@ -1948,7 +1980,7 @@ export const bandcampSyncTask = task({
         .eq("workspace_id", workspaceId)
         .is("bandcamp_url", null)
         .is("bandcamp_type_name", null)
-        .limit(100);
+        .limit(200);
 
       const g2SweepSelected = noUrlNoType?.length ?? 0;
       let g2SweepTriggered = 0;
@@ -1956,9 +1988,10 @@ export const bandcampSyncTask = task({
       let g2SkipNoSubdomain = 0;
       let g2SkipBadSlug = 0;
       let g2SkipUrlRace = 0;
+      let g2SkipOos = 0;
 
       if (noUrlNoType && noUrlNoType.length > 0) {
-        // Resolve variant → product title
+        // Resolve variant → product title + inventory
         const variantIds = noUrlNoType.map((m) => m.variant_id);
         const { data: variants } = await supabase
           .from("warehouse_product_variants")
@@ -1975,6 +2008,18 @@ export const bandcampSyncTask = task({
           ]),
         );
 
+        // Check in-stock status — only construct URLs for in-stock items
+        const inStockSet = new Set<string>();
+        for (let i = 0; i < variantIds.length; i += 200) {
+          const batch = variantIds.slice(i, i + 200);
+          const { data: inv } = await supabase
+            .from("warehouse_inventory_levels")
+            .select("variant_id, available")
+            .in("variant_id", batch)
+            .gt("available", 0);
+          for (const row of inv ?? []) inStockSet.add(row.variant_id);
+        }
+
         // Build band_id → subdomain map (17 unique keys — no overwrite issue)
         const { data: allConns } = await supabase
           .from("bandcamp_connections")
@@ -1990,7 +2035,6 @@ export const bandcampSyncTask = task({
         );
 
         // Secondary: label sub-artists via member_bands_cache
-        // (e.g. NSR member artists whose albums live at northernspyrecords.bandcamp.com)
         interface MemberBandEntry {
           band_id: number;
         }
@@ -2020,6 +2064,12 @@ export const bandcampSyncTask = task({
         }
 
         for (const pm of noUrlNoType) {
+          // Skip OOS items — URL construction is error-prone and not worth it for OOS
+          if (!inStockSet.has(pm.variant_id)) {
+            g2SkipOos++;
+            continue;
+          }
+
           const vInfo = variantMap.get(pm.variant_id);
           if (!vInfo?.productTitle) {
             g2SkipNoVariantTitle++;
@@ -2033,15 +2083,14 @@ export const bandcampSyncTask = task({
             null;
 
           if (!subdomain) {
-            // Cannot resolve — log to review queue for manual intervention (~7% of items)
             await supabase.from("warehouse_review_queue").upsert(
               {
                 workspace_id: workspaceId,
                 category: "bandcamp_scraper",
                 severity: "low" as const,
-                title: `Cannot construct Bandcamp URL: no subdomain for member_band_id ${memberBandId}`,
-                description: `Mapping ${pm.id} has member_band_id ${memberBandId} which does not match any active connection or member_bands_cache. Set bandcamp_url manually to enable scraping.`,
-                metadata: { mappingId: pm.id, memberBandId },
+                title: `Cannot resolve Bandcamp URL: no subdomain for member_band_id ${memberBandId}`,
+                description: `Mapping ${pm.id} (${vInfo.productTitle}) has member_band_id ${memberBandId} which does not match any active connection or member_bands_cache. Set bandcamp_url manually to enable scraping.`,
+                metadata: { mappingId: pm.id, memberBandId, productName: vInfo.productTitle, sku: vInfo.sku },
                 status: "open" as const,
                 group_key: `bc_unresolvable_${pm.id}`,
                 occurrence_count: 1,
@@ -2065,7 +2114,7 @@ export const bandcampSyncTask = task({
             continue;
           }
 
-          logger.info("Sweep group 2 item", {
+          logger.info("Sweep group 2 item (constructed, in-stock only)", {
             mappingId: pm.id,
             memberBandId,
             subdomain,
@@ -2104,7 +2153,7 @@ export const bandcampSyncTask = task({
           g2SweepTriggered++;
         }
         logger.info(
-          `Sweep group 2: triggered ${g2SweepTriggered}/${noUrlNoType.length} scrapes for no-URL mappings`,
+          `Sweep group 2: triggered ${g2SweepTriggered}/${noUrlNoType.length} scrapes (skipped ${g2SkipOos} OOS)`,
         );
       }
 
@@ -2130,9 +2179,8 @@ export const bandcampSyncTask = task({
           `Sweep group 3: ${scrapedNoAbout.length} already-scraped mappings missing about/credits/upc`,
         );
         for (const pm of scrapedNoAbout) {
-          const g3Cat = pm.product_category ?? classifyProduct(
-            pm.bandcamp_type_name, pm.bandcamp_url, null,
-          );
+          const g3Cat =
+            pm.product_category ?? classifyProduct(pm.bandcamp_type_name, pm.bandcamp_url, null);
           await bandcampScrapePageTask.trigger({
             url: pm.bandcamp_url as string,
             mappingId: pm.id,

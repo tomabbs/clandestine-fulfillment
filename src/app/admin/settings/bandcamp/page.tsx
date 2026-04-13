@@ -7,6 +7,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   BarChart3,
+  Check,
   CheckCircle2,
   Download,
   ExternalLink,
@@ -31,6 +32,7 @@ import {
   getBandcampTrending,
   getOrganizationsForWorkspace,
   triggerBandcampSync,
+  updateMappingUrl,
 } from "@/actions/bandcamp";
 import {
   DEFAULT_PAGE_SIZE,
@@ -140,6 +142,209 @@ function timeAgo(dateStr: string) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
+// ─── Open Issues Card (with inline URL edit) ────────────────────────────────
+
+type EnrichedReviewItem = {
+  id: string;
+  title: string;
+  severity: string;
+  group_key: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  productName: string | null;
+  sku: string | null;
+  accountName: string | null;
+  subdomain: string | null;
+  scrapeStatus: string | null;
+  urlSource: string | null;
+};
+
+function OpenIssuesCard({
+  reviewItems,
+  reviewCount,
+  onIssueUpdated,
+}: {
+  reviewItems: EnrichedReviewItem[];
+  reviewCount: number;
+  onIssueUpdated: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveUrl = async (mappingId: string) => {
+    if (!urlInput.trim()) return;
+    setSaving(true);
+    try {
+      const result = await updateMappingUrl({ mappingId, url: urlInput.trim() });
+      if (result.success) {
+        setEditingId(null);
+        setUrlInput("");
+        onIssueUpdated();
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4" /> Open Issues ({reviewCount})
+        </CardTitle>
+        <CardDescription>
+          Click a row to expand details and set the correct Bandcamp URL.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Product</TableHead>
+              <TableHead>Account</TableHead>
+              <TableHead>Issue</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Severity</TableHead>
+              <TableHead>When</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {reviewItems.map((item) => {
+              const mappingId = (item.metadata as Record<string, unknown>)?.mappingId as
+                | string
+                | undefined;
+              const isExpanded = editingId === item.id;
+              return (
+                <React.Fragment key={item.id}>
+                  <TableRow
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => {
+                      if (isExpanded) {
+                        setEditingId(null);
+                      } else {
+                        setEditingId(item.id);
+                        setUrlInput(
+                          ((item.metadata as Record<string, unknown>)?.url as string) ?? "",
+                        );
+                      }
+                    }}
+                  >
+                    <TableCell>
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate max-w-[220px]">
+                          {item.productName ?? "Unknown product"}
+                        </p>
+                        {item.sku && (
+                          <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate">
+                      {item.accountName ?? item.subdomain ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-sm max-w-[250px] truncate">{item.title}</TableCell>
+                    <TableCell>
+                      {item.scrapeStatus && (
+                        <Badge
+                          variant={
+                            item.scrapeStatus === "dead"
+                              ? "destructive"
+                              : item.scrapeStatus === "probation"
+                                ? "secondary"
+                                : "outline"
+                          }
+                          className="text-xs"
+                        >
+                          {item.scrapeStatus}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          item.severity === "critical"
+                            ? "destructive"
+                            : item.severity === "medium"
+                              ? "secondary"
+                              : "outline"
+                        }
+                      >
+                        {item.severity}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {timeAgo(item.created_at)}
+                    </TableCell>
+                  </TableRow>
+                  {isExpanded && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="bg-muted/30 p-4">
+                        <div className="space-y-3">
+                          <div className="flex gap-4 text-xs text-muted-foreground">
+                            {item.urlSource && <span>URL source: <strong>{item.urlSource}</strong></span>}
+                            {item.subdomain && (
+                              <a
+                                href={`https://${item.subdomain}.bandcamp.com/merch`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                {item.subdomain}.bandcamp.com/merch
+                                <ExternalLink className="h-3 w-3 inline ml-0.5" />
+                              </a>
+                            )}
+                          </div>
+                          {mappingId && (
+                            <div className="flex gap-2 items-center">
+                              <Input
+                                placeholder="Paste correct Bandcamp URL..."
+                                value={urlInput}
+                                onChange={(e) => setUrlInput(e.target.value)}
+                                className="flex-1 h-8"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              <Button
+                                size="sm"
+                                disabled={saving || !urlInput.trim()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSaveUrl(mappingId);
+                                }}
+                              >
+                                {saving ? (
+                                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                ) : (
+                                  <Check className="h-3 w-3 mr-1" />
+                                )}
+                                Set URL & Resolve
+                              </Button>
+                            </div>
+                          )}
+                          {item.metadata && (
+                            <details className="text-xs">
+                              <summary className="cursor-pointer text-muted-foreground">
+                                Raw metadata
+                              </summary>
+                              <pre className="mt-1 bg-muted p-2 rounded overflow-auto max-h-32">
+                                {JSON.stringify(item.metadata, null, 2)}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Bandcamp Health Tab ─────────────────────────────────────────────────────
 
 function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
@@ -185,7 +390,7 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
     art: 0,
     byCategory: { apparel: 0, merch: 0, bundle: 0, other: 0 },
   };
-  const urls = data.urlSources ?? { scraper_verified: 0, constructed: 0, orders_api: 0, none: 0 };
+  const urls = data.urlSources ?? { scraper_verified: 0, constructed: 0, orders_api: 0, sales_crossref: 0, manual: 0, none: 0 };
   const totalWithUrl = data.totalWithUrl ?? 0;
   const scrapeStats = data.scrapeStats ?? { total: 0, success: 0, failed: 0, blocked: 0 };
 
@@ -526,18 +731,26 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
           <CardTitle className="text-base">URL Sources</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
+          <div className="grid grid-cols-3 md:grid-cols-7 gap-3 text-center">
             <div>
               <p className="text-lg font-semibold tabular-nums">{urls.scraper_verified}</p>
               <p className="text-xs text-muted-foreground">Scraper verified</p>
             </div>
             <div>
-              <p className="text-lg font-semibold tabular-nums">{urls.constructed}</p>
-              <p className="text-xs text-muted-foreground">Constructed</p>
+              <p className="text-lg font-semibold tabular-nums">{urls.sales_crossref}</p>
+              <p className="text-xs text-muted-foreground">Sales crossref</p>
             </div>
             <div>
               <p className="text-lg font-semibold tabular-nums">{urls.orders_api}</p>
-              <p className="text-xs text-muted-foreground">Sales / Orders API</p>
+              <p className="text-xs text-muted-foreground">Orders API</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums">{urls.manual}</p>
+              <p className="text-xs text-muted-foreground">Manual</p>
+            </div>
+            <div>
+              <p className="text-lg font-semibold tabular-nums text-amber-500">{urls.constructed}</p>
+              <p className="text-xs text-muted-foreground">Constructed</p>
             </div>
             <div>
               <p className="text-lg font-semibold tabular-nums text-green-600">{totalWithUrl}</p>
@@ -553,64 +766,11 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
 
       {/* Row 7: Open Issues */}
       {data.reviewItems.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" /> Open Issues ({data.reviewCount})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>When</TableHead>
-                  <TableHead className="w-20" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.reviewItems.map((item) => {
-                  const mappingId = (item.metadata as Record<string, unknown>)?.mappingId as
-                    | string
-                    | undefined;
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell className="text-sm max-w-[300px] truncate">{item.title}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            item.severity === "critical"
-                              ? "destructive"
-                              : item.severity === "medium"
-                                ? "secondary"
-                                : "outline"
-                          }
-                        >
-                          {item.severity}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {timeAgo(item.created_at)}
-                      </TableCell>
-                      <TableCell>
-                        {mappingId && (
-                          <a
-                            href={`/admin/catalog/${mappingId}`}
-                            className="text-blue-600 hover:underline"
-                          >
-                            <ExternalLink className="h-3 w-3 inline mr-1" />
-                            View
-                          </a>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <OpenIssuesCard
+          reviewItems={data.reviewItems}
+          reviewCount={data.reviewCount}
+          onIssueUpdated={() => refetch()}
+        />
       )}
     </div>
   );

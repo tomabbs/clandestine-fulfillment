@@ -315,7 +315,9 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
   const memberBandIds = Array.from(memberBandSubdomain.keys());
   const { data: pending } = await serviceClient
     .from("bandcamp_product_mappings")
-    .select("id, bandcamp_url, variant_id, bandcamp_member_band_id, product_category, bandcamp_type_name")
+    .select(
+      "id, bandcamp_url, variant_id, bandcamp_member_band_id, product_category, bandcamp_type_name",
+    )
     .eq("workspace_id", conn.workspace_id)
     .in("bandcamp_member_band_id", memberBandIds)
     .or("bandcamp_type_name.is.null,bandcamp_about.is.null");
@@ -383,9 +385,7 @@ export async function triggerBandcampConnectionBackfill(connectionId: string) {
       if (!urlWritten) continue;
     }
 
-    const cat = m.product_category ?? classifyProduct(
-      m.bandcamp_type_name, scrapeUrl, null,
-    );
+    const cat = m.product_category ?? classifyProduct(m.bandcamp_type_name, scrapeUrl, null);
     await bandcampScrapePageTask.trigger({
       url: scrapeUrl,
       mappingId: m.id,
@@ -498,11 +498,13 @@ export async function getBandcampScraperHealth(workspaceId: string) {
   };
 
   // URL breakdown by source
-  const urlSources = { scraper_verified: 0, constructed: 0, orders_api: 0, none: 0 };
+  const urlSources = { scraper_verified: 0, constructed: 0, orders_api: 0, sales_crossref: 0, manual: 0, none: 0 };
   for (const m of mappings ?? []) {
     if (!m.bandcamp_url) urlSources.none++;
     else if (m.bandcamp_url_source === "scraper_verified") urlSources.scraper_verified++;
     else if (m.bandcamp_url_source === "constructed") urlSources.constructed++;
+    else if (m.bandcamp_url_source === "sales_crossref") urlSources.sales_crossref++;
+    else if (m.bandcamp_url_source === "manual") urlSources.manual++;
     else if (m.bandcamp_url_source === "orders_api") urlSources.orders_api++;
     else urlSources.orders_api++;
   }
@@ -599,8 +601,8 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     .order("created_at", { ascending: false })
     .limit(10);
 
-  // ── Open issues ──
-  const { data: reviewItems, count: reviewCount } = await supabase
+  // ── Open issues (enriched with product name + account) ──
+  const { data: rawReviewItems, count: reviewCount } = await supabase
     .from("warehouse_review_queue")
     .select("id, title, severity, group_key, metadata, created_at", { count: "exact" })
     .eq("workspace_id", workspaceId)
@@ -608,6 +610,65 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     .eq("status", "open")
     .order("created_at", { ascending: false })
     .limit(25);
+
+  // Enrich review items with product name, SKU, and account
+  const reviewMappingIds = (rawReviewItems ?? [])
+    .map((r) => (r.metadata as Record<string, unknown>)?.mappingId as string)
+    .filter(Boolean);
+  const enrichMap = new Map<string, { productName: string | null; sku: string | null; accountName: string | null; subdomain: string | null; scrapeStatus: string | null; urlSource: string | null }>();
+  if (reviewMappingIds.length > 0) {
+    const { data: enrichMappings } = await supabase
+      .from("bandcamp_product_mappings")
+      .select("id, variant_id, bandcamp_subdomain, bandcamp_url_source, scrape_status, bandcamp_member_band_id")
+      .in("id", reviewMappingIds);
+
+    if (enrichMappings?.length) {
+      const enrichVariantIds = enrichMappings.map((m) => m.variant_id).filter(Boolean);
+      const { data: enrichVariants } = await supabase
+        .from("warehouse_product_variants")
+        .select("id, sku, warehouse_products!inner(title)")
+        .in("id", enrichVariantIds);
+      const variantLookup = new Map(
+        (enrichVariants ?? []).map((v) => [v.id, { sku: v.sku, productTitle: (v.warehouse_products as unknown as { title: string }).title }]),
+      );
+
+      const bandIds = enrichMappings.map((m) => m.bandcamp_member_band_id as number).filter(Boolean);
+      const connLookup = new Map<number, string>();
+      if (bandIds.length > 0) {
+        const { data: conns } = await supabase
+          .from("bandcamp_connections")
+          .select("band_id, band_name")
+          .in("band_id", bandIds);
+        for (const c of conns ?? []) connLookup.set(c.band_id as number, c.band_name as string);
+      }
+
+      for (const m of enrichMappings) {
+        const v = variantLookup.get(m.variant_id);
+        enrichMap.set(m.id, {
+          productName: v?.productTitle ?? null,
+          sku: v?.sku ?? null,
+          accountName: connLookup.get(m.bandcamp_member_band_id as number) ?? null,
+          subdomain: m.bandcamp_subdomain,
+          scrapeStatus: m.scrape_status,
+          urlSource: m.bandcamp_url_source,
+        });
+      }
+    }
+  }
+
+  const reviewItems = (rawReviewItems ?? []).map((r) => {
+    const mappingId = (r.metadata as Record<string, unknown>)?.mappingId as string | undefined;
+    const enrich = mappingId ? enrichMap.get(mappingId) : undefined;
+    return {
+      ...r,
+      productName: enrich?.productName ?? null,
+      sku: enrich?.sku ?? null,
+      accountName: enrich?.accountName ?? null,
+      subdomain: enrich?.subdomain ?? null,
+      scrapeStatus: enrich?.scrapeStatus ?? null,
+      urlSource: enrich?.urlSource ?? null,
+    };
+  });
 
   return {
     total: t,
@@ -626,6 +687,114 @@ export async function getBandcampScraperHealth(workspaceId: string) {
     sensorReadings: sensorReadings ?? [],
     reviewItems: reviewItems ?? [],
     reviewCount: reviewCount ?? 0,
+  };
+}
+
+// === Manual URL update (from review queue / health page) ===
+
+const updateMappingUrlSchema = z.object({
+  mappingId: z.string().uuid(),
+  url: z.string().url(),
+});
+
+export async function updateMappingUrl(input: z.infer<typeof updateMappingUrlSchema>) {
+  await requireAuth();
+  const parsed = updateMappingUrlSchema.parse(input);
+  const supabase = createServiceRoleClient();
+
+  const { data: mapping, error: fetchErr } = await supabase
+    .from("bandcamp_product_mappings")
+    .select("id, workspace_id")
+    .eq("id", parsed.mappingId)
+    .single();
+
+  if (fetchErr || !mapping) {
+    return { success: false, error: "Mapping not found" };
+  }
+
+  const { error: updateErr } = await supabase
+    .from("bandcamp_product_mappings")
+    .update({
+      bandcamp_url: parsed.url,
+      bandcamp_url_source: "manual",
+      scrape_status: "active",
+      consecutive_failures: 0,
+      last_failure_reason: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.mappingId);
+
+  if (updateErr) {
+    return { success: false, error: updateErr.message };
+  }
+
+  // Auto-resolve any open review queue items for this mapping
+  await supabase
+    .from("warehouse_review_queue")
+    .update({ status: "resolved", resolved_at: new Date().toISOString() })
+    .eq("category", "bandcamp_scraper")
+    .eq("status", "open")
+    .like("group_key", `%${parsed.mappingId}%`);
+
+  return { success: true };
+}
+
+// === Fetch mapping context for review queue display ===
+
+export async function getMappingContext(mappingId: string) {
+  const supabase = createServiceRoleClient();
+
+  const { data: mapping } = await supabase
+    .from("bandcamp_product_mappings")
+    .select(
+      "id, variant_id, bandcamp_url, bandcamp_url_source, bandcamp_album_title, bandcamp_subdomain, scrape_status, product_category, bandcamp_member_band_id",
+    )
+    .eq("id", mappingId)
+    .single();
+
+  if (!mapping) return null;
+
+  // Get product name + SKU
+  const { data: variant } = await supabase
+    .from("warehouse_product_variants")
+    .select("sku, warehouse_products!inner(title)")
+    .eq("id", mapping.variant_id)
+    .single();
+
+  // Get account (connection) name
+  const memberBandId = mapping.bandcamp_member_band_id as number | null;
+  let accountName: string | null = null;
+  if (memberBandId) {
+    const { data: conn } = await supabase
+      .from("bandcamp_connections")
+      .select("band_name")
+      .eq("band_id", memberBandId)
+      .single();
+    accountName = conn?.band_name ?? null;
+  }
+  if (!accountName && mapping.bandcamp_subdomain) {
+    const { data: connBySub } = await supabase
+      .from("bandcamp_connections")
+      .select("band_name")
+      .ilike("band_url", `%${mapping.bandcamp_subdomain}%`)
+      .limit(1)
+      .single();
+    accountName = connBySub?.band_name ?? null;
+  }
+
+  return {
+    mappingId: mapping.id,
+    productName: variant
+      ? (variant.warehouse_products as unknown as { title: string }).title
+      : null,
+    sku: variant?.sku ?? null,
+    bandcampUrl: mapping.bandcamp_url,
+    urlSource: mapping.bandcamp_url_source,
+    subdomain: mapping.bandcamp_subdomain,
+    albumTitle: mapping.bandcamp_album_title,
+    scrapeStatus: mapping.scrape_status,
+    productCategory: mapping.product_category,
+    accountName,
   };
 }
 
