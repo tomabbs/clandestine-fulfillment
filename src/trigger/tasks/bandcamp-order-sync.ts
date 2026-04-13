@@ -63,21 +63,46 @@ export const bandcampOrderSyncTask = task({
           for (const [paymentId, orderItems] of Array.from(byPayment.entries())) {
             const first = orderItems[0];
             if (!first) continue;
-            const { data: existing } = await supabase
-              .from("warehouse_orders")
-              .select("id")
-              .eq("workspace_id", workspaceId)
-              .eq("bandcamp_payment_id", paymentId)
-              .maybeSingle();
 
-            if (existing) continue;
+            // Bandcamp repeats shipping on each line; take max (same dollars on every row).
+            const shippingPaid = Math.max(0, ...orderItems.map((i) => Number(i.shipping) || 0));
 
             const lineItems = orderItems.map((i: BandcampOrderItem) => ({
               sku: i.sku,
               title: i.item_name,
               quantity: i.quantity ?? 1,
               price: i.sub_total,
+              shipping: i.shipping ?? 0,
             }));
+
+            const { data: existing } = await supabase
+              .from("warehouse_orders")
+              .select("id, shipping_cost")
+              .eq("workspace_id", workspaceId)
+              .eq("bandcamp_payment_id", paymentId)
+              .maybeSingle();
+
+            if (existing) {
+              const needsShipping =
+                (existing.shipping_cost == null || Number(existing.shipping_cost) === 0) &&
+                shippingPaid > 0;
+              if (needsShipping) {
+                const { error: repairErr } = await supabase
+                  .from("warehouse_orders")
+                  .update({
+                    shipping_cost: shippingPaid,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", existing.id);
+                if (repairErr) {
+                  logger.warn("Bandcamp shipping_cost repair failed", {
+                    paymentId,
+                    error: repairErr.message,
+                  });
+                }
+              }
+              continue;
+            }
 
             // Derive org_id from the SKUs in this order rather than using conn.org_id
             // (all bandcamp_connections use Clandestine Distribution's org_id, not the
@@ -109,6 +134,7 @@ export const bandcampOrderSyncTask = task({
               fulfillment_status: first.ship_date ? "fulfilled" : "unfulfilled",
               total_price: first.order_total ?? 0,
               currency: first.currency ?? "USD",
+              shipping_cost: shippingPaid > 0 ? shippingPaid : null,
               line_items: lineItems,
               shipping_address: first.ship_to_name
                 ? {

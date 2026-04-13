@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-11
+updated_at: 2026-04-13
 
 domains:
   - name: auth_and_access
@@ -85,6 +85,7 @@ domains:
       - bandcamp sales backfill audit log (chunk-level tracking, verified completion)
       - bandcamp genre tags (HTML scraping + taxonomy matching)
       - bandcamp trending intelligence (dig_deeper API)
+      - Bandcamp order sync persists shipping paid (`warehouse_orders.shipping_cost`, `line_items[].shipping`) for fulfillment margin on shipments
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
       - Shopify product sync completeness (tracking, cost, weight, collections, publishing)

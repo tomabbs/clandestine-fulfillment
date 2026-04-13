@@ -16,6 +16,7 @@ import { getServiceDetails, normalizeService } from "@/lib/clients/easypost-serv
 import { requireStaff } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { normalizeAddress } from "@/lib/shared/address-normalize";
+import { maxShippingFromOrderLineItems } from "@/lib/utils";
 
 // === Schemas ===
 
@@ -132,7 +133,7 @@ export async function getShipments(filters: GetShipmentsFilters) {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost), warehouse_shipment_items(id, quantity)",
+      "id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, quantity)",
       { count: "exact" },
     );
 
@@ -222,7 +223,7 @@ export async function getShipmentDetail(id: string) {
     supabase
       .from("warehouse_shipments")
       .select(
-        "*, organizations(name), warehouse_orders(order_number, shipping_address, shipping_cost)",
+        "*, organizations(name), warehouse_orders(order_number, shipping_address, shipping_cost, line_items)",
       )
       .eq("id", id)
       .single(),
@@ -249,6 +250,7 @@ export async function getShipmentDetail(id: string) {
     order_number: string | null;
     shipping_address: Record<string, unknown> | null;
     shipping_cost: number | string | null;
+    line_items: unknown;
   } | null;
 
   let recipient = extractRecipient(shipment.label_data as Record<string, unknown> | null);
@@ -257,11 +259,18 @@ export async function getShipmentDetail(id: string) {
     recipient = mergeRecipients(recipient, recipientFromOrderShippingAddress(orderAddr));
   }
 
-  if (shipment.customer_shipping_charged == null && orderJoin?.shipping_cost != null) {
-    const oc = Number(orderJoin.shipping_cost);
-    if (!Number.isNaN(oc)) {
-      shipment = { ...shipment, customer_shipping_charged: oc };
-    }
+  const fromColumn =
+    orderJoin?.shipping_cost != null ? Number(orderJoin.shipping_cost) : Number.NaN;
+  const fromLineItems = maxShippingFromOrderLineItems(orderJoin?.line_items);
+  const resolvedOrderShipping =
+    !Number.isNaN(fromColumn) && fromColumn > 0
+      ? fromColumn
+      : fromLineItems != null
+        ? fromLineItems
+        : null;
+
+  if (shipment.customer_shipping_charged == null && resolvedOrderShipping != null) {
+    shipment = { ...shipment, customer_shipping_charged: resolvedOrderShipping };
   }
 
   // Compute cost breakdown by looking up format costs for each item's SKU

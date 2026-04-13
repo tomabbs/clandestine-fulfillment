@@ -86,7 +86,8 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - Key exports:
   - inbound: `getInboundShipments`, `getInboundDetail`, `createInbound`, `markArrived`, `beginCheckIn`, `checkInItem`, `completeCheckIn`
   - shipping log (renamed from "Shipping", route `/admin/shipping`): `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`, `getShippingRates`, `createOrderLabel`, `getLabelTaskStatus`
-    - `getShipments` select now includes: `ss_order_number`, `customer_shipping_charged`, `total_units`, `label_source`, `warehouse_orders(order_number)`. **Updated 2026-04-13**: added `labelSource` filter, normalized `extractRecipient` for ShipStation + Pirate Ship label_data shapes
+    - `getShipments` select now includes: `ss_order_number`, `customer_shipping_charged`, `total_units`, `label_source`, `warehouse_orders(order_number, shipping_cost, line_items)`, `warehouse_shipment_items(id, quantity)`. **Updated 2026-04-13**: added `labelSource` filter, normalized `extractRecipient` for ShipStation + Pirate Ship label_data shapes; **2026-04-13 (later)**: `line_items` supports inferring customer shipping when `shipping_cost` is missing on legacy Bandcamp rows
+    - `getShipmentDetail` merges `customer_shipping_charged` from `warehouse_orders.shipping_cost`, else max `line_items[].shipping` (Bandcamp JSON)
     - `getShipmentsSummary` **updated 2026-04-13**: filters `voided=false` so summary cards exclude voided shipments
   - orders: `getOrders`, `getOrderDetail`, `getTrackingEvents`, `getClientShipments`, `getShipmentItems`
     - `getClientShipments` **hardened 2026-04-02**: explicit `org_id` filter (resolves from authenticated user), includes `warehouse_orders(order_number)` join; no longer returns cross-org shipments. **Updated 2026-04-13**: added `search` param (tracking number filter)

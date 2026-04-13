@@ -21,6 +21,7 @@ import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+import { maxShippingFromOrderLineItems } from "@/lib/utils";
 
 // === Types ===
 
@@ -341,23 +342,37 @@ function ShipmentTableRow({
   const clientName = (shipment.organizations as unknown as { name: string } | null)?.name ?? null;
 
   const lineItems = (
-    shipment as ShipmentRow & { warehouse_shipment_items?: Array<{ quantity?: number | null }> }
+    shipment as ShipmentRow & {
+      warehouse_shipment_items?: Array<{ quantity?: number | null }>;
+    }
   ).warehouse_shipment_items;
+  const lineRowCount = lineItems?.length ?? 0;
   const unitsFromLines = lineItems?.reduce((s, row) => s + (Number(row.quantity) || 0), 0) ?? 0;
   const storedUnits = (shipment as ShipmentRow & { total_units?: number | null }).total_units ?? 0;
-  // Pirate Ship imports may omit total_units; prefer summed line quantities when higher
-  const itemCount = Math.max(storedUnits, unitsFromLines);
+  // Pirate Ship imports may omit total_units and per-row quantity; use line count when sum is 0 but rows exist
+  const itemCount = Math.max(
+    storedUnits,
+    unitsFromLines,
+    lineRowCount > 0 && unitsFromLines === 0 ? lineRowCount : 0,
+  );
 
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
   const carrierLabel = getCarrierLabel(shipment.carrier);
   const labelSource = (shipment as ShipmentRow & { label_source?: string | null }).label_source;
 
-  const orderShippingCost =
-    (shipment.warehouse_orders as { shipping_cost?: number | null } | null)?.shipping_cost ?? null;
+  const orderJoin = shipment.warehouse_orders as {
+    shipping_cost?: number | null;
+    line_items?: unknown;
+  } | null;
+  const fromColumn = orderJoin?.shipping_cost != null ? Number(orderJoin.shipping_cost) : null;
+  const fromLineItems = maxShippingFromOrderLineItems(orderJoin?.line_items);
+  const orderShippingEffective =
+    fromColumn != null && !Number.isNaN(fromColumn) && fromColumn > 0 ? fromColumn : fromLineItems;
   // Shipping gap indicator — prefer snapshot on shipment; fall back to order shipping (e.g. Pirate Ship import)
   const customerCharged =
     (shipment as ShipmentRow & { customer_shipping_charged?: number | null })
-      .customer_shipping_charged ?? (orderShippingCost != null ? Number(orderShippingCost) : null);
+      .customer_shipping_charged ??
+    (orderShippingEffective != null ? Number(orderShippingEffective) : null);
   const postage = shipment.shipping_cost ?? null;
   const shippingGap = customerCharged != null && postage != null ? customerCharged - postage : null;
 

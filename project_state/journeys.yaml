@@ -179,9 +179,12 @@ journeys:
   - id: pirate_ship_import
     area: shipping
     paths:
+      - src/app/admin/shipping/page.tsx
       - src/app/admin/shipping/pirate-ship/page.tsx
       - src/actions/pirate-ship.ts
+      - src/actions/shipping.ts
       - src/trigger/tasks/pirate-ship-import.ts
+      - src/trigger/tasks/bandcamp-order-sync.ts
       - src/lib/clients/pirate-ship-parser.ts
       - src/lib/shared/order-utils.ts
     status: green
@@ -191,6 +194,8 @@ journeys:
       - label_source set to pirate_ship
       - bandcamp_payment_id auto-copied from matched order
       - real warehouse_shipment_items created from order line items
+      - admin shipping list item count falls back to line row count when per-row quantity sums to 0
+      - bandcamp-order-sync sets warehouse_orders.shipping_cost and repairs legacy rows; getShipmentDetail can infer customer shipping from order line_items JSON
       - unmatched rows sent to review queue
       - import metrics written to errors JSONB
 
