@@ -156,9 +156,10 @@ const PIRATE_SHIP_COLUMNS = {
   trackingNumber: ["tracking number", "tracking #", "tracking_number", "tracking"],
   carrier: ["carrier", "shipping carrier"],
   service: ["service", "shipping service", "service type"],
-  shipDate: ["ship date", "date shipped", "shipped date", "date"],
+  shipDate: ["ship date", "date shipped", "shipped date", "date", "created date"],
   weight: ["weight", "weight (oz)", "weight (lbs)", "package weight"],
   cost: ["cost", "shipping cost", "label cost", "total cost", "amount"],
+  email: ["email", "recipient email", "customer email"],
   recipientName: [
     "recipient name",
     "recipient",
@@ -233,6 +234,7 @@ export const parsedShipmentSchema = z.object({
   shipDate: z.string().nullable(),
   weight: z.number().nullable(),
   cost: z.number().nullable(),
+  email: z.string().nullable(),
   recipientName: z.string().nullable(),
   recipientCompany: z.string().nullable(),
   recipientAddress1: z.string().nullable(),
@@ -277,6 +279,28 @@ export interface ParseXlsxResult {
 export interface ParseError {
   rowIndex: number;
   message: string;
+}
+
+// --- Carrier inference from tracking number format ---
+
+export function inferCarrierFromTracking(trackingNumber: string | null): {
+  carrier: string | null;
+  service: string | null;
+} {
+  if (!trackingNumber) return { carrier: null, service: null };
+  if (trackingNumber.startsWith("AHOY")) {
+    return { carrier: "Asendia", service: "International" };
+  }
+  if (/^\d{20,34}$/.test(trackingNumber)) {
+    return { carrier: "USPS", service: null };
+  }
+  if (trackingNumber.startsWith("1Z")) {
+    return { carrier: "UPS", service: null };
+  }
+  if (/^\d{12}$/.test(trackingNumber) || /^\d{15}$/.test(trackingNumber)) {
+    return { carrier: "FedEx", service: null };
+  }
+  return { carrier: null, service: null };
 }
 
 // --- Core parser ---
@@ -359,15 +383,20 @@ export function parseXlsx(buffer: Buffer): {
         getNum("customsValue") !== null ||
         get("customsHsTariff") !== null;
 
+      const rawCarrier = get("carrier");
+      const rawService = get("service");
+      const inferred = !rawCarrier ? inferCarrierFromTracking(trackingNumber) : null;
+
       const shipment: ParsedShipment & { rowIndex: number } = {
         rowIndex: i + 1, // 1-based for user display
         orderNumber,
         trackingNumber,
-        carrier: get("carrier"),
-        service: get("service"),
+        carrier: rawCarrier ?? inferred?.carrier ?? null,
+        service: rawService ?? inferred?.service ?? null,
         shipDate: get("shipDate"),
         weight: getNum("weight"),
         cost: getNum("cost"),
+        email: get("email"),
         recipientName: get("recipientName"),
         recipientCompany: get("recipientCompany"),
         recipientAddress1: get("recipientAddress1"),
