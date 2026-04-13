@@ -349,12 +349,18 @@ export const sensorCheckTask = schedules.task({
             domains: (openCircuits ?? []).map((d) => ({
               subdomain: d.subdomain,
               cooldown_remaining: d.cooldown_until
-                ? Math.max(0, Math.round((new Date(d.cooldown_until as string).getTime() - Date.now()) / 1000))
+                ? Math.max(
+                    0,
+                    Math.round(
+                      (new Date(d.cooldown_until as string).getTime() - Date.now()) / 1000,
+                    ),
+                  )
                 : null,
               effective_rps: d.effective_rps,
             })),
           },
-          message: openCount === 0 ? "All circuits closed" : `${openCount} domains with open circuits`,
+          message:
+            openCount === 0 ? "All circuits closed" : `${openCount} domains with open circuits`,
         });
       } catch {
         readings.push({

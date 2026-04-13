@@ -8,9 +8,7 @@
  * This function is cross-pipeline infrastructure — changes here affect all
  * three shipping ingest paths. Lock behavior with unit tests before modifying.
  */
-export function normalizeOrderNumber(
-  raw: string | null | undefined,
-): string | null {
+export function normalizeOrderNumber(raw: string | null | undefined): string | null {
   if (!raw) return null;
   return (
     raw

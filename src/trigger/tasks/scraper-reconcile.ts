@@ -9,8 +9,8 @@
  */
 
 import { logger, schedules } from "@trigger.dev/sdk";
-import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { classifyProduct } from "@/lib/shared/product-categories";
 import { bandcampSweepQueue } from "@/trigger/lib/bandcamp-sweep-queue";
 import { bandcampScrapePageTask } from "@/trigger/tasks/bandcamp-sync";
@@ -129,9 +129,8 @@ export const scraperReconcileSchedule = schedules.task({
 
           for (const m of staleMappings ?? []) {
             if (!m.bandcamp_url) continue;
-            const cat = m.product_category ?? classifyProduct(
-              m.bandcamp_type_name, m.bandcamp_url, null,
-            );
+            const cat =
+              m.product_category ?? classifyProduct(m.bandcamp_type_name, m.bandcamp_url, null);
             await bandcampScrapePageTask.trigger({
               url: m.bandcamp_url,
               mappingId: m.id,
@@ -175,9 +174,8 @@ export const scraperReconcileSchedule = schedules.task({
 
       for (const m of deadForProbe ?? []) {
         if (!m.bandcamp_url) continue;
-        const cat = m.product_category ?? classifyProduct(
-          m.bandcamp_type_name, m.bandcamp_url, null,
-        );
+        const cat =
+          m.product_category ?? classifyProduct(m.bandcamp_type_name, m.bandcamp_url, null);
         await bandcampScrapePageTask.trigger({
           url: m.bandcamp_url,
           mappingId: m.id,

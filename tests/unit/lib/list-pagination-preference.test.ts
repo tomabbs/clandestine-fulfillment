@@ -18,10 +18,7 @@ describe("list-pagination-preference", () => {
   });
 
   it("normalizes invalid stored pageSize", () => {
-    sessionStorage.setItem(
-      "cf:list-pag:v1:bad",
-      JSON.stringify({ page: 1, pageSize: 999 }),
-    );
+    sessionStorage.setItem("cf:list-pag:v1:bad", JSON.stringify({ page: 1, pageSize: 999 }));
     expect(readListPaginationPrefs("bad")).toEqual({ page: 1, pageSize: 50 });
   });
 

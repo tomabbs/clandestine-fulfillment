@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireClient } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { VisiblePages } from "@/lib/shared/portal-pages";
-import { TOGGLEABLE_PAGES, isPageVisible } from "@/lib/shared/portal-pages";
+import { isPageVisible, TOGGLEABLE_PAGES } from "@/lib/shared/portal-pages";
 
 export async function getPortalSettings() {
   const { orgId } = await requireClient();

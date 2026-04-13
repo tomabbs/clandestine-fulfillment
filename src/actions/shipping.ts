@@ -15,6 +15,11 @@ import {
 import { getServiceDetails, normalizeService } from "@/lib/clients/easypost-service-map";
 import { requireStaff } from "@/lib/server/auth-context";
 import { fetchBandcampShippingPaidForPayment } from "@/lib/server/bandcamp-shipping-paid";
+import {
+  batchBuildFormatCostMaps,
+  computeCostsFromMaps,
+  computeFulfillmentCostBreakdown,
+} from "@/lib/server/shipment-fulfillment-cost";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { normalizeAddress } from "@/lib/shared/address-normalize";
 import { maxShippingFromOrderLineItems } from "@/lib/utils";
@@ -134,7 +139,7 @@ export async function getShipments(filters: GetShipmentsFilters) {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, quantity)",
+      "id, workspace_id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, sku, quantity)",
       { count: "exact" },
     );
 
@@ -170,8 +175,75 @@ export async function getShipments(filters: GetShipmentsFilters) {
 
   if (error) throw new Error(`Failed to fetch shipments: ${error.message}`);
 
+  const rows = data ?? [];
+
+  // Batch-enrich with fulfillment costs grouped by workspace_id.
+  // Doing one variant + format_cost lookup per workspace avoids N+1 queries.
+  const workspaceIds = Array.from(
+    new Set(rows.map((s) => s.workspace_id).filter((id): id is string => !!id)),
+  );
+
+  type ShipmentItem = { sku?: string | null; quantity?: number | null };
+  type EnrichedRow = (typeof rows)[number] & {
+    fulfillment_total: number | null;
+    fulfillment_partial: boolean;
+  };
+
+  const byId = new Map<string, EnrichedRow>();
+  for (const s of rows) {
+    byId.set(s.id, {
+      ...s,
+      fulfillment_total: s.shipping_cost ?? null,
+      fulfillment_partial: false,
+    });
+  }
+
+  if (workspaceIds.length > 0) {
+    await Promise.all(
+      workspaceIds.map(async (wsId) => {
+        const wsRows = rows.filter((s) => s.workspace_id === wsId);
+        const allSkus = Array.from(
+          new Set(
+            wsRows.flatMap((s) => {
+              const items = (s.warehouse_shipment_items ?? []) as ShipmentItem[];
+              return items.map((i) => i.sku).filter((sk): sk is string => !!sk && sk.trim() !== "");
+            }),
+          ),
+        );
+
+        const { variantFormatMap, formatCostLookup } = await batchBuildFormatCostMaps(
+          wsId,
+          allSkus,
+          supabase,
+        );
+
+        for (const s of wsRows) {
+          const items = ((s.warehouse_shipment_items ?? []) as ShipmentItem[]).map((i) => ({
+            sku: i.sku ?? null,
+            quantity: Number(i.quantity) || 0,
+          }));
+          const costs = computeCostsFromMaps(
+            s.shipping_cost ?? 0,
+            items,
+            variantFormatMap,
+            formatCostLookup,
+          );
+          const enriched = byId.get(s.id);
+          if (enriched) {
+            enriched.fulfillment_total = costs.total;
+            enriched.fulfillment_partial = costs.partial;
+          }
+        }
+      }),
+    );
+  }
+
+  const shipments = rows.map(
+    (s) => byId.get(s.id) ?? { ...s, fulfillment_total: null, fulfillment_partial: false },
+  );
+
   return {
-    shipments: data ?? [],
+    shipments,
     total: count ?? 0,
     page: parsed.page,
     pageSize: parsed.pageSize,
@@ -318,84 +390,26 @@ export async function getShipmentDetail(id: string) {
     }
   }
 
-  // Compute cost breakdown by looking up format costs for each item's SKU
-  const skus = Array.from(new Set(items.map((i) => i.sku)));
-  const formatCostMap: Record<string, { pick_pack_cost: number; material_cost: number }> = {};
+  // Compute cost breakdown using shared helper (workspace-scoped, chunked .in() queries).
+  // The helper also returns skuFormatMap so we can populate item.format_name without a second query.
+  const workspaceId = shipment.workspace_id ?? "";
+  const postage = shipment.shipping_cost ?? 0;
+  const itemInputs = items.map((i) => ({ sku: i.sku ?? null, quantity: i.quantity }));
 
-  if (skus.length > 0) {
-    const { data: variants } = await supabase
-      .from("warehouse_product_variants")
-      .select("sku, format_name")
-      .in("sku", skus);
+  const costBreakdown = await computeFulfillmentCostBreakdown(
+    workspaceId,
+    postage,
+    itemInputs,
+    supabase,
+  );
 
-    const formatNames = [
-      ...Array.from(new Set((variants ?? []).map((v) => v.format_name).filter(Boolean))),
-    ] as string[];
-
-    if (formatNames.length > 0) {
-      const { data: formatCosts } = await supabase
-        .from("warehouse_format_costs")
-        .select("format_name, pick_pack_cost, material_cost")
-        .in("format_name", formatNames);
-
-      const formatLookup: Record<string, { pick_pack_cost: number; material_cost: number }> = {};
-      for (const fc of formatCosts ?? []) {
-        formatLookup[fc.format_name] = {
-          pick_pack_cost: fc.pick_pack_cost,
-          material_cost: fc.material_cost,
-        };
-      }
-
-      const variantFormatMap: Record<string, string | null> = {};
-      for (const v of variants ?? []) {
-        variantFormatMap[v.sku] = v.format_name;
-      }
-
-      for (const sku of skus) {
-        const fn = variantFormatMap[sku];
-        if (fn && formatLookup[fn]) {
-          formatCostMap[sku] = formatLookup[fn];
-        }
-      }
-    }
-  }
-
-  // Build enriched items with format info
+  // Enrich items with per-item format name (using map from shared helper — no second DB query)
   const enrichedItems = items.map((item) => ({
     ...item,
-    format_name: null as string | null,
+    format_name: (costBreakdown.skuFormatMap[item.sku] ?? null) as string | null,
     pick_pack_cost: 0,
     material_cost: 0,
   }));
-
-  // Populate format data from the lookup
-  for (const item of enrichedItems) {
-    const costs = formatCostMap[item.sku];
-    if (costs) {
-      item.pick_pack_cost = costs.pick_pack_cost * item.quantity;
-      item.material_cost = costs.material_cost * item.quantity;
-    }
-  }
-
-  // Set format_name from variants
-  if (skus.length > 0) {
-    const { data: variants } = await supabase
-      .from("warehouse_product_variants")
-      .select("sku, format_name")
-      .in("sku", skus);
-    const variantMap: Record<string, string | null> = {};
-    for (const v of variants ?? []) {
-      variantMap[v.sku] = v.format_name;
-    }
-    for (const item of enrichedItems) {
-      item.format_name = variantMap[item.sku] ?? null;
-    }
-  }
-
-  const totalPickPack = enrichedItems.reduce((sum, i) => sum + i.pick_pack_cost, 0);
-  const totalMaterials = enrichedItems.reduce((sum, i) => sum + i.material_cost, 0);
-  const postage = shipment.shipping_cost ?? 0;
-  const totalCost = postage + totalPickPack + totalMaterials;
 
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
 
@@ -406,12 +420,15 @@ export async function getShipmentDetail(id: string) {
     items: enrichedItems,
     trackingEvents: eventsResult.data ?? [],
     costBreakdown: {
-      postage,
-      materials: totalMaterials,
-      pickPack: totalPickPack,
-      dropShip: 0,
-      insurance: 0,
-      total: totalCost,
+      postage: costBreakdown.postage,
+      materials: costBreakdown.materials,
+      pickPack: costBreakdown.pickPack,
+      dropShip: costBreakdown.dropShip,
+      insurance: costBreakdown.insurance,
+      total: costBreakdown.total,
+      partial: costBreakdown.partial,
+      unknownSkus: costBreakdown.unknownSkus,
+      missingFormatCosts: costBreakdown.missingFormatCosts,
     },
   };
 }
@@ -659,7 +676,7 @@ export async function exportShipmentsCsv(filters?: {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, tracking_number, carrier, service, ship_date, shipping_cost, label_data, warehouse_orders(order_number), warehouse_shipment_items(sku, quantity)",
+      "id, workspace_id, tracking_number, carrier, service, ship_date, shipping_cost, label_data, warehouse_orders(order_number), warehouse_shipment_items(sku, quantity)",
     )
     .order("ship_date", { ascending: false })
     .limit(10000);
@@ -677,48 +694,39 @@ export async function exportShipmentsCsv(filters?: {
   const { data: shipments, error } = await query;
   if (error) throw new Error(`Export failed: ${error.message}`);
 
-  // Collect all SKUs for format cost lookup
-  const allSkus = new Set<string>();
-  for (const s of shipments ?? []) {
-    for (const item of (s.warehouse_shipment_items as Array<{ sku: string }>) ?? []) {
-      allSkus.add(item.sku);
+  const allRows = shipments ?? [];
+
+  // Build per-workspace format cost maps using shared helper (workspace-scoped + chunked)
+  type CsvItem = { sku?: string | null; quantity?: number | null };
+  const workspaceIds = Array.from(
+    new Set(allRows.map((s) => s.workspace_id).filter((id): id is string => !!id)),
+  );
+
+  // workspaceId -> { variantFormatMap, formatCostLookup }
+  const wsMaps = new Map<
+    string,
+    {
+      variantFormatMap: Record<string, string | null>;
+      formatCostLookup: Record<string, { pick_pack_cost: number; material_cost: number }>;
     }
-  }
+  >();
 
-  // Batch lookup format costs
-  const formatCostMap: Record<string, { pick_pack_cost: number; material_cost: number }> = {};
-  const skuArr = Array.from(allSkus);
-  if (skuArr.length > 0) {
-    const { data: variants } = await supabase
-      .from("warehouse_product_variants")
-      .select("sku, format_name")
-      .in("sku", skuArr);
-
-    const formatNames = [
-      ...Array.from(new Set((variants ?? []).map((v) => v.format_name).filter(Boolean))),
-    ] as string[];
-
-    if (formatNames.length > 0) {
-      const { data: formatCosts } = await supabase
-        .from("warehouse_format_costs")
-        .select("format_name, pick_pack_cost, material_cost")
-        .in("format_name", formatNames);
-
-      const formatLookup: Record<string, { pick_pack_cost: number; material_cost: number }> = {};
-      for (const fc of formatCosts ?? []) {
-        formatLookup[fc.format_name] = {
-          pick_pack_cost: fc.pick_pack_cost,
-          material_cost: fc.material_cost,
-        };
-      }
-
-      for (const v of variants ?? []) {
-        if (v.format_name && formatLookup[v.format_name]) {
-          formatCostMap[v.sku] = formatLookup[v.format_name];
-        }
-      }
-    }
-  }
+  await Promise.all(
+    workspaceIds.map(async (wsId) => {
+      const wsRows = allRows.filter((s) => s.workspace_id === wsId);
+      const skus = Array.from(
+        new Set(
+          wsRows.flatMap((s) =>
+            ((s.warehouse_shipment_items ?? []) as CsvItem[])
+              .map((i) => i.sku)
+              .filter((sk): sk is string => !!sk && sk.trim() !== ""),
+          ),
+        ),
+      );
+      const maps = await batchBuildFormatCostMaps(wsId, skus, supabase);
+      wsMaps.set(wsId, maps);
+    }),
+  );
 
   // Build CSV
   const headers = [
@@ -736,29 +744,26 @@ export async function exportShipmentsCsv(filters?: {
     "postage",
     "materials",
     "pick_pack",
-    "total",
+    "fulfillment_total",
   ];
 
-  const rows = (shipments ?? []).map((s) => {
+  const rows = allRows.map((s) => {
     const recipient = extractRecipient(s.label_data as Record<string, unknown> | null);
-    const items = (s.warehouse_shipment_items ?? []) as Array<{
-      sku: string;
-      quantity: number;
-    }>;
-    const itemStr = items.map((i) => `${i.sku}x${i.quantity}`).join("; ");
+    const items = ((s.warehouse_shipment_items ?? []) as CsvItem[]).map((i) => ({
+      sku: i.sku ?? null,
+      quantity: Number(i.quantity) || 0,
+    }));
+    const itemStr = items.map((i) => `${i.sku ?? "?"}x${i.quantity}`).join("; ");
 
-    let materials = 0;
-    let pickPack = 0;
-    for (const item of items) {
-      const costs = formatCostMap[item.sku];
-      if (costs) {
-        materials += costs.material_cost * item.quantity;
-        pickPack += costs.pick_pack_cost * item.quantity;
-      }
-    }
+    const wsId = (s as typeof s & { workspace_id?: string | null }).workspace_id ?? "";
+    const maps = wsMaps.get(wsId) ?? { variantFormatMap: {}, formatCostLookup: {} };
+    const costs = computeCostsFromMaps(
+      s.shipping_cost ?? 0,
+      items,
+      maps.variantFormatMap,
+      maps.formatCostLookup,
+    );
 
-    const postage = s.shipping_cost ?? 0;
-    const total = postage + materials + pickPack;
     const orderNumber =
       (s.warehouse_orders as unknown as { order_number: string | null } | null)?.order_number ?? "";
 
@@ -774,10 +779,10 @@ export async function exportShipmentsCsv(filters?: {
       recipient?.postalCode ?? "",
       recipient?.country ?? "",
       itemStr,
-      postage.toFixed(2),
-      materials.toFixed(2),
-      pickPack.toFixed(2),
-      total.toFixed(2),
+      (s.shipping_cost ?? 0).toFixed(2),
+      costs.materials.toFixed(2),
+      costs.pickPack.toFixed(2),
+      costs.total.toFixed(2),
     ];
   });
 

@@ -62,9 +62,8 @@ export const bandcampScrapeSweepTask = schedules.task({
       );
 
       for (const pm of g1Prioritized.items) {
-        const cat = pm.product_category ?? classifyProduct(
-          pm.bandcamp_type_name, pm.bandcamp_url, null,
-        );
+        const cat =
+          pm.product_category ?? classifyProduct(pm.bandcamp_type_name, pm.bandcamp_url, null);
         await bandcampScrapePageTask.trigger({
           url: pm.bandcamp_url as string,
           mappingId: pm.id,
@@ -103,9 +102,8 @@ export const bandcampScrapeSweepTask = schedules.task({
       );
 
       for (const pm of g3Prioritized.items) {
-        const cat = pm.product_category ?? classifyProduct(
-          pm.bandcamp_type_name, pm.bandcamp_url, null,
-        );
+        const cat =
+          pm.product_category ?? classifyProduct(pm.bandcamp_type_name, pm.bandcamp_url, null);
         await bandcampScrapePageTask.trigger({
           url: pm.bandcamp_url as string,
           mappingId: pm.id,

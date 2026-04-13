@@ -56,7 +56,9 @@ describe("classifyFailureReason", () => {
 
   it("classifies parse errors from error message", () => {
     expect(classifyFailureReason(undefined, new Error("tralbum not found"))).toBe("parse_failure");
-    expect(classifyFailureReason(undefined, new Error("parse error in data"))).toBe("parse_failure");
+    expect(classifyFailureReason(undefined, new Error("parse error in data"))).toBe(
+      "parse_failure",
+    );
   });
 
   it("defaults to server_error for unknown errors", () => {

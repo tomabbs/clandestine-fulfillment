@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getEffectiveRate, type EffectiveRate } from "@/lib/shared/billing-rates";
+import { type EffectiveRate, getEffectiveRate } from "@/lib/shared/billing-rates";
 import { detectFormat } from "./format-detector";
 
 // ── Consignment Payout Types (V7.2) ─────────────────────────────────────────

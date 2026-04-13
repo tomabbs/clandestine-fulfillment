@@ -124,15 +124,15 @@ export default function BillingPage() {
             <tbody className="divide-y">
               {data.snapshots.map((s) => {
                 const snapshotWarnings =
-                  ((s.snapshot_data as Record<string, unknown> | null)?.warnings as string[] | undefined) ?? [];
+                  ((s.snapshot_data as Record<string, unknown> | null)?.warnings as
+                    | string[]
+                    | undefined) ?? [];
                 return (
                   <tr key={s.id} className="hover:bg-muted/30">
                     <td className="p-3 font-medium">
                       {s.billing_period}
                       {snapshotWarnings.length > 0 && (
-                        <p className="text-xs text-yellow-600 mt-0.5">
-                          Billing note attached
-                        </p>
+                        <p className="text-xs text-yellow-600 mt-0.5">Billing note attached</p>
                       )}
                     </td>
                     <td className="p-3">

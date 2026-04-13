@@ -372,13 +372,24 @@ function ShipmentTableRow({
       : fromLineItems != null
         ? fromLineItems
         : null;
-  // Shipping gap indicator — prefer snapshot on shipment; fall back to order shipping (e.g. Pirate Ship import)
+  // Customer charged: prefer snapshot on shipment; fall back to order shipping
   const customerCharged =
     (shipment as ShipmentRow & { customer_shipping_charged?: number | null })
       .customer_shipping_charged ??
     (orderShippingEffective != null ? Number(orderShippingEffective) : null);
-  const postage = shipment.shipping_cost ?? null;
-  const shippingGap = customerCharged != null && postage != null ? customerCharged - postage : null;
+
+  // Use fulfillment_total (postage + materials + pick/pack) for cost column and margin dot.
+  // Falls back to raw postage if enrichment didn't run (e.g. no SKU data).
+  const enrichedRow = shipment as ShipmentRow & {
+    fulfillment_total?: number | null;
+    fulfillment_partial?: boolean;
+  };
+  const fulfillmentTotal = enrichedRow.fulfillment_total ?? shipment.shipping_cost ?? null;
+  const fulfillmentPartial = enrichedRow.fulfillment_partial ?? false;
+
+  // Margin = customer charged minus total fulfillment cost (postage + materials + pick/pack)
+  const fulfillmentGap =
+    customerCharged != null && fulfillmentTotal != null ? customerCharged - fulfillmentTotal : null;
 
   return (
     <>
@@ -457,19 +468,25 @@ function ShipmentTableRow({
         </td>
         <td className="px-4 py-3 text-right font-mono">
           <div className="flex items-center justify-end gap-1.5">
-            {shippingGap != null && (
+            {fulfillmentPartial && (
+              <span
+                className="inline-block h-2 w-2 rounded-full flex-shrink-0 bg-amber-400"
+                title="Fulfillment cost is partial — some item SKUs or format costs could not be resolved"
+              />
+            )}
+            {!fulfillmentPartial && fulfillmentGap != null && (
               <span
                 className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${
-                  shippingGap >= 0 ? "bg-green-500" : "bg-red-500"
+                  fulfillmentGap >= 0 ? "bg-green-500" : "bg-red-500"
                 }`}
                 title={
-                  shippingGap >= 0
-                    ? `Charged $${customerCharged?.toFixed(2)} / Postage $${postage?.toFixed(2)} (+$${shippingGap.toFixed(2)})`
-                    : `Charged $${customerCharged?.toFixed(2)} / Postage $${postage?.toFixed(2)} (-$${Math.abs(shippingGap).toFixed(2)} shortfall)`
+                  fulfillmentGap >= 0
+                    ? `Charged $${customerCharged?.toFixed(2)} / Fulfillment $${fulfillmentTotal?.toFixed(2)} (+$${fulfillmentGap.toFixed(2)})`
+                    : `Charged $${customerCharged?.toFixed(2)} / Fulfillment $${fulfillmentTotal?.toFixed(2)} (-$${Math.abs(fulfillmentGap).toFixed(2)} shortfall)`
                 }
               />
             )}
-            {formatCurrency(shipment.shipping_cost)}
+            {formatCurrency(fulfillmentTotal)}
           </div>
         </td>
       </tr>

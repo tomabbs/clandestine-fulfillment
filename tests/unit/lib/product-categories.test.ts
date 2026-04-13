@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALBUM_FORMAT_CATEGORIES,
+  CATEGORY_EXPECTED_FIELDS,
   classifyProduct,
   isAlbumLinkedBundle,
-  CATEGORY_EXPECTED_FIELDS,
-  ALBUM_FORMAT_CATEGORIES,
   NON_ALBUM_CATEGORIES,
 } from "@/lib/shared/product-categories";
 
@@ -58,7 +58,9 @@ describe("classifyProduct", () => {
   });
 
   it("apparel keyword in merch URL still returns apparel", () => {
-    expect(classifyProduct(null, "https://band.bandcamp.com/merch/t-shirt", "T-Shirt")).toBe("apparel");
+    expect(classifyProduct(null, "https://band.bandcamp.com/merch/t-shirt", "T-Shirt")).toBe(
+      "apparel",
+    );
   });
 });
 
@@ -68,12 +70,16 @@ describe("isAlbumLinkedBundle", () => {
   });
 
   it("returns false for bundles at /merch/ paths", () => {
-    expect(isAlbumLinkedBundle("https://band.bandcamp.com/merch/bundle-thing", "bundle")).toBe(false);
+    expect(isAlbumLinkedBundle("https://band.bandcamp.com/merch/bundle-thing", "bundle")).toBe(
+      false,
+    );
   });
 
   it("returns false for non-bundle categories", () => {
     expect(isAlbumLinkedBundle("https://band.bandcamp.com/album/cool-album", "vinyl")).toBe(false);
-    expect(isAlbumLinkedBundle("https://band.bandcamp.com/album/cool-album", "apparel")).toBe(false);
+    expect(isAlbumLinkedBundle("https://band.bandcamp.com/album/cool-album", "apparel")).toBe(
+      false,
+    );
   });
 
   it("returns false for null URL", () => {

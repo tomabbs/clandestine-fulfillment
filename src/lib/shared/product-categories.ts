@@ -64,10 +64,7 @@ export const CATEGORY_EXPECTED_FIELDS: Record<
 export const ALBUM_FORMAT_CATEGORIES: ProductCategory[] = ["vinyl", "cd", "cassette"];
 export const NON_ALBUM_CATEGORIES: ProductCategory[] = ["apparel", "merch", "bundle", "other"];
 
-export function isAlbumLinkedBundle(
-  url: string | null,
-  category: string | null,
-): boolean {
+export function isAlbumLinkedBundle(url: string | null, category: string | null): boolean {
   if (category !== "bundle") return false;
   if (!url) return false;
   try {

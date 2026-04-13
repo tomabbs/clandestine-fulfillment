@@ -72,8 +72,6 @@ export { bandcampSalesBackfillCron, bandcampSalesBackfillTask } from "./bandcamp
 export { bandcampSalesSyncSchedule } from "./bandcamp-sales-sync";
 // ── Bandcamp scrape sweep (independent queue, avoids bandcamp-api congestion) ──
 export { bandcampScrapeSweepTask } from "./bandcamp-scrape-sweep";
-// ── Bandcamp scraper reconciliation (every 6h, dead URL probes, auto-resolve) ──
-export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── Bandcamp genre tag backfill (on-demand) ──────────────────────────────────
 export { bandcampTagBackfillTask } from "./bandcamp-tag-backfill";
 export { bundleAvailabilitySweepTask } from "./bundle-availability-sweep";
@@ -85,6 +83,8 @@ export {
   discogsClientOrderSyncSchedule,
   discogsClientOrderSyncTask,
 } from "./discogs-client-order-sync";
+// ── Bandcamp scraper reconciliation (every 6h, dead URL probes, auto-resolve) ──
+export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
 // ── Tag cleanup (admin settings) ──────────────────────────────────────────────

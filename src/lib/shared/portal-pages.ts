@@ -19,7 +19,10 @@ export type VisiblePages = Partial<Record<PortalPageKey, boolean>>;
  * Check if a portal page is visible for a client.
  * Missing keys default to true (backward-compatible).
  */
-export function isPageVisible(visiblePages: VisiblePages | undefined | null, key: PortalPageKey): boolean {
+export function isPageVisible(
+  visiblePages: VisiblePages | undefined | null,
+  key: PortalPageKey,
+): boolean {
   if (!visiblePages) return true;
   return visiblePages[key] !== false;
 }

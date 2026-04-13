@@ -2,7 +2,11 @@
 
 import { Loader2, RefreshCw } from "lucide-react";
 import { useCallback } from "react";
-import { getHealthData, getShippingBillingHealth, triggerSensorCheck } from "@/actions/admin-settings";
+import {
+  getHealthData,
+  getShippingBillingHealth,
+  triggerSensorCheck,
+} from "@/actions/admin-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -169,13 +173,17 @@ function PipelineHealth() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Orphaned shipments</span>
-                <span className={`font-mono ${data.orphanedShipmentCount > 0 ? "text-red-600 font-semibold" : ""}`}>
+                <span
+                  className={`font-mono ${data.orphanedShipmentCount > 0 ? "text-red-600 font-semibold" : ""}`}
+                >
                   {data.orphanedShipmentCount}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Open review items</span>
-                <span className={`font-mono ${data.reviewQueueTotal > 10 ? "text-yellow-600 font-semibold" : ""}`}>
+                <span
+                  className={`font-mono ${data.reviewQueueTotal > 10 ? "text-yellow-600 font-semibold" : ""}`}
+                >
                   {data.reviewQueueTotal}
                 </span>
               </div>
@@ -201,7 +209,9 @@ function PipelineHealth() {
                   <div key={sw.id} className="border-l-2 border-yellow-400 pl-2">
                     <p className="font-medium text-xs">{sw.billingPeriod}</p>
                     {sw.warnings.map((w, i) => (
-                      <p key={i} className="text-xs text-yellow-700">{w}</p>
+                      <p key={i} className="text-xs text-yellow-700">
+                        {w}
+                      </p>
                     ))}
                   </div>
                 ))

@@ -49,6 +49,7 @@ domains:
     paths:
       - src/actions/**
       - src/lib/server/bandcamp-shipping-paid.ts
+      - src/lib/server/shipment-fulfillment-cost.ts
     responsibilities:
       - validated read/write boundaries
       - service role guarded mutations
@@ -87,6 +88,7 @@ domains:
       - bandcamp genre tags (HTML scraping + taxonomy matching)
       - bandcamp trending intelligence (dig_deeper API)
       - Bandcamp order sync persists shipping paid (`warehouse_orders.shipping_cost`, `line_items[].shipping`) for fulfillment margin on shipments; `bandcamp-shipping-paid` hydrates from get_orders when the DB never stored it
+      - `shipment-fulfillment-cost.ts` is the single owner of fulfillment cost computation (postage + materials + pick/pack); used by `getShipments` (batch, workspace-scoped, chunked .in()) and `getShipmentDetail` (single); returns `partial`/`unknownSkus`/`missingFormatCosts`/`skuFormatMap`; all variant and format-cost queries scoped by workspace_id; integer-cents accumulation to prevent IEEE 754 drift
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
       - Shopify product sync completeness (tracking, cost, weight, collections, publishing)

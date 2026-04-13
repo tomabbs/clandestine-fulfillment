@@ -1,5 +1,5 @@
-import { logger } from "@trigger.dev/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { logger } from "@trigger.dev/sdk";
 
 /**
  * Extract the canonical circuit-breaker key from a Bandcamp URL.
@@ -95,7 +95,11 @@ export async function recordCircuitSuccess(
     p_subdomain: subdomain,
   });
   if (error) {
-    logger.warn("Failed to record domain success", { workspaceId, subdomain, error: error.message });
+    logger.warn("Failed to record domain success", {
+      workspaceId,
+      subdomain,
+      error: error.message,
+    });
   }
 }
 
@@ -116,7 +120,11 @@ export async function recordCircuitFailure(
   });
 
   if (error) {
-    logger.warn("Failed to record domain failure", { workspaceId, subdomain, error: error.message });
+    logger.warn("Failed to record domain failure", {
+      workspaceId,
+      subdomain,
+      error: error.message,
+    });
     return null;
   }
 
@@ -138,10 +146,7 @@ export async function recordCircuitFailure(
 /**
  * Classify an HTTP error into a failure reason for the last_failure_reason taxonomy.
  */
-export function classifyFailureReason(
-  httpStatus: number | undefined,
-  error: unknown,
-): string {
+export function classifyFailureReason(httpStatus: number | undefined, error: unknown): string {
   if (httpStatus === 429) return "rate_limited";
   if (httpStatus === 404) return "not_found";
   if (httpStatus === 410) return "gone";
