@@ -79,11 +79,21 @@ export const pirateShipImportTask = task({
         created_without_items: 0,
       };
 
+      type LineItem = {
+        sku?: string;
+        title?: string;
+        quantity?: number;
+        variantTitle?: string;
+        variant_title?: string;
+        price?: number;
+      };
+
       type MatchedOrder = {
         id: string;
         org_id: string;
         order_number: string;
         bandcamp_payment_id: number | null;
+        line_items: LineItem[] | null;
       };
 
       const labelData = (shipment: (typeof parsed.shipments)[number]) => ({
@@ -155,6 +165,20 @@ export const pirateShipImportTask = task({
               })),
             );
             metrics.created_with_items++;
+          } else if (matchedOrder.line_items?.length) {
+            // Fallback: use JSONB line_items on the order (common for Bandcamp orders)
+            await supabase.from("warehouse_shipment_items").insert(
+              matchedOrder.line_items.map((item, idx) => ({
+                shipment_id: newShipment.id,
+                workspace_id: workspaceId,
+                sku: item.sku ?? null,
+                quantity: item.quantity ?? 1,
+                product_title: item.title ?? null,
+                variant_title: item.variantTitle ?? item.variant_title ?? null,
+                item_index: idx,
+              })),
+            );
+            metrics.created_with_items++;
           } else {
             logger.warn(`Order ${matchedOrder.id} matched but has 0 line items`);
             metrics.created_without_items++;
@@ -191,7 +215,7 @@ export const pirateShipImportTask = task({
           if (normalized) {
             const { data: exactMatch } = await supabase
               .from("warehouse_orders")
-              .select("id, org_id, order_number, bandcamp_payment_id")
+              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
               .eq("workspace_id", workspaceId)
               .eq("order_number", normalized)
               .maybeSingle();
@@ -201,10 +225,10 @@ export const pirateShipImportTask = task({
             if (!matchedOrder) {
               const { data: candidates } = await supabase
                 .from("warehouse_orders")
-                .select("id, org_id, order_number, bandcamp_payment_id")
-                .eq("workspace_id", workspaceId)
-                .ilike("order_number", `%${normalized}%`)
-                .limit(5);
+              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
+              .eq("workspace_id", workspaceId)
+              .ilike("order_number", `%${normalized}%`)
+              .limit(5);
 
               matchedOrder =
                 candidates?.find(
@@ -223,12 +247,12 @@ export const pirateShipImportTask = task({
             if (email) {
               const { data: emailMatch } = await supabase
                 .from("warehouse_orders")
-                .select("id, org_id, order_number, bandcamp_payment_id")
-                .eq("workspace_id", workspaceId)
-                .ilike("customer_email", email)
-                .order("created_at", { ascending: false })
-                .limit(1)
-                .maybeSingle();
+              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
+              .eq("workspace_id", workspaceId)
+              .ilike("customer_email", email)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
 
               if (emailMatch) {
                 matchedOrder = emailMatch;
@@ -239,11 +263,11 @@ export const pirateShipImportTask = task({
             if (!matchedOrder && customerName) {
               const { data: nameMatches } = await supabase
                 .from("warehouse_orders")
-                .select("id, org_id, order_number, bandcamp_payment_id")
-                .eq("workspace_id", workspaceId)
-                .ilike("customer_name", customerName)
-                .order("created_at", { ascending: false })
-                .limit(1);
+              .select("id, org_id, order_number, bandcamp_payment_id, line_items")
+              .eq("workspace_id", workspaceId)
+              .ilike("customer_name", customerName)
+              .order("created_at", { ascending: false })
+              .limit(1);
 
               if (nameMatches?.length) {
                 matchedOrder = nameMatches[0];
