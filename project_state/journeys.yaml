@@ -195,7 +195,7 @@ journeys:
       - bandcamp_payment_id auto-copied from matched order
       - real warehouse_shipment_items created from order line items
       - admin shipping list item count falls back to line row count when per-row quantity sums to 0
-      - bandcamp-order-sync sets warehouse_orders.shipping_cost and repairs legacy rows; getShipmentDetail can infer customer shipping from order line_items JSON
+      - bandcamp-order-sync sets warehouse_orders.shipping_cost and repairs legacy rows; getShipmentDetail infers from order line_items JSON or hydrates from Bandcamp get_orders on expand when payment ID is linked
       - unmatched rows sent to review queue
       - import metrics written to errors JSONB
 

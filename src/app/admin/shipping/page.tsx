@@ -367,7 +367,11 @@ function ShipmentTableRow({
   const fromColumn = orderJoin?.shipping_cost != null ? Number(orderJoin.shipping_cost) : null;
   const fromLineItems = maxShippingFromOrderLineItems(orderJoin?.line_items);
   const orderShippingEffective =
-    fromColumn != null && !Number.isNaN(fromColumn) && fromColumn > 0 ? fromColumn : fromLineItems;
+    fromColumn != null && !Number.isNaN(fromColumn)
+      ? fromColumn
+      : fromLineItems != null
+        ? fromLineItems
+        : null;
   // Shipping gap indicator — prefer snapshot on shipment; fall back to order shipping (e.g. Pirate Ship import)
   const customerCharged =
     (shipment as ShipmentRow & { customer_shipping_charged?: number | null })
@@ -650,12 +654,10 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
             const fulfillmentDiff = charged != null ? charged - costBreakdown.total : null;
             return (
               <dl className="text-sm space-y-1">
-                {charged != null && (
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">Customer charged</dt>
-                    <dd className="font-mono">{formatCurrency(charged)}</dd>
-                  </div>
-                )}
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Customer charged (shipping)</dt>
+                  <dd className="font-mono">{charged != null ? formatCurrency(charged) : "—"}</dd>
+                </div>
                 <div className="flex justify-between">
                   <dt>Postage</dt>
                   <dd className="font-mono">{formatCurrency(costBreakdown.postage)}</dd>

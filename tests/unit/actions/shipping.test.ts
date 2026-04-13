@@ -46,6 +46,15 @@ function wireChain() {
 
 vi.mock("@/lib/server/supabase-server", () => ({
   createServerSupabaseClient: vi.fn(() => Promise.resolve({ from: mockFrom })),
+  createServiceRoleClient: vi.fn(() => ({ from: mockFrom })),
+}));
+
+vi.mock("@/lib/server/auth-context", () => ({
+  requireStaff: vi.fn(() => Promise.resolve({ userId: "user-1", workspaceId: "ws-1" })),
+}));
+
+vi.mock("@/lib/server/bandcamp-shipping-paid", () => ({
+  fetchBandcampShippingPaidForPayment: vi.fn(() => Promise.resolve(null)),
 }));
 
 // Must import after mocks

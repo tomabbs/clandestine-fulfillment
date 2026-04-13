@@ -14,6 +14,7 @@ import {
 } from "@/lib/clients/easypost-client";
 import { getServiceDetails, normalizeService } from "@/lib/clients/easypost-service-map";
 import { requireStaff } from "@/lib/server/auth-context";
+import { fetchBandcampShippingPaidForPayment } from "@/lib/server/bandcamp-shipping-paid";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { normalizeAddress } from "@/lib/shared/address-normalize";
 import { maxShippingFromOrderLineItems } from "@/lib/utils";
@@ -217,13 +218,14 @@ export async function getShipmentsSummary(filters?: {
 
 export async function getShipmentDetail(id: string) {
   z.string().uuid().parse(id);
+  await requireStaff();
   const supabase = await createServerSupabaseClient();
 
   const [shipmentResult, itemsResult, eventsResult] = await Promise.all([
     supabase
       .from("warehouse_shipments")
       .select(
-        "*, organizations(name), warehouse_orders(order_number, shipping_address, shipping_cost, line_items)",
+        "*, organizations(name), warehouse_orders(id, order_number, shipping_address, shipping_cost, line_items, created_at)",
       )
       .eq("id", id)
       .single(),
@@ -247,10 +249,12 @@ export async function getShipmentDetail(id: string) {
   const items = itemsResult.data ?? [];
 
   const orderJoin = shipment.warehouse_orders as {
+    id: string | null;
     order_number: string | null;
     shipping_address: Record<string, unknown> | null;
     shipping_cost: number | string | null;
     line_items: unknown;
+    created_at: string | null;
   } | null;
 
   let recipient = extractRecipient(shipment.label_data as Record<string, unknown> | null);
@@ -259,18 +263,59 @@ export async function getShipmentDetail(id: string) {
     recipient = mergeRecipients(recipient, recipientFromOrderShippingAddress(orderAddr));
   }
 
+  const rawOrderShipping = orderJoin?.shipping_cost;
   const fromColumn =
-    orderJoin?.shipping_cost != null ? Number(orderJoin.shipping_cost) : Number.NaN;
+    rawOrderShipping != null && rawOrderShipping !== "" ? Number(rawOrderShipping) : Number.NaN;
   const fromLineItems = maxShippingFromOrderLineItems(orderJoin?.line_items);
-  const resolvedOrderShipping =
-    !Number.isNaN(fromColumn) && fromColumn > 0
-      ? fromColumn
-      : fromLineItems != null
-        ? fromLineItems
-        : null;
+  let resolvedOrderShipping: number | null = null;
+  if (!Number.isNaN(fromColumn)) {
+    resolvedOrderShipping = fromColumn;
+  } else if (fromLineItems != null) {
+    resolvedOrderShipping = fromLineItems;
+  }
 
   if (shipment.customer_shipping_charged == null && resolvedOrderShipping != null) {
     shipment = { ...shipment, customer_shipping_charged: resolvedOrderShipping };
+  }
+
+  if (
+    shipment.customer_shipping_charged == null &&
+    shipment.bandcamp_payment_id != null &&
+    shipment.workspace_id &&
+    shipment.org_id
+  ) {
+    const anchorIso =
+      shipment.ship_date != null
+        ? `${String(shipment.ship_date)}T12:00:00.000Z`
+        : (orderJoin?.created_at ?? null);
+    try {
+      const fetched = await fetchBandcampShippingPaidForPayment({
+        workspaceId: shipment.workspace_id,
+        orgId: shipment.org_id,
+        paymentId: Number(shipment.bandcamp_payment_id),
+        anchorDateIso: anchorIso,
+      });
+      if (fetched) {
+        const admin = createServiceRoleClient();
+        const orderId = shipment.order_id ?? orderJoin?.id;
+        if (orderId) {
+          await admin
+            .from("warehouse_orders")
+            .update({
+              shipping_cost: fetched.shippingPaid,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", orderId);
+        }
+        await admin
+          .from("warehouse_shipments")
+          .update({ customer_shipping_charged: fetched.shippingPaid })
+          .eq("id", shipment.id);
+        shipment = { ...shipment, customer_shipping_charged: fetched.shippingPaid };
+      }
+    } catch {
+      // Bandcamp unavailable or no rows — leave customer_shipping_charged null
+    }
   }
 
   // Compute cost breakdown by looking up format costs for each item's SKU

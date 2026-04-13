@@ -48,6 +48,7 @@ domains:
   - name: server_actions
     paths:
       - src/actions/**
+      - src/lib/server/bandcamp-shipping-paid.ts
     responsibilities:
       - validated read/write boundaries
       - service role guarded mutations
@@ -85,7 +86,7 @@ domains:
       - bandcamp sales backfill audit log (chunk-level tracking, verified completion)
       - bandcamp genre tags (HTML scraping + taxonomy matching)
       - bandcamp trending intelligence (dig_deeper API)
-      - Bandcamp order sync persists shipping paid (`warehouse_orders.shipping_cost`, `line_items[].shipping`) for fulfillment margin on shipments
+      - Bandcamp order sync persists shipping paid (`warehouse_orders.shipping_cost`, `line_items[].shipping`) for fulfillment margin on shipments; `bandcamp-shipping-paid` hydrates from get_orders when the DB never stored it
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
       - Shopify product sync completeness (tracking, cost, weight, collections, publishing)
