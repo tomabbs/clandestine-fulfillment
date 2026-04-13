@@ -47,7 +47,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `discogs-mailorder-sync` | `src/trigger/tasks/discogs-mailorder-sync.ts` | `*/10 * * * *` |
 | `discogs-client-order-sync` | `src/trigger/tasks/discogs-client-order-sync.ts` | `*/10 * * * *` |
 | `discogs-message-poll` | `src/trigger/tasks/discogs-message-poll.ts` | `*/5 * * * *` |
-| `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` — **hardened 2026-04-02**: upsert ON CONFLICT `(workspace_id, shipstation_shipment_id)`, pre-fetches `/orders` for `shippingAmount` → `customer_shipping_charged`, two-phase order auto-link (exact normalized order number → auto-assign; probabilistic → review queue only), ghost item pruning, `label_source='shipstation'` |
+| `shipstation-poll` | `src/trigger/tasks/shipstation-poll.ts` | `*/30 * * * *` — **hardened 2026-04-02**: upsert ON CONFLICT `(workspace_id, shipstation_shipment_id)`, pre-fetches `/orders` for `shippingAmount` → `customer_shipping_charged`, two-phase order auto-link (exact normalized order number → auto-assign; probabilistic → review queue only), ghost item pruning, `label_source='shipstation'`. **Updated 2026-04-13**: auto-copies `bandcamp_payment_id` from linked order, uses shared `normalizeOrderNumber`, writes `sensor_readings` on completion |
 | `bundle-availability-sweep` | `src/trigger/tasks/bundle-availability-sweep.ts` | `0 6 * * *` (daily 6am UTC) |
 | `catalog-stats-refresh` | `src/trigger/tasks/catalog-stats-refresh.ts` | `0 4 * * *` (daily 4am UTC) |
 | `bandcamp-sales-sync` | `src/trigger/tasks/bandcamp-sales-sync.ts` | `0 5 * * *` (daily 5am UTC) |
@@ -66,7 +66,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bandcamp-scrape-page` | `src/trigger/tasks/bandcamp-sync.ts` | `bandcamp-sync` |
 | `bandcamp-order-sync` | `src/trigger/tasks/bandcamp-order-sync.ts` | `bandcamp-order-sync-cron` |
 | `bandcamp-mark-shipped` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `src/actions/bandcamp-shipping.ts`, `bandcamp-mark-shipped-cron` |
-| `pirate-ship-import` | `src/trigger/tasks/pirate-ship-import.ts` | `src/actions/pirate-ship.ts` |
+| `pirate-ship-import` | `src/trigger/tasks/pirate-ship-import.ts` | `src/actions/pirate-ship.ts` — **rewritten 2026-04-13**: multi-tier org matching (exact order → ilike fallback → alias → review queue), two-layer tracking dedup (pre-check + 23505 catch), auto-links `order_id` + copies `bandcamp_payment_id`, creates real `warehouse_shipment_items` from order line items, `label_source='pirate_ship'`, import-level metrics in `errors` JSONB, writes `sensor_readings` on failure |
 | `inbound-product-create` | `src/trigger/tasks/inbound-product-create.ts` | `src/actions/inbound.ts` |
 | `inbound-checkin-complete` | `src/trigger/tasks/inbound-checkin-complete.ts` | `src/actions/inbound.ts` |
 | `tag-cleanup-backfill` | `src/trigger/tasks/tag-cleanup-backfill.ts` | `src/actions/admin-settings.ts` |

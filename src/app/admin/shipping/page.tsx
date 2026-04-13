@@ -43,7 +43,9 @@ interface LabelDataAddress {
 function extractRecipient(labelData: unknown): LabelDataAddress | null {
   if (!labelData || typeof labelData !== "object") return null;
   const ld = labelData as Record<string, unknown>;
-  return (ld.shipTo as LabelDataAddress) ?? null;
+  if (ld.shipTo) return ld.shipTo as LabelDataAddress;
+  if (ld.recipient) return ld.recipient as LabelDataAddress;
+  return null;
 }
 
 function getCarrierLabel(carrier: string | null): string {
@@ -229,6 +231,17 @@ export default function ShippingPage() {
           className="w-32"
           onChange={(e) => handleFilterChange("status", e.target.value)}
         />
+        <select
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          defaultValue=""
+          onChange={(e) => handleFilterChange("labelSource", e.target.value)}
+        >
+          <option value="">All Sources</option>
+          <option value="shipstation">ShipStation</option>
+          <option value="pirate_ship">Pirate Ship</option>
+          <option value="easypost">EasyPost</option>
+          <option value="manual">Manual</option>
+        </select>
       </div>
 
       {/* Table */}
@@ -366,6 +379,9 @@ function ShipmentTableRow({
             {carrierLabel && <Badge variant="secondary">{carrierLabel}</Badge>}
             {labelSource === "shipstation" && (
               <span className="text-xs bg-blue-100 text-blue-700 px-1 rounded">SS</span>
+            )}
+            {labelSource === "pirate_ship" && (
+              <span className="text-xs bg-orange-100 text-orange-700 px-1 rounded">PS</span>
             )}
             {labelSource === "easypost" && (
               <span className="text-xs bg-green-100 text-green-700 px-1 rounded">EP</span>

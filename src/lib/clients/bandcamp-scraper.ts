@@ -20,7 +20,7 @@ export function buildBandcampAlbumUrl(subdomain: string, albumTitle: string): st
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  if (!slug) return null;
+  if (!slug || slug.length < 2) return null;
   return `https://${subdomain}.bandcamp.com/album/${slug}`;
 }
 

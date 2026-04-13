@@ -1,6 +1,7 @@
 "use server";
 
-import { requireClient } from "@/lib/server/auth-context";
+import { toZonedTime } from "date-fns-tz";
+import { requireClient, requireStaff } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import type {
   WarehouseBillingAdjustment,
@@ -300,9 +301,65 @@ export async function createBillingAdjustment(data: {
   if (error) throw new Error(error.message);
 }
 
+// === Current Month Preview ===
+
+const WAREHOUSE_TZ = "America/New_York";
+
+/** Portal: real-time billing estimate for the current month */
+export async function getClientCurrentMonthPreview() {
+  const { orgId, workspaceId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const now = toZonedTime(new Date(), WAREHOUSE_TZ);
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const start = `${year}-${month}-01`;
+  const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+  const end = `${year}-${month}-${String(lastDay).padStart(2, "0")}`;
+  const label = `${year}-${month}`;
+
+  const [shipmentsResult, adjustmentsResult] = await Promise.all([
+    supabase
+      .from("warehouse_shipments")
+      .select("id, shipping_cost, voided, billed", { count: "exact" })
+      .eq("workspace_id", workspaceId)
+      .eq("org_id", orgId)
+      .eq("voided", false)
+      .gte("ship_date", start)
+      .lte("ship_date", end),
+    supabase
+      .from("warehouse_billing_adjustments")
+      .select("amount, reason")
+      .eq("workspace_id", workspaceId)
+      .eq("org_id", orgId)
+      .eq("billing_period", label)
+      .is("snapshot_id", null),
+  ]);
+
+  const shipments = shipmentsResult.data ?? [];
+  const adjustments = adjustmentsResult.data ?? [];
+
+  const totalShipping = shipments.reduce((sum, s) => sum + (s.shipping_cost ?? 0), 0);
+  const storageAdjustments = adjustments.filter((a) => a.reason === "storage_fee");
+  const manualAdjustments = adjustments.filter((a) => a.reason !== "storage_fee");
+  const totalStorage = storageAdjustments.reduce((sum, a) => sum + (a.amount ?? 0), 0);
+  const totalAdjustments = manualAdjustments.reduce((sum, a) => sum + (a.amount ?? 0), 0);
+
+  return {
+    billingPeriod: label,
+    shipmentCount: shipmentsResult.count ?? 0,
+    totalShipping,
+    totalStorage,
+    totalAdjustments,
+    estimatedTotal: totalShipping + totalStorage + totalAdjustments,
+    isEstimate: true,
+  };
+}
+
 // === Client Overrides ===
 
 export async function getClientOverrides(workspaceId: string) {
+  await requireStaff();
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("warehouse_billing_rule_overrides")
@@ -324,6 +381,7 @@ export async function createClientOverride(data: {
   override_amount: number;
   effective_from: string;
 }) {
+  await requireStaff();
   const supabase = await createServerSupabaseClient();
   const { data: user } = await supabase.auth.getUser();
   const now = new Date().toISOString();
@@ -340,6 +398,7 @@ export async function createClientOverride(data: {
 }
 
 export async function deleteClientOverride(overrideId: string) {
+  await requireStaff();
   const supabase = await createServerSupabaseClient();
   const { error } = await supabase
     .from("warehouse_billing_rule_overrides")

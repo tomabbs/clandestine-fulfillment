@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getEffectiveRate, type EffectiveRate } from "@/lib/shared/billing-rates";
 import { detectFormat } from "./format-detector";
 
 // ── Consignment Payout Types (V7.2) ─────────────────────────────────────────
@@ -49,12 +50,6 @@ interface StorageLineItem {
   storage_fee: number;
 }
 
-interface EffectiveRate {
-  amount: number;
-  source: "override" | "default";
-  ruleName: string;
-}
-
 interface AppliedRate {
   ruleType: string;
   ruleName: string;
@@ -85,64 +80,7 @@ export interface BillingSnapshotData {
     total_adjustments: number;
     grand_total: number;
   };
-}
-
-/**
- * Two-tier rate lookup: org-specific override → workspace default.
- *
- * Mirrors the old app's getRateForOrg pattern. Checks
- * warehouse_billing_rule_overrides for an org-specific amount first,
- * then falls back to the workspace-default rule from warehouse_billing_rules.
- *
- * @param effectiveDate - The billing period start date (YYYY-MM-DD) for
- *   effective_from comparison.
- */
-export async function getEffectiveRate(
-  supabase: SupabaseClient,
-  workspaceId: string,
-  orgId: string,
-  ruleType: string,
-  effectiveDate: string,
-): Promise<EffectiveRate | null> {
-  // Find the most recent active default rule for this type
-  const { data: defaultRule } = await supabase
-    .from("warehouse_billing_rules")
-    .select("id, amount, rule_name")
-    .eq("workspace_id", workspaceId)
-    .eq("rule_type", ruleType)
-    .eq("is_active", true)
-    .lte("effective_from", effectiveDate)
-    .order("effective_from", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!defaultRule) return null;
-
-  // Check for an org-specific override on this rule
-  const { data: override } = await supabase
-    .from("warehouse_billing_rule_overrides")
-    .select("override_amount")
-    .eq("workspace_id", workspaceId)
-    .eq("org_id", orgId)
-    .eq("rule_id", defaultRule.id)
-    .lte("effective_from", effectiveDate)
-    .order("effective_from", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (override) {
-    return {
-      amount: Number(override.override_amount),
-      source: "override",
-      ruleName: defaultRule.rule_name,
-    };
-  }
-
-  return {
-    amount: Number(defaultRule.amount),
-    source: "default",
-    ruleName: defaultRule.rule_name,
-  };
+  warnings?: string[];
 }
 
 /**
@@ -161,15 +99,12 @@ export async function calculateBillingForOrg(
   // Fetch all data in parallel
   const [
     shipmentsResult,
-    shipmentItemsResult,
     formatRulesResult,
     formatCostsResult,
     rulesResult,
     adjustmentsResult,
     orgResult,
-    inventoryResult,
   ] = await Promise.all([
-    // All shipments for the org in the period (not filtering billed/voided yet — we need them for exclusion reasons)
     supabase
       .from("warehouse_shipments")
       .select("*")
@@ -178,20 +113,14 @@ export async function calculateBillingForOrg(
       .gte("ship_date", billingPeriod.start)
       .lte("ship_date", billingPeriod.end),
 
-    // Shipment items (need for format detection)
-    supabase.from("warehouse_shipment_items").select("*").eq("workspace_id", workspaceId),
-
-    // Format rules for detection
     supabase
       .from("warehouse_format_rules")
       .select("*")
       .eq("workspace_id", workspaceId)
       .order("priority", { ascending: false }),
 
-    // Format costs for pricing
     supabase.from("warehouse_format_costs").select("*").eq("workspace_id", workspaceId),
 
-    // Billing rules (active, effective before period end)
     supabase
       .from("warehouse_billing_rules")
       .select("*")
@@ -199,7 +128,6 @@ export async function calculateBillingForOrg(
       .eq("is_active", true)
       .lte("effective_from", billingPeriod.end),
 
-    // Manual adjustments for this period
     supabase
       .from("warehouse_billing_adjustments")
       .select("*")
@@ -208,29 +136,43 @@ export async function calculateBillingForOrg(
       .eq("billing_period", billingPeriod.label)
       .is("snapshot_id", null),
 
-    // Org details (for storage fee waiver check)
     supabase
       .from("organizations")
       .select("storage_fee_waived, warehouse_grace_period_ends_at")
       .eq("id", orgId)
       .single(),
-
-    // Inventory levels for storage calculation
-    supabase
-      .from("warehouse_inventory_levels")
-      .select("*")
-      .eq("workspace_id", workspaceId)
-      .eq("org_id", orgId),
   ]);
 
   const shipments = shipmentsResult.data ?? [];
-  const allShipmentItems = shipmentItemsResult.data ?? [];
+
+  // Scoped + chunked items fetch (prevents unbounded query)
+  const CHUNK_SIZE = 500;
+  const shipmentIds = shipments.map((s) => s.id);
+  type ShipmentItemRow = {
+    id: string;
+    shipment_id: string;
+    sku: string;
+    quantity: number;
+    product_title: string | null;
+    variant_title: string | null;
+    workspace_id: string;
+    [key: string]: unknown;
+  };
+  let allShipmentItems: ShipmentItemRow[] = [];
+
+  for (let i = 0; i < shipmentIds.length; i += CHUNK_SIZE) {
+    const chunk = shipmentIds.slice(i, i + CHUNK_SIZE);
+    const { data } = await supabase
+      .from("warehouse_shipment_items")
+      .select("*")
+      .in("shipment_id", chunk);
+    if (data) allShipmentItems = allShipmentItems.concat(data as ShipmentItemRow[]);
+  }
   const formatRules = formatRulesResult.data ?? [];
   const formatCosts = formatCostsResult.data ?? [];
   const _rules = rulesResult.data ?? [];
   const adjustments = adjustmentsResult.data ?? [];
-  const org = orgResult.data;
-  const inventoryLevels = inventoryResult.data ?? [];
+  const _org = orgResult.data;
 
   // Build format cost lookup
   const formatCostMap = new Map<string, { pick_pack_cost: number; material_cost: number }>();
@@ -401,84 +343,25 @@ export async function calculateBillingForOrg(
     }
   }
 
-  // Storage calculation
+  // Storage: sourced from storage_fee adjustments written by storage-calc.ts
+  // (no inline calc — prevents double-counting)
+  const storageAdjustments = adjustments.filter((a) => a.reason === "storage_fee");
+  const manualAdjustments = adjustments.filter((a) => a.reason !== "storage_fee");
+
+  const totalStorage = storageAdjustments.reduce((sum, a) => sum + (a.amount ?? 0), 0);
+  const totalAdjustments = manualAdjustments.reduce((sum, a) => sum + (a.amount ?? 0), 0);
+
+  // Build storage line items from the JSONB details on storage_fee adjustments
   const storageLineItems: StorageLineItem[] = [];
-  let totalStorage = 0;
-
-  const today = new Date().toISOString().split("T")[0];
-  const storageWaived =
-    org?.storage_fee_waived === true ||
-    (org?.warehouse_grace_period_ends_at != null && org.warehouse_grace_period_ends_at > today);
-
-  if (!storageWaived) {
-    // Get shipment counts per SKU in the last 6 months for "active stock" determination
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const sixMonthsAgoStr = sixMonthsAgo.toISOString().split("T")[0];
-
-    const recentShipmentsResult = await supabase
-      .from("warehouse_shipments")
-      .select("id")
-      .eq("workspace_id", workspaceId)
-      .eq("org_id", orgId)
-      .eq("voided", false)
-      .gte("ship_date", sixMonthsAgoStr);
-
-    const recentShipmentIds = (recentShipmentsResult.data ?? []).map((s) => s.id);
-
-    // Get item quantities shipped per SKU in last 6 months
-    const skuSalesMap = new Map<string, number>();
-    if (recentShipmentIds.length > 0) {
-      const recentItemsResult = await supabase
-        .from("warehouse_shipment_items")
-        .select("sku, quantity")
-        .in("shipment_id", recentShipmentIds);
-
-      for (const item of recentItemsResult.data ?? []) {
-        skuSalesMap.set(item.sku, (skuSalesMap.get(item.sku) ?? 0) + item.quantity);
-      }
-    }
-
-    // Find the storage rule — with org-specific override support
-    const storageRate = await getEffectiveRate(
-      supabase,
-      workspaceId,
-      orgId,
-      "storage",
-      effectiveDate,
-    );
-    const storageFeePerUnit = storageRate?.amount ?? 0;
-    if (storageRate) {
-      appliedRates.push({
-        ruleType: "storage",
-        ruleName: storageRate.ruleName,
-        amount: storageRate.amount,
-        source: storageRate.source,
-      });
-    }
-
-    for (const inv of inventoryLevels) {
-      if (inv.available <= 0) continue;
-
-      const activeStockThreshold = skuSalesMap.get(inv.sku) ?? 0;
-      const billableUnits = Math.max(0, inv.available - activeStockThreshold);
-
-      if (billableUnits > 0) {
-        const fee = billableUnits * storageFeePerUnit;
-        totalStorage += fee;
-        storageLineItems.push({
-          sku: inv.sku,
-          total_inventory: inv.available,
-          active_stock_threshold: activeStockThreshold,
-          billable_units: billableUnits,
-          storage_fee: fee,
-        });
-      }
+  for (const adj of storageAdjustments) {
+    const details = (adj as Record<string, unknown>).details as
+      | { line_items?: StorageLineItem[] }
+      | null
+      | undefined;
+    if (details?.line_items) {
+      storageLineItems.push(...details.line_items);
     }
   }
-
-  // Adjustments
-  const totalAdjustments = adjustments.reduce((sum, a) => sum + (a.amount ?? 0), 0);
 
   const grandTotal =
     totalShipping +

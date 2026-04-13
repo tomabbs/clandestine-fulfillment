@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import { getClientBillingSnapshotDetail, getClientBillingSnapshots } from "@/actions/billing";
+import {
+  getClientBillingSnapshotDetail,
+  getClientBillingSnapshots,
+  getClientCurrentMonthPreview,
+} from "@/actions/billing";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -46,6 +50,13 @@ export default function BillingPage() {
     enabled: !!workspaceId && !!orgId,
   });
 
+  const { data: preview } = useAppQuery({
+    tier: CACHE_TIERS.SESSION,
+    queryKey: ["billing-preview", orgId],
+    queryFn: () => getClientCurrentMonthPreview(),
+    enabled: !!workspaceId && !!orgId,
+  });
+
   if (error) {
     return (
       <div className="p-6 space-y-4">
@@ -65,6 +76,35 @@ export default function BillingPage() {
     <div className="p-6 space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
 
+      {preview && (
+        <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/20 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-sm font-semibold">Current Month ({preview.billingPeriod})</h2>
+            <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">
+              Estimated
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">Shipments</p>
+              <p className="font-mono font-medium">{preview.shipmentCount}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Shipping</p>
+              <p className="font-mono font-medium">${preview.totalShipping.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Storage</p>
+              <p className="font-mono font-medium">${preview.totalStorage.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground text-xs">Est. Total</p>
+              <p className="font-mono font-semibold">${preview.estimatedTotal.toFixed(2)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <p className="text-muted-foreground text-sm">Loading billing history…</p>
       ) : !data?.snapshots.length ? (
@@ -82,35 +122,46 @@ export default function BillingPage() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {data.snapshots.map((s) => (
-                <tr key={s.id} className="hover:bg-muted/30">
-                  <td className="p-3 font-medium">{s.billing_period}</td>
-                  <td className="p-3">
-                    <StatusBadge status={s.status} />
-                  </td>
-                  <td className="p-3 text-right font-mono">${s.grand_total.toFixed(2)}</td>
-                  <td className="p-3 text-right text-muted-foreground">
-                    {new Date(s.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedId(s.id)}>
-                        View
-                      </Button>
-                      {s.stripe_invoice_id && (
-                        <a
-                          href={`https://invoice.stripe.com/i/${s.stripe_invoice_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center rounded-lg border border-border bg-background px-2.5 h-7 text-[0.8rem] font-medium hover:bg-muted hover:text-foreground transition-all"
-                        >
-                          Download
-                        </a>
+              {data.snapshots.map((s) => {
+                const snapshotWarnings =
+                  ((s.snapshot_data as Record<string, unknown> | null)?.warnings as string[] | undefined) ?? [];
+                return (
+                  <tr key={s.id} className="hover:bg-muted/30">
+                    <td className="p-3 font-medium">
+                      {s.billing_period}
+                      {snapshotWarnings.length > 0 && (
+                        <p className="text-xs text-yellow-600 mt-0.5">
+                          Billing note attached
+                        </p>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="p-3">
+                      <StatusBadge status={s.status} />
+                    </td>
+                    <td className="p-3 text-right font-mono">${s.grand_total.toFixed(2)}</td>
+                    <td className="p-3 text-right text-muted-foreground">
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="p-3 text-right">
+                      <div className="flex gap-2 justify-end">
+                        <Button variant="outline" size="sm" onClick={() => setSelectedId(s.id)}>
+                          View
+                        </Button>
+                        {s.stripe_invoice_id && (
+                          <a
+                            href={`https://invoice.stripe.com/i/${s.stripe_invoice_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center rounded-lg border border-border bg-background px-2.5 h-7 text-[0.8rem] font-medium hover:bg-muted hover:text-foreground transition-all"
+                          >
+                            Download
+                          </a>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

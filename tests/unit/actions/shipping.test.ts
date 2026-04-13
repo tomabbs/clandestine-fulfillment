@@ -137,7 +137,9 @@ describe("shipping server actions", () => {
       ];
 
       mockFrom.mockImplementationOnce(() => ({
-        select: () => Promise.resolve({ data: mockData, error: null, count: 3 }),
+        select: () => ({
+          eq: () => Promise.resolve({ data: mockData, error: null, count: 3 }),
+        }),
       }));
 
       const result = await getShipmentsSummary();
@@ -149,7 +151,9 @@ describe("shipping server actions", () => {
 
     it("returns zeros when no shipments", async () => {
       mockFrom.mockImplementationOnce(() => ({
-        select: () => Promise.resolve({ data: [], error: null, count: 0 }),
+        select: () => ({
+          eq: () => Promise.resolve({ data: [], error: null, count: 0 }),
+        }),
       }));
 
       const result = await getShipmentsSummary();

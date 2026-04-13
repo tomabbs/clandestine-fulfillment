@@ -19,9 +19,11 @@ import {
 } from "@/lib/clients/bandcamp-scraper";
 import {
   findOrCreateCollection,
+  inventoryItemUpdate,
   productCreateMedia,
   productSetCreate,
   publishToSafeChannels,
+  shopifyGraphQL,
 } from "@/lib/clients/shopify-client";
 import { buildShopifyVariantInput } from "@/lib/clients/shopify-variant-input";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
@@ -343,6 +345,7 @@ export const bandcampScrapePageTask = task({
               scraped,
               variant.id,
               variant.title,
+              payload.albumTitle ?? null,
             );
           }
 
@@ -620,7 +623,26 @@ async function storeScrapedImages(
   scraped: ScrapedAlbumData,
   variantId: string,
   variantTitle: string | null,
+  expectedAlbumTitle: string | null,
 ) {
+  // Guard: if we know what album we expected to scrape and the page returned
+  // a different title, the URL likely resolved to the wrong page. Skip images
+  // entirely to avoid cross-pollinating album art across unrelated products.
+  if (expectedAlbumTitle && scraped.title) {
+    const normalize = (s: string) =>
+      s.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+    const expected = normalize(expectedAlbumTitle);
+    const actual = normalize(scraped.title);
+    if (expected && actual && !actual.includes(expected) && !expected.includes(actual)) {
+      logger.warn("Scraped page title does not match expected album — skipping images", {
+        productId,
+        expectedAlbumTitle,
+        scrapedTitle: scraped.title,
+      });
+      return;
+    }
+  }
+
   const { data: existingImages } = await supabase
     .from("warehouse_product_images")
     .select("id, src, position")
@@ -851,11 +873,14 @@ export const bandcampSyncTask = task({
       logger.info("Got bands", { count: bands.length });
 
       const bandLookup = new Map<number, BandcampBand>();
+      const subdomainLookup = new Map<string, BandcampBand>();
       for (const band of bands) {
         bandLookup.set(band.band_id, band);
+        if (band.subdomain) subdomainLookup.set(band.subdomain.toLowerCase(), band);
         if (band.member_bands) {
           for (const mb of band.member_bands) {
             bandLookup.set(mb.band_id, { ...mb, member_bands: [] });
+            if (mb.subdomain) subdomainLookup.set(mb.subdomain.toLowerCase(), { ...mb, member_bands: [] });
           }
         }
       }
@@ -1102,11 +1127,7 @@ export const bandcampSyncTask = task({
             if (merchItem.price != null && (existingVar.price == null || existingVar.price === 0)) {
               updates.price = merchItem.price;
             }
-            if (merchItem.price != null && (existingVar.cost == null || existingVar.cost === 0)) {
-              updates.cost =
-                Math.round(((updates.price as number | undefined) ?? merchItem.price) * 0.5 * 100) /
-                100;
-            }
+            // Cost is not derived from price — leave null until actual cost data is available
 
             // Street date — for bandcamp_initial only; all-authority preorder path is above
             if (Object.keys(updates).length > 0) {
@@ -1145,16 +1166,7 @@ export const bandcampSyncTask = task({
               }
             }
           } else if (existingVar) {
-            // warehouse_reviewed or warehouse_locked: only update cost if missing (non-destructive)
-            if (merchItem.price != null && (existingVar.cost == null || existingVar.cost === 0)) {
-              await supabase
-                .from("warehouse_product_variants")
-                .update({
-                  cost: Math.round(merchItem.price * 0.5 * 100) / 100,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", variantId);
-            }
+            // warehouse_reviewed or warehouse_locked: cost is not derived from price
 
             // API image backfill — only if product has no images yet
             if (bandcampImageUrl(merchItem.image_url) && existingVar.product_id) {
@@ -1231,8 +1243,21 @@ export const bandcampSyncTask = task({
           const memberBand = merchItem.member_band_id
             ? bandLookup.get(merchItem.member_band_id)
             : null;
+          const subdomainBand = merchItem.subdomain
+            ? subdomainLookup.get(merchItem.subdomain.toLowerCase())
+            : null;
+          // Prefer subdomain-resolved artist when member_band_id points to the
+          // label itself (or is absent). This prevents albums from inheriting
+          // the label name as the artist.
+          const isLabelMemberBand =
+            memberBand && band && memberBand.band_id === band.band_id;
           const artistName =
-            memberBand?.name ?? band?.name ?? connection.band_name ?? "Unknown Artist";
+            (!isLabelMemberBand && memberBand?.name) ||
+            subdomainBand?.name ||
+            memberBand?.name ||
+            band?.name ||
+            connection.band_name ||
+            "Unknown Artist";
 
           // Auto-generate SKU if missing
           let effectiveSku = merchItem.sku;
@@ -1350,7 +1375,7 @@ export const bandcampSyncTask = task({
 
           const bcPrice = merchItem.price ?? null;
           const bcCurrency = (merchItem.currency as string) ?? "USD";
-          const bcCost = bcPrice != null ? Math.round(bcPrice * 0.5 * 100) / 100 : null;
+          const bcCost: number | null = null;
           const bcBarcode =
             ((merchItem as Record<string, unknown>).barcode as string | null) ?? null;
           const productCategory = classifyProduct(
@@ -1402,8 +1427,40 @@ export const bandcampSyncTask = task({
             if (shopifyProductId) {
               try {
                 await publishToSafeChannels(shopifyProductId);
-              } catch {
-                // Non-critical — product created but not published
+              } catch (pubErr) {
+                logger.warn("Failed to publish product to channels", {
+                  shopifyProductId,
+                  error: String(pubErr),
+                });
+              }
+
+              // productSet doesn't reliably propagate weight — set via inventoryItemUpdate
+              const weight = CATEGORY_DEFAULT_WEIGHTS[productCategory];
+              if (weight) {
+                try {
+                  const varData = await shopifyGraphQL<{
+                    product: {
+                      variants: {
+                        nodes: Array<{ inventoryItem: { id: string } }>;
+                      };
+                    };
+                  }>(
+                    `query V($id: ID!) { product(id: $id) { variants(first: 1) { nodes { inventoryItem { id } } } } }`,
+                    { id: shopifyProductId },
+                  );
+                  const invItemId =
+                    varData?.product?.variants?.nodes?.[0]?.inventoryItem?.id;
+                  if (invItemId) {
+                    await inventoryItemUpdate(invItemId, {
+                      measurement: { weight: { value: weight.value, unit: weight.unit } },
+                    });
+                  }
+                } catch (weightErr) {
+                  logger.warn("Failed to set variant weight", {
+                    shopifyProductId,
+                    error: String(weightErr),
+                  });
+                }
               }
             }
           } catch (shopifyError) {
@@ -1704,6 +1761,16 @@ export const bandcampSyncTask = task({
       if (withUrlNoType && withUrlNoType.length > 0) {
         logger.info(`Sweep group 1: ${withUrlNoType.length} mappings with URL but no type_name`);
         for (const pm of withUrlNoType) {
+          // Reject URLs with garbage slugs (e.g. /album/- from prior sweep bugs)
+          const urlSlug = (pm.bandcamp_url as string).split("/album/")[1] ?? "";
+          if (!urlSlug || urlSlug.length < 2 || /^-+$/.test(urlSlug)) {
+            await supabase
+              .from("bandcamp_product_mappings")
+              .update({ bandcamp_url: null, bandcamp_url_source: null, updated_at: new Date().toISOString() })
+              .eq("id", pm.id);
+            logger.warn("Sweep group 1: cleared bad URL slug", { mappingId: pm.id, url: pm.bandcamp_url });
+            continue;
+          }
           await bandcampScrapePageTask.trigger({
             url: pm.bandcamp_url as string,
             mappingId: pm.id,

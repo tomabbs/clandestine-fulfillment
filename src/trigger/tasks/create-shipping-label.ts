@@ -8,7 +8,7 @@
  * Rule #12: Task payload is IDs only.
  */
 
-import { task, tasks } from "@trigger.dev/sdk";
+import { logger, task, tasks } from "@trigger.dev/sdk";
 import {
   buyLabel,
   createShipment,
@@ -189,6 +189,30 @@ export const createShippingLabelTask = task({
 
       if (shipError || !warehouseShipment) {
         return { success: false, error: `Failed to create shipment record: ${shipError?.message}` };
+      }
+
+      // ── Insert warehouse_shipment_items from order line items ─────────────────
+      if (orderType === "fulfillment") {
+        const { data: orderItems } = await supabase
+          .from("warehouse_order_items")
+          .select("sku, quantity, title, variant_title")
+          .eq("order_id", order.id);
+
+        if (orderItems?.length) {
+          await supabase.from("warehouse_shipment_items").insert(
+            orderItems.map((item, idx) => ({
+              shipment_id: warehouseShipment.id,
+              workspace_id: order.workspace_id,
+              sku: item.sku,
+              quantity: item.quantity,
+              product_title: item.title,
+              variant_title: item.variant_title,
+              item_index: idx,
+            })),
+          );
+        } else {
+          logger.warn(`EasyPost label created for order ${order.id} but order has 0 line items`);
+        }
       }
 
       // ── Insert easypost_labels ────────────────────────────────────────────────

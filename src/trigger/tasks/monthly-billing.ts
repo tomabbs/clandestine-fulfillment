@@ -68,8 +68,32 @@ export const monthlyBillingTask = schedules.task({
 
       for (const org of orgs) {
         try {
-          // Calculate billing snapshot
+          // Pre-flight: verify storage-calc has run for this period
+          const { data: storageFees } = await supabase
+            .from("warehouse_billing_adjustments")
+            .select("id")
+            .eq("workspace_id", workspaceId)
+            .eq("org_id", org.id)
+            .eq("billing_period", period.label)
+            .eq("reason", "storage_fee")
+            .limit(1);
+
+          const warnings: string[] = [];
+          if (!storageFees?.length) {
+            warnings.push(
+              `storage_fee_missing: No storage_fee adjustment found for ${org.name} in ${period.label}. storage-calc may not have run.`,
+            );
+            logger.error("No storage_fee adjustment found", {
+              task: "monthly-billing",
+              orgId: org.id,
+              period: period.label,
+            });
+          }
+
           const snapshot = await calculateBillingForOrg(supabase, workspaceId, org.id, period);
+          if (warnings.length > 0) {
+            snapshot.warnings = warnings;
+          }
 
           // Persist via RPC (Rule #22)
           const { data: snapshotId, error: rpcError } = await supabase.rpc(
@@ -199,6 +223,12 @@ export const monthlyBillingTask = schedules.task({
         completed_at: new Date().toISOString(),
       });
     }
+
+    await supabase.from("sensor_readings").insert({
+      sensor_name: "trigger:monthly-billing",
+      status: orgsFailed > 0 ? "warning" : "healthy",
+      message: `Period ${period.label}: ${orgsProcessed} orgs processed, ${orgsFailed} failed, $${totalRevenue.toFixed(2)} revenue`,
+    });
 
     return {
       orgsProcessed,

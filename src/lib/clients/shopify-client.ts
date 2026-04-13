@@ -607,12 +607,16 @@ export async function sellingPlanGroupDelete(id: string): Promise<void> {
 
 export async function inventoryItemUpdate(
   inventoryItemId: string,
-  input: { tracked?: boolean; cost?: number },
+  input: {
+    tracked?: boolean;
+    cost?: number;
+    measurement?: { weight: { value: number; unit: string } };
+  },
 ): Promise<void> {
   const mutation = `
     mutation InventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
       inventoryItemUpdate(id: $id, input: $input) {
-        inventoryItem { id tracked unitCost { amount } }
+        inventoryItem { id tracked unitCost { amount } measurement { weight { value unit } } }
         userErrors { message }
       }
     }
@@ -627,6 +631,7 @@ export async function inventoryItemUpdate(
     input: {
       ...(input.tracked != null ? { tracked: input.tracked } : {}),
       ...(input.cost != null ? { cost: input.cost } : {}),
+      ...(input.measurement ? { measurement: input.measurement } : {}),
     },
   });
 
@@ -740,10 +745,10 @@ let cachedPublications: Array<{ id: string; name: string }> | null = null;
 export async function getPublicationIds(): Promise<Array<{ id: string; name: string }>> {
   if (cachedPublications) return cachedPublications;
   const data = await shopifyGraphQL<{
-    channels: { edges: Array<{ node: { id: string; name: string } }> };
-  }>("{ channels(first: 20) { edges { node { id name } } } }");
-  cachedPublications = data.channels.edges.map((e) => ({
-    id: e.node.id.replace("/Channel/", "/Publication/"),
+    publications: { edges: Array<{ node: { id: string; name: string } }> };
+  }>("{ publications(first: 20) { edges { node { id name } } } }");
+  cachedPublications = data.publications.edges.map((e) => ({
+    id: e.node.id,
     name: e.node.name,
   }));
   return cachedPublications;

@@ -12,6 +12,7 @@
 import { schedules } from "@trigger.dev/sdk";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { getEffectiveRate } from "@/lib/shared/billing-rates";
 
 export interface StorageCalcResult {
   orgsProcessed: number;
@@ -79,21 +80,7 @@ export const storageCalcTask = schedules.task({
 
       if (!orgs) continue;
 
-      // Get storage fee rate
-      const { data: storageRule } = await supabase
-        .from("warehouse_billing_rules")
-        .select("amount")
-        .eq("workspace_id", workspaceId)
-        .eq("rule_type", "storage")
-        .eq("is_active", true)
-        .single();
-
-      const storageFeePerUnit = storageRule?.amount ?? 0;
-      if (storageFeePerUnit === 0) {
-        orgsSkipped += orgs.length;
-        continue;
-      }
-
+      const billingStart = `${billingPeriod}-01`;
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
       const sixMonthsAgoStr = sixMonthsAgo.toISOString().split("T")[0];
@@ -104,7 +91,18 @@ export const storageCalcTask = schedules.task({
           continue;
         }
 
-        // Get inventory levels for this org
+        const storageRate = await getEffectiveRate(
+          supabase,
+          workspaceId,
+          org.id,
+          "storage",
+          billingStart,
+        );
+        if (!storageRate || storageRate.amount === 0) {
+          orgsSkipped++;
+          continue;
+        }
+
         const { data: levels } = await supabase
           .from("warehouse_inventory_levels")
           .select("sku, available")
@@ -113,7 +111,6 @@ export const storageCalcTask = schedules.task({
 
         const inventoryBySku = new Map((levels ?? []).map((l) => [l.sku, l.available as number]));
 
-        // Get sales in last 6 months
         const { data: recentShipments } = await supabase
           .from("warehouse_shipments")
           .select("id")
@@ -139,15 +136,27 @@ export const storageCalcTask = schedules.task({
         const orgBillableUnits = activeStockResults.reduce((sum, r) => sum + r.billableUnits, 0);
 
         if (orgBillableUnits > 0) {
-          const totalFee = orgBillableUnits * storageFeePerUnit;
+          const totalFee = orgBillableUnits * storageRate.amount;
 
-          // Write as billing adjustment for the monthly-billing task to consume
           await supabase.from("warehouse_billing_adjustments").insert({
             workspace_id: workspaceId,
             org_id: org.id,
             billing_period: billingPeriod,
             amount: totalFee,
             reason: "storage_fee",
+            details: {
+              rate_per_unit: storageRate.amount,
+              rate_source: storageRate.source,
+              line_items: activeStockResults
+                .filter((r) => r.billableUnits > 0)
+                .map((r) => ({
+                  sku: r.sku,
+                  total_inventory: r.totalInventory,
+                  active_stock_threshold: r.activeStock,
+                  billable_units: r.billableUnits,
+                  storage_fee: r.billableUnits * storageRate.amount,
+                })),
+            },
           });
 
           totalBillableUnits += orgBillableUnits;
@@ -156,6 +165,12 @@ export const storageCalcTask = schedules.task({
         orgsProcessed++;
       }
     }
+
+    await supabase.from("sensor_readings").insert({
+      sensor_name: "trigger:storage-calc",
+      status: "healthy",
+      message: `Processed ${orgsProcessed} orgs, ${totalBillableUnits} billable units`,
+    });
 
     return { orgsProcessed, orgsSkipped, totalBillableUnits };
   },

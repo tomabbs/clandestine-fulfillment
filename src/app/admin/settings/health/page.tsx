@@ -2,7 +2,7 @@
 
 import { Loader2, RefreshCw } from "lucide-react";
 import { useCallback } from "react";
-import { getHealthData, triggerSensorCheck } from "@/actions/admin-settings";
+import { getHealthData, getShippingBillingHealth, triggerSensorCheck } from "@/actions/admin-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -88,6 +88,154 @@ export default function HealthPage() {
           )}
         </div>
       )}
+
+      <PipelineHealth />
+    </div>
+  );
+}
+
+function PipelineHealth() {
+  const { data, isLoading } = useAppQuery({
+    queryKey: ["admin", "settings", "pipeline-health"],
+    queryFn: () => getShippingBillingHealth(),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  if (isLoading) {
+    return <p className="text-muted-foreground text-sm">Loading pipeline health...</p>;
+  }
+
+  if (!data) return null;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold tracking-tight">Pipeline Health</h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Shipping Ingest */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Shipping Ingest (30d)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tabular-nums">{data.totalShipments30d}</p>
+            <div className="mt-2 space-y-1 text-sm">
+              {Object.entries(data.shipmentsBySource).map(([src, count]) => (
+                <div key={src} className="flex justify-between">
+                  <span className="text-muted-foreground">{src}</span>
+                  <span className="font-mono">{count as number}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Pirate Ship Imports */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Pirate Ship Imports</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              {data.psImports.length === 0 ? (
+                <p className="text-muted-foreground">No recent imports</p>
+              ) : (
+                data.psImports.slice(0, 5).map((imp) => (
+                  <div key={imp.id} className="flex items-center justify-between">
+                    <div>
+                      <Badge variant={imp.status === "completed" ? "default" : "destructive"}>
+                        {imp.status}
+                      </Badge>
+                      <span className="ml-2 text-muted-foreground text-xs">
+                        {imp.processedCount ?? 0} processed
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(imp.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Data Integrity */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Data Integrity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Orphaned shipments</span>
+                <span className={`font-mono ${data.orphanedShipmentCount > 0 ? "text-red-600 font-semibold" : ""}`}>
+                  {data.orphanedShipmentCount}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Open review items</span>
+                <span className={`font-mono ${data.reviewQueueTotal > 10 ? "text-yellow-600 font-semibold" : ""}`}>
+                  {data.reviewQueueTotal}
+                </span>
+              </div>
+              {Object.entries(data.reviewByCategory).map(([cat, count]) => (
+                <div key={cat} className="flex justify-between pl-3">
+                  <span className="text-muted-foreground text-xs">{cat}</span>
+                  <span className="font-mono text-xs">{count as number}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Billing Pipeline */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Billing Pipeline</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              {data.snapshotWarnings.length > 0 ? (
+                data.snapshotWarnings.map((sw) => (
+                  <div key={sw.id} className="border-l-2 border-yellow-400 pl-2">
+                    <p className="font-medium text-xs">{sw.billingPeriod}</p>
+                    {sw.warnings.map((w, i) => (
+                      <p key={i} className="text-xs text-yellow-700">{w}</p>
+                    ))}
+                  </div>
+                ))
+              ) : (
+                <p className="text-muted-foreground">No billing warnings</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Task Health */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Task Sensors</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              {Object.entries(data.taskHealth).length === 0 ? (
+                <p className="text-muted-foreground">No task sensor data</p>
+              ) : (
+                Object.entries(data.taskHealth).map(([name, info]) => {
+                  const t = info as { status: string; message: string | null; at: string };
+                  return (
+                    <div key={name} className="flex items-center justify-between">
+                      <span className="font-mono text-xs">{name}</span>
+                      <Badge variant={statusBadgeVariant(t.status)}>{t.status}</Badge>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@
 import { logger, schedules } from "@trigger.dev/sdk";
 import { fetchOrders, fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { normalizeOrderNumber } from "@/lib/shared/order-utils";
 import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
 import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
 
@@ -124,6 +125,12 @@ export const shipstationPollTask = schedules.task({
         metadata: { last_poll_processed: totalProcessed },
       });
     }
+
+    await supabase.from("sensor_readings").insert({
+      sensor_name: "trigger:shipstation-poll",
+      status: "healthy",
+      message: `Processed ${totalProcessed} shipments`,
+    });
 
     return { processed: totalProcessed };
   },
@@ -306,10 +313,9 @@ async function ingestFromPoll(
       itemSkus,
     );
     if (linkedOrderId) {
-      // Fetch linked order to get authoritative shipping cost and source
       const { data: linkedOrder } = await supabase
         .from("warehouse_orders")
-        .select("shipping_cost, fulfillment_status, source")
+        .select("shipping_cost, fulfillment_status, source, bandcamp_payment_id")
         .eq("id", linkedOrderId)
         .single();
 
@@ -323,6 +329,9 @@ async function ingestFromPoll(
           order_id: linkedOrderId,
           ...(authoritativeShippingCharged != null && {
             customer_shipping_charged: authoritativeShippingCharged,
+          }),
+          ...(linkedOrder?.bandcamp_payment_id != null && {
+            bandcamp_payment_id: linkedOrder.bandcamp_payment_id,
           }),
         })
         .eq("id", upserted.id);
@@ -348,20 +357,6 @@ async function ingestFromPoll(
 
   logger.info(
     `Ingested shipment ${shipstationShipmentId}: org=${orgMatch.orgId}, items=${itemsRaw.length}, linked=${!!upserted.order_id}`,
-  );
-}
-
-// ─── Order number normalization ───────────────────────────────────────────────
-// Strips BC- prefix, lowercases, removes all non-alphanumeric chars so
-// "BC-12345678" == "bc 12345678" == "12345678" all map to "12345678".
-function normalizeOrderNumber(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  return (
-    raw
-      .toLowerCase()
-      .replace(/^(bc|bandcamp)[-\s]*/i, "")
-      .replace(/[^a-z0-9]/g, "")
-      .trim() || null
   );
 }
 

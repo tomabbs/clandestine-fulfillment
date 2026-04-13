@@ -175,3 +175,39 @@ journeys:
       - bundle.component_unavailable sensor detects zero-stock components
       - client-store webhook triggers bundle-component-fanout for bundle sales
       - setBundleComponents validates component SKUs and creates missing inventory levels
+
+  - id: pirate_ship_import
+    area: shipping
+    paths:
+      - src/app/admin/shipping/pirate-ship/page.tsx
+      - src/actions/pirate-ship.ts
+      - src/trigger/tasks/pirate-ship-import.ts
+      - src/lib/clients/pirate-ship-parser.ts
+      - src/lib/shared/order-utils.ts
+    status: green
+    checks:
+      - XLSX parsed and rows matched to orders via normalizeOrderNumber
+      - two-layer tracking dedup (pre-check + 23505)
+      - label_source set to pirate_ship
+      - bandcamp_payment_id auto-copied from matched order
+      - real warehouse_shipment_items created from order line items
+      - unmatched rows sent to review queue
+      - import metrics written to errors JSONB
+
+  - id: shipping_billing_pipeline
+    area: billing
+    paths:
+      - src/trigger/tasks/storage-calc.ts
+      - src/trigger/tasks/monthly-billing.ts
+      - src/lib/clients/billing-calculator.ts
+      - src/lib/shared/billing-rates.ts
+      - src/actions/billing.ts
+    status: green
+    checks:
+      - storage-calc uses getEffectiveRate with org-level overrides
+      - per-SKU JSONB details written to warehouse_billing_adjustments
+      - billing-calculator separates storage_fee from total_adjustments (no double-count)
+      - shipment items scoped to billing period shipments (chunked)
+      - monthly-billing pre-flight check verifies storage_fee exists
+      - billing snapshot warnings embedded in snapshot_data
+      - sensor_readings written on task completion/failure

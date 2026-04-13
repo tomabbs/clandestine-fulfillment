@@ -45,7 +45,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/admin-settings.ts`
 - Key exports:
   - `getDashboardStats`
-  - `getGeneralSettings`, `getIntegrationStatus`, `getHealthData`
+  - `getGeneralSettings`, `getIntegrationStatus`, `getHealthData`, `getShippingBillingHealth` **(new 2026-04-13)** — pipeline health metrics for admin dashboard
   - `triggerSensorCheck`, `triggerTagCleanup`
 - Admin page: `/admin/catalog/bundles` — bundle management
 
@@ -86,9 +86,10 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - Key exports:
   - inbound: `getInboundShipments`, `getInboundDetail`, `createInbound`, `markArrived`, `beginCheckIn`, `checkInItem`, `completeCheckIn`
   - shipping log (renamed from "Shipping", route `/admin/shipping`): `getShipments`, `getShipmentsSummary`, `getShipmentDetail`, `exportShipmentsCsv`, `getShippingRates`, `createOrderLabel`, `getLabelTaskStatus`
-    - `getShipments` select now includes: `ss_order_number`, `customer_shipping_charged`, `total_units`, `label_source`, `warehouse_orders(order_number)`
+    - `getShipments` select now includes: `ss_order_number`, `customer_shipping_charged`, `total_units`, `label_source`, `warehouse_orders(order_number)`. **Updated 2026-04-13**: added `labelSource` filter, normalized `extractRecipient` for ShipStation + Pirate Ship label_data shapes
+    - `getShipmentsSummary` **updated 2026-04-13**: filters `voided=false` so summary cards exclude voided shipments
   - orders: `getOrders`, `getOrderDetail`, `getTrackingEvents`, `getClientShipments`, `getShipmentItems`
-    - `getClientShipments` **hardened 2026-04-02**: explicit `org_id` filter (resolves from authenticated user), includes `warehouse_orders(order_number)` join; no longer returns cross-org shipments
+    - `getClientShipments` **hardened 2026-04-02**: explicit `org_id` filter (resolves from authenticated user), includes `warehouse_orders(order_number)` join; no longer returns cross-org shipments. **Updated 2026-04-13**: added `search` param (tracking number filter)
     - `getOrderDetail` shipments now auto-populated via `order_id` FK set by `shipstation-poll` auto-link
   - scan: `lookupLocation`, `lookupBarcode`, `submitCount`, `recordReceivingScan`
   - mail orders: `getMailOrders` (admin), `getClientMailOrders` (portal), `getMailOrderPayoutSummary`
@@ -108,7 +109,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/reports.ts`
   - `src/actions/review-queue.ts`
 - Key exports:
-  - billing: `getAuthWorkspaceId`, `getBillingRules`, `createBillingRule`, `updateBillingRule`, `getFormatCosts`, `updateFormatCost`, `createFormatCost`, snapshot + adjustments + overrides APIs
+  - billing: `getAuthWorkspaceId`, `getBillingRules`, `createBillingRule`, `updateBillingRule`, `getFormatCosts`, `updateFormatCost`, `createFormatCost`, snapshot + adjustments + overrides APIs. **Updated 2026-04-13**: added `getClientCurrentMonthPreview` (TZ-aware billing estimate), `requireStaff()` on `getClientOverrides`/`createClientOverride`/`deleteClientOverride`
   - reports: `getTopSellers`, `getTopSellersSummary`
   - review queue: `getReviewQueueItems`, `assignReviewItem`, `resolveReviewItem`, `suppressReviewItem`, `reopenReviewItem`, bulk ops
 

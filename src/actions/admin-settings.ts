@@ -106,3 +106,118 @@ export async function triggerTagCleanup() {
   const handle = await tasks.trigger("tag-cleanup-backfill", { workspace_id: ws.id });
   return { runId: handle.id };
 }
+
+// === Pipeline Health ===
+
+export async function getShippingBillingHealth() {
+  const supabase = await createServerSupabaseClient();
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+  const [
+    shipmentsBySource,
+    psImports,
+    orphanedShipments,
+    reviewQueue,
+    recentSnapshots,
+    taskSensors,
+  ] = await Promise.all([
+    supabase
+      .from("warehouse_shipments")
+      .select("label_source")
+      .gte("created_at", `${thirtyDaysAgo}T00:00:00Z`),
+
+    supabase
+      .from("warehouse_pirate_ship_imports")
+      .select("id, status, processed_count, error_count, errors, created_at")
+      .order("created_at", { ascending: false })
+      .limit(10),
+
+    supabase
+      .from("warehouse_shipments")
+      .select("id", { count: "exact", head: true })
+      .is("org_id", null)
+      .eq("voided", false),
+
+    supabase
+      .from("warehouse_review_queue")
+      .select("id, category", { count: "exact" })
+      .eq("status", "open"),
+
+    supabase
+      .from("warehouse_billing_snapshots")
+      .select("id, billing_period, status, snapshot_data, created_at")
+      .order("created_at", { ascending: false })
+      .limit(5),
+
+    supabase
+      .from("sensor_readings")
+      .select("sensor_name, status, message, created_at")
+      .in("sensor_name", [
+        "trigger:storage-calc",
+        "trigger:monthly-billing",
+        "trigger:pirate-ship-import",
+        "trigger:shipstation-poll",
+      ])
+      .order("created_at", { ascending: false })
+      .limit(20),
+  ]);
+
+  // Aggregate shipments by source
+  const sourceCounts: Record<string, number> = {};
+  for (const s of shipmentsBySource.data ?? []) {
+    const src = s.label_source ?? "unknown";
+    sourceCounts[src] = (sourceCounts[src] ?? 0) + 1;
+  }
+
+  // Recent PS imports with metrics
+  const psImportSummary = (psImports.data ?? []).map((imp) => ({
+    id: imp.id,
+    status: imp.status,
+    processedCount: imp.processed_count,
+    errorCount: imp.error_count,
+    metrics: (imp.errors as Record<string, unknown>)?.metrics ?? null,
+    createdAt: imp.created_at,
+  }));
+
+  // Snapshots with warnings
+  const snapshotWarnings = (recentSnapshots.data ?? [])
+    .filter((s) => {
+      const sd = s.snapshot_data as Record<string, unknown> | null;
+      return sd?.warnings && (sd.warnings as string[]).length > 0;
+    })
+    .map((s) => ({
+      id: s.id,
+      billingPeriod: s.billing_period,
+      warnings: ((s.snapshot_data as Record<string, unknown>)?.warnings as string[]) ?? [],
+    }));
+
+  // Review queue by category
+  const reviewByCategory: Record<string, number> = {};
+  for (const r of reviewQueue.data ?? []) {
+    reviewByCategory[r.category] = (reviewByCategory[r.category] ?? 0) + 1;
+  }
+
+  // Latest task sensor readings
+  const latestByTask = new Map<string, { status: string; message: string | null; at: string }>();
+  for (const r of taskSensors.data ?? []) {
+    if (!latestByTask.has(r.sensor_name)) {
+      latestByTask.set(r.sensor_name, {
+        status: r.status,
+        message: r.message,
+        at: r.created_at,
+      });
+    }
+  }
+
+  return {
+    shipmentsBySource: sourceCounts,
+    totalShipments30d: shipmentsBySource.data?.length ?? 0,
+    psImports: psImportSummary,
+    orphanedShipmentCount: orphanedShipments.count ?? 0,
+    reviewQueueTotal: reviewQueue.count ?? 0,
+    reviewByCategory,
+    snapshotWarnings,
+    taskHealth: Object.fromEntries(latestByTask),
+  };
+}

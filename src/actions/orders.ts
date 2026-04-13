@@ -177,6 +177,7 @@ export async function getClientShipments(filters: {
   pageSize?: number;
   status?: string;
   carrier?: string;
+  search?: string;
 }) {
   const supabase = await createServerSupabaseClient();
   const serviceClient = createServiceRoleClient();
@@ -208,6 +209,10 @@ export async function getClientShipments(filters: {
 
   if (filters.status) query = query.eq("status", filters.status);
   if (filters.carrier) query = query.ilike("carrier", `%${filters.carrier}%`);
+  if (filters.search) {
+    const term = `%${filters.search}%`;
+    query = query.or(`tracking_number.ilike.${term},carrier.ilike.${term}`);
+  }
 
   const { data, count } = await query;
   return { shipments: data ?? [], total: count ?? 0, page, pageSize };

@@ -26,6 +26,7 @@ const getShipmentsSchema = z.object({
   dateTo: z.string().optional(),
   status: z.string().optional(),
   carrier: z.string().optional(),
+  labelSource: z.enum(["shipstation", "pirate_ship", "easypost", "manual"]).optional(),
   page: z.number().int().positive().default(1),
   pageSize: z.number().int().positive().max(250).default(50),
 });
@@ -48,8 +49,11 @@ interface LabelDataAddress {
 
 function extractRecipient(labelData: Record<string, unknown> | null): LabelDataAddress | null {
   if (!labelData) return null;
-  const shipTo = labelData.shipTo as LabelDataAddress | undefined;
-  return shipTo ?? null;
+  // ShipStation stores recipient under shipTo
+  if (labelData.shipTo) return labelData.shipTo as LabelDataAddress;
+  // Pirate Ship stores recipient under recipient
+  if (labelData.recipient) return labelData.recipient as LabelDataAddress;
+  return null;
 }
 
 function getCarrierTrackingUrl(
@@ -99,6 +103,9 @@ export async function getShipments(filters: GetShipmentsFilters) {
   if (parsed.carrier) {
     query = query.eq("carrier", parsed.carrier);
   }
+  if (parsed.labelSource) {
+    query = query.eq("label_source", parsed.labelSource);
+  }
 
   const from = (parsed.page - 1) * parsed.pageSize;
   const to = from + parsed.pageSize - 1;
@@ -124,7 +131,10 @@ export async function getShipmentsSummary(filters?: {
 }) {
   const supabase = await createServerSupabaseClient();
 
-  let query = supabase.from("warehouse_shipments").select("id, shipping_cost", { count: "exact" });
+  let query = supabase
+    .from("warehouse_shipments")
+    .select("id, shipping_cost", { count: "exact" })
+    .eq("voided", false);
 
   if (filters?.orgId) {
     query = query.eq("org_id", filters.orgId);

@@ -23,7 +23,7 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 type ShipmentRow = Awaited<ReturnType<typeof getClientShipments>>["shipments"][number];
 
 export default function PortalShippingPage() {
-  const [filters, setFilters] = useState({ page: 1, pageSize: 50, status: "", carrier: "" });
+  const [filters, setFilters] = useState({ page: 1, pageSize: 50, status: "", carrier: "", search: "" });
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useAppQuery({
@@ -55,6 +55,12 @@ export default function PortalShippingPage() {
       <h1 className="text-2xl font-semibold tracking-tight">Shipping</h1>
 
       <div className="flex flex-wrap gap-3">
+        <Input
+          placeholder="Search tracking..."
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
+          className="w-48"
+        />
         <Input
           placeholder="Filter by carrier..."
           value={filters.carrier}
@@ -155,6 +161,11 @@ export default function PortalShippingPage() {
                           {labelSource === "shipstation" && (
                             <span className="text-xs bg-blue-100 text-blue-700 px-1 rounded">
                               SS
+                            </span>
+                          )}
+                          {labelSource === "pirate_ship" && (
+                            <span className="text-xs bg-orange-100 text-orange-700 px-1 rounded">
+                              PS
                             </span>
                           )}
                           {labelSource === "easypost" && (
