@@ -535,7 +535,9 @@ function ShipmentExpandedDetail({
   detail: ShipmentDetail;
   onDetailRefresh: () => void;
 }) {
-  const { shipment, recipient, costBreakdown, items, trackingEvents } = detail;
+  const { shipment, recipient, costBreakdown, items, trackingEvents, availableFormats } = detail;
+  const formatOptions =
+    availableFormats && availableFormats.length > 0 ? availableFormats : FORMAT_OPTIONS_FALLBACK;
   const bandcampPaymentId = (shipment as { bandcamp_payment_id?: number | null })
     .bandcamp_payment_id;
   const [bcPaymentInput, setBcPaymentInput] = useState(String(bandcampPaymentId ?? ""));
@@ -684,6 +686,7 @@ function ShipmentExpandedDetail({
                           ).format_name_override,
                         }}
                         onSaved={onDetailRefresh}
+                        formatOptions={formatOptions}
                       />
                     </td>
                   </tr>
@@ -795,8 +798,8 @@ function ShipmentExpandedDetail({
 
 // === Format Cell (inline edit) ===
 
-/** Canonical format options — matches warehouse_format_costs keys and PRODUCT_TYPE_ALIASES targets. */
-const FORMAT_OPTIONS = ["LP", "CD", "Cassette", '7"', "T-Shirt", "Other"] as const;
+/** Fallback format options used only when the server hasn't returned availableFormats yet. */
+const FORMAT_OPTIONS_FALLBACK = ["LP", "CD", "Cassette", '7"'] as const;
 
 /**
  * Displays the resolved format for a shipment item and lets staff assign an override
@@ -805,13 +808,16 @@ const FORMAT_OPTIONS = ["LP", "CD", "Cassette", '7"', "T-Shirt", "Other"] as con
  * - Format resolved → shows format text + pencil button to edit
  * - Format blank    → shows "—" with an inline select open by default
  * - Saving calls setShipmentItemFormatOverride; clearing picks the empty option
+ * - Options are fetched from warehouse_format_costs so the names always match cost rows exactly.
  */
 function FormatCell({
   item,
   onSaved,
+  formatOptions,
 }: {
   item: { id: string; format_name: string | null; format_name_override?: string | null };
   onSaved: () => void;
+  formatOptions: readonly string[];
 }) {
   const [editing, setEditing] = useState(!item.format_name);
   const [saving, setSaving] = useState(false);
@@ -855,7 +861,7 @@ function FormatCell({
             onKeyDown={(e) => e.key === "Escape" && item.format_name && setEditing(false)}
           >
             <option value="">— clear —</option>
-            {FORMAT_OPTIONS.map((f) => (
+            {formatOptions.map((f) => (
               <option key={f} value={f}>
                 {f}
               </option>

@@ -423,12 +423,17 @@ export async function getShipmentDetail(id: string) {
       ((i as { format_name_override?: string | null }).format_name_override ?? null) || null,
   }));
 
-  const costBreakdown = await computeFulfillmentCostBreakdown(
-    workspaceId,
-    postage,
-    itemInputs,
-    supabase,
-  );
+  const [costBreakdown, formatCostsResult] = await Promise.all([
+    computeFulfillmentCostBreakdown(workspaceId, postage, itemInputs, supabase),
+    // Fetch available format names so the UI dropdown shows exactly what has cost rows,
+    // preventing the "T-Shirt vs Shirt (S/M)" mismatch where the wrong format name
+    // is selected and costs stay $0 due to missingFormatCosts.
+    supabase
+      .from("warehouse_format_costs")
+      .select("format_name")
+      .eq("workspace_id", workspaceId)
+      .order("format_name"),
+  ]);
 
   // Enrich items with per-item format name (using map from shared helper — no second DB query)
   const enrichedItems = items.map((item) => ({
@@ -440,12 +445,17 @@ export async function getShipmentDetail(id: string) {
 
   const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.tracking_number);
 
+  const availableFormats = (formatCostsResult.data ?? [])
+    .map((r: { format_name: string }) => r.format_name)
+    .filter(Boolean);
+
   return {
     shipment,
     recipient,
     trackingUrl,
     items: enrichedItems,
     trackingEvents: eventsResult.data ?? [],
+    availableFormats,
     costBreakdown: {
       postage: costBreakdown.postage,
       materials: costBreakdown.materials,
