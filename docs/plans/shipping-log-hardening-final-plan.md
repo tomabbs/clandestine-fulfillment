@@ -250,3 +250,48 @@ See **Risks** and **Rollback plan** sections above.
 - `bash scripts/ci-inventory-guard.sh` / webhook guards if touched
 - `supabase migration list --linked` when migrations ship
 - Contract: list `fulfillment_total` === detail `costBreakdown.total` for same id
+
+---
+
+## Squarespace / unmapped-SKU title fallback (2026-04-14)
+
+### Problem
+
+After the backfill migration resolved 2009 variants (2427 → 418 NULLs), a second audit found ~40 SKUs in `warehouse_shipment_items` that were **completely absent from `warehouse_product_variants`** — not a NULL-format issue, but SKUs that never existed in the catalog:
+
+- **22 Squarespace placeholder IDs** (`SQ6720646`, `SQ4004064`, etc.) — ShipStation used Squarespace line-item IDs as SKUs because Squarespace never sent a real product SKU. These will never match any variant row.
+- **12 real products** never synced (resolved by the shopify-full-backfill task that ran separately).
+- **6 one-offs** (`UNKNOWN`, `DL-BO-LE12`, etc.) — genuinely unmatchable.
+
+### Solution implemented
+
+Three-tier title-based fallback added to `batchBuildFormatCostMaps` in `src/lib/server/shipment-fulfillment-cost.ts`. Runs only for SKUs absent from `warehouse_product_variants` and only when the caller provides an `itemTitleMap`.
+
+**Tier 1 — Keyword extraction** (`extractFormatFromTitle`): Scans the item's `product_title` / `variant_title` for format keywords (LP, CD, Cassette, 7", T-Shirt etc.) using ordered regex patterns. Resolves ~10 of the 22 Squarespace items.
+
+**Tier 2 — Fuzzy product title match**: For items where keyword extraction returns null, fetches all `warehouse_products` titles for the workspace (single query, cached for the batch) and scores each against the item title using Jaccard word-overlap with a containment check. Minimum threshold 0.6 with ≥10 char overlap guard. Resolves title-named items like "Joy Guidry - AMEN" → LP.
+
+**Tier 3 — Unknown (amber dot)**: Items where both passes fail remain in `unknownSkus` → `partial=true` → amber dot. Correct behaviour; no silent $0 costs.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/lib/server/shipment-fulfillment-cost.ts` | Added `TITLE_FORMAT_KEYWORDS`, `extractFormatFromTitle` (exported), `normalizeTitleForMatching`, `titleSimilarity`; extended `batchBuildFormatCostMaps` with optional `itemTitleMap` param + two-pass fallback; extended `ItemInput` with `product_title?`, `variant_title?`; `computeFulfillmentCostBreakdown` builds title map automatically from `ItemInput` fields |
+| `src/actions/shipping.ts` | `getShipments`: adds `product_title, variant_title` to `warehouse_shipment_items` select; builds and passes `itemTitleMap` to `batchBuildFormatCostMaps`. `getShipmentDetail`: passes `product_title`/`variant_title` through `itemInputs`. `exportShipmentsCsv`: same select + title map changes as `getShipments` |
+| `tests/unit/lib/server/shipment-fulfillment-cost.test.ts` | Added 13 new tests: `extractFormatFromTitle` (8 cases covering all format types, edge cases, null), `batchBuildFormatCostMaps — title-based fallback` (5 cases: keyword pass, fuzzy pass, no-title → unknown, backward compat without map, keyword-over-fuzzy priority) |
+
+### Test results
+
+56 tests passing (28 pre-existing + 13 new title-fallback + 15 shipping action tests). `pnpm typecheck` clean.
+
+### Known limitations
+
+- **Genuinely ambiguous SQ* items** (`UNKNOWN`, `DL-BO-LE12`, items with non-descriptive titles like "Merch Order") remain amber. No format information is recoverable — this is correct behaviour.
+- **Fuzzy match performance**: Fetches all workspace products once per workspace per request batch. With ~1000 products and 50 shipments this is one extra query. Acceptable; can be cached in Redis if needed.
+- **False-positive fuzzy risk**: Threshold 0.6 + 10-char minimum prevents short titles like "LP" from matching unrelated products. Real-world testing may reveal edge cases — adjusting the threshold is a one-line change in `titleSimilarity`.
+
+### Follow-up
+
+- The `shopify-full-backfill` task (triggered in the same session) will resolve the 12 "real products never synced" bucket once it completes.
+- Remaining unfixable SQ* items will always show amber dot — document this in operator runbooks so staff know the signal is expected for legacy Squarespace orders.

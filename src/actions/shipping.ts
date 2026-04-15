@@ -139,7 +139,7 @@ export async function getShipments(filters: GetShipmentsFilters) {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, workspace_id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, sku, quantity)",
+      "id, workspace_id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, sku, quantity, product_title, variant_title, format_name_override)",
       { count: "exact" },
     );
 
@@ -183,7 +183,13 @@ export async function getShipments(filters: GetShipmentsFilters) {
     new Set(rows.map((s) => s.workspace_id).filter((id): id is string => !!id)),
   );
 
-  type ShipmentItem = { sku?: string | null; quantity?: number | null };
+  type ShipmentItem = {
+    sku?: string | null;
+    quantity?: number | null;
+    product_title?: string | null;
+    variant_title?: string | null;
+    format_name_override?: string | null;
+  };
   type EnrichedRow = (typeof rows)[number] & {
     fulfillment_total: number | null;
     fulfillment_partial: boolean;
@@ -202,19 +208,33 @@ export async function getShipments(filters: GetShipmentsFilters) {
     await Promise.all(
       workspaceIds.map(async (wsId) => {
         const wsRows = rows.filter((s) => s.workspace_id === wsId);
-        const allSkus = Array.from(
-          new Set(
-            wsRows.flatMap((s) => {
-              const items = (s.warehouse_shipment_items ?? []) as ShipmentItem[];
-              return items.map((i) => i.sku).filter((sk): sk is string => !!sk && sk.trim() !== "");
-            }),
-          ),
-        );
+        // Collect all SKUs and build a sku→title map for title-based format fallback plus
+        // a sku→override map for staff-assigned formats (highest priority).
+        const allSkus: string[] = [];
+        const itemTitleMap: Record<string, string | null> = {};
+        const overrideMap: Record<string, string> = {};
+        for (const s of wsRows) {
+          for (const item of (s.warehouse_shipment_items ?? []) as ShipmentItem[]) {
+            if (!item.sku || item.sku.trim() === "") continue;
+            if (!allSkus.includes(item.sku)) allSkus.push(item.sku);
+            if (!(item.sku in itemTitleMap)) {
+              const parts = [item.product_title, item.variant_title].filter(
+                (p): p is string => !!p && p.trim() !== "",
+              );
+              itemTitleMap[item.sku] = parts.length > 0 ? parts.join(" ") : null;
+            }
+            if (item.format_name_override && !(item.sku in overrideMap)) {
+              overrideMap[item.sku] = item.format_name_override;
+            }
+          }
+        }
 
         const { variantFormatMap, formatCostLookup } = await batchBuildFormatCostMaps(
           wsId,
           allSkus,
           supabase,
+          itemTitleMap,
+          overrideMap,
         );
 
         for (const s of wsRows) {
@@ -394,7 +414,14 @@ export async function getShipmentDetail(id: string) {
   // The helper also returns skuFormatMap so we can populate item.format_name without a second query.
   const workspaceId = shipment.workspace_id ?? "";
   const postage = shipment.shipping_cost ?? 0;
-  const itemInputs = items.map((i) => ({ sku: i.sku ?? null, quantity: i.quantity }));
+  const itemInputs = items.map((i) => ({
+    sku: i.sku ?? null,
+    quantity: i.quantity,
+    product_title: (i as { product_title?: string | null }).product_title ?? null,
+    variant_title: (i as { variant_title?: string | null }).variant_title ?? null,
+    format_override:
+      ((i as { format_name_override?: string | null }).format_name_override ?? null) || null,
+  }));
 
   const costBreakdown = await computeFulfillmentCostBreakdown(
     workspaceId,
@@ -676,7 +703,7 @@ export async function exportShipmentsCsv(filters?: {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, workspace_id, tracking_number, carrier, service, ship_date, shipping_cost, label_data, warehouse_orders(order_number), warehouse_shipment_items(sku, quantity)",
+      "id, workspace_id, tracking_number, carrier, service, ship_date, shipping_cost, label_data, warehouse_orders(order_number), warehouse_shipment_items(sku, quantity, product_title, variant_title, format_name_override)",
     )
     .order("ship_date", { ascending: false })
     .limit(10000);
@@ -697,7 +724,13 @@ export async function exportShipmentsCsv(filters?: {
   const allRows = shipments ?? [];
 
   // Build per-workspace format cost maps using shared helper (workspace-scoped + chunked)
-  type CsvItem = { sku?: string | null; quantity?: number | null };
+  type CsvItem = {
+    sku?: string | null;
+    quantity?: number | null;
+    product_title?: string | null;
+    variant_title?: string | null;
+    format_name_override?: string | null;
+  };
   const workspaceIds = Array.from(
     new Set(allRows.map((s) => s.workspace_id).filter((id): id is string => !!id)),
   );
@@ -714,16 +747,25 @@ export async function exportShipmentsCsv(filters?: {
   await Promise.all(
     workspaceIds.map(async (wsId) => {
       const wsRows = allRows.filter((s) => s.workspace_id === wsId);
-      const skus = Array.from(
-        new Set(
-          wsRows.flatMap((s) =>
-            ((s.warehouse_shipment_items ?? []) as CsvItem[])
-              .map((i) => i.sku)
-              .filter((sk): sk is string => !!sk && sk.trim() !== ""),
-          ),
-        ),
-      );
-      const maps = await batchBuildFormatCostMaps(wsId, skus, supabase);
+      const skus: string[] = [];
+      const itemTitleMap: Record<string, string | null> = {};
+      const overrideMap: Record<string, string> = {};
+      for (const s of wsRows) {
+        for (const item of (s.warehouse_shipment_items ?? []) as CsvItem[]) {
+          if (!item.sku || item.sku.trim() === "") continue;
+          if (!skus.includes(item.sku)) skus.push(item.sku);
+          if (!(item.sku in itemTitleMap)) {
+            const parts = [item.product_title, item.variant_title].filter(
+              (p): p is string => !!p && p.trim() !== "",
+            );
+            itemTitleMap[item.sku] = parts.length > 0 ? parts.join(" ") : null;
+          }
+          if (item.format_name_override && !(item.sku in overrideMap)) {
+            overrideMap[item.sku] = item.format_name_override;
+          }
+        }
+      }
+      const maps = await batchBuildFormatCostMaps(wsId, skus, supabase, itemTitleMap, overrideMap);
       wsMaps.set(wsId, maps);
     }),
   );
@@ -796,4 +838,33 @@ export async function exportShipmentsCsv(filters?: {
   const csvLines = [headers.join(","), ...rows.map((row) => row.map(csvEscape).join(","))];
 
   return csvLines.join("\n");
+}
+
+// === Format Override ===
+
+const setFormatOverrideSchema = z.object({
+  itemId: z.string().uuid(),
+  formatName: z.string().min(1).max(64).nullable(),
+});
+
+/**
+ * Set (or clear) a staff-assigned format override on a single warehouse_shipment_items row.
+ * The override is the highest-priority format source in the cost engine — it bypasses all
+ * automatic resolution (variant format_name → product_type → title keywords → fuzzy match).
+ * Pass null to clear the override and revert to automatic resolution.
+ */
+export async function setShipmentItemFormatOverride(input: {
+  itemId: string;
+  formatName: string | null;
+}): Promise<void> {
+  await requireStaff();
+  const { itemId, formatName } = setFormatOverrideSchema.parse(input);
+  const supabase = await createServerSupabaseClient();
+
+  const { error } = await supabase
+    .from("warehouse_shipment_items")
+    .update({ format_name_override: formatName })
+    .eq("id", itemId);
+
+  if (error) throw new Error(`Failed to set format override: ${error.message}`);
 }

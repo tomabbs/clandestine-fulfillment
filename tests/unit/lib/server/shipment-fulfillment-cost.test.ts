@@ -3,6 +3,7 @@ import {
   batchBuildFormatCostMaps,
   computeCostsFromMaps,
   computeFulfillmentCostBreakdown,
+  extractFormatFromTitle,
   roundCents,
 } from "@/lib/server/shipment-fulfillment-cost";
 
@@ -540,5 +541,161 @@ describe("List vs detail contract", () => {
     expect(result.pickPack).toBeCloseTo(2.0);
     expect(result.total).toBeCloseTo(9.82); // 6.50 + 1.32 + 2.00
     expect(result.skuFormatMap["LP-001"]).toBe("LP"); // fallback recorded in map
+  });
+});
+
+// === extractFormatFromTitle ===
+
+describe("extractFormatFromTitle", () => {
+  it("extracts LP from various title patterns", () => {
+    expect(extractFormatFromTitle("Joy Guidry - AMEN LP")).toBe("LP");
+    expect(extractFormatFromTitle('Some Band - Great Album 12" Vinyl')).toBe("LP");
+    expect(extractFormatFromTitle("Artist Name - Title Vinyl LP")).toBe("LP");
+    expect(extractFormatFromTitle("Band - Album 2XLP")).toBe("LP");
+    expect(extractFormatFromTitle("Double LP Record")).toBe("LP");
+  });
+
+  it("extracts CD", () => {
+    expect(extractFormatFromTitle("Some Album CD")).toBe("CD");
+    expect(extractFormatFromTitle("Best Of Compact Disc")).toBe("CD");
+    expect(extractFormatFromTitle("Limited Edition CDR")).toBe("CD");
+  });
+
+  it("extracts Cassette", () => {
+    expect(extractFormatFromTitle("Live At The Venue Cassette")).toBe("Cassette");
+    expect(extractFormatFromTitle("Demo Tape")).toBe("Cassette");
+  });
+
+  it('extracts 7"', () => {
+    expect(extractFormatFromTitle('Split 7" Single')).toBe('7"');
+    expect(extractFormatFromTitle("Seven-Inch release")).toBe('7"');
+  });
+
+  it("extracts T-Shirt", () => {
+    expect(extractFormatFromTitle("Band Logo T-Shirt")).toBe("T-Shirt");
+    expect(extractFormatFromTitle("Tour Tee Black")).toBe("T-Shirt");
+    expect(extractFormatFromTitle("Show Apparel")).toBe("T-Shirt");
+  });
+
+  it('prefers 7" over LP when both patterns present', () => {
+    // 7" pattern runs first in the array
+    expect(extractFormatFromTitle('7" Vinyl single')).toBe('7"');
+  });
+
+  it("returns null for unrecognised titles", () => {
+    expect(extractFormatFromTitle("Poster Print")).toBeNull();
+    expect(extractFormatFromTitle("")).toBeNull();
+    expect(extractFormatFromTitle(null)).toBeNull();
+    expect(extractFormatFromTitle(undefined)).toBeNull();
+  });
+});
+
+// === batchBuildFormatCostMaps — title fallback (itemTitleMap) ===
+
+describe("batchBuildFormatCostMaps — title-based fallback", () => {
+  /** Supabase mock: variants returns empty (SKU not in catalog), products table for fuzzy match. */
+  function makeTitleFallbackSupabase(productRows: Array<{ title: string; product_type: string }>) {
+    return {
+      from: vi.fn((table: string) => {
+        if (table === "warehouse_product_variants") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_products") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ data: productRows, error: null }),
+            }),
+          };
+        }
+        if (table === "warehouse_format_costs") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({
+                  data: [
+                    { format_name: "LP", pick_pack_cost: 2.0, material_cost: 1.32 },
+                    { format_name: "CD", pick_pack_cost: 1.5, material_cost: 0.75 },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
+      }),
+    };
+  }
+
+  it("resolves format via keyword extraction when SKU is absent from variants", async () => {
+    const supabase = makeTitleFallbackSupabase([]);
+    const result = await batchBuildFormatCostMaps("ws-1", ["SQ6720646"], supabase, {
+      SQ6720646: "Joy Guidry - AMEN LP",
+    });
+    expect(result.variantFormatMap["SQ6720646"]).toBe("LP");
+    expect(result.unknownSkus).not.toContain("SQ6720646");
+  });
+
+  it("resolves format via fuzzy product title match when keyword extraction misses", async () => {
+    const supabase = makeTitleFallbackSupabase([
+      { title: "Joy Guidry - AMEN", product_type: "LP" },
+    ]);
+    // Title has no format keyword, but matches a product title fuzzily
+    const result = await batchBuildFormatCostMaps("ws-1", ["SQ4004064"], supabase, {
+      SQ4004064: "Joy Guidry - AMEN",
+    });
+    expect(result.variantFormatMap["SQ4004064"]).toBe("LP");
+    expect(result.unknownSkus).not.toContain("SQ4004064");
+  });
+
+  it("adds to unknownSkus when no title is provided for missing SKU", async () => {
+    const supabase = makeTitleFallbackSupabase([]);
+    const result = await batchBuildFormatCostMaps("ws-1", ["SQ9999999"], supabase, {
+      SQ9999999: null,
+    });
+    expect(result.variantFormatMap["SQ9999999"]).toBeUndefined();
+    expect(result.unknownSkus).toContain("SQ9999999");
+  });
+
+  it("does not run title fallback when itemTitleMap is omitted (backward compat)", async () => {
+    const supabase = makeTitleFallbackSupabase([]);
+    const result = await batchBuildFormatCostMaps("ws-1", ["SQ6720646"], supabase);
+    // No itemTitleMap passed → should not call warehouse_products
+    expect(result.unknownSkus).toContain("SQ6720646");
+    const fromCalls = (supabase.from as ReturnType<typeof vi.fn>).mock.calls.map(
+      (args: unknown[]) => args[0] as string,
+    );
+    expect(fromCalls).not.toContain("warehouse_products");
+  });
+
+  it("keyword fallback takes precedence over fuzzy match", async () => {
+    // Title has "LP" → keyword pass resolves it; fuzzy pass should never run
+    const supabase = makeTitleFallbackSupabase([
+      { title: "Totally Different Album CD", product_type: "CD" },
+    ]);
+    const result = await batchBuildFormatCostMaps("ws-1", ["SQ0000001"], supabase, {
+      SQ0000001: "Some Great LP",
+    });
+    expect(result.variantFormatMap["SQ0000001"]).toBe("LP");
+  });
+
+  it("end-to-end: Squarespace SKU with LP title resolves full costs (not $0)", async () => {
+    const supabase = makeTitleFallbackSupabase([]);
+    const result = await computeFulfillmentCostBreakdown(
+      "ws-1",
+      6.5,
+      [{ sku: "SQ6720646", quantity: 1, product_title: "Joy Guidry - AMEN LP" }],
+      supabase,
+    );
+    expect(result.partial).toBe(false);
+    expect(result.materials).toBeCloseTo(1.32);
+    expect(result.pickPack).toBeCloseTo(2.0);
+    expect(result.skuFormatMap["SQ6720646"]).toBe("LP");
   });
 });

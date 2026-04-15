@@ -1,8 +1,19 @@
 "use client";
 
-import { Download, ExternalLink, Loader2, Package, Search, Send, Upload } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Download,
+  ExternalLink,
+  Loader2,
+  Package,
+  Pencil,
+  Search,
+  Send,
+  Upload,
+  X,
+} from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { setBandcampPaymentId, triggerBandcampMarkShipped } from "@/actions/bandcamp-shipping";
 import type { GetShipmentsFilters } from "@/actions/shipping";
 import {
@@ -10,6 +21,7 @@ import {
   getShipmentDetail,
   getShipments,
   getShipmentsSummary,
+  setShipmentItemFormatOverride,
 } from "@/actions/shipping";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
@@ -326,6 +338,11 @@ function ShipmentTableRow({
   detail: ShipmentDetail | undefined;
   detailLoading: boolean;
 }) {
+  const queryClient = useQueryClient();
+  const handleDetailRefresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.shipments.detail(shipment.id) });
+  }, [queryClient, shipment.id]);
+
   const recipient = extractRecipient(shipment.label_data);
 
   // Priority: linked warehouse_order number > ss_order_number > SS-{id} fallback
@@ -500,7 +517,7 @@ function ShipmentTableRow({
                 <Skeleton className="h-4 w-40" />
               </div>
             ) : detail ? (
-              <ShipmentExpandedDetail detail={detail} />
+              <ShipmentExpandedDetail detail={detail} onDetailRefresh={handleDetailRefresh} />
             ) : null}
           </td>
         </tr>
@@ -511,7 +528,13 @@ function ShipmentTableRow({
 
 // === Expanded Detail ===
 
-function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
+function ShipmentExpandedDetail({
+  detail,
+  onDetailRefresh,
+}: {
+  detail: ShipmentDetail;
+  onDetailRefresh: () => void;
+}) {
   const { shipment, recipient, costBreakdown, items, trackingEvents } = detail;
   const bandcampPaymentId = (shipment as { bandcamp_payment_id?: number | null })
     .bandcamp_payment_id;
@@ -648,10 +671,21 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id} className="border-b border-dashed">
-                    <td className="py-1 pr-3">{item.product_title ?? "---"}</td>
+                    <td className="py-1 pr-3 text-sm">{item.product_title ?? "---"}</td>
                     <td className="py-1 pr-3 font-mono text-xs">{item.sku}</td>
                     <td className="py-1 pr-3 text-right tabular-nums">{item.quantity}</td>
-                    <td className="py-1">{item.format_name ?? "---"}</td>
+                    <td className="py-1">
+                      <FormatCell
+                        item={{
+                          id: item.id,
+                          format_name: item.format_name,
+                          format_name_override: (
+                            item as typeof item & { format_name_override?: string | null }
+                          ).format_name_override,
+                        }}
+                        onSaved={onDetailRefresh}
+                      />
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -755,6 +789,106 @@ function ShipmentExpandedDetail({ detail }: { detail: ShipmentDetail }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// === Format Cell (inline edit) ===
+
+/** Canonical format options — matches warehouse_format_costs keys and PRODUCT_TYPE_ALIASES targets. */
+const FORMAT_OPTIONS = ["LP", "CD", "Cassette", '7"', "T-Shirt", "Other"] as const;
+
+/**
+ * Displays the resolved format for a shipment item and lets staff assign an override
+ * when automatic resolution fails (blank / amber dot) or is wrong.
+ *
+ * - Format resolved → shows format text + pencil button to edit
+ * - Format blank    → shows "—" with an inline select open by default
+ * - Saving calls setShipmentItemFormatOverride; clearing picks the empty option
+ */
+function FormatCell({
+  item,
+  onSaved,
+}: {
+  item: { id: string; format_name: string | null; format_name_override?: string | null };
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(!item.format_name);
+  const [saving, setSaving] = useState(false);
+  const selectRef = useRef<HTMLSelectElement>(null);
+
+  // When the format becomes resolved (after a save + refetch), exit editing mode.
+  useEffect(() => {
+    if (item.format_name) setEditing(false);
+  }, [item.format_name]);
+
+  useEffect(() => {
+    if (editing) selectRef.current?.focus();
+  }, [editing]);
+
+  const handleChange = async (value: string) => {
+    setSaving(true);
+    try {
+      await setShipmentItemFormatOverride({
+        itemId: item.id,
+        formatName: value || null,
+      });
+      onSaved();
+    } catch {
+      // leave editing open so staff can retry
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        {saving ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <select
+            ref={selectRef}
+            className="h-7 rounded border border-input bg-background px-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            defaultValue={item.format_name_override ?? item.format_name ?? ""}
+            onChange={(e) => handleChange(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && item.format_name && setEditing(false)}
+          >
+            <option value="">— clear —</option>
+            {FORMAT_OPTIONS.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        )}
+        {item.format_name && !saving && (
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="text-muted-foreground hover:text-foreground"
+            title="Cancel"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 group">
+      <span className={item.format_name_override ? "font-medium text-amber-700" : ""}>
+        {item.format_name ?? "—"}
+      </span>
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+        title={item.format_name_override ? "Edit format override" : "Set format"}
+      >
+        <Pencil className="h-3 w-3" />
+      </button>
     </div>
   );
 }
