@@ -21,7 +21,10 @@ interface ImportMetrics {
 
 export const pirateShipImportTask = task({
   id: "pirate-ship-import",
-  run: async (payload: PirateShipImportPayload) => {
+  // Do not retry — file processing errors (bad XLSX, missing storage object)
+  // are not transient. Retrying would prolong a bad state without recovering.
+  retry: { maxAttempts: 1 },
+  run: async (payload: PirateShipImportPayload, { ctx }) => {
     const { importId, workspaceId } = payload;
     const supabase = createServiceRoleClient();
 
@@ -146,7 +149,13 @@ export const pirateShipImportTask = task({
 
         if (shipmentError) {
           if (shipmentError.code === "23505") {
-            logger.info(`Tracking ${shipment.trackingNumber} duplicate (23505), skipping`);
+            // Race condition: pre-insert check passed but a concurrent import
+            // inserted the same tracking number between our check and insert.
+            logger.warn("Race condition duplicate on insert (23505)", {
+              trackingNumber: shipment.trackingNumber,
+              importId,
+              workspaceId,
+            });
             return "duplicate";
           }
           throw new Error(`Failed to create shipment: ${shipmentError.message}`);
@@ -315,7 +324,6 @@ export const pirateShipImportTask = task({
 
               if (aliasMatch) {
                 matchSource = "alias";
-                // Insert shipment with org_id only (no order linkage)
                 const { data: newShipment, error: shipmentError } = await supabase
                   .from("warehouse_shipments")
                   .insert({
@@ -336,6 +344,11 @@ export const pirateShipImportTask = task({
 
                 if (shipmentError) {
                   if (shipmentError.code === "23505") {
+                    // Race condition on alias insert
+                    logger.warn("Race condition duplicate on alias insert (23505)", {
+                      trackingNumber: shipment.trackingNumber,
+                      importId,
+                    });
                     metrics.skipped_duplicate++;
                     continue;
                   }
@@ -399,13 +412,14 @@ export const pirateShipImportTask = task({
         metrics.matched_by_alias +
         metrics.skipped_duplicate;
 
+      // Store ctx.run.id in the final errors update so it survives this last write
       await supabase
         .from("warehouse_pirate_ship_imports")
         .update({
           status: "completed",
           processed_count: processedCount,
           error_count: errorCount,
-          errors: { per_row_errors: perRowErrors, metrics },
+          errors: { per_row_errors: perRowErrors, metrics, trigger_run_id: ctx.run.id },
           completed_at: new Date().toISOString(),
         })
         .eq("id", importId);
@@ -415,11 +429,19 @@ export const pirateShipImportTask = task({
       return { importId, totalRows: parsed.totalRows, processedCount, errorCount, metrics };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      // Failure update — add phase + timestamp + run ID for traceability
       await supabase
         .from("warehouse_pirate_ship_imports")
         .update({
           status: "failed",
-          errors: [{ message: errorMessage }],
+          errors: [
+            {
+              phase: "runtime",
+              message: errorMessage,
+              trigger_run_id: ctx.run.id,
+              timestamp: new Date().toISOString(),
+            },
+          ],
           completed_at: new Date().toISOString(),
         })
         .eq("id", importId);

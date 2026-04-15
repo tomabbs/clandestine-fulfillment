@@ -781,6 +781,62 @@ export const sensorCheckTask = schedules.task({
       console.error("[sensor-check] Failed to check stale pause state:", err);
     }
 
+    // Global check: auto-fail imports stuck pending/processing for >30 minutes.
+    // Runs once per sensor-check pass (not per workspace).
+    // Measures time since upload (created_at) — coarse but acceptable.
+    // If imports legitimately exceed 30 min, raise the threshold.
+    try {
+      const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data: stuckImports } = await supabase
+        .from("warehouse_pirate_ship_imports")
+        .select("id, workspace_id, file_name, created_at, status")
+        .in("status", ["pending", "processing"])
+        .lt("created_at", thirtyMinAgo);
+
+      if (stuckImports && stuckImports.length > 0) {
+        for (const imp of stuckImports) {
+          await supabase
+            .from("warehouse_pirate_ship_imports")
+            .update({
+              status: "failed",
+              completed_at: new Date().toISOString(),
+              errors: [
+                {
+                  phase: "timeout",
+                  message: `Import timed out after 30 minutes (was: ${imp.status})`,
+                  timestamp: new Date().toISOString(),
+                },
+              ],
+            })
+            .eq("id", imp.id);
+
+          await supabase.from("warehouse_review_queue").upsert(
+            {
+              workspace_id: imp.workspace_id,
+              category: "sensor",
+              severity: "high",
+              title: `Pirate Ship import timed out: ${imp.file_name}`,
+              description: `Import ${imp.id} was stuck in "${imp.status}" for >30 minutes. Re-upload to retry.`,
+              metadata: {
+                import_id: imp.id,
+                file_name: imp.file_name,
+                stuck_status: imp.status,
+              },
+              group_key: `pirate_ship_timeout:${imp.id}`,
+              status: "open",
+              occurrence_count: 1,
+            },
+            { onConflict: "group_key", ignoreDuplicates: false },
+          );
+        }
+        console.warn(
+          `[sensor-check] Auto-failed ${stuckImports.length} stuck Pirate Ship import(s)`,
+        );
+      }
+    } catch (err) {
+      console.error("[sensor-check] Failed to check stuck imports:", err);
+    }
+
     return allResults;
   },
 });

@@ -1,6 +1,3 @@
-# Prompt Pack — PLAN
-
-Use this prompt when you need a change plan and want no architecture drift.
 
 ## Required Read-First (Hard Block)
 
@@ -56,3 +53,39 @@ If scope includes sync, webhook, inventory, orders, releases, billing, or suppor
 - Include a dedicated Trigger touchpoint section.
 - List task IDs and ingress routes/actions.
 - No final plan without this section.
+
+ALSO integrate these sections into the plan doc
+
+# Feature
+# Goal
+# Context
+
+# Requirements
+- Functional:
+- Non-functional:
+
+# Constraints
+- Technical:
+- Product:
+- External (Supabase, APIs, etc.):
+
+# Affected files
+
+# Proposed implementation
+
+# Assumptions
+
+# Risks
+
+# Validation plan
+
+# Rollback plan   ← ADD THIS
+
+# Rejected alternatives
+
+# Open questions   ← ADD THIS
+
+# Deferred items   ← ADD THIS ⭐
+
+# Revision history
+

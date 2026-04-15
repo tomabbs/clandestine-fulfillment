@@ -605,7 +605,11 @@ export interface WarehousePirateShipImport {
   row_count: number | null;
   processed_count: number;
   error_count: number;
-  errors: Record<string, unknown>[];
+  // Polymorphic JSONB — two runtime shapes:
+  //   success → { per_row_errors: [...], metrics: {...}, trigger_run_id?: string }
+  //   failure → [{ phase: string; message: string; timestamp: string; trigger_run_id?: string }]
+  // Always read via parseImportErrors() in the UI — never treat as plain array.
+  errors: unknown;
   uploaded_by: string | null;
   created_at: string;
   completed_at: string | null;

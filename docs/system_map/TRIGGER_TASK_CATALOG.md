@@ -36,7 +36,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bandcamp-mark-shipped-cron` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `*/15 * * * *` |
 | `client-store-order-detect` | `src/trigger/tasks/client-store-order-detect.ts` | `*/10 * * * *` |
 | `multi-store-inventory-push` | `src/trigger/tasks/multi-store-inventory-push.ts` | `*/5 * * * *` |
-| `sensor-check` | `src/trigger/tasks/sensor-check.ts` | `*/5 * * * *` |
+| `sensor-check` | `src/trigger/tasks/sensor-check.ts` | `*/5 * * * *` — **updated 2026-04-10**: global stuck-import check auto-fails `warehouse_pirate_ship_imports` stuck in `pending`/`processing` for >30 min and creates a `severity: high` review queue item |
 | `preorder-fulfillment` | `src/trigger/tasks/preorder-fulfillment.ts` | `0 6,18 * * *` (America/New_York) — 2×/day; tags-only model (no selling plans, §21) |
 | `monthly-billing` | `src/trigger/tasks/monthly-billing.ts` | `0 2 1 * *` (America/New_York) |
 | `storage-calc` | `src/trigger/tasks/storage-calc.ts` | `0 1 1 * *` (America/New_York) |
@@ -68,7 +68,7 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `bandcamp-scrape-page` | `src/trigger/tasks/bandcamp-sync.ts` | `bandcamp-sync`, `bandcamp-scrape-sweep`, `scraper-reconcile`, `src/actions/bandcamp.ts` — **hardened 2026-04-14**: category-gated enrichment, per-domain circuit breaker (DB-backed AIMD), dead URL lifecycle (active/probation/dead), inline review queue auto-resolve, adaptive rate limiting |
 | `bandcamp-order-sync` | `src/trigger/tasks/bandcamp-order-sync.ts` | `bandcamp-order-sync-cron` — persists `warehouse_orders.shipping_cost` from Bandcamp line shipping, stores per-line `shipping` in `line_items` JSON, repairs existing orders missing `shipping_cost` when API returns shipping |
 | `bandcamp-mark-shipped` | `src/trigger/tasks/bandcamp-mark-shipped.ts` | `src/actions/bandcamp-shipping.ts`, `bandcamp-mark-shipped-cron` |
-| `pirate-ship-import` | `src/trigger/tasks/pirate-ship-import.ts` | `src/actions/pirate-ship.ts` — **rewritten 2026-04-13**: multi-tier org matching (exact order → ilike fallback → alias → review queue), two-layer tracking dedup (pre-check + 23505 catch), auto-links `order_id` + copies `bandcamp_payment_id`, creates real `warehouse_shipment_items` from order line items, `label_source='pirate_ship'`, import-level metrics in `errors` JSONB, writes `sensor_readings` on failure |
+| `pirate-ship-import` | `src/trigger/tasks/pirate-ship-import.ts` | `src/actions/pirate-ship.ts` — **rewritten 2026-04-13**: multi-tier org matching (exact order → ilike fallback → alias → review queue), two-layer tracking dedup (pre-check + 23505 catch), auto-links `order_id` + copies `bandcamp_payment_id`, creates real `warehouse_shipment_items` from order line items, `label_source='pirate_ship'`, import-level metrics in `errors` JSONB, writes `sensor_readings` on failure. **Hardened 2026-04-10**: `retry: { maxAttempts: 1 }` (file errors not transient), `ctx.run.id` stored in `errors` JSONB on completion, 23505 race condition logged at `warn`, failure `errors` includes `phase` + `timestamp` + `trigger_run_id` |
 | `inbound-product-create` | `src/trigger/tasks/inbound-product-create.ts` | `src/actions/inbound.ts` |
 | `inbound-checkin-complete` | `src/trigger/tasks/inbound-checkin-complete.ts` | `src/actions/inbound.ts` |
 | `tag-cleanup-backfill` | `src/trigger/tasks/tag-cleanup-backfill.ts` | `src/actions/admin-settings.ts` |

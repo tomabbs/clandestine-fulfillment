@@ -498,7 +498,14 @@ export async function getBandcampScraperHealth(workspaceId: string) {
   };
 
   // URL breakdown by source
-  const urlSources = { scraper_verified: 0, constructed: 0, orders_api: 0, sales_crossref: 0, manual: 0, none: 0 };
+  const urlSources = {
+    scraper_verified: 0,
+    constructed: 0,
+    orders_api: 0,
+    sales_crossref: 0,
+    manual: 0,
+    none: 0,
+  };
   for (const m of mappings ?? []) {
     if (!m.bandcamp_url) urlSources.none++;
     else if (m.bandcamp_url_source === "scraper_verified") urlSources.scraper_verified++;
@@ -615,11 +622,23 @@ export async function getBandcampScraperHealth(workspaceId: string) {
   const reviewMappingIds = (rawReviewItems ?? [])
     .map((r) => (r.metadata as Record<string, unknown>)?.mappingId as string)
     .filter(Boolean);
-  const enrichMap = new Map<string, { productName: string | null; sku: string | null; accountName: string | null; subdomain: string | null; scrapeStatus: string | null; urlSource: string | null }>();
+  const enrichMap = new Map<
+    string,
+    {
+      productName: string | null;
+      sku: string | null;
+      accountName: string | null;
+      subdomain: string | null;
+      scrapeStatus: string | null;
+      urlSource: string | null;
+    }
+  >();
   if (reviewMappingIds.length > 0) {
     const { data: enrichMappings } = await supabase
       .from("bandcamp_product_mappings")
-      .select("id, variant_id, bandcamp_subdomain, bandcamp_url_source, scrape_status, bandcamp_member_band_id")
+      .select(
+        "id, variant_id, bandcamp_subdomain, bandcamp_url_source, scrape_status, bandcamp_member_band_id",
+      )
       .in("id", reviewMappingIds);
 
     if (enrichMappings?.length) {
@@ -629,10 +648,18 @@ export async function getBandcampScraperHealth(workspaceId: string) {
         .select("id, sku, warehouse_products!inner(title)")
         .in("id", enrichVariantIds);
       const variantLookup = new Map(
-        (enrichVariants ?? []).map((v) => [v.id, { sku: v.sku, productTitle: (v.warehouse_products as unknown as { title: string }).title }]),
+        (enrichVariants ?? []).map((v) => [
+          v.id,
+          {
+            sku: v.sku,
+            productTitle: (v.warehouse_products as unknown as { title: string }).title,
+          },
+        ]),
       );
 
-      const bandIds = enrichMappings.map((m) => m.bandcamp_member_band_id as number).filter(Boolean);
+      const bandIds = enrichMappings
+        .map((m) => m.bandcamp_member_band_id as number)
+        .filter(Boolean);
       const connLookup = new Map<number, string>();
       if (bandIds.length > 0) {
         const { data: conns } = await supabase

@@ -192,19 +192,32 @@ journeys:
       - src/actions/shipping.ts
       - src/trigger/tasks/pirate-ship-import.ts
       - src/trigger/tasks/bandcamp-order-sync.ts
+      - src/trigger/tasks/sensor-check.ts
       - src/lib/clients/pirate-ship-parser.ts
       - src/lib/shared/order-utils.ts
+      - src/lib/shared/types.ts
     status: green
     checks:
       - XLSX parsed and rows matched to orders via normalizeOrderNumber
-      - two-layer tracking dedup (pre-check + 23505)
+      - two-layer tracking dedup (pre-check + 23505); 23505 race logged at warn with context
       - label_source set to pirate_ship
       - bandcamp_payment_id auto-copied from matched order
       - real warehouse_shipment_items created from order line items
       - admin shipping list item count falls back to line row count when per-row quantity sums to 0
       - bandcamp-order-sync sets warehouse_orders.shipping_cost and repairs legacy rows; getShipmentDetail infers from order line_items JSON or hydrates from Bandcamp get_orders on expand when payment ID is linked
       - unmatched rows sent to review queue
-      - import metrics written to errors JSONB
+      - import metrics written to errors JSONB (success shape object; failure shape array)
+      - enqueue failures (tasks.trigger throws) immediately mark row failed — no stuck pending
+      - history table polls every 2s while any import is pending/processing (recursive setTimeout)
+      - detail panel auto-opens when the just-uploaded import reaches completed/failed
+      - 8 metric cards rendered from JSONB via parseImportErrors helper (handles both JSONB shapes)
+      - duplicate callout shown when metrics.skipped_duplicate > 0
+      - matched shipments and parse errors capped at 100 rows in detail panel
+      - stuck-import sensor in sensor-check auto-fails imports stuck >30 min and creates review queue item
+      - WarehousePirateShipImport.errors typed as unknown (polymorphic JSONB); read via parseImportErrors
+      - JSONB filters use ->> (text extraction) not -> for UUID string comparisons in getImportDetail
+      - task configured with retry: { maxAttempts: 1 } — file errors are not transient
+      - ctx.run.id stored in final errors JSONB update for traceability
 
   - id: shipping_billing_pipeline
     area: billing

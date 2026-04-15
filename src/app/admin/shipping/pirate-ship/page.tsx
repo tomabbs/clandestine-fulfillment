@@ -1,7 +1,7 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getImportDetail, getImportHistory, initiateImport } from "@/actions/pirate-ship";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
@@ -11,11 +11,61 @@ import type { WarehousePirateShipImport } from "@/lib/shared/types";
 
 type ImportDetail = Awaited<ReturnType<typeof getImportDetail>>;
 
+interface ImportMetrics {
+  total_rows: number;
+  matched_by_order: number;
+  matched_by_customer: number;
+  matched_by_alias: number;
+  skipped_duplicate: number;
+  sent_to_review: number;
+  created_with_items: number;
+  created_without_items: number;
+}
+
+interface ParsedErrors {
+  metrics: ImportMetrics | null;
+  perRowErrors: Array<{ row?: number; message: string }>;
+}
+
+// Normalises both JSONB shapes stored in warehouse_pirate_ship_imports.errors:
+//   success  → object: { per_row_errors: [...], metrics: {...}, trigger_run_id?: string }
+//   failure  → array:  [{ phase, message, timestamp, trigger_run_id? }]
+// Never call .length or .map() directly on imp.errors — use this helper instead.
+function parseImportErrors(raw: unknown): ParsedErrors {
+  if (!raw) return { metrics: null, perRowErrors: [] };
+
+  // Success shape: object with a 'metrics' key
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw) && "metrics" in raw) {
+    const obj = raw as { per_row_errors?: unknown[]; metrics: ImportMetrics };
+    return {
+      metrics: obj.metrics,
+      perRowErrors: (obj.per_row_errors ?? []) as Array<{ row?: number; message: string }>,
+    };
+  }
+
+  // Failure shape: array of error objects
+  if (Array.isArray(raw)) {
+    return {
+      metrics: null,
+      perRowErrors: raw as Array<{ row?: number; message: string }>,
+    };
+  }
+
+  return { metrics: null, perRowErrors: [{ message: String(raw) }] };
+}
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB client-side guard
+const DISPLAY_ROW_LIMIT = 100; // Cap rendered rows to prevent browser freeze on large imports
+
 export default function PirateShipImportPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedImport, setSelectedImport] = useState<ImportDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // Tracks the most recently uploaded import so we can auto-open it when it finishes
+  const [pendingImportId, setPendingImportId] = useState<string | null>(null);
+  // Prevents polling from re-opening a panel the user explicitly closed
+  const [manuallyClosedIds, setManuallyClosedIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -28,13 +78,79 @@ export default function PirateShipImportPage() {
     tier: CACHE_TIERS.REALTIME,
   });
 
-  // Rule #68: Upload directly to Supabase Storage (4.5MB Server Action limit)
+  const handleViewDetail = useCallback(async (importId: string) => {
+    setLoadingDetail(true);
+    try {
+      const detail = await getImportDetail(importId);
+      setSelectedImport(detail);
+    } catch {
+      setSelectedImport(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }, []);
+
+  const handleCloseDetail = useCallback(() => {
+    if (selectedImport?.import?.id) {
+      setManuallyClosedIds((prev) => new Set(prev).add(selectedImport.import?.id ?? ""));
+    }
+    setSelectedImport(null);
+  }, [selectedImport]);
+
+  // Recursive setTimeout — awaits refetchHistory before scheduling the next tick.
+  // Prevents overlapping requests if the query takes longer than the poll interval.
+  useEffect(() => {
+    const imports = historyData?.imports ?? [];
+    const hasInFlight = imports.some(
+      (i: WarehousePirateShipImport) => i.status === "pending" || i.status === "processing",
+    );
+
+    // When polling stops, check if our tracked upload just finished — auto-open its detail
+    if (!hasInFlight) {
+      if (pendingImportId) {
+        const finished = imports.find(
+          (i: WarehousePirateShipImport) =>
+            i.id === pendingImportId && (i.status === "completed" || i.status === "failed"),
+        );
+        if (finished && !manuallyClosedIds.has(finished.id)) {
+          setPendingImportId(null);
+          handleViewDetail(finished.id);
+        }
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    const schedulePoll = (): ReturnType<typeof setTimeout> => {
+      return setTimeout(async () => {
+        if (cancelled) return;
+        await refetchHistory();
+        if (!cancelled) {
+          schedulePoll();
+        }
+      }, 2000);
+    };
+
+    const timer = schedulePoll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [historyData, pendingImportId, manuallyClosedIds, refetchHistory, handleViewDetail]);
+
+  // Rule #68: Upload directly to Supabase Storage (4.5 MB Server Action limit)
   const handleUpload = useCallback(async () => {
     const file = fileInputRef.current?.files?.[0];
     if (!file) return;
 
     if (!file.name.endsWith(".xlsx")) {
       setUploadError("Please select an XLSX file");
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setUploadError("File too large (max 10 MB). Export a smaller date range from Pirate Ship.");
       return;
     }
 
@@ -47,7 +163,6 @@ export default function PirateShipImportPage() {
       if (!supabaseUrl || !supabaseKey) throw new Error("Missing Supabase config");
       const supabase = createBrowserClient(supabaseUrl, supabaseKey);
 
-      // Upload to storage with unique path
       const timestamp = Date.now();
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const storagePath = `imports/${timestamp}-${safeName}`;
@@ -60,11 +175,10 @@ export default function PirateShipImportPage() {
         throw new Error(`Upload failed: ${uploadErr.message}`);
       }
 
-      // Call Server Action with storage path only (not file data)
-      await initiateImport(storagePath, file.name);
+      const { importId } = await initiateImport(storagePath, file.name);
 
-      // Reset and refresh
       if (fileInputRef.current) fileInputRef.current.value = "";
+      setPendingImportId(importId);
       refetchHistory();
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
@@ -72,18 +186,6 @@ export default function PirateShipImportPage() {
       setUploading(false);
     }
   }, [refetchHistory]);
-
-  const handleViewDetail = useCallback(async (importId: string) => {
-    setLoadingDetail(true);
-    try {
-      const detail = await getImportDetail(importId);
-      setSelectedImport(detail);
-    } catch {
-      setSelectedImport(null);
-    } finally {
-      setLoadingDetail(false);
-    }
-  }, []);
 
   return (
     <div className="p-6 space-y-8">
@@ -109,6 +211,11 @@ export default function PirateShipImportPage() {
           </Button>
         </div>
         {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
+        {pendingImportId && (
+          <p className="text-sm text-muted-foreground animate-pulse">
+            Processing import — results will appear automatically...
+          </p>
+        )}
       </div>
 
       {/* Import History Table */}
@@ -176,15 +283,13 @@ export default function PirateShipImportPage() {
       </div>
 
       {/* Detail View */}
-      {selectedImport && (
-        <ImportDetailPanel detail={selectedImport} onClose={() => setSelectedImport(null)} />
-      )}
+      {selectedImport && <ImportDetailPanel detail={selectedImport} onClose={handleCloseDetail} />}
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: WarehousePirateShipImport["status"] }) {
-  const styles = {
+  const styles: Record<WarehousePirateShipImport["status"], string> = {
     pending: "bg-yellow-100 text-yellow-800",
     processing: "bg-blue-100 text-blue-800",
     completed: "bg-green-100 text-green-800",
@@ -200,27 +305,94 @@ function StatusBadge({ status }: { status: WarehousePirateShipImport["status"] }
   );
 }
 
+// Separate badge for review queue items — different status domain from import status
+function ReviewStatusBadge({ status }: { status: string }) {
+  return (
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground">
+      {status}
+    </span>
+  );
+}
+
 function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose: () => void }) {
+  if (!detail.import) return null;
+
+  const imp = detail.import;
+  const { metrics, perRowErrors } = parseImportErrors(imp.errors);
+  const newShipments = metrics ? metrics.created_with_items + metrics.created_without_items : null;
+
+  const displayedShipments = detail.matchedShipments.slice(0, DISPLAY_ROW_LIMIT);
+  const displayedErrors = perRowErrors.slice(0, DISPLAY_ROW_LIMIT);
+  const displayedUnmatched = detail.unmatchedItems.slice(0, DISPLAY_ROW_LIMIT);
+
   return (
     <div className="border rounded-lg p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Import Detail: {detail.import.file_name}</h2>
+        <h2 className="text-lg font-medium">Import Detail: {imp.file_name}</h2>
         <Button variant="outline" size="sm" onClick={onClose}>
           Close
         </Button>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Total Rows" value={detail.import.row_count ?? 0} />
-        <StatCard label="Processed" value={detail.import.processed_count} />
-        <StatCard label="Matched" value={detail.matchedShipments.length} />
-        <StatCard label="Unmatched" value={detail.unmatchedItems.length} />
-      </div>
+      {/* Duplicate callout */}
+      {metrics && metrics.skipped_duplicate > 0 && (
+        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-900">
+          <strong>
+            {metrics.skipped_duplicate} duplicate tracking number
+            {metrics.skipped_duplicate !== 1 ? "s" : ""} skipped
+          </strong>{" "}
+          — these shipments already exist from a previous import and were not re-imported.
+        </div>
+      )}
+
+      {/* Metrics cards */}
+      {metrics ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <StatCard label="Total Rows" value={imp.row_count ?? 0} />
+          <StatCard label="New Shipments" value={newShipments ?? 0} highlight="good" />
+          <StatCard label="Duplicates Skipped" value={metrics.skipped_duplicate} />
+          <StatCard label="Matched by Order #" value={metrics.matched_by_order} highlight="good" />
+          <StatCard
+            label="Matched by Customer"
+            value={metrics.matched_by_customer}
+            highlight="good"
+          />
+          <StatCard
+            label="Matched by Org Alias"
+            value={metrics.matched_by_alias}
+            highlight="good"
+          />
+          <StatCard
+            label="Sent to Review"
+            value={metrics.sent_to_review}
+            highlight={metrics.sent_to_review > 0 ? "warn" : "neutral"}
+          />
+          <StatCard
+            label="Parse Errors"
+            value={imp.error_count}
+            highlight={imp.error_count > 0 ? "bad" : "neutral"}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-4 gap-4">
+          <StatCard label="Total Rows" value={imp.row_count ?? 0} />
+          <StatCard label="Processed" value={imp.processed_count} />
+          <StatCard label="Matched" value={detail.matchedShipments.length} />
+          <StatCard label="Unmatched" value={detail.unmatchedItems.length} />
+        </div>
+      )}
 
       {/* Matched Shipments */}
       {detail.matchedShipments.length > 0 && (
         <div className="space-y-2">
-          <h3 className="font-medium text-sm">Matched Shipments</h3>
+          <h3 className="font-medium text-sm">
+            Matched Shipments ({detail.matchedShipments.length})
+            {detail.matchedShipments.length > DISPLAY_ROW_LIMIT && (
+              <span className="ml-2 text-xs text-muted-foreground font-normal">
+                — showing first {DISPLAY_ROW_LIMIT}
+              </span>
+            )}
+          </h3>
           <div className="border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead>
@@ -232,7 +404,7 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
                 </tr>
               </thead>
               <tbody>
-                {detail.matchedShipments.map(
+                {displayedShipments.map(
                   (s: {
                     id: string;
                     tracking_number: string | null;
@@ -259,7 +431,14 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
       {/* Unmatched Items */}
       {detail.unmatchedItems.length > 0 && (
         <div className="space-y-2">
-          <h3 className="font-medium text-sm text-destructive">Unmatched (Review Queue)</h3>
+          <h3 className="font-medium text-sm text-destructive">
+            Unmatched — Sent to Review ({detail.unmatchedItems.length})
+            {detail.unmatchedItems.length > DISPLAY_ROW_LIMIT && (
+              <span className="ml-2 text-xs text-muted-foreground font-normal">
+                — showing first {DISPLAY_ROW_LIMIT}
+              </span>
+            )}
+          </h3>
           <div className="border border-destructive/20 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead>
@@ -271,7 +450,7 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
                 </tr>
               </thead>
               <tbody>
-                {detail.unmatchedItems.map(
+                {displayedUnmatched.map(
                   (item: { id: string; metadata: Record<string, unknown>; status: string }) => (
                     <tr key={item.id} className="border-b last:border-0">
                       <td className="p-2">{(item.metadata?.row_index as number) ?? "-"}</td>
@@ -284,7 +463,7 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
                         {(item.metadata?.tracking_number as string) ?? "-"}
                       </td>
                       <td className="p-2">
-                        <StatusBadge status={item.status as WarehousePirateShipImport["status"]} />
+                        <ReviewStatusBadge status={item.status} />
                       </td>
                     </tr>
                   ),
@@ -295,17 +474,24 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
         </div>
       )}
 
-      {/* Errors */}
-      {detail.import.errors.length > 0 && (
+      {/* Parse Errors */}
+      {displayedErrors.length > 0 && (
         <div className="space-y-2">
-          <h3 className="font-medium text-sm text-destructive">Parse Errors</h3>
+          <h3 className="font-medium text-sm text-destructive">
+            Parse Errors ({perRowErrors.length})
+            {perRowErrors.length > DISPLAY_ROW_LIMIT && (
+              <span className="ml-2 text-xs text-muted-foreground font-normal">
+                — showing first {DISPLAY_ROW_LIMIT}
+              </span>
+            )}
+          </h3>
           <div className="border border-destructive/20 rounded-lg p-4 space-y-1">
-            {detail.import.errors.map((err: Record<string, unknown>) => (
+            {displayedErrors.map((err) => (
               <div
-                key={`err-${(err.row as number) ?? "x"}-${(err.message as string)?.slice(0, 20) ?? ""}`}
+                key={`err-${err.row ?? "x"}-${String(err.message).slice(0, 20)}`}
                 className="text-xs text-destructive"
               >
-                Row {(err.row as number) ?? "?"}: {(err.message as string) ?? "Unknown error"}
+                Row {err.row ?? "?"}: {err.message ?? "Unknown error"}
               </div>
             ))}
           </div>
@@ -315,11 +501,28 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({
+  label,
+  value,
+  highlight = "neutral",
+}: {
+  label: string;
+  value: number;
+  highlight?: "good" | "warn" | "bad" | "neutral";
+}) {
+  const valueClass =
+    highlight === "bad"
+      ? "text-destructive"
+      : highlight === "warn"
+        ? "text-yellow-700"
+        : highlight === "good"
+          ? "text-green-700"
+          : "";
+
   return (
     <div className="border rounded-lg p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      <div className={`text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</div>
     </div>
   );
 }

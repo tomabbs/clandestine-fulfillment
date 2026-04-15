@@ -24,13 +24,11 @@ export async function initiateImport(storagePath: string, fileName: string) {
 
   const supabase = await createServerSupabaseClient();
 
-  // Get current user
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Unauthorized");
 
-  // Get user's workspace and internal user ID
   const { data: userData } = await supabase
     .from("users")
     .select("id, workspace_id")
@@ -39,7 +37,6 @@ export async function initiateImport(storagePath: string, fileName: string) {
 
   if (!userData) throw new Error("User not found");
 
-  // Create import record
   const { data: importRecord, error } = await supabase
     .from("warehouse_pirate_ship_imports")
     .insert({
@@ -54,11 +51,33 @@ export async function initiateImport(storagePath: string, fileName: string) {
 
   if (error) throw new Error(`Failed to create import record: ${error.message}`);
 
-  // Rule #41/#48: Fire Trigger task for heavy processing, return ID
-  await tasks.trigger("pirate-ship-import", {
-    importId: importRecord.id,
-    workspaceId: userData.workspace_id,
-  });
+  // Rule #41/#48: Fire Trigger task for heavy processing.
+  // Wrapped in try/catch — if enqueue fails, mark the row failed immediately
+  // so it does not stay "pending" forever.
+  // Note: if the update inside catch also fails (double transient failure),
+  // the 30-min stuck-import sensor in sensor-check.ts catches it.
+  try {
+    await tasks.trigger("pirate-ship-import", {
+      importId: importRecord.id,
+      workspaceId: userData.workspace_id,
+    });
+  } catch (triggerErr) {
+    await supabase
+      .from("warehouse_pirate_ship_imports")
+      .update({
+        status: "failed",
+        errors: [
+          {
+            phase: "enqueue",
+            message: `Failed to start import task: ${String(triggerErr)}`,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", importRecord.id);
+    throw new Error(`Import saved but could not be queued: ${String(triggerErr)}`);
+  }
 
   return { importId: importRecord.id };
 }
@@ -130,18 +149,17 @@ export async function getImportDetail(importId: string) {
 
   if (error) throw new Error(`Failed to fetch import: ${error.message}`);
 
-  // Get review queue items for unmatched orgs
+  // Use ->> (text extraction) not -> (JSONB) for UUID string comparison in PostgREST
   const { data: reviewItems } = await supabase
     .from("warehouse_review_queue")
     .select("*")
     .eq("category", "pirate_ship_unmatched_org")
-    .filter("metadata->import_id", "eq", id);
+    .filter("metadata->>import_id", "eq", id);
 
-  // Get shipments created by this import
   const { data: shipments } = await supabase
     .from("warehouse_shipments")
     .select("id, org_id, tracking_number, carrier, ship_date, shipping_cost, status")
-    .filter("label_data->import_id", "eq", id);
+    .filter("label_data->>import_id", "eq", id);
 
   return {
     import: data,

@@ -107,7 +107,10 @@ export default function InventoryActivityPage() {
             <Download className="h-4 w-4 mr-1" />
             {exporting ? "Exporting…" : "Export CSV"}
           </Button>
-          <Link href="/portal/inventory" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Link
+            href="/portal/inventory"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
             ← Inventory
           </Link>
         </div>
@@ -123,7 +126,9 @@ export default function InventoryActivityPage() {
         />
         <Select
           value={filters.source}
-          onValueChange={(v) => setFilters((f) => ({ ...f, source: !v || v === "__all__" ? "" : v, page: 1 }))}
+          onValueChange={(v) =>
+            setFilters((f) => ({ ...f, source: !v || v === "__all__" ? "" : v, page: 1 }))
+          }
         >
           <SelectTrigger className="w-48">
             <SelectValue placeholder="All sources" />

@@ -282,7 +282,11 @@ function OpenIssuesCard({
                       <TableCell colSpan={6} className="bg-muted/30 p-4">
                         <div className="space-y-3">
                           <div className="flex gap-4 text-xs text-muted-foreground">
-                            {item.urlSource && <span>URL source: <strong>{item.urlSource}</strong></span>}
+                            {item.urlSource && (
+                              <span>
+                                URL source: <strong>{item.urlSource}</strong>
+                              </span>
+                            )}
                             {item.subdomain && (
                               <a
                                 href={`https://${item.subdomain}.bandcamp.com/merch`}
@@ -390,7 +394,14 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
     art: 0,
     byCategory: { apparel: 0, merch: 0, bundle: 0, other: 0 },
   };
-  const urls = data.urlSources ?? { scraper_verified: 0, constructed: 0, orders_api: 0, sales_crossref: 0, manual: 0, none: 0 };
+  const urls = data.urlSources ?? {
+    scraper_verified: 0,
+    constructed: 0,
+    orders_api: 0,
+    sales_crossref: 0,
+    manual: 0,
+    none: 0,
+  };
   const totalWithUrl = data.totalWithUrl ?? 0;
   const scrapeStats = data.scrapeStats ?? { total: 0, success: 0, failed: 0, blocked: 0 };
 
@@ -749,7 +760,9 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
               <p className="text-xs text-muted-foreground">Manual</p>
             </div>
             <div>
-              <p className="text-lg font-semibold tabular-nums text-amber-500">{urls.constructed}</p>
+              <p className="text-lg font-semibold tabular-nums text-amber-500">
+                {urls.constructed}
+              </p>
               <p className="text-xs text-muted-foreground">Constructed</p>
             </div>
             <div>

@@ -71,7 +71,10 @@ export default function InventoryPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
-        <Link href="/portal/inventory/activity" className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <Link
+          href="/portal/inventory/activity"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
           View Activity Log
         </Link>
       </div>
