@@ -163,13 +163,30 @@ describe("computeCostsFromMaps", () => {
     expect(result.pickPack).toBe(0);
     expect(result.partial).toBe(false);
   });
+
+  it("REGRESSION: null format_name in map triggers partial=true (not silent skip)", () => {
+    // Root Cause B fix: before this patch, if(!fn) continue silently skipped null-format
+    // SKUs, leaving partial=false. After fix, they are added to unknownSkus → partial=true.
+    const vm = { "LP-001": null }; // SKU found but format unresolvable
+    const fc = { LP: { pick_pack_cost: 2.5, material_cost: 1.0 } };
+    const result = computeCostsFromMaps(10.0, [{ sku: "LP-001", quantity: 1 }], vm, fc);
+    expect(result.partial).toBe(true); // amber dot — was incorrectly false before fix
+    expect(result.materials).toBe(0);
+    expect(result.pickPack).toBe(0);
+    expect(result.total).toBe(10.0); // postage only
+    expect(result.unknownSkus).toContain("LP-001");
+  });
 });
 
 // === batchBuildFormatCostMaps ===
 
 describe("batchBuildFormatCostMaps", () => {
   function makeSupabase(
-    variantData: Array<{ sku: string; format_name: string | null }>,
+    variantData: Array<{
+      sku: string;
+      format_name: string | null;
+      warehouse_products?: { product_type: string | null } | null;
+    }>,
     formatCostData: Array<{ format_name: string; pick_pack_cost: number; material_cost: number }>,
   ) {
     return {
@@ -264,6 +281,57 @@ describe("batchBuildFormatCostMaps", () => {
     await batchBuildFormatCostMaps("ws-SPECIFIC", ["LP-001"], supabase);
 
     expect(mockEq).toHaveBeenCalledWith("workspace_id", "ws-SPECIFIC");
+  });
+
+  it("uses warehouse_products.product_type as fallback when format_name is null", async () => {
+    const supabase = makeSupabase(
+      [{ sku: "LP-001", format_name: null, warehouse_products: { product_type: "LP" } }],
+      [{ format_name: "LP", pick_pack_cost: 2.5, material_cost: 1.0 }],
+    );
+    const result = await batchBuildFormatCostMaps("ws-1", ["LP-001"], supabase);
+    expect(result.variantFormatMap["LP-001"]).toBe("LP");
+    expect(result.unknownSkus).toEqual([]);
+    expect(result.formatCostLookup.LP.pick_pack_cost).toBe(2.5);
+  });
+
+  it("stores null in variantFormatMap when both format_name and product_type are null", async () => {
+    const supabase = makeSupabase(
+      [{ sku: "LP-001", format_name: null, warehouse_products: { product_type: null } }],
+      [],
+    );
+    const result = await batchBuildFormatCostMaps("ws-1", ["LP-001"], supabase);
+    // Variant was found so it is NOT in unknownSkus at this stage.
+    // The null map value causes computeCostsFromMaps to add it to unknownSkus.
+    expect(result.variantFormatMap).toHaveProperty("LP-001", null);
+    expect(result.unknownSkus).toEqual([]); // batchBuild doesn't mark it unknown; computeCosts does
+  });
+
+  it("treats empty string product_type as null (|| not ??)", async () => {
+    const supabase = makeSupabase(
+      [{ sku: "LP-001", format_name: null, warehouse_products: { product_type: "" } }],
+      [],
+    );
+    const result = await batchBuildFormatCostMaps("ws-1", ["LP-001"], supabase);
+    expect(result.variantFormatMap["LP-001"]).toBeNull();
+  });
+
+  it("treats whitespace-only product_type as null after trim", async () => {
+    const supabase = makeSupabase(
+      [{ sku: "LP-001", format_name: null, warehouse_products: { product_type: "   " } }],
+      [],
+    );
+    const result = await batchBuildFormatCostMaps("ws-1", ["LP-001"], supabase);
+    // "   ".trim() = "" → falsy → null; must not reach formatCostLookup as "   "
+    expect(result.variantFormatMap["LP-001"]).toBeNull();
+  });
+
+  it("respects explicit format_name even when product_type differs", async () => {
+    const supabase = makeSupabase(
+      [{ sku: "LP-001", format_name: "CD", warehouse_products: { product_type: "LP" } }],
+      [{ format_name: "CD", pick_pack_cost: 1.5, material_cost: 0.75 }],
+    );
+    const result = await batchBuildFormatCostMaps("ws-1", ["LP-001"], supabase);
+    expect(result.variantFormatMap["LP-001"]).toBe("CD"); // explicit format_name wins
   });
 
   it("scopes format_cost query by workspace_id", async () => {
@@ -418,5 +486,59 @@ describe("List vs detail contract", () => {
     expect(listResult.materials).toBe(detailResult.materials);
     expect(listResult.pickPack).toBe(detailResult.pickPack);
     expect(listResult.partial).toBe(detailResult.partial);
+  });
+
+  it("null format_name with product_type=LP fallback resolves full costs (not $0)", async () => {
+    // End-to-end parity: exercises batchBuildFormatCostMaps FK join + computeCostsFromMaps.
+    // Variant has format_name=null but product_type=LP via parent product FK join.
+    // Expected: costs resolved correctly — materials and pick_pack NOT $0, partial=false.
+    const supabase = {
+      from: vi.fn((table: string) => {
+        if (table === "warehouse_product_variants") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({
+                  data: [
+                    {
+                      sku: "LP-001",
+                      format_name: null,
+                      warehouse_products: { product_type: "LP" },
+                    },
+                  ],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_format_costs") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockResolvedValue({
+                  data: [{ format_name: "LP", pick_pack_cost: 2.0, material_cost: 1.32 }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
+      }),
+    };
+
+    const result = await computeFulfillmentCostBreakdown(
+      "ws-1",
+      6.5,
+      [{ sku: "LP-001", quantity: 1 }],
+      supabase,
+    );
+
+    expect(result.partial).toBe(false); // format resolved via product_type fallback
+    expect(result.materials).toBeCloseTo(1.32);
+    expect(result.pickPack).toBeCloseTo(2.0);
+    expect(result.total).toBeCloseTo(9.82); // 6.50 + 1.32 + 2.00
+    expect(result.skuFormatMap["LP-001"]).toBe("LP"); // fallback recorded in map
   });
 });

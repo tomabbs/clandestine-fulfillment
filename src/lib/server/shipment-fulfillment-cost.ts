@@ -16,6 +16,42 @@ type AnySupabaseClient = { from: (table: string) => any };
 
 const CHUNK_SIZE = 250;
 
+/**
+ * Normalize Shopify free-text product_type values to the keys used in warehouse_format_costs.
+ * Shopify lets merchants enter any string — "12\" Vinyl", "CDR", "7\" Vinyl", etc.
+ * This map keeps the runtime fallback in sync with the migration alias list.
+ * Values not in the map are returned as-is; if they still miss the cost lookup they
+ * land in missingFormatCosts and trigger the amber dot (correct behaviour).
+ */
+const PRODUCT_TYPE_ALIASES: Record<string, string> = {
+  // LP / vinyl
+  '12" Vinyl': "LP",
+  '2x 12" Vinyl': "LP",
+  "Vinyl LP": "LP",
+  "2 x Vinyl LP": "LP",
+  // CD
+  CDR: "CD",
+  "2x CD": "CD",
+  "2xCD": "CD",
+  // Cassette
+  "2x Cassette": "Cassette",
+  "Cassette,": "Cassette",
+  // 7"
+  '7" Vinyl': '7"',
+  // Apparel
+  "T-Shirt/Apparel": "T-Shirt",
+  Shirt: "T-Shirt",
+  // Other
+  Magazine: "Other",
+};
+
+function normalizeProductType(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return PRODUCT_TYPE_ALIASES[trimmed] ?? trimmed;
+}
+
 export interface ItemInput {
   sku: string | null | undefined;
   quantity: number;
@@ -77,12 +113,18 @@ export async function batchBuildFormatCostMaps(
     };
   }
 
-  // Chunk variant lookups
-  const variantRows: Array<{ sku: string; format_name: string | null }> = [];
+  // Chunk variant lookups — join warehouse_products to get product_type as fallback
+  // for when format_name is NULL. shopify-sync writes product_type to warehouse_products
+  // but not format_name to variants; this FK join recovers the format without an extra query.
+  const variantRows: Array<{
+    sku: string;
+    format_name: string | null;
+    warehouse_products: { product_type: string | null } | null;
+  }> = [];
   for (const skuChunk of chunk(uniqueSkus, CHUNK_SIZE)) {
     const { data } = await supabase
       .from("warehouse_product_variants")
-      .select("sku, format_name")
+      .select("sku, format_name, warehouse_products(product_type)")
       .eq("workspace_id", workspaceId)
       .in("sku", skuChunk);
     if (data) variantRows.push(...data);
@@ -90,7 +132,13 @@ export async function batchBuildFormatCostMaps(
 
   const variantFormatMap: Record<string, string | null> = {};
   for (const v of variantRows) {
-    variantFormatMap[v.sku] = v.format_name;
+    // Use format_name when set; fall back to parent product's product_type, normalized
+    // through PRODUCT_TYPE_ALIASES (e.g. "12\" Vinyl" → "LP"). normalizeProductType
+    // also handles trim + empty-string collapse.
+    const rawProductType = (v.warehouse_products as { product_type: string | null } | null)
+      ?.product_type;
+    const productType = normalizeProductType(rawProductType ?? null);
+    variantFormatMap[v.sku] = v.format_name || productType;
   }
 
   const unknownSkus = uniqueSkus.filter((s) => !(s in variantFormatMap));
@@ -174,7 +222,16 @@ export function computeCostsFromMaps(
     }
 
     const fn = variantFormatMap[item.sku];
-    if (!fn) continue;
+    if (!fn) {
+      // SKU is in the map but format_name is unresolvable after both the direct column
+      // and product_type fallback were tried. Treat as unknown so partial=true fires
+      // and the amber dot shows — never silently skip.
+      // Note: unknownSkus intentionally covers both "SKU not in system" (checked above)
+      // and "format unresolvable". If a future diagnostic screen needs to distinguish
+      // them, introduce a separate unresolvedFormats array.
+      if (!unknownSkus.includes(item.sku)) unknownSkus.push(item.sku);
+      continue;
+    }
 
     if (!(fn in formatCostLookup)) {
       if (!missingFormatCosts.includes(fn)) missingFormatCosts.push(fn);

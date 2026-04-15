@@ -88,7 +88,7 @@ domains:
       - bandcamp genre tags (HTML scraping + taxonomy matching)
       - bandcamp trending intelligence (dig_deeper API)
       - Bandcamp order sync persists shipping paid (`warehouse_orders.shipping_cost`, `line_items[].shipping`) for fulfillment margin on shipments; `bandcamp-shipping-paid` hydrates from get_orders when the DB never stored it
-      - `shipment-fulfillment-cost.ts` is the single owner of fulfillment cost computation (postage + materials + pick/pack); used by `getShipments` (batch, workspace-scoped, chunked .in()) and `getShipmentDetail` (single); returns `partial`/`unknownSkus`/`missingFormatCosts`/`skuFormatMap`; all variant and format-cost queries scoped by workspace_id; integer-cents accumulation to prevent IEEE 754 drift
+      - `shipment-fulfillment-cost.ts` is the single owner of fulfillment cost computation (postage + materials + pick/pack); used by `getShipments` (batch, workspace-scoped, chunked .in()) and `getShipmentDetail` (single); returns `partial`/`unknownSkus`/`missingFormatCosts`/`skuFormatMap`; all variant and format-cost queries scoped by workspace_id; integer-cents accumulation to prevent IEEE 754 drift; `batchBuildFormatCostMaps` falls back to `warehouse_products.product_type` via FK join when `format_name` is NULL, normalizing Shopify aliases via `PRODUCT_TYPE_ALIASES` (e.g. "12\" Vinyl" → "LP"); null-format SKUs after fallback are added to `unknownSkus` → `partial: true` → amber dot (never silently skipped)
       - SKU reconciliation and auto-generation
       - workspace_catalog_stats snapshot refresh
       - Shopify product sync completeness (tracking, cost, weight, collections, publishing)
