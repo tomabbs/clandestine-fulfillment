@@ -21,9 +21,9 @@ interface ImportMetrics {
 
 export const pirateShipImportTask = task({
   id: "pirate-ship-import",
-  // Do not retry — file processing errors (bad XLSX, missing storage object)
-  // are not transient. Retrying would prolong a bad state without recovering.
-  retry: { maxAttempts: 1 },
+  // No task-level retry override — using global default (maxAttempts: 3).
+  // A previous retry: { maxAttempts: 1 } override caused Trigger.dev v4 to
+  // never execute the task (runs stayed "pending" indefinitely).
   run: async (payload: PirateShipImportPayload, { ctx }) => {
     const { importId, workspaceId } = payload;
     const supabase = createServiceRoleClient();
