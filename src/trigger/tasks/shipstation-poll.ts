@@ -186,7 +186,7 @@ async function ingestFromPoll(
   // or by auto-link, subsequent polls preserve those values.
   //
   // Step A: Insert if new (ignoreDuplicates: true = do nothing on conflict)
-  const { data: insertedRow } = await supabase
+  const { data: insertedRow, error: upsertErr } = await supabase
     .from("warehouse_shipments")
     .upsert(
       {
@@ -218,6 +218,40 @@ async function ingestFromPoll(
     )
     .select("id, order_id")
     .maybeSingle();
+
+  if (upsertErr) {
+    logger.error("ShipStation shipment upsert failed", {
+      error: upsertErr.message,
+      code: upsertErr.code,
+      shipstationShipmentId,
+      workspaceId,
+    });
+    // 23514 = CHECK constraint violation — create a review queue item so the
+    // shipment is not silently dropped. Other codes fall through and the caller
+    // logs "Failed to find or create" below, which is misleading — this path
+    // now returns early with full context instead.
+    if (upsertErr.code === "23514") {
+      await supabase.from("warehouse_review_queue").upsert(
+        {
+          workspace_id: workspaceId,
+          category: "sensor",
+          severity: "high",
+          title: `ShipStation shipment blocked by DB constraint: ${shipstationShipmentId}`,
+          description: `CHECK constraint violation (${upsertErr.code}) prevented insert. Error: ${upsertErr.message}. Re-trigger shipstation-poll after the constraint fix is deployed.`,
+          metadata: {
+            shipstation_shipment_id: shipstationShipmentId,
+            error_code: upsertErr.code,
+            error_message: upsertErr.message,
+          },
+          group_key: `ss_constraint_fail:${shipstationShipmentId}`,
+          status: "open",
+          occurrence_count: 1,
+        },
+        { onConflict: "group_key", ignoreDuplicates: false },
+      );
+    }
+    return;
+  }
 
   // Step B: If row already existed, fetch it then update only mutable fields
   let upsertedId: string;

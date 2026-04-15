@@ -329,6 +329,8 @@ export const pirateShipImportTask = task({
                   .insert({
                     workspace_id: workspaceId,
                     org_id: aliasMatch.id,
+                    order_id: null, // explicit: no order link for alias-matched shipments
+                    mailorder_id: null, // explicit: satisfies chk_shipment_not_both_orders
                     tracking_number: shipment.trackingNumber,
                     carrier: shipment.carrier,
                     service: shipment.service,

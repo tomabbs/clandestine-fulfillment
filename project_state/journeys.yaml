@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-11
+updated_at: 2026-04-15
 
 journeys:
   - id: staff_client_invite
@@ -218,6 +218,18 @@ journeys:
       - JSONB filters use ->> (text extraction) not -> for UUID string comparisons in getImportDetail
       - task configured with retry: { maxAttempts: 1 } — file errors are not transient
       - ctx.run.id stored in final errors JSONB update for traceability
+      - Tier 3 alias insert sets order_id: null, mailorder_id: null explicitly (satisfies chk_shipment_not_both_orders)
+
+  - id: shipstation_poll
+    area: shipping
+    paths:
+      - src/trigger/tasks/shipstation-poll.ts
+    status: green
+    checks:
+      - Step A upsert captures error from Supabase call (error code + message logged)
+      - 23514 (CHECK constraint violation) creates severity:high review queue item with group_key ss_constraint_fail:{id}
+      - no silent shipment drop — all upsert errors return early with full context
+      - org_id and order_id immutability preserved (Step B update never overwrites them)
 
   - id: shipping_billing_pipeline
     area: billing
