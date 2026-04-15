@@ -6,6 +6,10 @@
  * - Clandestine Shopify (direct API, not client_store_connections)
  * - Bandcamp (via bandcamp-inventory-push task)
  * - Client stores (via multi-store-inventory-push task)
+ *
+ * When workspaces.inventory_sync_paused is true, all outbound pushes are
+ * skipped immediately. recordInventoryChange() still completes — Redis + Postgres
+ * stay current. The updated quantities are pushed when sync resumes.
  */
 
 import { tasks } from "@trigger.dev/sdk";
@@ -38,6 +42,18 @@ export async function fanoutInventoryChange(
   correlationId?: string,
 ): Promise<FanoutResult> {
   const supabase = createServiceRoleClient();
+
+  // Pause guard — single primary-key lookup before any outbound work
+  const { data: ws } = await supabase
+    .from("workspaces")
+    .select("inventory_sync_paused")
+    .eq("id", workspaceId)
+    .single();
+
+  if (ws?.inventory_sync_paused) {
+    return { storeConnectionsPushed: 0, bandcampPushed: false, shopifyPushed: false };
+  }
+
   let storeConnectionsPushed = 0;
   let bandcampPushed = false;
   let shopifyPushed = false;

@@ -11,6 +11,46 @@ const adjustInventorySchema = z.object({
   reason: z.string().min(1),
 });
 
+// === Shared helpers (used by getInventoryDetail and getClientInventoryActivity) ===
+
+const SOURCE_LABELS: Record<string, string> = {
+  shopify: "Shopify order",
+  bandcamp: "Bandcamp sale",
+  squarespace: "Squarespace order",
+  woocommerce: "WooCommerce order",
+  shipstation: "ShipStation order",
+  manual: "Manual adjustment",
+  inbound: "Inbound shipment",
+  preorder: "Pre-order allocation",
+  backfill: "Inventory backfill",
+};
+
+function getSourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source;
+}
+
+function getReferenceId(source: string, metadata: Record<string, unknown>): string | null {
+  if (source === "inbound" && metadata.inbound_shipment_id) {
+    return `Inbound #${String(metadata.inbound_shipment_id).slice(0, 8)}`;
+  }
+  if (
+    (source === "shopify" ||
+      source === "woocommerce" ||
+      source === "squarespace" ||
+      source === "shipstation") &&
+    metadata.order_id
+  ) {
+    return `Order ${metadata.order_id}`;
+  }
+  if (source === "bandcamp" && metadata.bandcamp_item_id) {
+    return `Bandcamp item ${metadata.bandcamp_item_id}`;
+  }
+  if (source === "manual" && metadata.reason) {
+    return String(metadata.reason);
+  }
+  return null;
+}
+
 // === Types ===
 
 interface InventoryFilters {
@@ -47,6 +87,19 @@ interface InventoryListResult {
   pageSize: number;
 }
 
+interface ActivityItem {
+  id: string;
+  delta: number;
+  source: string;
+  sourceLabel: string;
+  referenceId: string | null;
+  previousQuantity: number | null;
+  newQuantity: number | null;
+  correlationId: string;
+  createdAt: string;
+  metadata: Record<string, unknown>;
+}
+
 interface InventoryDetailResult {
   level: {
     sku: string;
@@ -60,15 +113,27 @@ interface InventoryDetailResult {
     locationType: string;
     quantity: number;
   }>;
-  recentActivity: Array<{
-    id: string;
-    delta: number;
-    source: string;
-    correlationId: string;
-    createdAt: string;
-    metadata: Record<string, unknown>;
-  }>;
+  recentActivity: ActivityItem[];
   bandcampUrl: string | null;
+}
+
+export interface ActivityFilters {
+  sku?: string;
+  source?: string;
+  dateRange?: "7d" | "30d" | "90d" | "all";
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ActivityRow extends ActivityItem {
+  sku: string;
+}
+
+export interface ActivityResult {
+  rows: ActivityRow[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 // === Server Actions ===
@@ -330,22 +395,33 @@ export async function getInventoryDetail(sku: string): Promise<InventoryDetailRe
     };
   });
 
-  // Fetch recent activity (last 20)
+  // Fetch recent activity (last 20) with enriched fields
   const { data: activityData } = await supabase
     .from("warehouse_inventory_activity")
-    .select("id, delta, source, correlation_id, created_at, metadata")
+    .select(
+      "id, delta, source, correlation_id, previous_quantity, new_quantity, created_at, metadata",
+    )
     .eq("sku", sku)
+    .eq("is_synthetic", false)
     .order("created_at", { ascending: false })
     .limit(20);
 
-  const recentActivity = (activityData ?? []).map((a: Record<string, unknown>) => ({
-    id: a.id as string,
-    delta: a.delta as number,
-    source: a.source as string,
-    correlationId: a.correlation_id as string,
-    createdAt: a.created_at as string,
-    metadata: a.metadata as Record<string, unknown>,
-  }));
+  const recentActivity: ActivityItem[] = (activityData ?? []).map((a: Record<string, unknown>) => {
+    const meta = (a.metadata as Record<string, unknown>) ?? {};
+    const src = a.source as string;
+    return {
+      id: a.id as string,
+      delta: a.delta as number,
+      source: src,
+      sourceLabel: getSourceLabel(src),
+      referenceId: getReferenceId(src, meta),
+      previousQuantity: a.previous_quantity as number | null,
+      newQuantity: a.new_quantity as number | null,
+      correlationId: a.correlation_id as string,
+      createdAt: a.created_at as string,
+      metadata: meta,
+    };
+  });
 
   return {
     level: {
@@ -567,4 +643,140 @@ export async function exportInventoryCsv(filters: {
   });
 
   return [header, ...lines].join("\n");
+}
+
+// === Client Inventory Activity ===
+
+/**
+ * Org-scoped inventory activity feed for the client portal.
+ * Uses service role after scoping to the authenticated client's org.
+ * Defence-in-depth: RLS policy also blocks cross-org reads.
+ *
+ * workspace_id is included in the query filter so Postgres uses the
+ * idx_inventory_activity_ws_date_sku index (leading edge: workspace_id).
+ */
+export async function getClientInventoryActivity(
+  filters: ActivityFilters = {},
+): Promise<ActivityResult> {
+  const { orgId, workspaceId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const page = filters.page ?? 1;
+  const pageSize = filters.pageSize ?? 50;
+  const offset = (page - 1) * pageSize;
+
+  const { data: skuRows } = await supabase
+    .from("warehouse_inventory_levels")
+    .select("sku")
+    .eq("org_id", orgId);
+
+  const orgSkus = (skuRows ?? []).map((r) => r.sku);
+  if (orgSkus.length === 0) {
+    return { rows: [], total: 0, page, pageSize };
+  }
+
+  let query = supabase
+    .from("warehouse_inventory_activity")
+    .select(
+      "id, sku, delta, source, correlation_id, previous_quantity, new_quantity, metadata, created_at",
+      { count: "exact" },
+    )
+    .eq("workspace_id", workspaceId)
+    .in("sku", orgSkus)
+    .eq("is_synthetic", false)
+    .order("created_at", { ascending: false });
+
+  if (filters.sku) {
+    query = query.ilike("sku", `%${filters.sku}%`);
+  }
+  if (filters.source) {
+    query = query.eq("source", filters.source);
+  }
+  if (filters.dateRange && filters.dateRange !== "all") {
+    const days = filters.dateRange === "7d" ? 7 : filters.dateRange === "30d" ? 30 : 90;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte("created_at", since);
+  }
+
+  const { data, count, error } = await query.range(offset, offset + pageSize - 1);
+  if (error) throw new Error(`Failed to fetch activity: ${error.message}`);
+
+  const rows: ActivityRow[] = (data ?? []).map((a: Record<string, unknown>) => {
+    const meta = (a.metadata as Record<string, unknown>) ?? {};
+    const src = a.source as string;
+    return {
+      id: a.id as string,
+      sku: a.sku as string,
+      delta: a.delta as number,
+      source: src,
+      sourceLabel: getSourceLabel(src),
+      referenceId: getReferenceId(src, meta),
+      previousQuantity: a.previous_quantity as number | null,
+      newQuantity: a.new_quantity as number | null,
+      correlationId: a.correlation_id as string,
+      createdAt: a.created_at as string,
+      metadata: meta,
+    };
+  });
+
+  return { rows, total: count ?? 0, page, pageSize };
+}
+
+/**
+ * Export the client's inventory activity as CSV.
+ * Capped at 2,000 rows — Server Actions run in Vercel Serverless Functions
+ * (1 GB RAM, 15s timeout). Building a large CSV string in memory risks OOM.
+ * For larger exports, a streaming Route Handler at /api/export-activity is
+ * the correct long-term solution.
+ */
+export async function exportClientInventoryActivity(
+  filters: Omit<ActivityFilters, "page" | "pageSize"> = {},
+): Promise<string> {
+  const { orgId, workspaceId } = await requireClient();
+  const supabase = createServiceRoleClient();
+
+  const { data: skuRows } = await supabase
+    .from("warehouse_inventory_levels")
+    .select("sku")
+    .eq("org_id", orgId);
+
+  const orgSkus = (skuRows ?? []).map((r) => r.sku);
+  if (orgSkus.length === 0) return "Date,SKU,Change,Before,After,Cause,Reference\n";
+
+  let query = supabase
+    .from("warehouse_inventory_activity")
+    .select("id, sku, delta, source, previous_quantity, new_quantity, metadata, created_at")
+    .eq("workspace_id", workspaceId)
+    .in("sku", orgSkus)
+    .eq("is_synthetic", false)
+    .order("created_at", { ascending: false })
+    .limit(2_000);
+
+  if (filters.sku) query = query.ilike("sku", `%${filters.sku}%`);
+  if (filters.source) query = query.eq("source", filters.source);
+  if (filters.dateRange && filters.dateRange !== "all") {
+    const days = filters.dateRange === "7d" ? 7 : filters.dateRange === "30d" ? 30 : 90;
+    query = query.gte("created_at", new Date(Date.now() - days * 86_400_000).toISOString());
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`Export failed: ${error.message}`);
+
+  const header = "Date,SKU,Change,Before,After,Cause,Reference";
+  const csvRows = (data ?? []).map((a: Record<string, unknown>) => {
+    const meta = (a.metadata as Record<string, unknown>) ?? {};
+    const src = a.source as string;
+    const ref = getReferenceId(src, meta) ?? "";
+    return [
+      new Date(a.created_at as string).toISOString(),
+      a.sku,
+      a.delta,
+      a.previous_quantity ?? "",
+      a.new_quantity ?? "",
+      getSourceLabel(src),
+      `"${ref.replace(/"/g, '""')}"`,
+    ].join(",");
+  });
+
+  return [header, ...csvRows].join("\n");
 }

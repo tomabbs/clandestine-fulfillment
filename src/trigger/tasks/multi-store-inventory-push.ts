@@ -59,12 +59,41 @@ export const multiStoreInventoryPushTask = schedules.task({
 
       if (!connections || connections.length === 0) continue;
 
-      // Load workspace safety stock default + bundles_enabled flag
+      // Load workspace settings including pause flag
       const { data: ws } = await supabase
         .from("workspaces")
-        .select("default_safety_stock, bundles_enabled")
+        .select("default_safety_stock, bundles_enabled, inventory_sync_paused")
         .eq("id", workspaceId)
         .single();
+
+      // Pause guard — state-change-only logging to avoid flooding channel_sync_log
+      if (ws?.inventory_sync_paused) {
+        const { data: lastLog } = await supabase
+          .from("channel_sync_log")
+          .select("status")
+          .eq("workspace_id", workspaceId)
+          .eq("channel", "multi-store")
+          .eq("sync_type", "inventory_push")
+          .order("completed_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (lastLog?.status !== "paused") {
+          await supabase.from("channel_sync_log").insert({
+            workspace_id: workspaceId,
+            channel: "multi-store",
+            sync_type: "inventory_push",
+            status: "paused",
+            items_processed: 0,
+            items_failed: 0,
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+            metadata: { reason: "inventory_sync_paused" },
+          });
+        }
+        continue;
+      }
+
       const workspaceSafetyStock = ws?.default_safety_stock ?? 3;
       const bundlesEnabled = ws?.bundles_enabled ?? false;
 

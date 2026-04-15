@@ -308,7 +308,7 @@ describe("inventory Server Actions", () => {
         ],
       });
 
-      // Call 4: .from("warehouse_inventory_activity").select(...).eq(...).order(...).limit(...)
+      // Call 4: .from("warehouse_inventory_activity").select(...).eq(...).eq(...).order(...).limit(...)
       const activity = createIndependentChain(null);
       activity.setTerminal("limit");
       activity.proxy.limit.mockResolvedValue({
@@ -318,6 +318,8 @@ describe("inventory Server Actions", () => {
             delta: -2,
             source: "shopify",
             correlation_id: "wh:123",
+            previous_quantity: 12,
+            new_quantity: 10,
             created_at: "2026-03-15T00:00:00Z",
             metadata: {},
           },
@@ -351,6 +353,10 @@ describe("inventory Server Actions", () => {
           id: "act-1",
           delta: -2,
           source: "shopify",
+          sourceLabel: "Shopify order",
+          referenceId: null,
+          previousQuantity: 12,
+          newQuantity: 10,
           correlationId: "wh:123",
           createdAt: "2026-03-15T00:00:00Z",
           metadata: {},

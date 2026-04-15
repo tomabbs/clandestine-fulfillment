@@ -8,6 +8,7 @@ export const queryKeys = {
     all: ["inventory"] as const,
     list: (filters?: Record<string, unknown>) => ["inventory", "list", filters] as const,
     detail: (sku: string) => ["inventory", "detail", sku] as const,
+    activity: (filters?: Record<string, unknown>) => ["inventory", "activity", filters] as const,
   },
   orders: {
     all: ["orders"] as const,

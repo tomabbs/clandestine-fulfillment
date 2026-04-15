@@ -59,6 +59,9 @@ export interface Workspace {
   name: string;
   slug: string;
   created_at: string;
+  inventory_sync_paused: boolean;
+  inventory_sync_paused_at: string | null;
+  inventory_sync_paused_by: string | null;
 }
 
 export type ServiceType = "full_service" | "storage_only" | "drop_ship";

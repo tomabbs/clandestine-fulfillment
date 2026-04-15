@@ -6,6 +6,10 @@
  *
  * Rule #9: Uses bandcampQueue (serialized with all other Bandcamp API tasks).
  * Rule #7: Uses createServiceRoleClient().
+ *
+ * When workspaces.inventory_sync_paused is true, the workspace is skipped.
+ * Only the state-change (active → paused transition) is logged to channel_sync_log
+ * to avoid flooding the log with 288 identical entries per day.
  */
 
 import { schedules } from "@trigger.dev/sdk";
@@ -46,12 +50,43 @@ export const bandcampInventoryPushTask = schedules.task({
         continue;
       }
 
-      // Load workspace default safety stock + bundles_enabled flag
+      // Load workspace settings including pause flag
       const { data: ws } = await supabase
         .from("workspaces")
-        .select("default_safety_stock, bundles_enabled")
+        .select("default_safety_stock, bundles_enabled, inventory_sync_paused")
         .eq("id", workspaceId)
         .single();
+
+      // Pause guard — state-change-only logging to avoid flooding channel_sync_log
+      if (ws?.inventory_sync_paused) {
+        const { data: lastLog } = await supabase
+          .from("channel_sync_log")
+          .select("status")
+          .eq("workspace_id", workspaceId)
+          .eq("channel", "bandcamp")
+          .eq("sync_type", "inventory_push")
+          .order("completed_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (lastLog?.status !== "paused") {
+          const now = new Date().toISOString();
+          await supabase.from("channel_sync_log").insert({
+            workspace_id: workspaceId,
+            channel: "bandcamp",
+            sync_type: "inventory_push",
+            status: "paused",
+            items_processed: 0,
+            items_failed: 0,
+            started_at: now,
+            completed_at: now,
+            metadata: { reason: "inventory_sync_paused", run_id: ctx.run.id },
+          });
+        }
+        allResults.push({ workspaceId, itemsPushed: 0, itemsFailed: 0 });
+        continue;
+      }
+
       const workspaceSafetyStock = ws?.default_safety_stock ?? 3;
       const bundlesEnabled = ws?.bundles_enabled ?? false;
 
@@ -169,7 +204,7 @@ export const bandcampInventoryPushTask = schedules.task({
         }
       }
 
-      // Log results
+      // Log results with enriched metadata for bandcamp-push-log.py
       await supabase.from("channel_sync_log").insert({
         workspace_id: workspaceId,
         channel: "bandcamp",
@@ -179,6 +214,10 @@ export const bandcampInventoryPushTask = schedules.task({
         items_failed: itemsFailed,
         started_at: startedAt,
         completed_at: new Date().toISOString(),
+        metadata: {
+          run_id: ctx.run.id,
+          band_count: connections.length,
+        },
       });
 
       allResults.push({ workspaceId, itemsPushed, itemsFailed });

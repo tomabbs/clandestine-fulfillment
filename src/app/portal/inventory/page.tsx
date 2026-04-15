@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, Minus, Package, Plus } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import {
   getClientInventoryLevels,
@@ -8,6 +9,7 @@ import {
   updateInventoryBuffer,
 } from "@/actions/inventory";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
+import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -67,7 +69,12 @@ export default function InventoryPage() {
 
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
+        <Link href="/portal/inventory/activity" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          View Activity Log
+        </Link>
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
@@ -257,19 +264,34 @@ export default function InventoryPage() {
                               ) : (
                                 <ul className="space-y-1 text-sm">
                                   {detail.recentActivity.slice(0, 10).map((a) => (
-                                    <li key={a.id} className="flex items-center justify-between">
-                                      <span className="flex items-center gap-1">
+                                    <li
+                                      key={a.id}
+                                      className="flex items-center justify-between gap-2"
+                                    >
+                                      <span className="flex items-center gap-1 min-w-0">
                                         {a.delta > 0 ? (
-                                          <Plus className="h-3 w-3 text-green-600" />
+                                          <Plus className="h-3 w-3 text-green-600 shrink-0" />
                                         ) : (
-                                          <Minus className="h-3 w-3 text-red-600" />
+                                          <Minus className="h-3 w-3 text-red-600 shrink-0" />
                                         )}
                                         <span className="font-mono">
                                           {a.delta > 0 ? `+${a.delta}` : a.delta}
                                         </span>
-                                        <span className="text-muted-foreground">{a.source}</span>
+                                        {a.previousQuantity != null && a.newQuantity != null && (
+                                          <span className="text-muted-foreground text-xs font-mono">
+                                            ({a.previousQuantity}→{a.newQuantity})
+                                          </span>
+                                        )}
+                                        <span className="text-muted-foreground truncate">
+                                          {a.sourceLabel}
+                                        </span>
+                                        {a.referenceId && (
+                                          <span className="text-muted-foreground text-xs truncate">
+                                            · {a.referenceId}
+                                          </span>
+                                        )}
                                       </span>
-                                      <span className="text-muted-foreground text-xs">
+                                      <span className="text-muted-foreground text-xs whitespace-nowrap">
                                         {new Date(a.createdAt).toLocaleDateString()}
                                       </span>
                                     </li>

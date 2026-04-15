@@ -754,6 +754,33 @@ export const sensorCheckTask = schedules.task({
       allResults.push({ workspaceId, readings: readings.length, criticals: criticals.length });
     }
 
+    // Global check: alert if any workspace has had inventory sync paused >24 hours.
+    // Runs once per sensor-check pass (not per workspace) since it queries globally.
+    try {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: stalePauses } = await supabase
+        .from("workspaces")
+        .select("id, name, inventory_sync_paused_at")
+        .eq("inventory_sync_paused", true)
+        .lt("inventory_sync_paused_at", oneDayAgo);
+
+      if (stalePauses && stalePauses.length > 0) {
+        const names = stalePauses.map((w) => w.name).join(", ");
+        for (const ws of stalePauses) {
+          await supabase.from("sensor_readings").insert({
+            workspace_id: ws.id,
+            sensor_name: "inv.sync_paused_too_long",
+            status: "warning",
+            message: `Inventory sync has been paused for >24 hours on workspace "${ws.name}". Resume when ready to push quantities to storefronts.`,
+            value: { paused_at: ws.inventory_sync_paused_at },
+          });
+        }
+        console.warn(`[sensor-check] ${stalePauses.length} workspace(s) paused >24h: ${names}`);
+      }
+    } catch (err) {
+      console.error("[sensor-check] Failed to check stale pause state:", err);
+    }
+
     return allResults;
   },
 });

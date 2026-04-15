@@ -1,6 +1,7 @@
 "use server";
 
 import { tasks } from "@trigger.dev/sdk";
+import { requireAuth } from "@/lib/server/auth-context";
 import { createServerSupabaseClient } from "@/lib/server/supabase-server";
 
 export async function getGeneralSettings() {
@@ -120,6 +121,102 @@ export async function triggerTagCleanup() {
 export async function triggerShopifyImageBackfill(): Promise<{ runId: string }> {
   const handle = await tasks.trigger("shopify-image-backfill", {});
   return { runId: handle.id };
+}
+
+// === Inventory Sync Pause ===
+
+export interface InventorySyncPauseStatus {
+  paused: boolean;
+  pausedAt: string | null;
+  pausedByUserId: string | null;
+}
+
+export async function getInventorySyncPauseStatus(): Promise<InventorySyncPauseStatus> {
+  const supabase = await createServerSupabaseClient();
+  const { data } = await supabase
+    .from("workspaces")
+    .select("inventory_sync_paused, inventory_sync_paused_at, inventory_sync_paused_by")
+    .limit(1)
+    .single();
+
+  return {
+    paused: data?.inventory_sync_paused ?? false,
+    pausedAt: data?.inventory_sync_paused_at ?? null,
+    pausedByUserId: data?.inventory_sync_paused_by ?? null,
+  };
+}
+
+/**
+ * Idempotent — no-op if already in the target state.
+ * Returns true if state changed, false if it was already correct.
+ */
+export async function setInventorySyncPaused(paused: boolean): Promise<{ changed: boolean }> {
+  const { userRecord } = await requireAuth();
+  const supabase = await createServerSupabaseClient();
+
+  const { data: ws } = await supabase
+    .from("workspaces")
+    .select("id, inventory_sync_paused")
+    .limit(1)
+    .single();
+
+  if (!ws) throw new Error("No workspace found");
+
+  if (ws.inventory_sync_paused === paused) {
+    return { changed: false };
+  }
+
+  const { error } = await supabase
+    .from("workspaces")
+    .update({
+      inventory_sync_paused: paused,
+      inventory_sync_paused_at: paused ? new Date().toISOString() : null,
+      inventory_sync_paused_by: paused ? userRecord.id : null,
+    })
+    .eq("id", ws.id);
+
+  if (error) throw new Error(`Failed to update sync pause: ${error.message}`);
+  return { changed: true };
+}
+
+/**
+ * Clears the pause flag then immediately triggers both inventory push tasks.
+ * Uses Promise.allSettled so a failure in one task is surfaced rather than
+ * silently swallowed. Also triggers even if already resumed (admin explicitly
+ * requested a push).
+ */
+export async function resumeAndPushNow(): Promise<{
+  bandcampRunId: string | null;
+  storeRunId: string | null;
+  partialFailure: string | null;
+}> {
+  await setInventorySyncPaused(false);
+
+  const results = await Promise.allSettled([
+    tasks.trigger("bandcamp-inventory-push", {}),
+    tasks.trigger("multi-store-inventory-push", {}),
+  ]);
+
+  const bcResult = results[0];
+  const storeResult = results[1];
+
+  const failures: string[] = [];
+  if (bcResult.status === "rejected") {
+    failures.push(
+      `Bandcamp: ${bcResult.reason instanceof Error ? bcResult.reason.message : "unknown"}`,
+    );
+  }
+  if (storeResult.status === "rejected") {
+    failures.push(
+      `Stores: ${storeResult.reason instanceof Error ? storeResult.reason.message : "unknown"}`,
+    );
+  }
+
+  return {
+    bandcampRunId: bcResult.status === "fulfilled" ? bcResult.value.id : null,
+    storeRunId: storeResult.status === "fulfilled" ? storeResult.value.id : null,
+    partialFailure: failures.length > 0 ? failures.join("; ") : null,
+  };
 }
 
 // === Pipeline Health ===
