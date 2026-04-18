@@ -1,4 +1,9 @@
 ---
+- slug: sku-coverage-followups-2026-04-18
+  title: "SKU coverage audit follow-ups (2026-04-18, post-structural-seed)"
+  due_date: 2026-04-25
+  severity: medium
+  context: "After scripts/audit-sku-coverage.ts + scripts/seed-missing-inventory-levels.ts (840 safe-zero) + scripts/reconcile-missing-inventory-levels.ts (752 reconciled from SS/BC truth) closed the 1,592-variant NULL-level gap on 2026-04-18, four residual issues remain that cannot be auto-fixed: (1) 1 variant has NULL/empty SKU and was skipped — needs operator triage to decide rename or delete. (2) 73 SS-only SKUs with -CLEAR/-COLOR suffixes (e.g. LP-DR-046-CLEAR, LP-NS-133-REDPINK) are SS records left over from before CLAUDE.md Rule 8 (one product per SKU for music formats) was adopted; SS still tracks color variants we collapsed. Decision needed: re-split DB records or backfill SS to merge color variants into the parent SKU. (3) 609 BC-live SKUs (mostly LR-MBOT-S-1, LR-MBOT-S-2 size-option pattern) are not in our DB — bandcamp-sync currently imports the package SKU but skips per-option size SKUs. Add per-option SKU import to src/trigger/tasks/bandcamp-sync.ts. (4) 82 DB BC-mapped SKUs with slug-hash names (CD-THEMASQU-9Q3Q etc.) that BC live no longer returns — likely deleted/private bandcamp items; needs a cleanup pass to either re-link or mark mappings inactive. (5) 1 case mismatch LP-DR-046-Clear in DB vs LP-DR-046-CLEAR in SS — one-row UPDATE. Full evidence: reports/finish-line/sku-coverage-2026-04-18T20-31-07-642Z.json, reports/finish-line/seed-missing-levels-2026-04-18T20-26-53-784Z.json, reports/finish-line/reconcile-missing-levels-2026-04-18T20-30-47-738Z.json. None of these block resume of inventory_sync_paused; they are catalog-quality items."
 - slug: ws3-3g-locations-admin-page
   title: "WS3 §3g — Standalone /admin/inventory/locations admin page (DONE 2026-04-18)"
   due_date: 2026-04-19

@@ -1,0 +1,361 @@
+{
+  "ts": "2026-04-18T20-26-53-784Z",
+  "workspace": {
+    "id": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+    "name": "Clandestine Distribution",
+    "slug": "clandestine"
+  },
+  "inventory_sync_paused": true,
+  "mode": "apply",
+  "variants_total": 2876,
+  "levels_total_existing": 1284,
+  "missing_total": 1592,
+  "classification": {
+    "sku_null": 0,
+    "defer_in_both": 44,
+    "defer_in_ss_only": 620,
+    "defer_in_bc_only": 88,
+    "seed_safe_zero": 840
+  },
+  "write": {
+    "attempted": true,
+    "inserted": 840,
+    "error": null
+  },
+  "samples": {
+    "defer_in_both_first_25": [
+      {
+        "variant_id": "055c084f-c8d9-459d-88c6-39c63474cd4c",
+        "sku": "CD-NNA-104"
+      },
+      {
+        "variant_id": "09e438a3-3cbe-4dd1-8502-7837c8c06497",
+        "sku": "LP-NS-146"
+      },
+      {
+        "variant_id": "0ecd51fd-0b2b-4076-af8a-5217e8477d4a",
+        "sku": "LP-NS-022"
+      },
+      {
+        "variant_id": "11822ee1-5f8d-4577-b6f1-af8c6afd3e55",
+        "sku": "LP-NS-043"
+      },
+      {
+        "variant_id": "13a3178b-d220-45e1-b59b-383e489d9eb4",
+        "sku": "LP-NS-128"
+      },
+      {
+        "variant_id": "1f135180-3ef5-4cd2-bd74-2c969fc32da5",
+        "sku": "CD-NS-158"
+      },
+      {
+        "variant_id": "2217ccb3-34c0-432c-a366-aa96da6b6f38",
+        "sku": "LP-NS-086"
+      },
+      {
+        "variant_id": "28dcf79b-5a32-4de3-b21f-613f935489cd",
+        "sku": "LP-NNA-059"
+      },
+      {
+        "variant_id": "39a4ff22-262b-4067-b2e9-b035b1c78433",
+        "sku": "LP-NNA-079"
+      },
+      {
+        "variant_id": "3ad1cbd1-84b8-4b89-b718-65f382796350",
+        "sku": "LP-WSR-026"
+      },
+      {
+        "variant_id": "406156a7-6f63-4c01-a01c-0f75aa91aa24",
+        "sku": "LP-NNA-065"
+      },
+      {
+        "variant_id": "446d2a89-69ad-4597-9f3e-3445e87e64ef",
+        "sku": "CD-NS-113"
+      },
+      {
+        "variant_id": "481f8efd-3f54-4412-acc4-3afec95479ce",
+        "sku": "CD-EHR-001"
+      },
+      {
+        "variant_id": "4edbb376-16c9-46df-96e7-a2c1983cc782",
+        "sku": "CD-NS-018"
+      },
+      {
+        "variant_id": "5ba2fc47-705b-435b-b6bc-0937bd803847",
+        "sku": "CS-NNA-115"
+      },
+      {
+        "variant_id": "5bb4d4cc-66bc-45dc-a133-ece68b1feebc",
+        "sku": "CS-NNA-091"
+      },
+      {
+        "variant_id": "6018d342-d24e-4044-9b0d-8f6bd923c804",
+        "sku": "LP-NS-093"
+      },
+      {
+        "variant_id": "68837e76-0685-49c1-a54e-13d24905b8c4",
+        "sku": "CD-NS-077"
+      },
+      {
+        "variant_id": "6c2afbd2-7ee4-4eaf-8642-d160215458b9",
+        "sku": "CS-NNA-145"
+      },
+      {
+        "variant_id": "6edde833-4f40-4430-a02a-9e37210fd706",
+        "sku": "CD-NS-064"
+      },
+      {
+        "variant_id": "6f407b85-6c75-44a1-aa5d-740d2f4cf335",
+        "sku": "LP-NS-044"
+      },
+      {
+        "variant_id": "75aac39c-70f8-4e6f-97ac-fbc8dcfa5d82",
+        "sku": "CD-NS-167"
+      },
+      {
+        "variant_id": "7b9009a8-7ae5-4955-8840-52cce57cfc97",
+        "sku": "LP-NS-025"
+      },
+      {
+        "variant_id": "7d33b48a-6b8c-479c-a469-92f3dad00b8e",
+        "sku": "LP-NNA-121"
+      },
+      {
+        "variant_id": "7db1ae55-c8b5-40f6-a253-0e30f1997091",
+        "sku": "CS-NNA-105"
+      }
+    ],
+    "defer_in_ss_only_first_25": [
+      {
+        "variant_id": "004d30a7-43a7-4328-a9a0-f0e2f32742d6",
+        "sku": "CD-BDJ-001-DT"
+      },
+      {
+        "variant_id": "0120bae0-a6f7-4c48-8b5f-4bdc804650c1",
+        "sku": "CD-FDR-06"
+      },
+      {
+        "variant_id": "013db85f-9caf-410d-b11b-3244673714f0",
+        "sku": "LP-DR-056"
+      },
+      {
+        "variant_id": "01f7f8e7-6900-4e4d-8a22-09e13181cc75",
+        "sku": "CS-EB-049"
+      },
+      {
+        "variant_id": "02947bd4-f775-47d9-96ad-adb90c6106dd",
+        "sku": "LP-DIFI-33-1"
+      },
+      {
+        "variant_id": "02a4d727-f022-4bff-a0b5-e5216031f37a",
+        "sku": "LP-FRS-006"
+      },
+      {
+        "variant_id": "02c30d9d-586f-44bc-8495-05b80c2864d2",
+        "sku": "LP-ALC-125-GBSPLIT"
+      },
+      {
+        "variant_id": "02c3330e-2ca4-48b9-bb30-1897970854c9",
+        "sku": "CS-WLB-005"
+      },
+      {
+        "variant_id": "0366342e-e291-4f5a-9431-aabf8c10f605",
+        "sku": "LP-FRS-028"
+      },
+      {
+        "variant_id": "047fdf50-af5f-49a5-92ea-7a7973ce59cb",
+        "sku": "LP-FRS-003"
+      },
+      {
+        "variant_id": "05fae8b8-5b0d-4f0f-863f-e16fe2752bd6",
+        "sku": "CD-SATATUHATTA-046"
+      },
+      {
+        "variant_id": "0601db8b-fc47-43b4-bd49-e525ff4711d4",
+        "sku": "LP-GGGR-109"
+      },
+      {
+        "variant_id": "0615279e-13c3-4fcd-a1f1-e3db92f68398",
+        "sku": "LP-DM-015"
+      },
+      {
+        "variant_id": "0621e69b-6df0-4622-8d51-153f5651ad1b",
+        "sku": "CD-ACD-002"
+      },
+      {
+        "variant_id": "06388f89-f3c5-4465-8c7c-9ae2203d9810",
+        "sku": "LP-FRS-017"
+      },
+      {
+        "variant_id": "067668d5-fc5e-4dbf-8ba7-b18b75dca98b",
+        "sku": "LP-AE-068"
+      },
+      {
+        "variant_id": "06eefdb6-de50-4ebd-b1e6-04c63c9e7218",
+        "sku": "LP-SCR-054"
+      },
+      {
+        "variant_id": "0771155e-38ae-44ba-a8af-456d1c62b5d1",
+        "sku": "LP-ALC-130"
+      },
+      {
+        "variant_id": "087226ca-6127-4a6a-873b-81f8ec5653fe",
+        "sku": "LP-iMach-008-WHITE"
+      },
+      {
+        "variant_id": "088ec41a-75b9-4928-a3fd-b86d92768a3e",
+        "sku": "LP-GGGR-104"
+      },
+      {
+        "variant_id": "08a166b3-1e47-4faf-937d-64914712ab57",
+        "sku": "LP-EB-048"
+      },
+      {
+        "variant_id": "0993c24e-68a2-42d8-9d30-116e869f9c5d",
+        "sku": "LP-DIFI-045-5-BLACK"
+      },
+      {
+        "variant_id": "09b3c0b9-58d8-4967-b020-1b1a0174bf48",
+        "sku": "CD-GGGR-129"
+      },
+      {
+        "variant_id": "09f00569-1c56-4dd5-9c4d-0b3dba91c2f2",
+        "sku": "LP-GGGR-091"
+      },
+      {
+        "variant_id": "0a096380-2a75-4e6c-a39b-a302e67e90bf",
+        "sku": "LP-AV!-042"
+      }
+    ],
+    "defer_in_bc_only_first_25": [
+      {
+        "variant_id": "01958804-9c5c-4488-b149-297fae7c3315",
+        "sku": "CS-EHR-023"
+      },
+      {
+        "variant_id": "03dd648e-9b07-4105-90bd-afc490a8e241",
+        "sku": "CS-NS-092"
+      },
+      {
+        "variant_id": "05e8f098-371f-4ecd-a10c-7757882fee59",
+        "sku": "CS-WSR-028"
+      },
+      {
+        "variant_id": "06983d32-0cf5-47ed-8a4e-5d63828f1e1e",
+        "sku": "LP-NS-013"
+      },
+      {
+        "variant_id": "0756eb43-0e1c-4651-877f-2db59e2eccb9",
+        "sku": "MLP-NS-075"
+      },
+      {
+        "variant_id": "0d32aa39-b80e-447d-92e4-8d95bb1267eb",
+        "sku": "MLP-NS-124"
+      },
+      {
+        "variant_id": "143011f8-6fd5-4f3b-8eb7-2e6db4fdd703",
+        "sku": "LP-NS-117-P"
+      },
+      {
+        "variant_id": "148f6cb6-808f-4242-b404-a2508430a5bc",
+        "sku": "LP-NS-114C"
+      },
+      {
+        "variant_id": "17881da0-0266-43a9-b7d9-bd57ca397c51",
+        "sku": "LP-NS-062"
+      },
+      {
+        "variant_id": "19ae6b5a-64a6-4180-b2ab-91ca5ccb8fa9",
+        "sku": "LP-NS-130D2F"
+      },
+      {
+        "variant_id": "19d0c2e3-8f93-45c3-ab3d-b885a442680f",
+        "sku": "SI-NS-002"
+      },
+      {
+        "variant_id": "1ea27c97-4c36-46ac-989a-08da144e870f",
+        "sku": "LP-NNA-055"
+      },
+      {
+        "variant_id": "2eafd77a-89a2-4b45-bb50-99598b167511",
+        "sku": "LP-NS-152-PC"
+      },
+      {
+        "variant_id": "2ee1bcb3-592a-4bf2-8349-f74e2ca522e7",
+        "sku": "LP-EHR-034"
+      },
+      {
+        "variant_id": "350c18b0-6722-4085-9353-ccfe85fec0d6",
+        "sku": "CS-NS-119"
+      },
+      {
+        "variant_id": "37058d69-c119-4f4f-a105-42e0ebcf64d9",
+        "sku": "CS-NS-072"
+      },
+      {
+        "variant_id": "3c438dff-f314-4f5b-94c1-33e1b11a5b1c",
+        "sku": "LP-NNA-121C"
+      },
+      {
+        "variant_id": "3d901cdf-e0ac-4ba9-92ca-8cd5ee3bf8f7",
+        "sku": "LP-EHR-031"
+      },
+      {
+        "variant_id": "40525661-548f-4ce3-9139-fa57f31b69e1",
+        "sku": "LP-NS-082"
+      },
+      {
+        "variant_id": "424dacaa-6a4f-46ef-bd15-7c97599c675b",
+        "sku": "CD-NS-002"
+      },
+      {
+        "variant_id": "497772b7-a55b-498b-bad8-241fd1c25e2a",
+        "sku": "LP-NS-067"
+      },
+      {
+        "variant_id": "4b36d3b8-a0e3-40c8-99b8-2ea9d94ef234",
+        "sku": "CD-NS-090"
+      },
+      {
+        "variant_id": "4d89d98b-1c8e-49af-ac60-c80231dd0662",
+        "sku": "LP-NS-058"
+      },
+      {
+        "variant_id": "4f7dd1fc-33de-4e86-9440-7f5e562b344b",
+        "sku": "CD-NS-051"
+      },
+      {
+        "variant_id": "55be56b9-6b7e-40f8-99d4-5e5b99c9f96f",
+        "sku": "CD-NS-020"
+      }
+    ],
+    "seed_safe_zero_first_25": [
+      "CS-MT-126",
+      "LP-SS-053",
+      "LP-VTUL-015",
+      "LP-AE-059",
+      "CS-KORP-006",
+      "LP-FPR-027",
+      "ALC-146",
+      "LP-CAS-001",
+      "CD-WLB-005",
+      "CS-EHR-025",
+      "LP-EHR-020",
+      "LP-Fönstret-15",
+      "LP-ALC-144-YELLOW",
+      "CS-NGSP-KG-DV1",
+      "CD-SPR-090",
+      "LP-RWCLTR-025",
+      "LP-AV!-068",
+      "LP-ALT-038",
+      "CS-RT-003",
+      "CD-holo-034",
+      "LP-DR-037",
+      "CS-TB-P77-NIMH",
+      "LP-EHR-051-PSPLAT",
+      "CS-PCT-008",
+      "LP-UMA-092"
+    ],
+    "sku_null_first_25": []
+  }
+}
