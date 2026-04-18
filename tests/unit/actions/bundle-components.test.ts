@@ -91,6 +91,17 @@ describe("bundle-components Server Actions", () => {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockResolvedValue({ data: [], error: null }),
       };
+      // Production now also validates that component variant rows exist + have inventory
+      // levels before the atomic delete/insert (src/actions/bundle-components.ts §94-138).
+      // Mock the two reads it issues: warehouse_product_variants + warehouse_inventory_levels.
+      const componentVariantsChain = {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockResolvedValue({ data: [{ id: VARIANT_B, sku: "SKU-B" }], error: null }),
+      };
+      const inventoryLevelsChain = {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockResolvedValue({ data: [{ variant_id: VARIANT_B }], error: null }),
+      };
       const deleteChain = {
         delete: vi.fn(() => {
           opOrder.push("delete");
@@ -108,6 +119,8 @@ describe("bundle-components Server Actions", () => {
       mockFrom
         .mockReturnValueOnce(variantChain)
         .mockReturnValueOnce(graphChain)
+        .mockReturnValueOnce(componentVariantsChain)
+        .mockReturnValueOnce(inventoryLevelsChain)
         .mockReturnValueOnce(deleteChain)
         .mockReturnValueOnce(insertTable);
 
@@ -165,6 +178,25 @@ describe("bundle-components Server Actions", () => {
           error: null,
         }),
       };
+      // Production validates component variant rows + inventory levels before the
+      // atomic delete/insert — see "calls delete then insert" test for the same shape.
+      const componentVariantsChain = {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockResolvedValue({
+          data: [
+            { id: VARIANT_B, sku: "SKU-B" },
+            { id: VARIANT_C, sku: "SKU-C" },
+          ],
+          error: null,
+        }),
+      };
+      const inventoryLevelsChain = {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockResolvedValue({
+          data: [{ variant_id: VARIANT_B }, { variant_id: VARIANT_C }],
+          error: null,
+        }),
+      };
       const deleteChain = {
         delete: vi.fn().mockReturnThis(),
         eq: vi.fn().mockResolvedValue({ error: null }),
@@ -176,6 +208,8 @@ describe("bundle-components Server Actions", () => {
       mockFrom
         .mockReturnValueOnce(variantChain)
         .mockReturnValueOnce(graphChain)
+        .mockReturnValueOnce(componentVariantsChain)
+        .mockReturnValueOnce(inventoryLevelsChain)
         .mockReturnValueOnce(deleteChain)
         .mockReturnValueOnce(insertTable);
 
