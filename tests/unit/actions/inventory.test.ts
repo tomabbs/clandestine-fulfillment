@@ -196,6 +196,9 @@ describe("inventory Server Actions", () => {
         imageSrc: "https://img.example.com/1.jpg",
         bandcampUrl: "https://bc.example.com",
         status: "active",
+        countStatus: null,
+        countStartedAt: null,
+        countStartedByName: null,
       });
     });
   });

@@ -4,6 +4,7 @@ import { createBrowserClient } from "@supabase/ssr";
 import {
   AlertCircle,
   ChevronDown,
+  ClipboardList,
   FileBarChart,
   LayoutDashboard,
   Library,
@@ -56,6 +57,8 @@ const NAV_ITEMS = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
   { title: "Scan", href: "/admin/scan", icon: ScanBarcode },
   { title: "Inventory", href: "/admin/inventory", icon: Package },
+  { title: "Manual Count", href: "/admin/inventory/manual-count", icon: ClipboardList },
+  { title: "Locations", href: "/admin/inventory/locations", icon: Warehouse },
   { title: "Inbound", href: "/admin/inbound", icon: PackagePlus },
   { title: "ShipStation Orders", href: "/admin/shipstation-orders", icon: Warehouse },
   { title: "Orders", href: "/admin/orders", icon: ShoppingCart },
@@ -75,10 +78,12 @@ const SETTINGS_ITEMS = [
   { title: "Users", href: "/admin/settings/users" },
   { title: "Bandcamp Accounts", href: "/admin/settings/bandcamp" },
   { title: "Store Connections", href: "/admin/settings/store-connections" },
+  { title: "Reconnect Client Stores", href: "/admin/settings/client-store-reconnect" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },
   { title: "Channels", href: "/admin/channels" },
   { title: "Integrations", href: "/admin/settings/integrations" },
   { title: "Health", href: "/admin/settings/health" },
+  { title: "Mega-plan verification", href: "/admin/settings/megaplan-verification" },
 ] as const;
 
 export function AdminSidebar() {

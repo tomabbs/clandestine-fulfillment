@@ -12,6 +12,11 @@ import {
   updateVariantFormat,
 } from "@/actions/inventory";
 import { getOrganizations } from "@/actions/organizations";
+// Saturday Workstream 3 (2026-04-18) — count session UI panel.
+//   Lives inside the existing expanded-row detail (full-width, above the
+//   Locations / Recent Activity 2-col grid). All five count Server Actions
+//   are wrapped inside the component; no plumbing needed at the page level.
+import { InventoryCountSessionPanel } from "@/components/admin/inventory-count-session-panel";
 import { EditableNumberCell, EditableSelectCell } from "@/components/shared/editable-cell";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Button } from "@/components/ui/button";
@@ -43,6 +48,22 @@ const FORMAT_OPTIONS = [
   { value: "Merch", label: "Merch" },
   { value: "Other", label: "Other" },
 ];
+
+// Inline relative-time helper — duplicates the same pattern used in
+// catalog/[id]/page.tsx and support/page.tsx. The shared home for this
+// (`src/lib/shared/utils.ts`) is tracked under deferred slug `shared-utils-path`
+// — when that lands, all three call sites should consolidate.
+function formatRelativeTimeShort(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function InventoryPage() {
   const queryClient = useQueryClient();
@@ -275,6 +296,32 @@ export default function InventoryPage() {
                       <TableCell>
                         <div className="font-medium">{row.productTitle}</div>
                         <div className="text-muted-foreground text-xs">{row.sku}</div>
+                        {row.countStatus === "count_in_progress" ? (
+                          <div
+                            className="mt-1 inline-flex items-center gap-1.5 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200"
+                            title={
+                              row.countStartedAt
+                                ? `Count started ${new Date(row.countStartedAt).toLocaleString()}`
+                                : "Count in progress"
+                            }
+                          >
+                            <span
+                              aria-hidden
+                              className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"
+                            />
+                            <span>Counting…</span>
+                            {row.countStartedAt ? (
+                              <span className="text-amber-700 dark:text-amber-300">
+                                · {formatRelativeTimeShort(row.countStartedAt)}
+                              </span>
+                            ) : null}
+                            {row.countStartedByName ? (
+                              <span className="text-amber-700 dark:text-amber-300">
+                                by {row.countStartedByName}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
                         {row.orgName ?? "—"}
@@ -351,6 +398,8 @@ export default function InventoryPage() {
                             <Skeleton className="h-24 w-full" />
                           ) : detail ? (
                             <div className="grid grid-cols-2 gap-6">
+                              {/* WS3 3c — count session panel (full-width spans both columns) */}
+                              <InventoryCountSessionPanel sku={row.sku} />
                               {/* Locations */}
                               <div>
                                 <h4 className="mb-2 text-sm font-semibold">Locations</h4>

@@ -78,6 +78,13 @@ interface InventoryRow {
   imageSrc: string | null;
   bandcampUrl: string | null;
   status: string;
+  // Per-row count session indicators (Sunday UX polish slug ws3-ux-polish-sunday).
+  // Lets staff scan the inventory list and see which SKUs are mid-count
+  // without expanding the row. Populated for staff queries only — we never
+  // surface internal staff workflow state to clients.
+  countStatus: "idle" | "count_in_progress" | null;
+  countStartedAt: string | null;
+  countStartedByName: string | null;
 }
 
 interface InventoryListResult {
@@ -155,6 +162,10 @@ export async function getInventoryLevels(
   const offset = (page - 1) * pageSize;
 
   // Build query: inventory_levels → variants → products → orgs
+  // count_status / count_started_at / users:count_started_by drive the
+  // per-row "Counting…" indicator (slug ws3-ux-polish-sunday). The embedded
+  // users join works because the FK on warehouse_inventory_levels.count_started_by
+  // → public.users(id) was added in migration 20260418000001.
   let query = supabase.from("warehouse_inventory_levels").select(
     `
       id,
@@ -164,6 +175,9 @@ export async function getInventoryLevels(
       committed,
       incoming,
       safety_stock,
+      count_status,
+      count_started_at,
+      users:count_started_by ( id, name ),
       warehouse_product_variants!inner (
         id,
         product_id,
@@ -221,6 +235,9 @@ export async function getInventoryLevels(
       committed,
       incoming,
       safety_stock,
+      count_status,
+      count_started_at,
+      users:count_started_by ( id, name ),
       warehouse_product_variants!inner (
         id,
         product_id,
@@ -279,6 +296,7 @@ export async function getInventoryLevels(
     const org = product.organizations as Record<string, unknown>;
     const images = product.images as Array<Record<string, unknown>>;
     const firstImage = images?.[0];
+    const startedBy = row.users as { id?: string; name?: string | null } | null;
 
     return {
       variantId: variant.id as string,
@@ -295,6 +313,9 @@ export async function getInventoryLevels(
       imageSrc: (firstImage?.src as string) ?? null,
       bandcampUrl: variant.bandcamp_url as string | null,
       status: product.status as string,
+      countStatus: (row.count_status as InventoryRow["countStatus"] | undefined) ?? null,
+      countStartedAt: (row.count_started_at as string | null) ?? null,
+      countStartedByName: startedBy?.name ?? null,
     };
   });
 
@@ -556,6 +577,9 @@ export async function getClientInventoryLevels(
       imageSrc: (firstImage?.src as string) ?? null,
       bandcampUrl: row.bandcamp_url as string | null,
       status: product.status as string,
+      countStatus: null,
+      countStartedAt: null,
+      countStartedByName: null,
     };
   });
 

@@ -12,7 +12,25 @@ export type InventorySource =
   | "manual"
   | "inbound"
   | "preorder"
-  | "backfill";
+  | "backfill"
+  // Phase 5 (2026-04-13): tiered ShipStation v2 ↔ DB reconcile sensor.
+  // Used by `shipstation-bandcamp-reconcile-{hot,warm,cold}` when v2 is treated
+  // as the source of truth and our DB is adjusted to match. Mirrored in
+  // supabase/migrations/20260413000030_phase5_reconcile_and_sku_sync_status.sql
+  // (warehouse_inventory_activity.source CHECK constraint).
+  | "reconcile"
+  // Saturday Workstream 2 (2026-04-18): manual inventory count entry by staff
+  // via /admin/inventory/manual-count (bulk table editor, absolute-set with
+  // confirmation gate). Distinct from "manual" (per-SKU dialog adjustment
+  // with free-text reason) so billing/audit can identify count-driven writes.
+  // CHECK constraint extended in
+  // supabase/migrations/20260418000001_phase4b_megaplan_closeout_and_count_session.sql.
+  | "manual_inventory_count"
+  // Saturday Workstream 3 (2026-04-18): per-location count session deltas
+  // produced when completeCountSession() reconciles a location's counted
+  // inventory back to warehouse_inventory_levels. Same migration as
+  // manual_inventory_count.
+  | "cycle_count";
 
 export type ReviewSeverity = "low" | "medium" | "high" | "critical";
 
@@ -62,7 +80,32 @@ export interface Workspace {
   inventory_sync_paused: boolean;
   inventory_sync_paused_at: string | null;
   inventory_sync_paused_by: string | null;
+  // Tier 1 hardening #1 — per-integration kill switches
+  shipstation_sync_paused: boolean;
+  shipstation_sync_paused_at: string | null;
+  shipstation_sync_paused_by: string | null;
+  bandcamp_sync_paused: boolean;
+  bandcamp_sync_paused_at: string | null;
+  bandcamp_sync_paused_by: string | null;
+  clandestine_shopify_sync_paused: boolean;
+  clandestine_shopify_sync_paused_at: string | null;
+  clandestine_shopify_sync_paused_by: string | null;
+  client_store_sync_paused: boolean;
+  client_store_sync_paused_at: string | null;
+  client_store_sync_paused_by: string | null;
+  // Tier 1 hardening #13 — percentage rollout for Phase 4 fanout
+  fanout_rollout_percent: number;
+  // Phase 4 — default ShipStation v2 (inventory_warehouse_id, inventory_location_id)
+  // used by background fanout tasks. NULL ⇒ v2 fanout short-circuits for this workspace.
+  shipstation_v2_inventory_warehouse_id: string | null;
+  shipstation_v2_inventory_location_id: string | null;
 }
+
+export type IntegrationKillSwitchKey =
+  | "shipstation"
+  | "bandcamp"
+  | "clandestine_shopify"
+  | "client_store";
 
 export type ServiceType = "full_service" | "storage_only" | "drop_ship";
 
