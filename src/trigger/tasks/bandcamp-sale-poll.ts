@@ -89,9 +89,30 @@ export const bandcampSalePollTask = schedules.task({
                 // Trigger immediate push to all channels after a sale —
                 // don't wait for the next cron cycle (push tasks are idempotent)
                 if (result.success && !result.alreadyProcessed) {
+                  // Phase 4 — bidirectional bridge: enqueue per-SKU
+                  // ShipStation v2 decrement gated through external_sync_events
+                  // ledger keyed `sale:{band_id}:{package_id}:{newSold}:{sku}`.
+                  // Pinned to shipstationQueue so v2 60 req/min budget stays
+                  // serialized; fanout-guard applies the `shipstation` kill
+                  // switch + workspace rollout bucket.
+                  const ssV2CorrelationId = `sale:${connection.band_id}:${item.package_id}:${newSold}:${variant.sku}`;
                   await Promise.allSettled([
                     tasks.trigger("bandcamp-inventory-push", {}),
                     tasks.trigger("multi-store-inventory-push", {}),
+                    tasks.trigger("shipstation-v2-decrement", {
+                      workspaceId,
+                      sku: variant.sku,
+                      quantity: Math.abs(delta),
+                      correlationId: ssV2CorrelationId,
+                      reason: "bandcamp_sale",
+                      metadata: {
+                        band_id: connection.band_id,
+                        bandcamp_item_id: item.package_id,
+                        previous_quantity_sold: lastSold,
+                        new_quantity_sold: newSold,
+                        sale_poll_run_id: ctx.run.id,
+                      },
+                    }),
                   ]).catch(() => {
                     /* non-critical — cron covers it */
                   });

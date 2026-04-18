@@ -116,6 +116,10 @@ describe("bandcamp server actions", () => {
         })
         .mockReturnValueOnce({
           select: vi.fn().mockReturnValue({
+            // memberBandIds.length > 0 in this fixture (band_id 1 + 2) so production
+            // takes the `.in("bandcamp_member_band_id", memberBandIds)` branch, not
+            // `.eq(...)`. Both are stubbed for defense against future fixture edits.
+            in: vi.fn().mockResolvedValue({ count: 15 }),
             eq: vi.fn().mockResolvedValue({ count: 15 }),
           }),
         });

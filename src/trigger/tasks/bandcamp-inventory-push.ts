@@ -13,8 +13,9 @@
  */
 
 import { schedules } from "@trigger.dev/sdk";
-import { refreshBandcampToken, updateQuantities } from "@/lib/clients/bandcamp";
+import { getMerchDetails, refreshBandcampToken, updateQuantities } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
+import { computeEffectiveBundleAvailable } from "@/lib/server/bundles";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
@@ -115,14 +116,53 @@ export const bandcampInventoryPushTask = schedules.task({
 
       for (const connection of connections) {
         try {
-          // Get all mappings for this connection's band
-          const { data: mappings } = await supabase
+          // Phase 1 — `push_mode` filter (TRUTH_LAYER: Bandcamp push_mode contract).
+          // `normal` and `manual_override` are pushed; `blocked_baseline` and
+          // `blocked_multi_origin` are skipped at the source. We pull `push_mode`
+          // here (not in a WHERE clause) so we can also count blocked rows in the
+          // sync log metadata for operational visibility.
+          //
+          // Phase 0.7 — Distro skip (defensive). Distro variants (variant whose
+          // owning warehouse_products row has org_id IS NULL) are not Bandcamp
+          // products by definition, but if a stray bandcamp_product_mappings row
+          // ever gets attached to one (e.g. data drift, manual SQL), we MUST NOT
+          // push to Bandcamp on its behalf. We pull the variant→product join so
+          // we can drop those rows before building update payloads.
+          const { data: allMappings } = await supabase
             .from("bandcamp_product_mappings")
-            .select("id, variant_id, bandcamp_item_id, bandcamp_item_type, last_quantity_sold")
+            .select(
+              "id, variant_id, bandcamp_item_id, bandcamp_item_type, last_quantity_sold, push_mode, warehouse_product_variants!inner(warehouse_products!inner(org_id))",
+            )
             .eq("workspace_id", workspaceId)
             .not("bandcamp_item_id", "is", null);
 
-          if (!mappings || mappings.length === 0) continue;
+          if (!allMappings || allMappings.length === 0) continue;
+
+          // Strip the join shape so downstream code keeps the simple row type.
+          type RawMapping = (typeof allMappings)[number];
+          const mappingsAfterDistroFilter = allMappings.filter((m: RawMapping) => {
+            const variant = m.warehouse_product_variants as unknown as {
+              warehouse_products: { org_id: string | null } | null;
+            } | null;
+            return variant?.warehouse_products?.org_id != null;
+          });
+          const distroSkipped = allMappings.length - mappingsAfterDistroFilter.length;
+          if (distroSkipped > 0) {
+            console.warn(
+              `[bandcamp-inventory-push] band ${connection.band_id}: ${distroSkipped} distro-attached mapping(s) skipped (org_id IS NULL on owning product)`,
+            );
+          }
+
+          const mappings = mappingsAfterDistroFilter.filter(
+            (m: RawMapping) => m.push_mode === "normal" || m.push_mode === "manual_override",
+          );
+          const blockedCount = mappingsAfterDistroFilter.length - mappings.length;
+          if (blockedCount > 0) {
+            console.log(
+              `[bandcamp-inventory-push] band ${connection.band_id}: ${blockedCount}/${mappingsAfterDistroFilter.length} mappings skipped (push_mode != normal/manual_override)`,
+            );
+          }
+          if (mappings.length === 0) continue;
 
           // Get variant IDs to look up inventory (include component variant IDs for bundle MIN)
           const variantIds = mappings.map((m) => m.variant_id);
@@ -149,8 +189,32 @@ export const bandcampInventoryPushTask = schedules.task({
             ]),
           );
 
-          // Build update payload — apply safety buffer at push time
-          const pushItems: Array<{
+          // Fetch merch details to identify option-level items
+          const merchDetails = await getMerchDetails(connection.band_id, accessToken);
+          const optionsByPackageId = new Map<
+            number,
+            Array<{ option_id: number; quantity_sold: number }>
+          >();
+          for (const item of merchDetails) {
+            if (item.options && item.options.length > 0) {
+              optionsByPackageId.set(
+                item.package_id,
+                item.options.map((o) => ({
+                  option_id: o.option_id,
+                  quantity_sold: o.quantity_sold ?? 0,
+                })),
+              );
+            }
+          }
+
+          // Build update payloads — apply safety buffer at push time
+          const packageItems: Array<{
+            item_id: number;
+            item_type: string;
+            quantity_available: number;
+            quantity_sold: number;
+          }> = [];
+          const optionItems: Array<{
             item_id: number;
             item_type: string;
             quantity_available: number;
@@ -164,36 +228,49 @@ export const bandcampInventoryPushTask = schedules.task({
             const rawAvailable = inv?.available ?? 0;
             const effectiveSafety = inv?.safetyStock ?? workspaceSafetyStock;
 
-            // Compute bundle minimum when this variant is a bundle and bundles are enabled
             let effectiveAvailable = rawAvailable;
             if (bundlesEnabled) {
               const components = bundleMap.get(mapping.variant_id);
               if (components?.length) {
-                // DFS cycle safety is enforced at write time (setBundleComponents).
-                // At push time we just compute MIN — no recursion risk.
-                const componentMin = Math.min(
-                  ...components.map((c) => {
-                    const compInv = inventoryByVariant.get(c.component_variant_id);
-                    return Math.floor((compInv?.available ?? 0) / c.quantity);
-                  }),
+                // Phase 2.5(b): shared bundle availability helper.
+                effectiveAvailable = computeEffectiveBundleAvailable(
+                  rawAvailable,
+                  components,
+                  inventoryByVariant,
                 );
-                effectiveAvailable = Math.min(rawAvailable, Math.max(0, componentMin));
               }
             }
 
             const pushedQuantity = Math.max(0, effectiveAvailable - effectiveSafety);
+            const options = optionsByPackageId.get(mapping.bandcamp_item_id);
 
-            pushItems.push({
-              item_id: mapping.bandcamp_item_id,
-              item_type: mapping.bandcamp_item_type,
-              quantity_available: pushedQuantity,
-              quantity_sold: mapping.last_quantity_sold ?? 0,
-            });
+            if (options) {
+              // Option-level: push each option with the same quantity
+              for (const opt of options) {
+                optionItems.push({
+                  item_id: opt.option_id,
+                  item_type: "o",
+                  quantity_available: pushedQuantity,
+                  quantity_sold: opt.quantity_sold,
+                });
+              }
+            } else {
+              packageItems.push({
+                item_id: mapping.bandcamp_item_id,
+                item_type: mapping.bandcamp_item_type,
+                quantity_available: pushedQuantity,
+                quantity_sold: mapping.last_quantity_sold ?? 0,
+              });
+            }
           }
 
-          if (pushItems.length > 0) {
-            await updateQuantities(pushItems, accessToken);
-            itemsPushed += pushItems.length;
+          if (packageItems.length > 0) {
+            await updateQuantities(packageItems, accessToken);
+            itemsPushed += packageItems.length;
+          }
+          if (optionItems.length > 0) {
+            await updateQuantities(optionItems, accessToken);
+            itemsPushed += optionItems.length;
           }
         } catch (error) {
           itemsFailed++;

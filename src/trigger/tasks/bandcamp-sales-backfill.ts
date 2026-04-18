@@ -17,6 +17,7 @@ import { logger, schedules, task } from "@trigger.dev/sdk";
 import { refreshBandcampToken, type SalesReportItem, salesReport } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
 // Keep in sync with safeBigint in scripts/run-sales-backfill.mjs
 function safeBigint(val: unknown): number | null {
@@ -120,9 +121,13 @@ async function insertSalesRows(
 /**
  * DEPRECATED on-demand task. Kept for registry compatibility.
  * All backfill work now goes through scripts/run-sales-backfill.mjs.
+ *
+ * Rule #9: pinned to bandcampQueue for defense-in-depth even though the body
+ * no longer hits the OAuth API — guards against accidental future revival.
  */
 export const bandcampSalesBackfillTask = task({
   id: "bandcamp-sales-backfill",
+  queue: bandcampQueue,
   maxDuration: 300,
   run: async (payload: { connectionId: string }) => {
     logger.warn(
@@ -137,10 +142,18 @@ export const bandcampSalesBackfillTask = task({
 
 /**
  * Self-healing cron: retries failed chunks and detects stale connections.
+ *
+ * Rule #9 (CLAUDE.md): MUST share the bandcampQueue (concurrencyLimit: 1) with
+ * every other Bandcamp OAuth task to serialize all `refreshBandcampToken()`
+ * calls. Without this, two concurrent token refreshes can return distinct
+ * access_tokens, the older one is invalidated by the next refresh, and
+ * subsequent calls receive `duplicate_grant` — which destroys the OAuth token
+ * family and requires manual re-auth in the Bandcamp dashboard.
  */
 export const bandcampSalesBackfillCron = schedules.task({
   id: "bandcamp-sales-backfill-cron",
   cron: "*/10 * * * *",
+  queue: bandcampQueue,
   maxDuration: 300,
   run: async () => {
     const supabase = createServiceRoleClient();

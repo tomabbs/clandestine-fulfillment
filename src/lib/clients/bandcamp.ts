@@ -390,17 +390,31 @@ export async function updateQuantities(
   }>,
   accessToken: string,
 ): Promise<void> {
+  // Bandcamp API uses `id` and `id_type` (not `item_id`/`item_type`).
+  // `id_type` must be "p" (package) or "o" (option), not the full word.
+  const apiItems = items.map((i) => ({
+    id: i.item_id,
+    id_type: i.item_type === "package" ? "p" : i.item_type,
+    quantity_available: i.quantity_available,
+    quantity_sold: i.quantity_sold,
+  }));
+
   const response = await fetch("https://bandcamp.com/api/merchorders/1/update_quantities", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ items: apiItems }),
   });
 
   if (!response.ok) {
     throw new Error(`updateQuantities failed: ${response.status}`);
+  }
+
+  const json = await response.json();
+  if (json.error) {
+    throw new Error(`updateQuantities API error: ${json.error_message ?? "unknown"}`);
   }
 }
 
@@ -672,6 +686,63 @@ export async function fetchSalesReport(
   }
 
   return { ready: true, url: json.url };
+}
+
+// === Shipping Origin Details (multi-origin probe) =========================
+// Phase 1 — used by `bandcamp-baseline-audit` to detect merchants with >1
+// shipping origin. `update_quantities` writes ONLY to the default origin, so
+// any merchant with multiple origins needs `push_mode='blocked_multi_origin'`
+// until per-origin fanout ships (deferred to Phase 4+).
+
+const bandcampShippingOriginSchema = z
+  .object({
+    origin_id: z.number(),
+    name: z.string().nullish(),
+    is_default: z.boolean().nullish(),
+    country: z.string().nullish(),
+    country_code: z.string().nullish(),
+    state: z.string().nullish(),
+    city: z.string().nullish(),
+    postal_code: z.string().nullish(),
+  })
+  .passthrough();
+
+const getShippingOriginDetailsResponseSchema = z.object({
+  success: z.boolean().optional(),
+  origins: z.preprocess((v) => v ?? [], z.array(bandcampShippingOriginSchema)),
+});
+
+export type BandcampShippingOrigin = z.infer<typeof bandcampShippingOriginSchema>;
+
+export async function getShippingOriginDetails(
+  bandId: number,
+  accessToken: string,
+): Promise<BandcampShippingOrigin[]> {
+  const response = await fetch(
+    "https://bandcamp.com/api/merchorders/1/get_shipping_origin_details",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ band_id: bandId }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`getShippingOriginDetails failed for band ${bandId}: ${response.status}`);
+  }
+
+  const json = (await response.json()) as { error?: boolean; error_message?: string };
+  if (json.error) {
+    throw new Error(
+      `getShippingOriginDetails API error for band ${bandId}: ${json.error_message ?? "unknown"}`,
+    );
+  }
+
+  const data = getShippingOriginDetailsResponseSchema.parse(json);
+  return data.origins;
 }
 
 export async function updateSku(

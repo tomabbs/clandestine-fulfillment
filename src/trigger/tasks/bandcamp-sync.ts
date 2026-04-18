@@ -26,6 +26,7 @@ import {
   shopifyGraphQL,
 } from "@/lib/clients/shopify-client";
 import { buildShopifyVariantInput } from "@/lib/clients/shopify-variant-input";
+import { computeBandcampSeedQuantity } from "@/lib/server/bandcamp-effective-available";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
@@ -1309,8 +1310,13 @@ export const bandcampSyncTask = task({
               await supabase.from("warehouse_product_variants").update(updates).eq("id", variantId);
             }
 
-            // Inventory seeding: if warehouse is 0 and Bandcamp has stock, seed once
-            if (merchItem.quantity_available != null && merchItem.quantity_available > 0) {
+            // Inventory seeding: if warehouse is 0 and Bandcamp has stock, seed once.
+            // Phase 1 follow-up #2: trust the origin allocation sum (controlled
+            // stock), NOT customer-facing TOP `quantity_available` (which can be
+            // inflated by merchant baselines per Part 9 audit). Origin sum is the
+            // only safe seed source for Phase 4's bidirectional bridge.
+            const seedDecision = computeBandcampSeedQuantity(merchItem);
+            if (seedDecision.effective > 0) {
               const { data: inv } = await supabase
                 .from("warehouse_inventory_levels")
                 .select("available")
@@ -1323,18 +1329,22 @@ export const bandcampSyncTask = task({
                   await recordInventoryChange({
                     workspaceId,
                     sku: seedSku,
-                    delta: merchItem.quantity_available,
+                    delta: seedDecision.effective,
                     source: "backfill",
                     correlationId: `bandcamp-seed:${connection.band_id}:${merchItem.package_id}:initial`,
                     metadata: {
                       band_id: connection.band_id,
                       bandcamp_item_id: merchItem.package_id,
-                      quantity_available: merchItem.quantity_available,
+                      effective_source: seedDecision.source,
+                      effective_quantity: seedDecision.effective,
+                      top_quantity_available: merchItem.quantity_available ?? null,
                     },
                   });
                   logger.info("Seeded inventory from Bandcamp", {
                     sku: seedSku,
-                    quantity: merchItem.quantity_available,
+                    quantity: seedDecision.effective,
+                    source: seedDecision.source,
+                    top_quantity: merchItem.quantity_available ?? null,
                   });
                 }
               }
@@ -1733,24 +1743,33 @@ export const bandcampSyncTask = task({
 
             // Step 2: Apply actual Bandcamp quantity via canonical write path (Rule #20).
             // This ensures Redis is updated and fanout pushes to Bandcamp + client stores.
-            const initialQty = merchItem.quantity_available ?? 0;
-            if (initialQty > 0) {
+            // Phase 1 follow-up #2: seed from origin allocation sum (controlled
+            // stock), NOT TOP quantity_available which can be inflated by merchant
+            // baselines (Part 9). Single-origin merchants without origin tracking
+            // fall back to TOP via `computeBandcampSeedQuantity`.
+            const seedDecision = computeBandcampSeedQuantity(merchItem);
+            if (seedDecision.effective > 0) {
               await recordInventoryChange({
                 workspaceId,
                 sku: effectiveSku,
-                delta: initialQty,
+                delta: seedDecision.effective,
                 source: "backfill",
                 correlationId: `bandcamp-seed:${connection.band_id}:${merchItem.package_id}`,
                 metadata: {
                   band_id: connection.band_id,
                   package_id: merchItem.package_id,
+                  effective_source: seedDecision.source,
+                  effective_quantity: seedDecision.effective,
+                  top_quantity_available: merchItem.quantity_available ?? null,
                 },
               });
             }
 
             logger.info("Seeded initial inventory", {
               sku: effectiveSku,
-              available: initialQty,
+              available: seedDecision.effective,
+              source: seedDecision.source,
+              top_quantity: merchItem.quantity_available ?? null,
               skuGenerated,
             });
 

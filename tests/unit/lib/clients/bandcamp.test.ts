@@ -25,6 +25,7 @@ vi.stubGlobal("fetch", mockFetch);
 // Import after mocks
 import {
   assembleBandcampTitle,
+  getShippingOriginDetails,
   matchSkuToVariants,
   normalizeFormat,
   refreshBandcampToken,
@@ -253,6 +254,61 @@ describe("bandcamp client", () => {
 
       expect(result.matched).toHaveLength(0);
       expect(result.unmatched).toHaveLength(2);
+    });
+  });
+
+  // Phase 1 — `getShippingOriginDetails` is the multi-origin probe used by
+  // `bandcamp-baseline-audit`. The wrapper must POST to the documented
+  // endpoint, parse the `origins[]` array, and surface any API-level error
+  // (the API returns 200 + `{ error: true }` for application errors).
+  describe("getShippingOriginDetails", () => {
+    it("returns parsed origins on success", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          success: true,
+          origins: [
+            { origin_id: 1, name: "Default", is_default: true, country_code: "US" },
+            { origin_id: 2, name: "EU warehouse", country_code: "DE" },
+          ],
+        }),
+      });
+
+      const origins = await getShippingOriginDetails(123, "tok");
+
+      expect(origins).toHaveLength(2);
+      expect(origins[0].origin_id).toBe(1);
+      expect(origins[1].country_code).toBe("DE");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://bandcamp.com/api/merchorders/1/get_shipping_origin_details",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({ Authorization: "Bearer tok" }),
+        }),
+      );
+    });
+
+    it("treats missing `origins` as empty array (single-origin merchant default)", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+      const origins = await getShippingOriginDetails(123, "tok");
+      expect(origins).toEqual([]);
+    });
+
+    it("throws on HTTP error", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 503 });
+      await expect(getShippingOriginDetails(123, "tok")).rejects.toThrow(/503/);
+    });
+
+    it("throws on application-level `{ error: true }`", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ error: true, error_message: "permission denied" }),
+      });
+      await expect(getShippingOriginDetails(123, "tok")).rejects.toThrow(/permission denied/);
     });
   });
 });
