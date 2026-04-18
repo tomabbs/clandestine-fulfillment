@@ -50,3 +50,19 @@ next-env.d.ts
 .turbo
 .claude/
 .DS_Store
+
+# supabase CLI ephemeral state
+supabase/.temp/
+
+# operator-local artifacts (one-off audit / migration scripts output)
+scripts/output/
+
+# operator-local reports — large CSV/JSON/XLSX dumps from one-off audits
+reports/*.csv
+reports/*.json
+reports/*.xlsx
+reports/*.txt
+reports/*.sql
+
+# integration test snapshots (env-coupled)
+tests/integration/__snapshots__/
