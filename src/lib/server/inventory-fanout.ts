@@ -12,8 +12,10 @@
  * stay current. The updated quantities are pushed when sync resumes.
  */
 
+import * as Sentry from "@sentry/nextjs";
 import { tasks } from "@trigger.dev/sdk";
 import { inventoryAdjustQuantities } from "@/lib/clients/shopify-client";
+import { loadFanoutGuard } from "@/lib/server/fanout-guard";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 const SHOPIFY_LOCATION_ID = "gid://shopify/Location/104066613563";
@@ -41,108 +43,131 @@ export async function fanoutInventoryChange(
   delta?: number,
   correlationId?: string,
 ): Promise<FanoutResult> {
-  const supabase = createServiceRoleClient();
+  return Sentry.startSpan(
+    {
+      name: "inventory.fanout",
+      op: "fanout.dispatch",
+      attributes: {
+        "fanout.workspace_id": workspaceId,
+        "fanout.sku": sku,
+        "fanout.delta": delta ?? 0,
+        "fanout.correlation_id": correlationId ?? "",
+      },
+    },
+    async () => {
+      const supabase = createServiceRoleClient();
+      const guard = await loadFanoutGuard(supabase, workspaceId);
+      const effectiveCorrelationId = correlationId ?? `fanout:${sku}:${Date.now()}`;
 
-  // Pause guard — single primary-key lookup before any outbound work
-  const { data: ws } = await supabase
-    .from("workspaces")
-    .select("inventory_sync_paused")
-    .eq("id", workspaceId)
-    .single();
+      let storeConnectionsPushed = 0;
+      let bandcampPushed = false;
+      let shopifyPushed = false;
 
-  if (ws?.inventory_sync_paused) {
-    return { storeConnectionsPushed: 0, bandcampPushed: false, shopifyPushed: false };
-  }
+      const { data: variant } = await supabase
+        .from("warehouse_product_variants")
+        .select("id, shopify_inventory_item_id")
+        .eq("workspace_id", workspaceId)
+        .eq("sku", sku)
+        .single();
 
-  let storeConnectionsPushed = 0;
-  let bandcampPushed = false;
-  let shopifyPushed = false;
-
-  const { data: variant } = await supabase
-    .from("warehouse_product_variants")
-    .select("id, shopify_inventory_item_id")
-    .eq("workspace_id", workspaceId)
-    .eq("sku", sku)
-    .single();
-
-  // Push to Clandestine Shopify via direct API (not client_store_connections)
-  if (variant?.shopify_inventory_item_id && delta != null && delta !== 0) {
-    try {
-      await inventoryAdjustQuantities(
-        variant.shopify_inventory_item_id,
-        SHOPIFY_LOCATION_ID,
-        delta,
-        correlationId ?? `fanout:${sku}:${Date.now()}`,
-      );
-      shopifyPushed = true;
-    } catch (err) {
-      console.error(
-        `[fanout] Shopify push failed for SKU=${sku}:`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  const { data: skuMappings } = await supabase
-    .from("client_store_sku_mappings")
-    .select("connection_id")
-    .eq("is_active", true)
-    .eq("remote_sku", sku);
-
-  const { data: bandcampMappings } = await supabase
-    .from("bandcamp_product_mappings")
-    .select("id, variant_id")
-    .eq("workspace_id", workspaceId);
-
-  const hasBandcampMapping =
-    variant &&
-    (bandcampMappings ?? []).some((m) => (m as Record<string, unknown>).variant_id === variant.id);
-
-  const targets = determineFanoutTargets((skuMappings ?? []).length > 0, !!hasBandcampMapping);
-
-  if (targets.pushToStores) {
-    try {
-      await tasks.trigger("multi-store-inventory-push", {});
-      storeConnectionsPushed = (skuMappings ?? []).length;
-    } catch {
-      /* non-critical */
-    }
-  }
-
-  if (targets.pushToBandcamp) {
-    try {
-      await tasks.trigger("bandcamp-inventory-push", {});
-      bandcampPushed = true;
-    } catch {
-      /* non-critical */
-    }
-  }
-
-  if (variant) {
-    const { data: parentBundles } = await supabase
-      .from("bundle_components")
-      .select("bundle_variant_id")
-      .eq("workspace_id", workspaceId)
-      .eq("component_variant_id", variant.id)
-      .limit(1);
-
-    if (parentBundles?.length) {
-      if (!targets.pushToBandcamp) {
+      if (
+        variant?.shopify_inventory_item_id &&
+        delta != null &&
+        delta !== 0 &&
+        guard.shouldFanout("clandestine_shopify", effectiveCorrelationId)
+      ) {
         try {
-          await tasks.trigger("bandcamp-inventory-push", {});
-        } catch {
-          /* */
+          await Sentry.startSpan(
+            {
+              name: "inventory.fanout.shopify",
+              op: "fanout.shopify",
+              attributes: { "fanout.sku": sku, "fanout.delta": delta },
+            },
+            () =>
+              inventoryAdjustQuantities(
+                variant.shopify_inventory_item_id as string,
+                SHOPIFY_LOCATION_ID,
+                delta,
+                effectiveCorrelationId,
+              ),
+          );
+          shopifyPushed = true;
+        } catch (err) {
+          Sentry.captureException(err, {
+            tags: { fanout_target: "clandestine_shopify", sku },
+            extra: { workspaceId, correlationId: effectiveCorrelationId },
+          });
+          console.error(
+            `[fanout] Shopify push failed for SKU=${sku}:`,
+            err instanceof Error ? err.message : err,
+          );
         }
       }
-      if (!targets.pushToStores) {
+
+      const { data: skuMappings } = await supabase
+        .from("client_store_sku_mappings")
+        .select("connection_id")
+        .eq("is_active", true)
+        .eq("remote_sku", sku);
+
+      const { data: bandcampMappings } = await supabase
+        .from("bandcamp_product_mappings")
+        .select("id, variant_id")
+        .eq("workspace_id", workspaceId);
+
+      const hasBandcampMapping =
+        variant &&
+        (bandcampMappings ?? []).some(
+          (m) => (m as Record<string, unknown>).variant_id === variant.id,
+        );
+
+      const targets = determineFanoutTargets((skuMappings ?? []).length > 0, !!hasBandcampMapping);
+
+      if (targets.pushToStores && guard.shouldFanout("client_store", effectiveCorrelationId)) {
         try {
           await tasks.trigger("multi-store-inventory-push", {});
+          storeConnectionsPushed = (skuMappings ?? []).length;
         } catch {
-          /* */
+          /* non-critical */
         }
       }
-    }
-  }
 
-  return { storeConnectionsPushed, bandcampPushed, shopifyPushed };
+      if (targets.pushToBandcamp && guard.shouldFanout("bandcamp", effectiveCorrelationId)) {
+        try {
+          await tasks.trigger("bandcamp-inventory-push", {});
+          bandcampPushed = true;
+        } catch {
+          /* non-critical */
+        }
+      }
+
+      if (variant) {
+        const { data: parentBundles } = await supabase
+          .from("bundle_components")
+          .select("bundle_variant_id")
+          .eq("workspace_id", workspaceId)
+          .eq("component_variant_id", variant.id)
+          .limit(1);
+
+        if (parentBundles?.length) {
+          if (!targets.pushToBandcamp && guard.shouldFanout("bandcamp", effectiveCorrelationId)) {
+            try {
+              await tasks.trigger("bandcamp-inventory-push", {});
+            } catch {
+              /* */
+            }
+          }
+          if (!targets.pushToStores && guard.shouldFanout("client_store", effectiveCorrelationId)) {
+            try {
+              await tasks.trigger("multi-store-inventory-push", {});
+            } catch {
+              /* */
+            }
+          }
+        }
+      }
+
+      return { storeConnectionsPushed, bandcampPushed, shopifyPushed };
+    },
+  );
 }

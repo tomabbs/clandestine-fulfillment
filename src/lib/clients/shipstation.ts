@@ -323,5 +323,271 @@ export function parseShipNotifyPayload(rawBody: string): ShipNotifyPayload {
   return shipNotifyPayloadSchema.parse(parsed);
 }
 
+/**
+ * Fetch the shipments listed in a SHIP_NOTIFY `resource_url`.
+ *
+ * SHIP_NOTIFY does NOT inline the shipment payload — it sends a URL that
+ * the receiver must call back with the same Basic auth used for `/shipments`.
+ * The URL ShipStation sends always lives under `ssapi.shipstation.com`
+ * (validated below) so we never follow an attacker-controlled host.
+ *
+ * Returns the parsed list (the URL typically resolves to a single
+ * shipment but ShipStation can batch multiple recently-shipped shipments
+ * into one notification, so callers MUST iterate the array).
+ */
+export async function fetchShipmentsByResourceUrl(
+  resourceUrl: string,
+): Promise<ShipStationShipment[]> {
+  let parsed: URL;
+  try {
+    parsed = new URL(resourceUrl);
+  } catch {
+    throw new Error(`Invalid SHIP_NOTIFY resource_url: ${resourceUrl}`);
+  }
+  // Refuse anything outside the v1 host; SHIP_NOTIFY is a v1 webhook and
+  // the URL is always rooted at ssapi.shipstation.com per ShipStation's docs.
+  if (parsed.host !== "ssapi.shipstation.com") {
+    throw new Error(
+      `Refusing to follow SHIP_NOTIFY resource_url outside ssapi.shipstation.com: host=${parsed.host}`,
+    );
+  }
+
+  // Always include shipment items so the processor sees SKUs without a
+  // second round-trip per shipment.
+  if (!parsed.searchParams.has("includeShipmentItems")) {
+    parsed.searchParams.set("includeShipmentItems", "True");
+  }
+
+  const path = `${parsed.pathname}${parsed.search}`;
+  const raw = await shipstationFetch<unknown>(path);
+  return shipmentsListResponseSchema.parse(raw).shipments;
+}
+
+// === Products + Aliases (Phase 0.5 SKU rectify) ============================
+//
+// ShipStation v1 `/products` is the ONLY surface that exposes the
+// `aliases[]` array used by Inventory Sync to map cross-store SKUs onto a
+// single master product. v2 has no equivalent — aliases are a v1-only
+// concept. See plan §10 / §7.1.10 for why aliases beat renames as the
+// primary rectify primitive.
+//
+// CRITICAL: `PUT /products/{productId}` is a FULL-RESOURCE replacement, not
+// a patch. Every caller MUST first GET the current resource, mutate the
+// fields it owns, then PUT the entire merged body back. Any field omitted
+// from the PUT body is cleared. Concurrency hazards (lost-update on the
+// aliases array) are addressed at the task layer via a per-product Redis
+// mutex (see `src/trigger/lib/redis-mutex.ts` and the rectify task).
+
+const shipStationProductAliasSchema = z.object({
+  // ShipStation's docs use `name` for the alias SKU string. We re-export it
+  // as `sku` for ergonomic call-sites; the wire format keeps `name`.
+  name: z.string(),
+  storeId: z.number().nullable().optional(),
+  storeName: z.string().nullable().optional(),
+});
+
+export type ShipStationProductAlias = z.infer<typeof shipStationProductAliasSchema>;
+
+const shipStationProductSchema = z
+  .object({
+    productId: z.number(),
+    sku: z.string(),
+    name: z.string().nullable().optional(),
+    // Aliases is the field we mutate in rectify. Always treat as an array;
+    // ShipStation returns `null` for products with no aliases configured.
+    aliases: z.preprocess((v) => v ?? [], z.array(shipStationProductAliasSchema)),
+    // We pass these through unchanged so the full-resource PUT does not
+    // accidentally clear them. New fields ShipStation may return in the
+    // future are preserved via `.passthrough()` on the parent object below.
+    price: z.number().nullable().optional(),
+    defaultCost: z.number().nullable().optional(),
+    weightOz: z.number().nullable().optional(),
+    length: z.number().nullable().optional(),
+    width: z.number().nullable().optional(),
+    height: z.number().nullable().optional(),
+    active: z.boolean().nullable().optional(),
+    productCategory: z
+      .object({
+        categoryId: z.number().nullable().optional(),
+        name: z.string().nullable().optional(),
+      })
+      .nullable()
+      .optional(),
+    productType: z.string().nullable().optional(),
+    warehouseLocation: z.string().nullable().optional(),
+    defaultCarrierCode: z.string().nullable().optional(),
+    defaultServiceCode: z.string().nullable().optional(),
+    defaultPackageCode: z.string().nullable().optional(),
+    defaultIntlCarrierCode: z.string().nullable().optional(),
+    defaultIntlServiceCode: z.string().nullable().optional(),
+    defaultIntlPackageCode: z.string().nullable().optional(),
+    defaultConfirmation: z.string().nullable().optional(),
+    defaultIntlConfirmation: z.string().nullable().optional(),
+    customsDescription: z.string().nullable().optional(),
+    customsValue: z.number().nullable().optional(),
+    customsTariffNo: z.string().nullable().optional(),
+    customsCountryCode: z.string().nullable().optional(),
+    noCustoms: z.boolean().nullable().optional(),
+    tags: z.array(z.unknown()).nullable().optional(),
+    createDate: z.string().nullable().optional(),
+    modifyDate: z.string().nullable().optional(),
+  })
+  // Critical: passthrough preserves ShipStation fields we don't yet model so
+  // the full-resource PUT round-trip does not silently drop them.
+  .passthrough();
+
+export type ShipStationProduct = z.infer<typeof shipStationProductSchema>;
+
+const productsListResponseSchema = z.object({
+  products: z.array(shipStationProductSchema),
+  total: z.number(),
+  page: z.number(),
+  pages: z.number(),
+});
+
+export interface FetchProductsParams {
+  sku?: string;
+  productCategoryId?: number;
+  productTypeId?: number;
+  tagId?: number;
+  startDate?: string;
+  endDate?: string;
+  sortBy?: string;
+  sortDir?: "ASC" | "DESC";
+  page?: number;
+  pageSize?: number;
+  showInactive?: boolean;
+}
+
+/**
+ * Search products with filters. Used by the audit task to walk the catalog
+ * page-by-page and by `getProductBySku()` below for exact lookups.
+ */
+export async function fetchProducts(params: FetchProductsParams = {}) {
+  const searchParams = new URLSearchParams();
+  if (params.sku) searchParams.set("sku", params.sku);
+  if (params.productCategoryId !== undefined)
+    searchParams.set("productCategoryId", String(params.productCategoryId));
+  if (params.productTypeId !== undefined)
+    searchParams.set("productTypeId", String(params.productTypeId));
+  if (params.tagId !== undefined) searchParams.set("tagId", String(params.tagId));
+  if (params.startDate) searchParams.set("startDate", toShipStationDate(params.startDate));
+  if (params.endDate) searchParams.set("endDate", toShipStationDate(params.endDate));
+  if (params.sortBy) searchParams.set("sortBy", params.sortBy);
+  if (params.sortDir) searchParams.set("sortDir", params.sortDir);
+  if (params.page) searchParams.set("page", String(params.page));
+  if (params.pageSize) searchParams.set("pageSize", String(params.pageSize));
+  if (params.showInactive !== undefined)
+    searchParams.set("showInactive", params.showInactive ? "True" : "False");
+
+  const query = searchParams.toString();
+  const path = `/products${query ? `?${query}` : ""}`;
+  const raw = await shipstationFetch<unknown>(path);
+  return productsListResponseSchema.parse(raw);
+}
+
+/**
+ * Exact-match lookup by master SKU. Returns the single product if exactly
+ * one match exists, null if none, throws if multiple (ShipStation should
+ * never return multiple but the validation surfaces upstream data integrity
+ * issues immediately rather than letting them propagate into rectify).
+ */
+export async function getProductBySku(sku: string): Promise<ShipStationProduct | null> {
+  const result = await fetchProducts({ sku, pageSize: 50 });
+  const exact = result.products.filter((p) => p.sku === sku);
+  if (exact.length === 0) return null;
+  if (exact.length > 1) {
+    throw new Error(
+      `ShipStation v1 returned ${exact.length} products with sku=${sku}; expected at most 1`,
+    );
+  }
+  return exact[0];
+}
+
+export async function getProduct(productId: number): Promise<ShipStationProduct> {
+  const raw = await shipstationFetch<unknown>(`/products/${productId}`);
+  return shipStationProductSchema.parse(raw);
+}
+
+/**
+ * Full-resource PUT. Caller MUST pass a complete product body — every list
+ * field (notably `aliases[]`) that should survive must be in the payload.
+ * Returns the parsed response so the caller can verify the write landed.
+ */
+export async function putProduct(
+  productId: number,
+  body: ShipStationProduct,
+): Promise<ShipStationProduct> {
+  const raw = await shipstationFetch<unknown>(`/products/${productId}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  return shipStationProductSchema.parse(raw);
+}
+
+/**
+ * GET-merge-PUT helper for adding a single alias to a product. The `current`
+ * argument is REQUIRED — callers MUST pass the resource snapshot they took
+ * inside their mutex window (see plan §7.1.10). Pass `current` even if you
+ * just GET it one line above to make the contract explicit at the call-site.
+ *
+ * Idempotent: if `aliasSku` already exists in `current.aliases`, this
+ * returns `current` without issuing a PUT.
+ */
+export async function addAliasToProduct({
+  current,
+  aliasSku,
+  storeId,
+  storeName,
+}: {
+  current: ShipStationProduct;
+  aliasSku: string;
+  storeId?: number;
+  storeName?: string;
+}): Promise<ShipStationProduct> {
+  if (current.aliases.some((a) => a.name === aliasSku)) {
+    return current;
+  }
+  const next: ShipStationProduct = {
+    ...current,
+    aliases: [
+      ...current.aliases,
+      {
+        name: aliasSku,
+        storeId: storeId ?? null,
+        storeName: storeName ?? null,
+      },
+    ],
+  };
+  return putProduct(current.productId, next);
+}
+
+/**
+ * GET-merge-PUT helper for removing a single alias. Idempotent: if the SKU
+ * is not in the aliases array, returns `current` without a PUT.
+ */
+export async function removeAliasFromProduct({
+  current,
+  aliasSku,
+}: {
+  current: ShipStationProduct;
+  aliasSku: string;
+}): Promise<ShipStationProduct> {
+  if (!current.aliases.some((a) => a.name === aliasSku)) {
+    return current;
+  }
+  const next: ShipStationProduct = {
+    ...current,
+    aliases: current.aliases.filter((a) => a.name !== aliasSku),
+  };
+  return putProduct(current.productId, next);
+}
+
 // Exported for testing
-export { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, rateLimitState, shipStationShipmentSchema };
+export {
+  RATE_LIMIT_MAX,
+  RATE_LIMIT_WINDOW_MS,
+  rateLimitState,
+  shipStationProductSchema,
+  shipStationShipmentSchema,
+};

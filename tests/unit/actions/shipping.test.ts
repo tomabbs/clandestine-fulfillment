@@ -367,6 +367,10 @@ describe("shipping server actions", () => {
                   data: [{ format_name: "LP", pick_pack_cost: 2.5, material_cost: 1.0 }],
                   error: null,
                 }),
+                order: vi.fn().mockResolvedValue({
+                  data: [{ format_name: "LP" }],
+                  error: null,
+                }),
               }),
             }),
           };
