@@ -1,0 +1,19 @@
+{
+  "stressRunId": "bulk-create-locations-burst-2026-04-18T19-18-01-989Z",
+  "scriptName": "bulk-create-locations-burst",
+  "ts": "2026-04-18T19:18:02.318Z",
+  "workspaceId": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+  "dryRun": true,
+  "passed": true,
+  "assertions": [],
+  "metrics": {
+    "planned_range_size": 50,
+    "name_prefix": "TEST-bulk-create-locations-burst-2026-04-18T19-18-01-989Z-BURST",
+    "v2_warehouse_id_present": 0,
+    "shipstation_sync_paused": 0
+  },
+  "sideEffectsSummarySql": "-- Side-effects summary for stress run: bulk-create-locations-burst-2026-04-18T19-18-01-989Z\n-- Run via: psql \"$DATABASE_URL\" -f - <<'EOF'\n\nselect 'external_sync_events' as table_name, count(*)::text as cnt\n  from external_sync_events\n  where correlation_id like 'bulk-create-locations-burst-2026-04-18T19-18-01-989Z%'\n     or metadata->>'stress_run_id' = 'bulk-create-locations-burst-2026-04-18T19-18-01-989Z'\nunion all\nselect 'warehouse_inventory_activity', count(*)::text\n  from warehouse_inventory_activity\n  where correlation_id like 'bulk-create-locations-burst-2026-04-18T19-18-01-989Z%'\n     or metadata->>'stress_run_id' = 'bulk-create-locations-burst-2026-04-18T19-18-01-989Z'\nunion all\nselect 'warehouse_review_queue', count(*)::text\n  from warehouse_review_queue\n  where group_key like 'stress:bulk-create-locations-burst-2026-04-18T19-18-01-989Z:%'\n     or metadata->>'stress_run_id' = 'bulk-create-locations-burst-2026-04-18T19-18-01-989Z'\nunion all\nselect 'webhook_events', count(*)::text\n  from webhook_events\n  where external_webhook_id like 'bulk-create-locations-burst-2026-04-18T19-18-01-989Z%'\nunion all\nselect 'warehouse_locations', count(*)::text\n  from warehouse_locations\n  where name like 'TEST-bulk-create-locations-burst-2026-04-18T19-18-01-989Z-%';\n\n-- EOF",
+  "notes": [
+    "Dry run — would call createLocationRange(prefix='TEST-bulk-create-locations-burst-2026-04-18T19-18-01-989Z-BURST', fromIndex=1, toIndex=50); expect mode='trigger' (>30 entries)."
+  ]
+}

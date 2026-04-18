@@ -8,7 +8,7 @@ This gate complements:
 - `scripts/sql/prod_parity_checks.sql`
 - `scripts/sql/webhook_health_snapshot.sql`
 
-> **Last full automated sweep:** 2026-04-13 (Phase 6 validation drill — see mega-plan Part 14.9 Phase 6 closeout). All Section A automated checks PASS (`pnpm typecheck` / `pnpm test` 1029/1029 / `pnpm build` / `pnpm exec biome check` 0 errors / inventory + webhook-dedup + fanout-gate + v2 batch CI guards). Section B (focused reliability tests via `pnpm release:gate`) PASS 8/8. Section C E2E subset and Sections C-E manual checks remain operator-led per their definitions below.
+> **Last full automated sweep:** 2026-04-13 (Megaplan Finish-Line v4 closeout). All Section A automated checks PASS (`pnpm typecheck` / `pnpm test` 1143/1143 — 1121 pre-Phase-6 + 22 new Phase 6 tests for `setFanoutRolloutPercentInternal` and `evaluateRampHaltCriteria` / `pnpm build` / `pnpm exec biome check` 0 errors / inventory + webhook-dedup + fanout-gate + v2 batch + source-union-sync CI guards). Section B (focused reliability tests via `pnpm release:gate`) PASS. Phase 7 ramp deferred today (workspace lacks `shipstation_v2_inventory_warehouse_id` / `_location_id`; `inventory_sync_paused = true`). Rollout infrastructure (helper + sensor + audit) SHIPPED and tested end-to-end via unit suites — see `reports/finish-line/finish_line_status.json` for the per-phase outcome breakdown and `reports/finish-line/rollback_proof.md` for the verified 3-layer rollback contract.
 
 ---
 

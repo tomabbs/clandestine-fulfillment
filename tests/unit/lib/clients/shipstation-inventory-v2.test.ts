@@ -211,6 +211,40 @@ describe("adjustInventoryV2 — Patch D2 boundary contract", () => {
       adjustInventoryV2(args({ transaction_type: "adjust", quantity: -1 })),
     ).rejects.toThrow(/negative quantity/);
   });
+
+  // ─── Phase 2B regression — empty-body success handling ─────────────────────
+  // Phase 1 §15.3 probe (2026-04-18) discovered that v2 inventory POST
+  // returns 200 with an empty body on success. The unguarded
+  // response.json() call threw "Unexpected end of JSON input" and the
+  // caller marked the external_sync_events row 'error' even though the
+  // write succeeded server-side. v2Fetch now tolerates empty bodies.
+  it("treats 200 + empty body as success (probe-discovered regression)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 200 }));
+    await expect(
+      adjustInventoryV2(args({ transaction_type: "increment", quantity: 5 })),
+    ).resolves.not.toThrow();
+  });
+
+  it("treats 204 No Content as success", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(
+      adjustInventoryV2(args({ transaction_type: "decrement", quantity: 2 })),
+    ).resolves.not.toThrow();
+  });
+
+  it("treats whitespace-only body as success", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("   \n", { status: 200 }));
+    await expect(
+      adjustInventoryV2(args({ transaction_type: "increment", quantity: 1 })),
+    ).resolves.not.toThrow();
+  });
+
+  it("throws a descriptive error when body is non-empty but malformed JSON", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{not-json", { status: 200 }));
+    await expect(
+      adjustInventoryV2(args({ transaction_type: "increment", quantity: 1 })),
+    ).rejects.toThrow(/failed to parse response body/);
+  });
 });
 
 // ─── Saturday Workstream 3 — location mutations (Plan §C.11) ────────────────

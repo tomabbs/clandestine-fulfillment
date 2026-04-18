@@ -101,7 +101,32 @@ async function v2Fetch<T>(path: string, options?: RequestInit): Promise<T> {
     const body = await response.text().catch(() => "");
     throw new Error(`ShipStation v2 ${response.status} ${path}: ${body}`);
   }
-  return response.json() as Promise<T>;
+
+  // Phase 2B fix (2026-04-18 §15.3 probe finding #1): v2 inventory POST
+  // returns 200 with an EMPTY body on success. Calling response.json()
+  // on an empty body throws "Unexpected end of JSON input" — which
+  // bubbled up to the caller as a phantom failure, the
+  // external_sync_events ledger then marked the row 'error', the task
+  // retried, and v2 idempotently re-applied the write but the operator
+  // dashboard filled with red error rows.
+  //
+  // Read the body as text first; if empty (or whitespace-only), return
+  // an empty object cast to T. Callers that depend on the response body
+  // already null-check the fields. Status 204 is also handled trivially.
+  if (response.status === 204) {
+    return {} as T;
+  }
+  const raw = await response.text();
+  if (!raw || raw.trim().length === 0) {
+    return {} as T;
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    throw new Error(
+      `ShipStation v2 ${path}: failed to parse response body (${err instanceof Error ? err.message : "unknown"}). Raw: ${raw.slice(0, 200)}`,
+    );
+  }
 }
 
 /**

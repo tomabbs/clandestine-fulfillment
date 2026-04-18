@@ -1,6 +1,11 @@
 "use server";
 
 import { z } from "zod";
+// Phase 4d (finish-line plan v4) — every Server Action in this file gates on
+// `requireStaff()` first. Warehouse scanning is staff-only by policy and the
+// previous lack of an auth check was tracked under deferred slug
+// `scanning-auth-audit`.
+import { requireStaff } from "@/lib/server/auth-context";
 import { createServerSupabaseClient } from "@/lib/server/supabase-server";
 
 // === Zod Schemas ===
@@ -26,6 +31,7 @@ const recordReceivingSchema = z.object({
 // === Actions ===
 
 export async function lookupLocation(barcode: string) {
+  await requireStaff();
   const parsed = barcodeSchema.safeParse(barcode);
   if (!parsed.success) {
     return { error: "Invalid barcode" };
@@ -49,6 +55,7 @@ export async function lookupLocation(barcode: string) {
 }
 
 export async function lookupBarcode(barcode: string) {
+  await requireStaff();
   const parsed = barcodeSchema.safeParse(barcode);
   if (!parsed.success) {
     return { error: "Invalid barcode" };
@@ -100,6 +107,7 @@ export async function submitCount(
   locationId: string,
   counts: Array<{ sku: string; scannedCount: number; expectedCount: number }>,
 ) {
+  await requireStaff();
   const parsed = submitCountSchema.safeParse({ locationId, counts });
   if (!parsed.success) {
     return { error: "Invalid count data", details: parsed.error.flatten() };
@@ -171,6 +179,7 @@ export async function submitCount(
 }
 
 export async function recordReceivingScan(inboundItemId: string, quantity: number) {
+  await requireStaff();
   const parsed = recordReceivingSchema.safeParse({ inboundItemId, quantity });
   if (!parsed.success) {
     return { error: "Invalid receiving data", details: parsed.error.flatten() };

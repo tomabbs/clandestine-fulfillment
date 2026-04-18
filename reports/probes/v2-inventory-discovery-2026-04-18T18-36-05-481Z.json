@@ -1,0 +1,817 @@
+{
+  "ts": "2026-04-18T18-36-05-481Z",
+  "warehouses": [
+    {
+      "inventory_warehouse_id": "se-214575",
+      "name": "Clandestine Distirbution",
+      "locations": [
+        {
+          "inventory_location_id": "se-3213662",
+          "name": "(Unspecified)"
+        },
+        {
+          "inventory_location_id": "se-3223762",
+          "name": "A La Carte - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223768",
+          "name": "(Unspecified)"
+        },
+        {
+          "inventory_location_id": "se-3223770",
+          "name": "Mammas Mysteriska Jukebox"
+        },
+        {
+          "inventory_location_id": "se-3223771",
+          "name": "??"
+        },
+        {
+          "inventory_location_id": "se-3223772",
+          "name": "100 Limousines - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223773",
+          "name": "4Q - 4B"
+        },
+        {
+          "inventory_location_id": "se-3223774",
+          "name": "4Q - 4C, 4E"
+        },
+        {
+          "inventory_location_id": "se-3223775",
+          "name": "à La Carte Records"
+        },
+        {
+          "inventory_location_id": "se-3223776",
+          "name": "Abhorrent A.D."
+        },
+        {
+          "inventory_location_id": "se-3223777",
+          "name": "Absurd Expo - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223778",
+          "name": "Absurd Expo"
+        },
+        {
+          "inventory_location_id": "se-3223779",
+          "name": "Absurd Expo - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223780",
+          "name": "Alchemy Records"
+        },
+        {
+          "inventory_location_id": "se-3223781",
+          "name": "Alchemy Records - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223782",
+          "name": "Alter - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223783",
+          "name": "Alter - (x7-3D)(x30-4E)"
+        },
+        {
+          "inventory_location_id": "se-3223784",
+          "name": "Antropofago Ateo"
+        },
+        {
+          "inventory_location_id": "se-3223785",
+          "name": "AOK Records - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223786",
+          "name": "Archaic Vaults - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223787",
+          "name": "Archaic Vaults"
+        },
+        {
+          "inventory_location_id": "se-3223788",
+          "name": "Arkeen - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223789",
+          "name": "Arkeen"
+        },
+        {
+          "inventory_location_id": "se-3223790",
+          "name": "Auris Apothecary - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223791",
+          "name": "Aurora Central"
+        },
+        {
+          "inventory_location_id": "se-3223792",
+          "name": "Bank NYC - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223793",
+          "name": "Beso De Muerte - 3C"
+        },
+        {
+          "inventory_location_id": "se-3223794",
+          "name": "Beso De Muerte"
+        },
+        {
+          "inventory_location_id": "se-3223795",
+          "name": "Beso De Muerte - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223796",
+          "name": "Birdwatcher"
+        },
+        {
+          "inventory_location_id": "se-3223797",
+          "name": "Black Day In July - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223798",
+          "name": "Black Day In July"
+        },
+        {
+          "inventory_location_id": "se-3223799",
+          "name": "Bluesanct"
+        },
+        {
+          "inventory_location_id": "se-3223800",
+          "name": "Bravecloud Records - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223801",
+          "name": "Breathing Problem - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223802",
+          "name": "Burning World Records"
+        },
+        {
+          "inventory_location_id": "se-3223803",
+          "name": "Ceremony of Seasons - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223804",
+          "name": "Chondritic Sound"
+        },
+        {
+          "inventory_location_id": "se-3223805",
+          "name": "Chondritic Sound - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223806",
+          "name": "Cipher Productions"
+        },
+        {
+          "inventory_location_id": "se-3223807",
+          "name": "Claimed Responsibility - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223808",
+          "name": "Cut-Throat Records"
+        },
+        {
+          "inventory_location_id": "se-3223809",
+          "name": "Damien Records - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223810",
+          "name": "Dead Channel Records"
+        },
+        {
+          "inventory_location_id": "se-3223811",
+          "name": "Difficult Interactions - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223812",
+          "name": "Difficult Interactions"
+        },
+        {
+          "inventory_location_id": "se-3223813",
+          "name": "Difficult Interactions - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223814",
+          "name": "Digital Regress - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223815",
+          "name": "Dinzu Artefacts - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223817",
+          "name": "Discoteca Italia - 3C"
+        },
+        {
+          "inventory_location_id": "se-3223818",
+          "name": "Discreet Music - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223819",
+          "name": "eë editions"
+        },
+        {
+          "inventory_location_id": "se-3223820",
+          "name": "Egghunt"
+        },
+        {
+          "inventory_location_id": "se-3223821",
+          "name": "Elevator Bath - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223822",
+          "name": "Elevator Bath - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223823",
+          "name": "Elevator Bath"
+        },
+        {
+          "inventory_location_id": "se-3223824",
+          "name": "Enmossed"
+        },
+        {
+          "inventory_location_id": "se-3223825",
+          "name": "Enmossed - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223826",
+          "name": "Enmossed - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223827",
+          "name": "Fantastique"
+        },
+        {
+          "inventory_location_id": "se-3223828",
+          "name": "Fish of Milk"
+        },
+        {
+          "inventory_location_id": "se-3223829",
+          "name": "Fixed Rythms - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223830",
+          "name": "Fixed Rythms"
+        },
+        {
+          "inventory_location_id": "se-3223831",
+          "name": "Flag Day Recordings"
+        },
+        {
+          "inventory_location_id": "se-3223832",
+          "name": "Flea - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223833",
+          "name": "Flint Mag - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223834",
+          "name": "Floorjazz - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223835",
+          "name": "Fördämning Arkiv - E3"
+        },
+        {
+          "inventory_location_id": "se-3223836",
+          "name": "Gilgongo - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223837",
+          "name": "Gilgongo"
+        },
+        {
+          "inventory_location_id": "se-3223838",
+          "name": "Gilgongo - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223839",
+          "name": "h2L"
+        },
+        {
+          "inventory_location_id": "se-3223840",
+          "name": "Hanson Records - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223841",
+          "name": "Happiest Place - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223842",
+          "name": "Happy Families - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223843",
+          "name": "Helicopter"
+        },
+        {
+          "inventory_location_id": "se-3223844",
+          "name": "Helicopter - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223845",
+          "name": "Helicopter - Small Meda"
+        },
+        {
+          "inventory_location_id": "se-3223846",
+          "name": "HN_AM - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223847",
+          "name": "Howling Mine"
+        },
+        {
+          "inventory_location_id": "se-3223848",
+          "name": "Human Head Stone - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223849",
+          "name": "I Dischi Del Barone - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223850",
+          "name": "I Dischi Del Barone"
+        },
+        {
+          "inventory_location_id": "se-3223851",
+          "name": "IFB Records"
+        },
+        {
+          "inventory_location_id": "se-3223852",
+          "name": "Industrial Coast"
+        },
+        {
+          "inventory_location_id": "se-3223853",
+          "name": "Industrial Coast - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223854",
+          "name": "Iron Lung - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223855",
+          "name": "LA Dark Records - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223856",
+          "name": "LA Dark Records - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223857",
+          "name": "Legion Of Dead"
+        },
+        {
+          "inventory_location_id": "se-3223858",
+          "name": "Listening House"
+        },
+        {
+          "inventory_location_id": "se-3223859",
+          "name": "Midnight Mannequin - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223860",
+          "name": "MISC."
+        },
+        {
+          "inventory_location_id": "se-3223861",
+          "name": "MISC. - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223862",
+          "name": "Monorail Tresspassing"
+        },
+        {
+          "inventory_location_id": "se-3223863",
+          "name": "Mumbling Eye - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223864",
+          "name": "N/A"
+        },
+        {
+          "inventory_location_id": "se-3223865",
+          "name": "Nagrania Cukiernicze"
+        },
+        {
+          "inventory_location_id": "se-3223866",
+          "name": "New Forces"
+        },
+        {
+          "inventory_location_id": "se-3223867",
+          "name": "NNA Tapes"
+        }
+      ]
+    },
+    {
+      "inventory_warehouse_id": "se-214707",
+      "name": "Inventory Warehouse",
+      "locations": [
+        {
+          "inventory_location_id": "se-3213662",
+          "name": "(Unspecified)"
+        },
+        {
+          "inventory_location_id": "se-3223762",
+          "name": "A La Carte - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223768",
+          "name": "(Unspecified)"
+        },
+        {
+          "inventory_location_id": "se-3223770",
+          "name": "Mammas Mysteriska Jukebox"
+        },
+        {
+          "inventory_location_id": "se-3223771",
+          "name": "??"
+        },
+        {
+          "inventory_location_id": "se-3223772",
+          "name": "100 Limousines - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223773",
+          "name": "4Q - 4B"
+        },
+        {
+          "inventory_location_id": "se-3223774",
+          "name": "4Q - 4C, 4E"
+        },
+        {
+          "inventory_location_id": "se-3223775",
+          "name": "à La Carte Records"
+        },
+        {
+          "inventory_location_id": "se-3223776",
+          "name": "Abhorrent A.D."
+        },
+        {
+          "inventory_location_id": "se-3223777",
+          "name": "Absurd Expo - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223778",
+          "name": "Absurd Expo"
+        },
+        {
+          "inventory_location_id": "se-3223779",
+          "name": "Absurd Expo - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223780",
+          "name": "Alchemy Records"
+        },
+        {
+          "inventory_location_id": "se-3223781",
+          "name": "Alchemy Records - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223782",
+          "name": "Alter - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223783",
+          "name": "Alter - (x7-3D)(x30-4E)"
+        },
+        {
+          "inventory_location_id": "se-3223784",
+          "name": "Antropofago Ateo"
+        },
+        {
+          "inventory_location_id": "se-3223785",
+          "name": "AOK Records - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223786",
+          "name": "Archaic Vaults - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223787",
+          "name": "Archaic Vaults"
+        },
+        {
+          "inventory_location_id": "se-3223788",
+          "name": "Arkeen - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223789",
+          "name": "Arkeen"
+        },
+        {
+          "inventory_location_id": "se-3223790",
+          "name": "Auris Apothecary - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223791",
+          "name": "Aurora Central"
+        },
+        {
+          "inventory_location_id": "se-3223792",
+          "name": "Bank NYC - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223793",
+          "name": "Beso De Muerte - 3C"
+        },
+        {
+          "inventory_location_id": "se-3223794",
+          "name": "Beso De Muerte"
+        },
+        {
+          "inventory_location_id": "se-3223795",
+          "name": "Beso De Muerte - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223796",
+          "name": "Birdwatcher"
+        },
+        {
+          "inventory_location_id": "se-3223797",
+          "name": "Black Day In July - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223798",
+          "name": "Black Day In July"
+        },
+        {
+          "inventory_location_id": "se-3223799",
+          "name": "Bluesanct"
+        },
+        {
+          "inventory_location_id": "se-3223800",
+          "name": "Bravecloud Records - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223801",
+          "name": "Breathing Problem - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223802",
+          "name": "Burning World Records"
+        },
+        {
+          "inventory_location_id": "se-3223803",
+          "name": "Ceremony of Seasons - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223804",
+          "name": "Chondritic Sound"
+        },
+        {
+          "inventory_location_id": "se-3223805",
+          "name": "Chondritic Sound - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223806",
+          "name": "Cipher Productions"
+        },
+        {
+          "inventory_location_id": "se-3223807",
+          "name": "Claimed Responsibility - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223808",
+          "name": "Cut-Throat Records"
+        },
+        {
+          "inventory_location_id": "se-3223809",
+          "name": "Damien Records - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223810",
+          "name": "Dead Channel Records"
+        },
+        {
+          "inventory_location_id": "se-3223811",
+          "name": "Difficult Interactions - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223812",
+          "name": "Difficult Interactions"
+        },
+        {
+          "inventory_location_id": "se-3223813",
+          "name": "Difficult Interactions - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223814",
+          "name": "Digital Regress - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223815",
+          "name": "Dinzu Artefacts - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223817",
+          "name": "Discoteca Italia - 3C"
+        },
+        {
+          "inventory_location_id": "se-3223818",
+          "name": "Discreet Music - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223819",
+          "name": "eë editions"
+        },
+        {
+          "inventory_location_id": "se-3223820",
+          "name": "Egghunt"
+        },
+        {
+          "inventory_location_id": "se-3223821",
+          "name": "Elevator Bath - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223822",
+          "name": "Elevator Bath - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223823",
+          "name": "Elevator Bath"
+        },
+        {
+          "inventory_location_id": "se-3223824",
+          "name": "Enmossed"
+        },
+        {
+          "inventory_location_id": "se-3223825",
+          "name": "Enmossed - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223826",
+          "name": "Enmossed - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223827",
+          "name": "Fantastique"
+        },
+        {
+          "inventory_location_id": "se-3223828",
+          "name": "Fish of Milk"
+        },
+        {
+          "inventory_location_id": "se-3223829",
+          "name": "Fixed Rythms - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223830",
+          "name": "Fixed Rythms"
+        },
+        {
+          "inventory_location_id": "se-3223831",
+          "name": "Flag Day Recordings"
+        },
+        {
+          "inventory_location_id": "se-3223832",
+          "name": "Flea - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223833",
+          "name": "Flint Mag - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223834",
+          "name": "Floorjazz - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223835",
+          "name": "Fördämning Arkiv - E3"
+        },
+        {
+          "inventory_location_id": "se-3223836",
+          "name": "Gilgongo - 3A"
+        },
+        {
+          "inventory_location_id": "se-3223837",
+          "name": "Gilgongo"
+        },
+        {
+          "inventory_location_id": "se-3223838",
+          "name": "Gilgongo - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223839",
+          "name": "h2L"
+        },
+        {
+          "inventory_location_id": "se-3223840",
+          "name": "Hanson Records - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223841",
+          "name": "Happiest Place - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223842",
+          "name": "Happy Families - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223843",
+          "name": "Helicopter"
+        },
+        {
+          "inventory_location_id": "se-3223844",
+          "name": "Helicopter - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223845",
+          "name": "Helicopter - Small Meda"
+        },
+        {
+          "inventory_location_id": "se-3223846",
+          "name": "HN_AM - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223847",
+          "name": "Howling Mine"
+        },
+        {
+          "inventory_location_id": "se-3223848",
+          "name": "Human Head Stone - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223849",
+          "name": "I Dischi Del Barone - Small Media"
+        },
+        {
+          "inventory_location_id": "se-3223850",
+          "name": "I Dischi Del Barone"
+        },
+        {
+          "inventory_location_id": "se-3223851",
+          "name": "IFB Records"
+        },
+        {
+          "inventory_location_id": "se-3223852",
+          "name": "Industrial Coast"
+        },
+        {
+          "inventory_location_id": "se-3223853",
+          "name": "Industrial Coast - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223854",
+          "name": "Iron Lung - 4C"
+        },
+        {
+          "inventory_location_id": "se-3223855",
+          "name": "LA Dark Records - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223856",
+          "name": "LA Dark Records - 3E"
+        },
+        {
+          "inventory_location_id": "se-3223857",
+          "name": "Legion Of Dead"
+        },
+        {
+          "inventory_location_id": "se-3223858",
+          "name": "Listening House"
+        },
+        {
+          "inventory_location_id": "se-3223859",
+          "name": "Midnight Mannequin - 3B"
+        },
+        {
+          "inventory_location_id": "se-3223860",
+          "name": "MISC."
+        },
+        {
+          "inventory_location_id": "se-3223861",
+          "name": "MISC. - 3D"
+        },
+        {
+          "inventory_location_id": "se-3223862",
+          "name": "Monorail Tresspassing"
+        },
+        {
+          "inventory_location_id": "se-3223863",
+          "name": "Mumbling Eye - SMALL MEDIA"
+        },
+        {
+          "inventory_location_id": "se-3223864",
+          "name": "N/A"
+        },
+        {
+          "inventory_location_id": "se-3223865",
+          "name": "Nagrania Cukiernicze"
+        },
+        {
+          "inventory_location_id": "se-3223866",
+          "name": "New Forces"
+        },
+        {
+          "inventory_location_id": "se-3223867",
+          "name": "NNA Tapes"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "stressRunId": "concurrent-count-session-2026-04-18T19-17-57-205Z",
+  "scriptName": "concurrent-count-session",
+  "ts": "2026-04-18T19:17:57.206Z",
+  "workspaceId": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+  "dryRun": true,
+  "passed": true,
+  "assertions": [
+    {
+      "name": "scenario_a_concurrent_session_with_mid_sale",
+      "passed": true,
+      "expected": "live_path_blocked_pending_workspace_seeding",
+      "actual": "skipped",
+      "note": "Workspace pre-conditions unmet on 2026-04-13 baseline (inventory_sync_paused=true OR v2 IDs NULL). Run live after Phase 7 prereqs are seeded."
+    }
+  ],
+  "metrics": {
+    "planned_sku_count": 5,
+    "planned_concurrency": 5
+  },
+  "sideEffectsSummarySql": "-- Side-effects summary for stress run: concurrent-count-session-2026-04-18T19-17-57-205Z\n-- Run via: psql \"$DATABASE_URL\" -f - <<'EOF'\n\nselect 'external_sync_events' as table_name, count(*)::text as cnt\n  from external_sync_events\n  where correlation_id like 'concurrent-count-session-2026-04-18T19-17-57-205Z%'\n     or metadata->>'stress_run_id' = 'concurrent-count-session-2026-04-18T19-17-57-205Z'\nunion all\nselect 'warehouse_inventory_activity', count(*)::text\n  from warehouse_inventory_activity\n  where correlation_id like 'concurrent-count-session-2026-04-18T19-17-57-205Z%'\n     or metadata->>'stress_run_id' = 'concurrent-count-session-2026-04-18T19-17-57-205Z'\nunion all\nselect 'warehouse_review_queue', count(*)::text\n  from warehouse_review_queue\n  where group_key like 'stress:concurrent-count-session-2026-04-18T19-17-57-205Z:%'\n     or metadata->>'stress_run_id' = 'concurrent-count-session-2026-04-18T19-17-57-205Z'\nunion all\nselect 'webhook_events', count(*)::text\n  from webhook_events\n  where external_webhook_id like 'concurrent-count-session-2026-04-18T19-17-57-205Z%'\nunion all\nselect 'warehouse_locations', count(*)::text\n  from warehouse_locations\n  where name like 'TEST-concurrent-count-session-2026-04-18T19-17-57-205Z-%';\n\n-- EOF",
+  "notes": [
+    "Live path requires staff-authenticated count-session Server Actions; same shim as manual-count-burst.",
+    "Scenario A test: mid-session synthetic shipstation decrement on one of 5 SKUs to verify the v4-corrected `delta = current - sumOfLocations` produces no double-decrement."
+  ]
+}

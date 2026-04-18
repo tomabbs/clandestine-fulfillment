@@ -1,0 +1,17 @@
+{
+  "stressRunId": "reconcile-chaos-2026-04-18T19-18-00-408Z",
+  "scriptName": "reconcile-chaos",
+  "ts": "2026-04-18T19:18:00.409Z",
+  "workspaceId": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+  "dryRun": true,
+  "passed": true,
+  "assertions": [],
+  "metrics": {
+    "sku_count": 5,
+    "drift_delta": 3
+  },
+  "sideEffectsSummarySql": "-- Side-effects summary for stress run: reconcile-chaos-2026-04-18T19-18-00-408Z\n-- Run via: psql \"$DATABASE_URL\" -f - <<'EOF'\n\nselect 'external_sync_events' as table_name, count(*)::text as cnt\n  from external_sync_events\n  where correlation_id like 'reconcile-chaos-2026-04-18T19-18-00-408Z%'\n     or metadata->>'stress_run_id' = 'reconcile-chaos-2026-04-18T19-18-00-408Z'\nunion all\nselect 'warehouse_inventory_activity', count(*)::text\n  from warehouse_inventory_activity\n  where correlation_id like 'reconcile-chaos-2026-04-18T19-18-00-408Z%'\n     or metadata->>'stress_run_id' = 'reconcile-chaos-2026-04-18T19-18-00-408Z'\nunion all\nselect 'warehouse_review_queue', count(*)::text\n  from warehouse_review_queue\n  where group_key like 'stress:reconcile-chaos-2026-04-18T19-18-00-408Z:%'\n     or metadata->>'stress_run_id' = 'reconcile-chaos-2026-04-18T19-18-00-408Z'\nunion all\nselect 'webhook_events', count(*)::text\n  from webhook_events\n  where external_webhook_id like 'reconcile-chaos-2026-04-18T19-18-00-408Z%'\nunion all\nselect 'warehouse_locations', count(*)::text\n  from warehouse_locations\n  where name like 'TEST-reconcile-chaos-2026-04-18T19-18-00-408Z-%';\n\n-- EOF",
+  "notes": [
+    "Dry run — would inject 3-unit Redis-vs-Postgres drift on 5 STRESS SKUs and trigger shipstation-bandcamp-reconcile-hot."
+  ]
+}

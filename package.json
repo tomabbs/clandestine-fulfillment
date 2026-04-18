@@ -19,7 +19,9 @@
     "test:e2e:full-audit": "CI=1 playwright test tests/e2e/full-site-audit.spec.ts --reporter=line --workers=1",
     "typecheck": "tsc --noEmit",
     "verify:cloud": "bash scripts/cloud-agent-verify.sh",
-    "release:gate": "bash scripts/release-gate.sh"
+    "release:gate": "bash scripts/release-gate.sh",
+    "stress:all": "bash scripts/stress/run-all.sh",
+    "stress:dry-run": "bash scripts/stress/run-all.sh --dry-run"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

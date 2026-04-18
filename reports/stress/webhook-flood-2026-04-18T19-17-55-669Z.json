@@ -1,0 +1,21 @@
+{
+  "stressRunId": "webhook-flood-2026-04-18T19-17-55-669Z",
+  "scriptName": "webhook-flood",
+  "ts": "2026-04-18T19:17:55.691Z",
+  "workspaceId": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+  "dryRun": true,
+  "passed": true,
+  "assertions": [],
+  "metrics": {
+    "replays_planned": 50,
+    "external_webhook_id": "webhook-flood-2026-04-18T19-17-55-669Z-shipnotify-001",
+    "webhook_events_rows": 0,
+    "activity_rows": 0,
+    "successful_inserts": 0,
+    "dedup_hits": 0
+  },
+  "sideEffectsSummarySql": "-- Side-effects summary for stress run: webhook-flood-2026-04-18T19-17-55-669Z\n-- Run via: psql \"$DATABASE_URL\" -f - <<'EOF'\n\nselect 'external_sync_events' as table_name, count(*)::text as cnt\n  from external_sync_events\n  where correlation_id like 'webhook-flood-2026-04-18T19-17-55-669Z%'\n     or metadata->>'stress_run_id' = 'webhook-flood-2026-04-18T19-17-55-669Z'\nunion all\nselect 'warehouse_inventory_activity', count(*)::text\n  from warehouse_inventory_activity\n  where correlation_id like 'webhook-flood-2026-04-18T19-17-55-669Z%'\n     or metadata->>'stress_run_id' = 'webhook-flood-2026-04-18T19-17-55-669Z'\nunion all\nselect 'warehouse_review_queue', count(*)::text\n  from warehouse_review_queue\n  where group_key like 'stress:webhook-flood-2026-04-18T19-17-55-669Z:%'\n     or metadata->>'stress_run_id' = 'webhook-flood-2026-04-18T19-17-55-669Z'\nunion all\nselect 'webhook_events', count(*)::text\n  from webhook_events\n  where external_webhook_id like 'webhook-flood-2026-04-18T19-17-55-669Z%'\nunion all\nselect 'warehouse_locations', count(*)::text\n  from warehouse_locations\n  where name like 'TEST-webhook-flood-2026-04-18T19-17-55-669Z-%';\n\n-- EOF",
+  "notes": [
+    "Dry run — would replay synthetic SHIP_NOTIFY 50× with external_webhook_id=webhook-flood-2026-04-18T19-17-55-669Z-shipnotify-001."
+  ]
+}

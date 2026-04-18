@@ -113,6 +113,10 @@ export { bandcampTagBackfillTask } from "./bandcamp-tag-backfill";
 //   createLocationRange() Server Action when range size > 30 (Vercel Server
 //   Action timeout fallback per plan §15.3 / Appendix C.17).
 export { bulkCreateLocationsTask } from "./bulk-create-locations";
+// Phase 3 (finish-line plan v4) — Trigger task variant of
+//   submitManualInventoryCounts for very large bulk Avail edits.
+//   Same per-row contract; offload path for Rule #41 compliance.
+export { bulkUpdateAvailableTask } from "./bulk-update-available";
 export { bundleAvailabilitySweepTask } from "./bundle-availability-sweep";
 // ── Bundle component tracking (inventory hardening) ───────────────────────────
 export { bundleComponentFanoutTask } from "./bundle-component-fanout";
@@ -143,6 +147,13 @@ export {
 // and creates a review queue item only when drift_major persists across two
 // consecutive runs (review pass v4 §5.3).
 export { megaplanSpotCheckTask } from "./megaplan-spot-check";
+// Phase 6 (finish-line plan v4) — ramp-halt-criteria-sensor.
+//   Cron every 2 minutes during ramp (tightened to */15 post-ramp per
+//   Phase 8e). Reads sensor_readings within last 1h, evaluates §31 halt
+//   criteria via the pure evaluator in src/trigger/lib/ramp-halt-evaluator.ts,
+//   and on halt calls setFanoutRolloutPercentInternal(0) with actor=sensor.
+//   Persists §5.3 two-consecutive-runs state on workspaces.ramp_sensor_state.
+export { rampHaltCriteriaSensorTask } from "./ramp-halt-criteria-sensor";
 // ── Bandcamp scraper reconciliation (every 6h, dead URL probes, auto-resolve) ──
 export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────

@@ -35,6 +35,14 @@ vi.mock("@/lib/server/supabase-server", () => ({
   })),
 }));
 
+// Phase 4d: every action now goes through requireStaff() first; default the
+// mock to "staff present" so existing happy-path tests still exercise the
+// downstream Supabase calls. The auth-rejection test below overrides this.
+const mockRequireStaff = vi.fn(async () => ({ userId: "u1", workspaceId: "w1" }));
+vi.mock("@/lib/server/auth-context", () => ({
+  requireStaff: () => mockRequireStaff(),
+}));
+
 // Import after mocks
 let lookupBarcode: (barcode: string) => Promise<Record<string, unknown>>;
 let lookupLocation: (barcode: string) => Promise<Record<string, unknown>>;
@@ -408,5 +416,34 @@ describe("recordReceivingScan", () => {
       isOver: true,
       newReceived: 6,
     });
+  });
+});
+
+// Phase 4d (finish-line plan v4) — auth gate enforcement
+describe("scanning Server Actions reject unauthenticated callers", () => {
+  it("lookupLocation throws when requireStaff rejects", async () => {
+    mockRequireStaff.mockRejectedValueOnce(new Error("Authentication required"));
+    await expect(lookupLocation("BIN-1")).rejects.toThrow(/Authentication required/);
+  });
+
+  it("lookupBarcode throws when requireStaff rejects", async () => {
+    mockRequireStaff.mockRejectedValueOnce(new Error("Authentication required"));
+    await expect(lookupBarcode("SKU-X")).rejects.toThrow(/Authentication required/);
+  });
+
+  it("submitCount throws when requireStaff rejects", async () => {
+    mockRequireStaff.mockRejectedValueOnce(new Error("Staff access required"));
+    await expect(
+      submitCount("550e8400-e29b-41d4-a716-446655440000", [
+        { sku: "S", scannedCount: 0, expectedCount: 0 },
+      ]),
+    ).rejects.toThrow(/Staff access required/);
+  });
+
+  it("recordReceivingScan throws when requireStaff rejects", async () => {
+    mockRequireStaff.mockRejectedValueOnce(new Error("Staff access required"));
+    await expect(recordReceivingScan("550e8400-e29b-41d4-a716-446655440000", 1)).rejects.toThrow(
+      /Staff access required/,
+    );
   });
 });

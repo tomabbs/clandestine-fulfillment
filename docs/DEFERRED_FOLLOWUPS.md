@@ -17,10 +17,27 @@
   severity: high
   context: "Per §31 halt-criteria of docs/plans/shipstation-source-of-truth-plan.md. Part A: edit an Avail cell, observe Bandcamp + ShipStation update within 60s. Part B: start a count session, edit per-location quantities, observe NEITHER Bandcamp NOR ShipStation update during the in-progress phase (fanout suppression invariant). Both parts MUST pass before ramping fanout to 10%."
 - slug: ws3-3f-per-location-rewrite
-  title: "WS3 §3f — Per-location rewrite of shipstation-v2-adjust-on-sku (SKU-total path now ships via fanout)"
-  due_date: 2026-04-22
+  title: "WS3 §3f — Per-location rewrite of shipstation-v2-adjust-on-sku (CLOSED WONTFIX 2026-04-18)"
+  due_date: 2026-04-19
+  severity: low
+  status: done
+  done_at: 2026-04-18
+  context: "CLOSED WONTFIX 2026-04-18 by Phase 1 §15.3 probe (reports/probes/ss-v2-per-location-2026-04-18T18-41-42-592Z.json, scripts/probe-ss-v2-per-location.ts). Empirical finding: ShipStation v2 collapses per-(warehouse, sku) writes into a SINGLE SKU-total row. Case 1 seeded Loc-A=10/Loc-B=20/Loc-C=30 against TEST-PROBE SKU; listInventory returned 1 row with available=60 and inventory_location_id=null. Case 2 decremented Loc-A by 5 → single row dropped to 55 (independent of which location was passed). Case 3 modify new_available=15 returned 400 (asymmetric per Patch D2). The per-location rewrite is therefore moot — v2 doesn't track per-location for SKUs within a warehouse. SKU-total path that shipped via fanout (audit fix F1) is canonical. has_per_location_data column stays as a flag for the warehouse_variant_locations join shape but no longer pivots fanout behavior."
+- slug: v2-fetch-empty-body-rollout
+  title: "v2Fetch empty-body fix rollout — verify v2 ledger error rate drops"
+  due_date: 2026-04-25
   severity: medium
-  context: "Saturday Workstream 3 closeout (2026-04-18) deferred this at the §15.3 GATE per the operator's stop_at_3d decision. UPDATED 2026-04-13 (audit fix F1): the SKU-total fanout path now ships — fanoutInventoryChange() enqueues shipstation-v2-adjust-on-sku for every non-echo, non-zero recordInventoryChange() write, so FR-1 is closed for the SKU-total semantic. Severity downgraded high→medium because the operational-blocker portion is resolved. Per-location rewrite remains: operator runs the §15.3 3-case probe (single-location SKU, multi-location SKU, location with no inventory) Saturday morning and reports outcome. If v2 honors per-location writes consistently → ship the rewrite (pivot key: warehouse_inventory_levels.has_per_location_data — set automatically on first per-location write by setVariantLocationQuantity; SKUs at true route per-location, SKUs at false stay on the SKU-total path that ships today). If not → keep routing through SKU-total v2 indefinitely (already the live path); mark has_per_location_data as audit-only."
+  context: "Phase 2B fix (2026-04-18) — Phase 1 §15.3 probe surfaced that v2 inventory POST returns 200/empty-body on success, but the v2Fetch wrapper called response.json() unconditionally, throwing 'Unexpected end of JSON input'. Caller marked external_sync_events row 'error' even though the write succeeded server-side. Fixed in src/lib/clients/shipstation-inventory-v2.ts (treats 204 + 200/empty + 200/whitespace as success, throws descriptive error on malformed JSON). Tests added in tests/unit/lib/clients/shipstation-inventory-v2.test.ts. Follow-up: 7 days post-deploy, verify external_sync_events.status='error' rate for system='shipstation_v2' has dropped meaningfully (was likely the dominant error class). If still elevated, check v2 5xx rates and headers."
+- slug: v2-stale-test-locations
+  title: "Untrappable orphan TEST-PROBE locations in ShipStation v2"
+  due_date: 2026-04-25
+  severity: low
+  context: "Phase 1 §15.3 probe (2026-04-18) created 3 TEST-PROBE locations (se-4106160, se-4106161, se-4106162) under warehouse se-214575. Probe Case 4 confirmed Reviewer A's hypothesis: v2 rejects DELETE on inventory_locations that have ever held inventory (HTTP 400, 3-retry exp backoff also failed). The 3 locations are now stuck in v2 forever. Phase 8b cleanup script must rebrand from 'delete stale TEST locations' to 'list + UI-filter stale TEST locations + open low-severity review row'. Action for operator: filter TEST-PROBE-* names out of warehouse picker UI; treat as permanent infrastructure. Forensic IDs in reports/probes/ss-v2-per-location-2026-04-18T18-41-42-592Z.json."
+- slug: v2-modify-quantity-error-message
+  title: "Investigate v2 modify validator returning 'quantity' error for missing new_available"
+  due_date: 2026-05-15
+  severity: low
+  context: "Phase 1 §15.3 probe Case 3 (2026-04-18) attempted modify new_available=15 (which our client validates client-side as >= 1, then sends only new_available — NOT quantity). v2 returned 400 with errors[0].message containing {\"errors\": {\"quantity\": [\"Must be greater than or equal to 1.\"]}}. Either v2's validator misreports the field name or our client request shape is being misinterpreted. Currently a non-issue because we have rule §7.1.6 (no modify with new_available=0) and the probe finding (sku_total semantics) means the 1:N modify call would have been pointless anyway. But the error message would be confusing to a future caller who tries to use modify legitimately."
 - slug: phase-7-dormant-cleanup
   title: "Phase 7: dormant client-store code cleanup"
   due_date: 2026-07-13
@@ -41,31 +58,31 @@
   due_date: 2026-04-25
   severity: low
   context: "Confirm 7-day retention is firing weekly via Trigger.dev dashboard. Cron task: external-sync-events-retention. Pre-existing per Patch D3."
-- slug: shipstation-stale-location-cleanup
-  title: "Stale ShipStation v2 location cleanup script"
-  due_date: 2026-05-21
-  severity: low
-  context: "After 30 days of atrophy, run scripts/cleanup-stale-ss-locations.ts to delete ShipStation locations with 0 inventory that aren't mirrored from our app. Reduces UI clutter for warehouse pickers."
+- slug: megaplan-ramp-admin-page
+  title: "/admin/settings/megaplan-ramp UI surface for ramp percent + audit trail"
+  due_date: 2026-04-19
+  severity: medium
+  context: "Phase 6 (finish-line plan v4) shipped the rollout infrastructure (setFanoutRolloutPercentInternal helper, setFanoutRolloutPercent staff Server Action, getFanoutRolloutAudit reader, ramp-halt-criteria-sensor cron, both Phase 6 migrations applied to remote, 22 unit tests green). The admin UI page /admin/settings/megaplan-ramp was DEFERRED because Phase 7 ramp itself was deferred (workspace lacks shipstation_v2_inventory_warehouse_id and _location_id; inventory_sync_paused is currently true). Page should: show current fanout_rollout_percent prominently, render fanout_rollout_audit trail (ts/percent_before/percent_after/reason/actor) reverse-chronological, expose ramp buttons (0/10/50/100) wired to setFanoutRolloutPercent with required reason field, and show last 5 ramp_halt_evaluator sensor_readings rows as an embedded health panel. Build after workspace v2 IDs are populated and inventory_sync_paused goes false."
+- slug: phase-6-shipstation-v2-5xx-rate-sensor
+  title: "Wire shipstation_v2_5xx_rate sensor reading"
+  due_date: 2026-04-25
+  severity: medium
+  context: "ramp-halt-criteria-sensor H-4 reads sensor_name='shipstation_v2_5xx_rate' value.rate from sensor_readings. The sensor task is in place but no producer writes that row yet. Either: (a) extend sensor-check to compute v2 5xx rate from external_sync_events.status='error' filtered to system='shipstation_v2' over 30 minutes, OR (b) add a v2-client-side telemetry hook that increments a counter and a flush cron writes the rolling rate. Until either lands, H-4 is structurally inactive (returns 'no v2 traffic in window' as detail). Not a blocker for first ramp window but should land before sustained 100%."
 - slug: migration-ordering-from-scratch
   title: "external_sync_events migration ordering bug (from-scratch deploys)"
   due_date: 2026-05-31
   severity: medium
-  context: "v6 finding — external_sync_events table is referenced by indexes/views before its CREATE TABLE in the migration sequence. Fine for incrementally-migrated databases but breaks `supabase db reset`. Move CREATE TABLE earlier or split into a leading migration."
-- slug: shared-utils-path
-  title: "Create src/lib/shared/utils.ts canonical home for cross-cutting utilities"
-  due_date: 2026-05-15
+  context: "v6 finding — external_sync_events table is referenced by indexes/views before its CREATE TABLE in the migration sequence. Fine for incrementally-migrated databases but breaks `supabase db reset`. Move CREATE TABLE earlier or split into a leading migration. Phase 4a (finish-line plan v4, 2026-04-13) explicitly de-scoped this from the one-day closeout per the operational guardrails de-scope ladder — triple-verification migration work (db reset + db diff --linked + db push --dry-run) needs a dedicated session, not a slot in a multi-phase day. Carry into a future migration-only window."
+- slug: evaluate-sku-deterministic-bucketing
+  title: "Evaluate SKU-deterministic bucketing for fanout-guard (R-24 follow-up)"
+  due_date: 2026-07-13
   severity: low
-  context: "Rule #57 enforcement: today src/lib/utils.ts has cn() but no shared/utils.ts exists. Future formatCurrency, formatBytes, etc. must land here, not in feature folders. Migrate cn() in a follow-up to consolidate."
-- slug: role-matrix-rename
-  title: "Add ROLE_MATRIX export to src/lib/shared/constants.ts"
-  due_date: 2026-05-15
+  context: "Phase 8a (finish-line plan v4, 2026-04-13) is set to land an optional `bucketingKey: 'correlation_id' | 'sku'` mode in `loadFanoutGuard`. At 100% rollout the choice is a no-op so it ships safely, but the alternate `'sku'` mode then sits as undocumented dead code unless we force a future decision. Trade-off: per-SKU consistency (every event for a given SKU is in or out of the bucket) vs per-event independence (each event hashes independently, smoothing distribution at intermediate percentages). Decide before next ramp-from-0 scenario whether to flip the default or delete the option."
+- slug: bulk-batch-correlation-grouping
+  title: "Refactor bulk-update-available + submitManualInventoryCounts to share a per-row engine"
+  due_date: 2026-07-13
   severity: low
-  context: "Rule #40 alignment: STAFF_ROLES is exported, ROLE_MATRIX is the canonical name in CLAUDE.md/Rule #58. Add ROLE_MATRIX as the primary export and keep STAFF_ROLES as a deprecated alias for one cycle."
-- slug: scanning-auth-audit
-  title: "Audit src/actions/scanning.ts for explicit requireStaff() calls"
-  due_date: 2026-05-15
-  severity: medium
-  context: "v6 finding — scanning Server Actions rely on middleware for auth instead of calling requireStaff() inline. Defense-in-depth: add requireStaff() to each action so a middleware bypass cannot escalate."
+  context: "Phase 3 (finish-line plan v4, 2026-04-13) shipped `src/trigger/tasks/bulk-update-available.ts` as a Trigger-task variant of `submitManualInventoryCounts` for very large batches (Rule #41 hardening). The Trigger task currently re-implements the per-row contract (pre-fetch, validate, recordInventoryChange) rather than sharing a helper because the Server Action already had its own well-tested path and we did not want the refactor risk in a one-day closeout. Future work: factor the per-row write loop into `src/lib/server/bulk-inventory-engine.ts`, have both callers delegate, and add a contract test that asserts both paths produce identical correlation_ids and ledger rows for the same payload. Keeps the Trigger split safe while collapsing duplicate logic."
 ---
 
 # Deferred follow-ups registry

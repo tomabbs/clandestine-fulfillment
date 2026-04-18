@@ -1,0 +1,58 @@
+{
+  "ts": "2026-04-18T18-32-44-711Z",
+  "git_sha": "df8b20771d63b82ac8d41f05d5f1e1c6032776e3",
+  "workspaces": [
+    {
+      "id": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+      "name": "Clandestine Distribution",
+      "inventory_sync_paused": true,
+      "shipstation_sync_paused": false,
+      "bandcamp_sync_paused": false,
+      "clandestine_shopify_sync_paused": false,
+      "client_store_sync_paused": false,
+      "fanout_rollout_percent": 100,
+      "shipstation_v2_inventory_warehouse_id": null,
+      "shipstation_v2_inventory_location_id": null
+    }
+  ],
+  "counts": {
+    "external_sync_events_total": 0,
+    "external_sync_events_success": 0,
+    "external_sync_events_error": 0,
+    "webhook_events_total": 41871,
+    "review_queue_open": 946,
+    "review_queue_open_high": 3,
+    "review_queue_open_critical": 6,
+    "warehouse_inventory_levels_total": 1284,
+    "warehouse_inventory_levels_per_location_data": 0,
+    "warehouse_variant_locations_total": 0,
+    "warehouse_locations_total": 0,
+    "megaplan_spot_check_runs_total": 11
+  },
+  "channel_sync_log_last_success": [
+    {
+      "channel": "shipstation_v2",
+      "last_success_at": null,
+      "sample_workspace": null
+    },
+    {
+      "channel": "bandcamp",
+      "last_success_at": null,
+      "sample_workspace": null
+    },
+    {
+      "channel": "clandestine_shopify",
+      "last_success_at": null,
+      "sample_workspace": null
+    },
+    {
+      "channel": "client_store",
+      "last_success_at": null,
+      "sample_workspace": null
+    }
+  ],
+  "oqb_finding": {
+    "location_id_propagation": "PARTIAL",
+    "note": "completeCountSession aggregates per-location quantities into ONE recordInventoryChange delta and does NOT carry a locationId in metadata (by session design — the delta is cross-location). setVariantLocationQuantity idle-path (Branch B) DOES pass location_id. Implication for Phase 2A: per-location fanout for source='cycle_count' MUST re-read warehouse_variant_locations at fanout time and emit one v2 push per non-zero location absolute, NOT rely on metadata.locationId. For source='manual_inventory_count' single-row edits, metadata.locationId IS available and the simpler 1:1 path applies."
+  }
+}

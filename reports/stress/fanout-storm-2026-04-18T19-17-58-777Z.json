@@ -1,0 +1,20 @@
+{
+  "stressRunId": "fanout-storm-2026-04-18T19-17-58-777Z",
+  "scriptName": "fanout-storm",
+  "ts": "2026-04-18T19:17:58.798Z",
+  "workspaceId": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+  "dryRun": true,
+  "passed": true,
+  "assertions": [],
+  "metrics": {
+    "sku_count": 10,
+    "total_events": 100,
+    "duplicate_ratio": 0.3,
+    "ledger_rows_for_run": 0,
+    "ledger_unique_collisions": 0
+  },
+  "sideEffectsSummarySql": "-- Side-effects summary for stress run: fanout-storm-2026-04-18T19-17-58-777Z\n-- Run via: psql \"$DATABASE_URL\" -f - <<'EOF'\n\nselect 'external_sync_events' as table_name, count(*)::text as cnt\n  from external_sync_events\n  where correlation_id like 'fanout-storm-2026-04-18T19-17-58-777Z%'\n     or metadata->>'stress_run_id' = 'fanout-storm-2026-04-18T19-17-58-777Z'\nunion all\nselect 'warehouse_inventory_activity', count(*)::text\n  from warehouse_inventory_activity\n  where correlation_id like 'fanout-storm-2026-04-18T19-17-58-777Z%'\n     or metadata->>'stress_run_id' = 'fanout-storm-2026-04-18T19-17-58-777Z'\nunion all\nselect 'warehouse_review_queue', count(*)::text\n  from warehouse_review_queue\n  where group_key like 'stress:fanout-storm-2026-04-18T19-17-58-777Z:%'\n     or metadata->>'stress_run_id' = 'fanout-storm-2026-04-18T19-17-58-777Z'\nunion all\nselect 'webhook_events', count(*)::text\n  from webhook_events\n  where external_webhook_id like 'fanout-storm-2026-04-18T19-17-58-777Z%'\nunion all\nselect 'warehouse_locations', count(*)::text\n  from warehouse_locations\n  where name like 'TEST-fanout-storm-2026-04-18T19-17-58-777Z-%';\n\n-- EOF",
+  "notes": [
+    "Dry run — would fire 100 concurrent recordInventoryChange calls across 10 SKUs (30 intentional duplicates) under stress_run_id=fanout-storm-2026-04-18T19-17-58-777Z."
+  ]
+}

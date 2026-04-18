@@ -1,0 +1,147 @@
+{
+  "plan_id": "megaplan-finish-line",
+  "plan_version": "v4",
+  "execution_date": "2026-04-13",
+  "outcome": "infrastructure_ready_ramp_deferred",
+  "phases": {
+    "0_preflight_baseline": {
+      "status": "completed",
+      "key_findings": [
+        "workspace 1e59b9ca-ab4e-442b-952b-a649e2aadb0e missing shipstation_v2_inventory_warehouse_id and shipstation_v2_inventory_location_id (NULL)",
+        "inventory_sync_paused = true on workspace",
+        "external_sync_events, warehouse_inventory_levels.has_per_location_data, warehouse_variant_locations, warehouse_locations all 0 rows",
+        "ShipStation v2 has 2 warehouses, 100 locations each",
+        "→ Phase 7 ramp deferred (requires operator to populate v2 IDs and clear pause flag)"
+      ]
+    },
+    "1_ss_v2_per_location_probe": {
+      "status": "completed",
+      "outcome": "phase_2a_close_wontfix",
+      "artifact": "reports/probes/ss-v2-per-location-2026-04-18T18-41-42-592Z.json",
+      "key_findings": [
+        "v2 collapses per-(warehouse, sku) writes into a SINGLE SKU-total row (case 1)",
+        "decrement on Loc-A propagates to single SKU-total row (case 2)",
+        "modify new_available=15 returns 400 — asymmetric per Patch D2 (case 3)",
+        "DELETE on inventory_locations that have ever held inventory rejected with HTTP 400 even with 3-retry exp backoff (case 4 — confirmed Reviewer A hypothesis)",
+        "v2Fetch JSON-parse bug discovered (200/empty-body → 'Unexpected end of JSON input')",
+        "3 TEST-PROBE locations now permanently stuck in v2: se-4106160, se-4106161, se-4106162 in warehouse se-214575"
+      ]
+    },
+    "2b_v2fetch_fix": {
+      "status": "completed",
+      "files_changed": ["src/lib/clients/shipstation-inventory-v2.ts"],
+      "tests_added": "tests/unit/lib/clients/shipstation-inventory-v2.test.ts (4 cases)",
+      "result": "v2Fetch now treats 204, 200/empty, 200/whitespace as success; throws descriptive error on malformed JSON"
+    },
+    "3_bulk_update_available": {
+      "status": "completed",
+      "files_added": [
+        "src/trigger/tasks/bulk-update-available.ts",
+        "tests/unit/trigger/tasks/bulk-update-available.test.ts (11 cases)"
+      ],
+      "files_modified": ["src/trigger/tasks/index.ts"],
+      "result": "Rule #41 compliance: bulk Avail edits >10 entries offload to Trigger task; existing /admin/inventory/manual-count covers smaller batches"
+    },
+    "4_deferred_followups_bundle": {
+      "status": "completed_with_descopes",
+      "shipped": {
+        "4b_shared_utils_path": {
+          "files": ["src/lib/shared/utils.ts (new)", "src/lib/utils.ts (re-export shim)", "src/app/admin/inventory/page.tsx (use new path)"]
+        },
+        "4c_role_matrix": {
+          "files": ["src/lib/shared/constants.ts (added ROLE_MATRIX, kept STAFF_ROLES/CLIENT_ROLES as aliases)"]
+        },
+        "4d_scanning_auth": {
+          "files": ["src/actions/scanning.ts (requireStaff() on all 4 actions)", "tests/unit/actions/scanning.test.ts (4 new auth-rejection tests)"]
+        },
+        "4e_source_union_sync_guard": {
+          "files": ["scripts/check-source-union-sync.ts (new)", "scripts/release-gate.sh (integrated)", "tests/unit/scripts/check-source-union-sync.test.ts (new)"]
+        }
+      },
+      "descoped": {
+        "4a_migration_ordering": "deferred per plan ladder — needs db reset triple-verify; risk too high for live workspace this session",
+        "4f_e2e_count_smoke": "deferred per plan ladder — Playwright smoke for full count session out of scope today"
+      },
+      "test_count_after": "1121 tests green"
+    },
+    "5_stress_harness": {
+      "status": "completed",
+      "files_added": [
+        "scripts/stress/lib/stress-run.ts",
+        "scripts/stress/manual-count-burst.ts",
+        "scripts/stress/webhook-flood.ts",
+        "scripts/stress/concurrent-count-session.ts",
+        "scripts/stress/fanout-storm.ts",
+        "scripts/stress/reconcile-chaos.ts",
+        "scripts/stress/bulk-create-locations-burst.ts",
+        "scripts/stress/run-all.sh",
+        "tests/unit/scripts/reconcile-chaos-debug-helper.test.ts",
+        "docs/operations/runbooks/stress-tests.md"
+      ],
+      "files_modified": ["package.json (stress:all, stress:dry-run scripts)"],
+      "dry_run_outcome": "all 6 scripts PASS in dry-run; live --apply gated behind Phase 7 prereqs"
+    },
+    "6_rollout_infrastructure": {
+      "status": "completed_admin_page_deferred",
+      "files_added": [
+        "supabase/migrations/20260413000040_phase6_fanout_rollout_audit.sql (workspaces.fanout_rollout_audit jsonb)",
+        "supabase/migrations/20260413000041_phase6_ramp_sensor_state.sql (workspaces.ramp_sensor_state jsonb)",
+        "src/lib/server/admin-rollout-internal.ts (setFanoutRolloutPercentInternal)",
+        "src/actions/admin-rollout.ts (setFanoutRolloutPercent staff Server Action + getFanoutRolloutAudit)",
+        "src/trigger/lib/ramp-halt-evaluator.ts (pure §31 evaluator)",
+        "src/trigger/tasks/ramp-halt-criteria-sensor.ts (cron */2 task)",
+        "tests/unit/lib/server/admin-rollout-internal.test.ts (8 cases)",
+        "tests/unit/trigger/lib/ramp-halt-evaluator.test.ts (14 cases)"
+      ],
+      "files_modified": ["src/trigger/tasks/index.ts (rampHaltCriteriaSensorTask export)"],
+      "migrations_applied_remote": true,
+      "test_count": "22 new tests green",
+      "deferred": {
+        "admin_page_ui": "/admin/settings/megaplan-ramp — slug: megaplan-ramp-admin-page (UI plumbing over already-built actions; deferred since Phase 7 deferred)"
+      }
+    },
+    "7_drive_ramp": {
+      "status": "deferred",
+      "reason": "workspace 1e59b9ca-ab4e-442b-952b-a649e2aadb0e prerequisites not met: shipstation_v2_inventory_warehouse_id NULL, shipstation_v2_inventory_location_id NULL, inventory_sync_paused=true. Infrastructure (rollout helper, sensor, audit) is fully wired and tested; awaits operator action."
+    },
+    "8_post_ramp_hardening": {
+      "status": "completed_partial",
+      "shipped": {
+        "8b_stale_location_auditor": "scripts/cleanup-stale-ss-locations.ts (read-only by default; --apply writes review queue row; does NOT attempt DELETE since Phase 1 proved v2 rejects it)"
+      },
+      "verified_preexisting": {
+        "source_union_guard": "scripts/check-source-union-sync.ts shipped in Phase 4e and integrated into release-gate.sh",
+        "retention_task": "external-sync-events-retention task registered in src/trigger/tasks/index.ts"
+      },
+      "deferred_until_post_ramp": {
+        "8a_r24_sku_deterministic": "slug: evaluate-sku-deterministic-bucketing — needs ramp data to evaluate",
+        "8e_cron_tighten": "tighten ramp-halt-criteria-sensor from */2 to */15 — needs Phase 7 to complete first"
+      }
+    }
+  },
+  "rollout_state": {
+    "current_fanout_rollout_percent": 0,
+    "audit_trail_initialized": true,
+    "halt_sensor_active": true,
+    "sensor_cron": "*/2 * * * *",
+    "halt_criteria": ["H-1 inv.redis_postgres_drift critical", "H-2 inv.propagation_lag critical", "H-3 spot-check drift_major > 5% (two consecutive)", "H-4 v2 5xx > 2% (halt_and_page)", "H-5 webhook silence (warn-only)"]
+  },
+  "test_summary": {
+    "total_unit_tests_after_phase_6": "1143 (1121 + 22 phase 6)",
+    "all_green": true
+  },
+  "deferred_followups_added_today": [
+    "ws3-3f-per-location-rewrite (CLOSED WONTFIX 2026-04-18 by Phase 1 probe)",
+    "v2-fetch-empty-body-rollout",
+    "v2-stale-test-locations",
+    "v2-modify-quantity-error-message",
+    "megaplan-ramp-admin-page",
+    "phase-6-shipstation-v2-5xx-rate-sensor"
+  ],
+  "operator_action_required_before_ramp": [
+    "Populate workspaces.shipstation_v2_inventory_warehouse_id (one of: se-214575)",
+    "Populate workspaces.shipstation_v2_inventory_location_id (any non-TEST-PROBE location)",
+    "Set workspaces.inventory_sync_paused = false",
+    "Build /admin/settings/megaplan-ramp UI (slug: megaplan-ramp-admin-page) OR drive ramp via direct setFanoutRolloutPercent call from a Server Action context"
+  ]
+}

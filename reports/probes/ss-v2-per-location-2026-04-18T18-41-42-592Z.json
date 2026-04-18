@@ -1,0 +1,113 @@
+{
+  "ts": "2026-04-18T18-41-42-592Z",
+  "warehouse_id": "se-214575",
+  "test_sku": "TEST-PROBE-1776537702592",
+  "created_locations": [
+    {
+      "id": "se-4106160",
+      "name": "TEST-PROBE-A-2026-04-18T18-41-42-592Z"
+    },
+    {
+      "id": "se-4106161",
+      "name": "TEST-PROBE-B-2026-04-18T18-41-42-592Z"
+    },
+    {
+      "id": "se-4106162",
+      "name": "TEST-PROBE-C-2026-04-18T18-41-42-592Z"
+    }
+  ],
+  "cases": {
+    "case1": {
+      "seed": [
+        {
+          "label": "Loc-A +10",
+          "ok": false,
+          "error": "Unexpected end of JSON input"
+        },
+        {
+          "label": "Loc-B +20",
+          "ok": false,
+          "error": "Unexpected end of JSON input"
+        },
+        {
+          "label": "Loc-C +30",
+          "ok": false,
+          "error": "Unexpected end of JSON input"
+        }
+      ],
+      "read_after": [
+        {
+          "sku": "TEST-PROBE-1776537702592",
+          "on_hand": 60,
+          "available": 60,
+          "average_cost": null
+        }
+      ]
+    },
+    "case2": {
+      "action": {
+        "label": "Loc-A -5",
+        "ok": false,
+        "error": "Unexpected end of JSON input"
+      },
+      "read_after": [
+        {
+          "sku": "TEST-PROBE-1776537702592",
+          "on_hand": 55,
+          "available": 55,
+          "average_cost": null
+        }
+      ]
+    },
+    "case3": {
+      "action": {
+        "label": "Loc-B modify 15",
+        "ok": false,
+        "error": "ShipStation v2 400 /v2/inventory: {\r\n  \"request_id\": \"3722c528-670a-4106-85e8-1b9390de3cb8\",\r\n  \"errors\": [\r\n    {\r\n      \"error_source\": \"shipengine\",\r\n      \"error_type\": \"system\",\r\n      \"error_code\": \"unspecified\",\r\n      \"message\": \"{\\\"title\\\": \\\"Validation Error\\\", \\\"errors\\\": {\\\"quantity\\\": [\\\"Must be greater than or equal to 1.\\\"]}}\"\r\n    }\r\n  ]\r\n}"
+      },
+      "read_after": [
+        {
+          "sku": "TEST-PROBE-1776537702592",
+          "on_hand": 55,
+          "available": 55,
+          "average_cost": null
+        }
+      ]
+    },
+    "case4": {
+      "action": {
+        "label": "DELETE Loc-A with history",
+        "ok": false,
+        "status": 400,
+        "error": "ShipStation v2 400 /v2/inventory_locations/se-4106160: {\r\n  \"request_id\": \"cf4283b8-193f-4324-aded-e45f7013ca40\",\r\n  \"errors\": [\r\n    {\r\n      \"error_source\": \"shipengine\",\r\n      \"error_type\": \"system\",\r\n      \"error_code\": \"unspecified\",\r\n      \"message\": \"{\\\"title\\\": \\\"Validation Error\\\", \\\"errors\\\": [\\\"Location has inventory. To auto-remove it, include remove_inventory=1\\\"]}\"\r\n    }\r\n  ]\r\n}"
+      }
+    }
+  },
+  "cleanup": {
+    "attempts": [
+      {
+        "id": "se-4106160",
+        "ok": false,
+        "tries": 4,
+        "error": "ShipStation v2 400 /v2/inventory_locations/se-4106160: {\r\n  \"request_id\": \"81074007-adf7-4d58-8c4a-be050a720cf3\",\r\n  \"errors\": [\r\n    {\r\n      \"error_source\": \"shipengine\",\r\n      \"error_type\": \"system\",\r\n      \"error_code\": \"unspecified\",\r\n      \"message\": \"{\\\"title\\\": \\\"Validation Error\\\", \\\"errors\\\": [\\\"Location has inventory. To auto-remove it, include remove_inventory=1\\\"]}\"\r\n    }\r\n  ]\r\n}"
+      },
+      {
+        "id": "se-4106161",
+        "ok": false,
+        "tries": 4,
+        "error": "ShipStation v2 400 /v2/inventory_locations/se-4106161: {\r\n  \"request_id\": \"a966fd08-bd73-46d3-ae56-d479bf8c57a6\",\r\n  \"errors\": [\r\n    {\r\n      \"error_source\": \"shipengine\",\r\n      \"error_type\": \"system\",\r\n      \"error_code\": \"unspecified\",\r\n      \"message\": \"{\\\"title\\\": \\\"Validation Error\\\", \\\"errors\\\": [\\\"Location has inventory. To auto-remove it, include remove_inventory=1\\\"]}\"\r\n    }\r\n  ]\r\n}"
+      },
+      {
+        "id": "se-4106162",
+        "ok": false,
+        "tries": 4,
+        "error": "ShipStation v2 400 /v2/inventory_locations/se-4106162: {\r\n  \"request_id\": \"006234f2-4ce0-4b61-ba38-af0d78ba94ff\",\r\n  \"errors\": [\r\n    {\r\n      \"error_source\": \"shipengine\",\r\n      \"error_type\": \"system\",\r\n      \"error_code\": \"unspecified\",\r\n      \"message\": \"{\\\"title\\\": \\\"Validation Error\\\", \\\"errors\\\": [\\\"Location has inventory. To auto-remove it, include remove_inventory=1\\\"]}\"\r\n    }\r\n  ]\r\n}"
+      }
+    ]
+  },
+  "conclusion": {
+    "semantics": "sku_total",
+    "rationale": "Case 1 returned 1 row with available≈60 (=10+20+30). v2 collapses per-location seeds into a SKU total. §3f rewrite is moot.",
+    "phase_2a_decision": "close_wontfix"
+  }
+}
