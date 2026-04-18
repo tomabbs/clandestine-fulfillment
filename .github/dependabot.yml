@@ -1,0 +1,67 @@
+# Tier 1 hardening (Part 14.7) item #6 — Dependabot config.
+#
+# Weekly scans for npm + GitHub Actions ecosystems. Security updates are
+# auto-PR'd; routine version bumps wait for the weekly digest.
+#
+# We deliberately do NOT enable Dependabot for the supabase migration
+# directory or other non-package paths.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - tier1-hardening
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      # Group all minor + patch updates together to reduce review fatigue
+      minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+      # Security updates always get their own PR for prompt review
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+    ignore:
+      # Pin Next.js / React major bumps — require manual upgrade with
+      # full regression pass given app-router complexity.
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      # Trigger.dev v4 → v5 will be a coordinated migration.
+      - dependency-name: "@trigger.dev/sdk"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@trigger.dev/build"
+        update-types: ["version-update:semver-major"]
+      # Supabase JS client bumps frequently; minors require type regen.
+      - dependency-name: "@supabase/supabase-js"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(actions)"

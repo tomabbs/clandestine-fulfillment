@@ -208,8 +208,8 @@ function PipelineHealth() {
                 data.snapshotWarnings.map((sw) => (
                   <div key={sw.id} className="border-l-2 border-yellow-400 pl-2">
                     <p className="font-medium text-xs">{sw.billingPeriod}</p>
-                    {sw.warnings.map((w, i) => (
-                      <p key={i} className="text-xs text-yellow-700">
+                    {sw.warnings.map((w) => (
+                      <p key={`${sw.id}:${w}`} className="text-xs text-yellow-700">
                         {w}
                       </p>
                     ))}

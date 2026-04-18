@@ -46,6 +46,8 @@ run_cmd "Unit/contract test suite" pnpm test
 run_cmd "Next build" pnpm build
 run_cmd "Inventory guard" bash scripts/ci-inventory-guard.sh
 run_cmd "Webhook dedup guard" bash scripts/ci-webhook-dedup-guard.sh
+run_cmd "Client store fanout-gate guard" bash scripts/check-fanout-gate.sh
+run_cmd "ShipStation v2 inventory batch guard" bash scripts/check-v2-inventory-batch.sh
 
 step "Section B: Focused reliability regression tests"
 run_cmd "Support/inbound/invite envelope tests" pnpm vitest run tests/unit/actions/support-envelope.test.ts tests/unit/actions/inbound-create-envelope.test.ts tests/unit/actions/users-invite-envelope.test.ts
