@@ -74,9 +74,15 @@ export async function recordInventoryChange(
 
   try {
     const { fanoutInventoryChange } = await import("@/lib/server/inventory-fanout");
-    fanoutInventoryChange(workspaceId, sku, redisResult, delta, correlationId).catch((err) => {
-      console.error(`[recordInventoryChange] Fanout failed for SKU=${sku}:`, err);
-    });
+    // Audit fix F1 (2026-04-13): forward the `source` so the fanout layer
+    // can echo-skip ShipStation v2 for events that already reflect v2
+    // state (`shipstation` SHIP_NOTIFY, `reconcile` drift sensor). All
+    // other sources legitimately need the v2 fanout push.
+    fanoutInventoryChange(workspaceId, sku, redisResult, delta, correlationId, source).catch(
+      (err) => {
+        console.error(`[recordInventoryChange] Fanout failed for SKU=${sku}:`, err);
+      },
+    );
   } catch {
     // Fanout is non-critical — cron jobs will pick up changes
   }

@@ -17,10 +17,10 @@
   severity: high
   context: "Per §31 halt-criteria of docs/plans/shipstation-source-of-truth-plan.md. Part A: edit an Avail cell, observe Bandcamp + ShipStation update within 60s. Part B: start a count session, edit per-location quantities, observe NEITHER Bandcamp NOR ShipStation update during the in-progress phase (fanout suppression invariant). Both parts MUST pass before ramping fanout to 10%."
 - slug: ws3-3f-per-location-rewrite
-  title: "WS3 §3f — Per-location rewrite of shipstation-v2-sync-on-sku + fanoutInventoryChange v2 enqueue"
+  title: "WS3 §3f — Per-location rewrite of shipstation-v2-adjust-on-sku (SKU-total path now ships via fanout)"
   due_date: 2026-04-22
-  severity: high
-  context: "Saturday Workstream 3 closeout (2026-04-18) deferred this at the §15.3 GATE per the operator's stop_at_3d decision. Operator runs the §15.3 3-case probe (single-location SKU, multi-location SKU, location with no inventory) Saturday morning and reports outcome. If v2 honors per-location writes consistently → ship the rewrite (pivot key: warehouse_inventory_levels.has_per_location_data — set automatically on first per-location write by setVariantLocationQuantity). If not → pivot to §15.6 fallback (continue routing through SKU-total v2 path indefinitely; mark has_per_location_data as audit-only)."
+  severity: medium
+  context: "Saturday Workstream 3 closeout (2026-04-18) deferred this at the §15.3 GATE per the operator's stop_at_3d decision. UPDATED 2026-04-13 (audit fix F1): the SKU-total fanout path now ships — fanoutInventoryChange() enqueues shipstation-v2-adjust-on-sku for every non-echo, non-zero recordInventoryChange() write, so FR-1 is closed for the SKU-total semantic. Severity downgraded high→medium because the operational-blocker portion is resolved. Per-location rewrite remains: operator runs the §15.3 3-case probe (single-location SKU, multi-location SKU, location with no inventory) Saturday morning and reports outcome. If v2 honors per-location writes consistently → ship the rewrite (pivot key: warehouse_inventory_levels.has_per_location_data — set automatically on first per-location write by setVariantLocationQuantity; SKUs at true route per-location, SKUs at false stay on the SKU-total path that ships today). If not → keep routing through SKU-total v2 indefinitely (already the live path); mark has_per_location_data as audit-only."
 - slug: phase-7-dormant-cleanup
   title: "Phase 7: dormant client-store code cleanup"
   due_date: 2026-07-13

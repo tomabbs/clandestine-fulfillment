@@ -73,6 +73,7 @@ export type ShipstationV2AdjustOnSkuResult =
       status:
         | "skipped_zero_delta"
         | "skipped_guard"
+        | "skipped_inventory_sync_paused"
         | "skipped_no_v2_defaults"
         | "skipped_bundle_parent"
         | "skipped_unknown_variant"
@@ -130,9 +131,30 @@ export const shipstationV2AdjustOnSkuTask = task({
 
     const { data: ws } = await supabase
       .from("workspaces")
-      .select("shipstation_v2_inventory_warehouse_id, shipstation_v2_inventory_location_id")
+      .select(
+        "shipstation_v2_inventory_warehouse_id, shipstation_v2_inventory_location_id, inventory_sync_paused",
+      )
       .eq("id", workspaceId)
       .single();
+
+    // Audit fix F3 (2026-04-13): honor the global inventory_sync_paused
+    // kill switch the same way bandcamp-inventory-push and
+    // multi-store-inventory-push do. Operator pauses → nothing leaves
+    // Clandestine, period. Pre-fix this task ignored the global flag and
+    // only respected the fanout-guard `shipstation` integration switch.
+    if (ws?.inventory_sync_paused) {
+      logger.info("[shipstation-v2-adjust-on-sku] inventory_sync_paused — skipping", {
+        workspaceId,
+        sku,
+        correlationId,
+      });
+      return {
+        status: "skipped_inventory_sync_paused",
+        correlationId,
+        sku,
+        reason: "inventory_sync_paused",
+      };
+    }
 
     const inventoryWarehouseId = ws?.shipstation_v2_inventory_warehouse_id ?? null;
     const inventoryLocationId = ws?.shipstation_v2_inventory_location_id ?? null;

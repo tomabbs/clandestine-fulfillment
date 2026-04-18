@@ -94,7 +94,7 @@ The plan modifies or adds the following API-boundary entries. New entries must b
 
 | File | Action | Change |
 |---|---|---|
-| `src/actions/inventory.ts` | `adjustInventory(sku, delta, reason)` | No signature change. Behavior unchanged. New side-effect: `recordInventoryChange()` now also enqueues `shipstation-v2-sync-on-sku` via the extended `fanoutInventoryChange()`. |
+| `src/actions/inventory.ts` | `adjustInventory(sku, delta, reason)` | No signature change. Behavior unchanged. New side-effect: `recordInventoryChange()` now also enqueues `shipstation-v2-adjust-on-sku` via the extended `fanoutInventoryChange()` (audit fix F1, 2026-04-13 — actual task name is `-adjust-on-sku` because it handles BOTH delta directions; the original plan name `-sync-on-sku` is preserved in the deferred §3f / §15.3 / §15.6 sections that describe the per-location rewrite). |
 | `src/actions/inventory.ts` | `getTodayCountProgress()` | **NEW**. Returns `{ totalChangesToday: number, totalChangesByMe: number }` for the Inventory page header chip. Reads `warehouse_inventory_activity` filtered to today + `source IN ('manual', 'cycle_count', 'manual_inventory_count')`. |
 
 ### Server Actions (new files)
@@ -130,12 +130,12 @@ Because this plan's scope touches **inventory, sync, and integrations**, a Trigg
 | Task ID | Queue | Schedule | Reviewed for |
 |---|---|---|---|
 | `bandcamp-sale-poll` | `bandcamp-api` | every 5 min | Confirmed it triggers `shipstation-v2-decrement` correctly (Phase 4). |
-| `bandcamp-push-on-sku` | `bandcamp-api` | event-driven | Mirror reference for `shipstation-v2-sync-on-sku`. Source inlined Appendix B.5. |
+| `bandcamp-push-on-sku` | `bandcamp-api` | event-driven | Mirror reference for `shipstation-v2-adjust-on-sku` (shipped) / per-location rewrite (deferred §3f). Source inlined Appendix B.5. |
 | `shipstation-v2-decrement` | `shipstation` | event-driven | Mirror reference. Source inlined Appendix B.6. |
 | `shipstation-bandcamp-reconcile-hot` | `shipstation` | every 5 min | No change. Will pick up new per-location writes via existing reconcile logic. |
 | `shipstation-bandcamp-reconcile-warm` | `shipstation` | every 30 min | No change. |
 | `shipstation-bandcamp-reconcile-cold` | `shipstation` | every 6 hr | No change. |
-| `process-shipstation-shipment` | `shipstation` | event-driven | No change. Continues to call `recordInventoryChange()` on shipment events; the fanout extension means a SHIP_NOTIFY now propagates to Bandcamp via existing `bandcamp-push-on-sku` AND to a new ShipStation per-location refresh via the new `shipstation-v2-sync-on-sku`. (This is intentional; the ShipStation refresh is a no-op write that matches what ShipStation just told us.) |
+| `process-shipstation-shipment` | `shipstation` | event-driven | No change. Continues to call `recordInventoryChange()` on shipment events. **Updated 2026-04-13 (audit fix F1):** the SHIP_NOTIFY-originated write does NOT propagate to ShipStation v2 — the source is `'shipstation'` and `fanoutInventoryChange()` echo-skips that source per Rule #65 (otherwise we would double-decrement what ShipStation just decremented locally). It still propagates to Bandcamp via existing `bandcamp-push-on-sku`. The per-location refresh via `shipstation-v2-sync-on-sku` (the original plan name; deferred per §3f / §15.3) is no longer required because the `'modify new_available'` no-op-write strategy is now obsolete — `adjust on sku` uses delta arithmetic and skipping is correct. |
 | `bandcamp-inventory-push` | `bandcamp-api` | every 5 min | Cron path unchanged. Continues to handle bundles + option-level mappings. |
 | `multi-store-inventory-push` | various per-platform | every 5 min | Unchanged. |
 | `external-sync-events-retention` | default | daily | Existing 7-day retention sweeper continues to apply; no schema change. |
@@ -144,13 +144,13 @@ Because this plan's scope touches **inventory, sync, and integrations**, a Trigg
 
 | Task ID | Queue | Schedule | Purpose |
 |---|---|---|---|
-| `shipstation-v2-sync-on-sku` | `shipstation` | event-driven (enqueued by `fanoutInventoryChange`) | Per-SKU push to ShipStation v2 inventory. Behavior phased: Saturday ships SKU-total path; same-day refactor to per-location writes. Skeleton in Appendix C.5. |
+| `shipstation-v2-adjust-on-sku` (originally planned as `shipstation-v2-sync-on-sku`) | `shipstation` | event-driven (enqueued by `fanoutInventoryChange` AND by `submitManualInventoryCounts`) | Per-SKU push to ShipStation v2 inventory. Behavior phased: SKU-total path **shipped 2026-04-13 (audit fix F1)** — see Part IV "Post-audit fixes". Per-location rewrite remains deferred per §3f / §15.3 GATE. Skeleton in Appendix C.5 describes the deferred per-location form (uses `transaction_type:'modify' new_available:N`); shipped form uses `'increment'/'decrement' quantity:|delta|` per Phase 0 Patch D2. |
 | `megaplan-spot-check` | `shipstation` | hourly during ramp weekend, then daily | Samples 5 SKUs per active client (~85 SKUs), reads each from DB / Redis / ShipStation v2 / Bandcamp, classifies drift, writes a `megaplan_spot_check_runs` row, creates a `warehouse_review_queue` item if any `drift_major` rows. Skeleton in Appendix C.3. |
 | `deferred-followups-reminder` | default (low-priority) | daily at 09:00 ET | Parses `docs/DEFERRED_FOLLOWUPS.md`, creates a `warehouse_review_queue` item for each entry whose `due_date <= today`, idempotent via `correlation_id = 'deferred:{slug}:{due_date}'`. Skeleton in Appendix C.4. |
 
 ### Queue serialization (Rule #9 / Tier 1 #1)
 
-All new ShipStation v2 traffic (`shipstation-v2-sync-on-sku`, location create/update calls inside Server Actions) routes through `shipstationQueue` (`concurrencyLimit: 1`). The Server Action ShipStation calls happen **inline** in the action body (not via Trigger), so they bypass the queue — but the volume is bounded (one call per location create, max ~50/day during the Tue/Wed labeling burst) and the calls are sequential within the action. This is documented as a constraint in §13.
+All new ShipStation v2 traffic (`shipstation-v2-adjust-on-sku` — shipped name; planned as `shipstation-v2-sync-on-sku`; location create/update calls inside Server Actions) routes through `shipstationQueue` (`concurrencyLimit: 1`). The Server Action ShipStation calls happen **inline** in the action body (not via Trigger), so they bypass the queue — but the volume is bounded (one call per location create, max ~50/day during the Tue/Wed labeling burst) and the calls are sequential within the action. This is documented as a constraint in §13.
 
 Bandcamp serialization is unchanged: `bandcamp-push-on-sku` and `bandcamp-sale-poll` both pin to `bandcamp-api` queue.
 
@@ -357,10 +357,10 @@ This is the canonical list. Cross-reference with §15 for behavior changes per f
 | Path | Purpose |
 |---|---|
 | `supabase/migrations/20260413000040_megaplan_spot_check_runs.sql` | Spot-check artifact storage |
-| `supabase/migrations/20260413000050_phase4b_shipstation_fanout.sql` | ShipStation kill-switch column + count_status columns + new InventorySource values + ShipStation location mirror columns |
+| `supabase/migrations/20260418000001_phase4b_megaplan_closeout_and_count_session.sql` (planned filename `20260413000050_phase4b_shipstation_fanout.sql`; renamed during WS1 build because the same migration also bundled spot-check + count-session schema) | ShipStation kill-switch column + count_status columns + new InventorySource values (`cycle_count`, `manual_inventory_count`) + ShipStation location mirror columns |
 | `src/trigger/tasks/megaplan-spot-check.ts` | Hourly spot-check task |
 | `src/trigger/tasks/deferred-followups-reminder.ts` | Daily reminder cron |
-| `src/trigger/tasks/shipstation-v2-sync-on-sku.ts` | New per-SKU push to ShipStation v2 (per-location semantics) |
+| `src/trigger/tasks/shipstation-v2-adjust-on-sku.ts` (planned as `shipstation-v2-sync-on-sku.ts`) | Per-SKU push to ShipStation v2. Shipped form: SKU-total via `increment`/`decrement` (audit fix F1, 2026-04-13). Per-location semantics deferred per §3f / §15.3. |
 | `src/actions/megaplan-spot-check.ts` | Server Actions for the verification admin page |
 | `src/actions/locations.ts` | Server Actions for location CRUD + ShipStation mirror |
 | `src/actions/inventory-counts.ts` | Server Actions for count sessions |
@@ -368,7 +368,7 @@ This is the canonical list. Cross-reference with §15 for behavior changes per f
 | `src/app/admin/settings/locations/page.tsx` | Admin page for location CRUD + sync status |
 | `tests/unit/trigger/megaplan-spot-check.test.ts` | Unit tests for the spot-check task |
 | `tests/unit/trigger/deferred-followups-reminder.test.ts` | Unit tests for the reminder cron |
-| `tests/unit/trigger/shipstation-v2-sync-on-sku.test.ts` | Unit tests for the per-SKU push (incl. per-location & fallback) |
+| `tests/unit/trigger/shipstation-v2-adjust-on-sku.test.ts` (planned name `shipstation-v2-sync-on-sku.test.ts`) | Unit tests for the per-SKU push. **Note (2026-04-13):** the shipped task currently exercises its skip cascade (incl. inventory_sync_paused, audit fix F3) via the inline tests in `tests/unit/actions/manual-inventory-count.test.ts` and the new echo/pause-skip logic tests in `tests/unit/lib/server/inventory-fanout.test.ts`. A dedicated `shipstation-v2-adjust-on-sku.test.ts` is a follow-up if/when the per-location rewrite ships. |
 | `tests/unit/actions/megaplan-spot-check.test.ts` | Unit tests for the spot-check Server Actions |
 | `tests/unit/actions/locations.test.ts` | Unit tests for location Server Actions (incl. ShipStation mirror failure path) |
 | `tests/unit/actions/inventory-counts.test.ts` | Unit tests for count session Server Actions (incl. fanout suppression invariant) |
@@ -382,8 +382,8 @@ This is the canonical list. Cross-reference with §15 for behavior changes per f
 |---|---|
 | `src/lib/shared/types.ts` | Add `'shipstation'` to `IntegrationKillSwitchKey`. Add `'cycle_count'` and `'manual_inventory_count'` to `InventorySource`. Add `CountStatus` type and extend `WarehouseInventoryLevel` interface. Add `shipstation_inventory_location_id`, `shipstation_synced_at`, `shipstation_sync_error` fields to `WarehouseLocation` interface. |
 | `src/lib/clients/shipstation-inventory-v2.ts` | Add `createInventoryLocation`, `updateInventoryLocation`, `deleteInventoryLocation`. |
-| `src/lib/server/inventory-fanout.ts` | Add ShipStation v2 as a fourth fanout target. New code reads variant/sku, evaluates `guard.shouldFanout('shipstation', correlationId)`, enqueues `tasks.trigger('shipstation-v2-sync-on-sku', {...})`. Bundles still excluded (existing logic). Distros excluded (already true via `org_id IS NULL`). |
-| `src/trigger/tasks/index.ts` | Register the three new tasks (spot-check, reminder, shipstation-v2-sync-on-sku). |
+| `src/lib/server/inventory-fanout.ts` | Add ShipStation v2 as a fourth fanout target — **shipped 2026-04-13 (audit fix F1)**. New code reads variant/sku, evaluates `guard.shouldFanout('shipstation', correlationId)`, enqueues `tasks.trigger('shipstation-v2-adjust-on-sku', {...})` (planned name was `-sync-on-sku`; shipped name handles BOTH delta directions). Bundles still excluded (existing logic). Source-based echo skip for `'shipstation'` and `'reconcile'` per Rule #65 (audit fix F1). Also adds a top-of-function `inventory_sync_paused` short-circuit (audit fix F2). Distros: not filtered here — same behavior as the pre-existing Bandcamp/Shopify fanout. |
+| `src/trigger/tasks/index.ts` | Register the three new tasks (spot-check, reminder, shipstation-v2-adjust-on-sku — registered under that name). |
 | `src/app/admin/inventory/page.tsx` | Toast feedback on inline-edit save. Recently-edited row highlight (CSS transition). Set-to toggle in the Adjust dialog. Daily count-progress chip near Export CSV. Expanded-row count session UI panel (Start count / per-location editable list with inline location create / Complete / Cancel). |
 | `src/actions/inventory.ts` | Add `getTodayCountProgress()` Server Action. |
 | `tests/unit/lib/billing-rates.test.ts` | Phase 6 cleanup carry-over: replace 3x `supabase as any` with proper typed mocks; remove unused `beforeEach` import. |
@@ -497,7 +497,7 @@ All three require staff role (the page is at `/admin/...` so middleware already 
 
 ### §15.2. Workstream 2 — live-counting backend fix (~4 hr Sat)
 
-**Migration 50** (`20260413000050_phase4b_shipstation_fanout.sql`). Multi-table:
+**Migration 50** (planned: `20260413000050_phase4b_shipstation_fanout.sql`; **shipped as** `20260418000001_phase4b_megaplan_closeout_and_count_session.sql`). Multi-table:
 
 ```sql
 -- 1) ShipStation kill switch column on workspaces
@@ -683,7 +683,7 @@ Numbered list. Each is testable.
 - **A-8.** `warehouse_variant_locations` table exists with columns `(variant_id, location_id, quantity, updated_at)`. *Test:* `\d warehouse_variant_locations`.
 - **A-9.** `warehouse_inventory_levels` is keyed by `(workspace_id, variant_id)` (or has a unique constraint thereon) so the existing `record_inventory_change_txn` RPC works on a single matching row. *Test:* known true from Phase 5 reconcile work.
 - **A-10.** The `derive_inventory_org_id` trigger continues to fire on UPDATE as well as INSERT. *Test:* `select tgname, tgenabled from pg_trigger where tgrelid = 'warehouse_inventory_levels'::regclass;`.
-- **A-11.** Adding three columns to `warehouse_inventory_levels` does not break the Phase 5 `sku_sync_status` view. *Test:* re-run `pnpm test` after migration 50.
+- **A-11.** Adding three columns to `warehouse_inventory_levels` does not break the Phase 5 `sku_sync_status` view. *Test:* re-run `pnpm test` after migration 50 (shipped as `20260418000001_phase4b_megaplan_closeout_and_count_session.sql`).
 - **A-12.** `pnpm release:gate` script exists and includes typecheck + test + build + biome + the inventory write-path lint guard. *Test:* `cat package.json | grep release:gate`.
 - **A-13.** Trigger.dev v4 `tasks.trigger()` is the supported way to enqueue from a Server Action (not `runs.trigger()` or `tasks.batchTrigger()`). *Test:* known true from existing fanout code (Appendix B.1).
 - **A-14.** Operator has the ShipStation v2 API key configured in production (`SHIPSTATION_V2_API_KEY`). *Test:* `vercel env ls`. Without this key, every ShipStation call fails — but the system fails gracefully (per-integration kill switch + fanout guard catch the 5xx burst).
@@ -847,7 +847,7 @@ Three layers, increasing severity:
 
 `UPDATE workspaces SET shipstation_sync_paused = true, shipstation_sync_paused_at = now(), shipstation_sync_paused_reason = 'rollback: <reason>' WHERE id = '<id>';`
 
-Effect: `fanoutInventoryChange()` skips the ShipStation v2 enqueue. `shipstation-v2-sync-on-sku` already-enqueued tasks check `shipstation_sync_paused` at task entry and short-circuit. Bandcamp + Shopify fanout continue.
+Effect: `fanoutInventoryChange()` skips the ShipStation v2 enqueue. `shipstation-v2-adjust-on-sku` (shipped task name; planned as `shipstation-v2-sync-on-sku`) already-enqueued tasks check `shipstation_sync_paused` at task entry and short-circuit. As of audit fix F3 (2026-04-13), `shipstation-v2-adjust-on-sku` ALSO honors the global `inventory_sync_paused` flag at task entry (`skipped_inventory_sync_paused` status). Bandcamp + Shopify fanout continue.
 
 For Bandcamp issues: `UPDATE workspaces SET bandcamp_sync_paused = true …`. For Shopify: `clandestine_shopify_sync_paused`.
 
@@ -1131,7 +1131,35 @@ All three Saturday workstreams shipped green. WS3 was halted after sub-task 3d (
 | WS3 3f — Per-location rewrite of `shipstation-v2-sync-on-sku` + `fanoutInventoryChange` v2 enqueue | gated by §15.3 ShipStation v2 per-location semantics probe | **deferred** | n/a until probe outcome reported |
 | WS3 3g — Standalone `/admin/inventory/locations` admin page | inline create from count UI covers Tue/Wed onboarding | **deferred to Sunday** | n/a |
 
-By Tuesday morning, the seven invariants from §24 are met for the parts of WS3 that shipped. The deferred §15.3-gated path keeps writing through the existing SKU-level v2 fanout in the meantime; the sticky `has_per_location_data` flag is in place and will be the pivot key when the rewrite resumes.
+By Tuesday morning, the seven invariants from §24 are met for the parts of WS3 that shipped. The deferred §15.3-gated path keeps writing through the SKU-level v2 fanout (now actually wired — see "Post-audit fixes" below) in the meantime; the sticky `has_per_location_data` flag is in place and will be the pivot key when the rewrite resumes.
+
+## Post-audit fixes (2026-04-13)
+
+A post-build audit ("Audit pass A — 2026-04-13") compared the plan body against the codebase and surfaced five findings (F1–F5). Three were behavioral (F1/F2/F3); two were doc-only (F4/F5). All five closed in a single follow-up commit on 2026-04-13. The pre-audit `Final outcome` table above describes what shipped on 2026-04-18; this section logs the corrections.
+
+| Finding | Severity | Where it was | Fix |
+|---|---|---|---|
+| **F1** — `fanoutInventoryChange()` was missing the ShipStation v2 enqueue, so single-cell `Avail` edits on `/admin/inventory` did not propagate to ShipStation v2. The plan §15.2/§15.3 deferred this via the per-location probe; the audit pulled the SKU-total interim forward because it does not need the probe (writes route to `workspaces.shipstation_v2_inventory_location_id`, the workspace default). | HIGH | `src/lib/server/inventory-fanout.ts` | Added a fourth fanout target after the Bandcamp section: enqueues `shipstation-v2-adjust-on-sku` for every non-zero `recordInventoryChange()` write. Function signature gained a new optional `source?: InventorySource` parameter (propagated from `record-inventory-change.ts`) so the fanout layer can echo-skip `source ∈ {shipstation, reconcile}` (Rule #65 — prevents double-decrement on Clandestine SHIP_NOTIFY and reconcile-loop oscillation). Sales (`bandcamp-sale-poll` enqueuing `shipstation-v2-decrement`) and manual-count (`submitManualInventoryCounts` direct-enqueue) re-use the same correlation_id, so the `external_sync_events` UNIQUE on `(system='shipstation_v2', correlation_id, sku, action)` deduplicates the dual enqueue safely. Result type gained `shipstationV2Enqueued: boolean`. New helper `shouldEchoSkipShipstationV2()` exported for unit testing. Per-location rewrite remains deferred (§15.3 probe + WS3 §3f). |
+| **F2** — `fanoutInventoryChange()` docstring promised an `inventory_sync_paused` short-circuit but the body did not implement it. Downstream tasks did short-circuit (so no remote API hit landed), but Trigger.dev still received needless enqueues and the kill switch was not "immediate" the way `§19 Rollback contracts` claimed. | MEDIUM | `src/lib/server/inventory-fanout.ts` | Added a Supabase lookup at the top of the function: if `workspaces.inventory_sync_paused=true`, set Sentry attribute `fanout.skipped='inventory_sync_paused'` and return zeroed `FanoutResult` immediately. Behavior now matches the docstring and §19. |
+| **F3** — `shipstation-v2-adjust-on-sku` ignored the global `inventory_sync_paused` flag, gating only on the per-integration `fanout-guard "shipstation"` switch. This meant an operator pausing global inventory sync would still see manual-count entries push to ShipStation v2 unless they also paused the per-integration switch. | MEDIUM | `src/trigger/tasks/shipstation-v2-adjust-on-sku.ts` | Added skip step `(0)` to the cascade: extends the workspaces select to include `inventory_sync_paused`; if true, returns `skipped_inventory_sync_paused`. New status added to the result-type union. Pattern mirrors `bandcamp-inventory-push.ts` and `multi-store-inventory-push.ts`. |
+| **F4** — Plan body referenced the old task name `shipstation-v2-sync-on-sku` in ~24 places; the codebase, `TRIGGER_TASK_CATALOG.md`, and `API_CATALOG.md` all use `shipstation-v2-adjust-on-sku` (which handles BOTH directions of delta — see WS2 implementation note). | LOW | `docs/plans/shipstation-source-of-truth-plan.md` | Selective rename in body sections that describe shipped behavior. Historical sections (§3f / §15.3 / §15.6) preserve the old name where they describe the deferred per-location rewrite that may legitimately use a new task name when it ships. |
+| **F5** — Plan body referenced "migration 50" / `20260413000050_phase4b_shipstation_fanout.sql`; reality shipped as `20260418000001_phase4b_megaplan_closeout_and_count_session.sql` (single migration that bundled WS1 + WS3 schema). | LOW | `docs/plans/shipstation-source-of-truth-plan.md` | Updated migration filename references to match what shipped. The original migration filename is a documented `Deviation from plan` already; F5 propagates that downstream. |
+
+Verification gates after the F1–F5 fixes:
+
+- `pnpm typecheck` — green
+- `pnpm vitest run` — 112 files / **1097 tests** passing (1084 → 1097 means 13 new tests landed across `inventory-fanout.test.ts` for the echo-skip + pause-skip + result-shape coverage)
+- `pnpm check:fix` — clean (1 file auto-formatted; 25 pre-existing warnings + 5 infos unaffected)
+
+Doc-sync contract (Rule: PLAN/BUILD/AUDIT prompt-pack `Doc Sync Contract`) updates that landed with the fixes:
+
+- `docs/system_map/TRIGGER_TASK_CATALOG.md` — `shipstation-v2-adjust-on-sku` row now lists `fanoutInventoryChange()` as a second invoker and includes step `(0)` in the skip cascade
+- `docs/system_map/API_CATALOG.md` — `submitManualInventoryCounts` fanout note now mentions the dual-enqueue + ledger dedup contract and the `inventory_sync_paused` gate at both layers
+- `project_state/journeys.yaml` — `per_integration_kill_switches_and_rollouts` checks now mention F1 wiring, F2 fanout-entry pause, and the Rule #65 echo-cancellation
+- `docs/DEFERRED_FOLLOWUPS.md` — `ws3-3f-per-location-rewrite` context updated to note the SKU-total path now ships; severity downgraded `high → medium` because the operational-blocker portion is resolved (only the per-location optimization remains gated)
+- `CLAUDE.md` — no rule edits needed; F1 follows existing Rules #20 (single write path), #43 (event ordering), #59 (bulk-sync exception), #65 (echo cancellation), #67 (connection pooling)
+
+Net effect: as of 2026-04-13, FR-1 from §12 is fully closed for the SKU-total semantic. A staff member editing the `Avail` cell on `/admin/inventory` now sees ShipStation v2 update within seconds via the `shipstation-v2-adjust-on-sku` task, ledger-gated and concurrency-safe through the shared `shipstation` queue. Per-location rewrite (§3f) remains the only deferred item and is unchanged in scope.
 
 ## Implementation notes
 
@@ -2345,7 +2373,7 @@ import { queue } from "@trigger.dev/sdk";
 export const shipstationQueue = queue({ name: "shipstation", concurrencyLimit: 1 });
 ```
 
-Used by `shipstation-poll`, `process-shipstation-shipment`, `shipstation-v2-decrement`, `shipstation-bandcamp-reconcile-{hot,warm,cold}`. The new `shipstation-v2-sync-on-sku` and `megaplan-spot-check` pin to this queue.
+Used by `shipstation-poll`, `process-shipstation-shipment`, `shipstation-v2-decrement`, `shipstation-bandcamp-reconcile-{hot,warm,cold}`. The new `shipstation-v2-adjust-on-sku` (shipped name; planned as `shipstation-v2-sync-on-sku`), `megaplan-spot-check`, and `bulk-create-locations` also pin to this queue.
 
 ### B.9.5. `src/trigger/tasks/index.ts`
 
@@ -2354,6 +2382,12 @@ Currently exports task constants for every shipped task. PROPOSED ADDITIONS:
 ```typescript
 export { megaplanSpotCheckTask } from "./megaplan-spot-check";
 export { deferredFollowupsReminderTask } from "./deferred-followups-reminder";
+// SHIPPED FORM (2026-04-13, audit fix F1):
+// export { shipstationV2AdjustOnSkuTask } from "./shipstation-v2-adjust-on-sku";
+// (the original plan name `shipstationV2SyncOnSkuTask` from `./shipstation-v2-sync-on-sku`
+//  is preserved here historically — the task was renamed during WS2 build because it
+//  handles BOTH delta directions, and the Appendix C.5 per-location form remains gated
+//  on the §15.3 probe.)
 export { shipstationV2SyncOnSkuTask } from "./shipstation-v2-sync-on-sku";
 ```
 
@@ -2457,7 +2491,7 @@ create policy "service_role_all_megaplan_spot_check_runs"
   with check (true);
 ```
 
-## C.2. `supabase/migrations/20260413000050_phase4b_shipstation_fanout.sql`
+## C.2. `supabase/migrations/20260413000050_phase4b_shipstation_fanout.sql` (planned filename — shipped as `20260418000001_phase4b_megaplan_closeout_and_count_session.sql`)
 
 ```sql
 -- Phase 4b — ShipStation v2 as fanout target + per-SKU count session
@@ -2792,7 +2826,7 @@ grant execute on function megaplan_sample_skus_per_client(int) to service_role;
 ```
 
 Notes for the build agent:
-- The `coalesce(l.count_status, 'idle') = 'idle'` filter requires Migration 50 (which adds `count_status`) to ship BEFORE Migration 40 OR for the function to be created in a SECOND migration sequenced after Migration 50. Recommended path: rename the spot-check migration to `20260413000060_megaplan_spot_check_runs.sql` so it runs AFTER `20260413000050_phase4b_shipstation_fanout.sql`. The proposed `40` numbering predates the column dependency and was a pre-v6 oversight.
+- The `coalesce(l.count_status, 'idle') = 'idle'` filter requires Migration 50 (which adds `count_status`) to ship BEFORE Migration 40 OR for the function to be created in a SECOND migration sequenced after Migration 50. **Resolved during WS1 build (2026-04-18):** the dependency was solved by bundling spot-check + count-session schema into a single migration `20260418000001_phase4b_megaplan_closeout_and_count_session.sql` so the column dependency is satisfied within one transaction. The original `20260413000040`/`20260413000050`/`20260413000060` triple-sequence numbering was abandoned in favor of the bundled file.
 - If the operator runs the spot-check before Migration 50 ships, the `coalesce(...)` clause becomes a no-op (column missing → coalesce returns the literal `'idle'`) and the filter accepts every row. This is safe behavior — no count sessions exist yet.
 
 ## C.4. `src/trigger/tasks/deferred-followups-reminder.ts`
@@ -3913,6 +3947,8 @@ export async function deleteInventoryLocation(inventoryLocationId: string): Prom
 
 ## C.12. `src/lib/server/inventory-fanout.ts` extension diff
 
+**Status: SHIPPED 2026-04-13 (audit fix F1).** The actual landed implementation differs from the C.12 sketch below in two ways: (1) the task name is `shipstation-v2-adjust-on-sku` (not `-sync-on-sku`) — handles BOTH delta directions; (2) the source-aware echo skip (Rule #65, for `'shipstation'` and `'reconcile'` sources) wraps the enqueue. See `src/lib/server/inventory-fanout.ts` for the live form. The block below is preserved as the original plan sketch.
+
 Insert the following block in `fanoutInventoryChange()` AFTER the Bandcamp fanout (around line 142, before the bundle-parent recursion):
 
 ```typescript
@@ -3940,7 +3976,7 @@ if (variant && guard.shouldFanout("shipstation", effectiveCorrelationId)) {
 }
 ```
 
-The `FanoutResult` interface gains a `shipstationEnqueued: boolean` field.
+The `FanoutResult` interface gains a `shipstationEnqueued: boolean` field. (Shipped form: `shipstationV2Enqueued: boolean`.)
 
 ## C.13. `src/app/admin/inventory/page.tsx` count session UI patch
 
@@ -4302,11 +4338,11 @@ export const bulkCreateLocationsTask = task({
 | `20260417000002_bandcamp_baseline_anomaly.sql` | **Phase 1**: bandcamp_baseline_anomalies table + push_mode enum |
 | `20260417000003_distro_dormancy.sql` | distro dormancy markers |
 | **PROPOSED** `20260413000040_megaplan_spot_check_runs.sql` | **THIS PLAN**: spot-check artifact storage |
-| **PROPOSED** `20260413000050_phase4b_shipstation_fanout.sql` | **THIS PLAN**: shipstation kill switch + count_status + ShipStation location mirror columns + cycle_count InventorySource |
+| **SHIPPED** `20260418000001_phase4b_megaplan_closeout_and_count_session.sql` (originally proposed as `20260413000050_phase4b_shipstation_fanout.sql`) | **THIS PLAN**: shipstation kill switch + count_status + ShipStation location mirror columns + cycle_count + manual_inventory_count InventorySource values + spot-check schema |
 
 ## D.2. Tables touched by this plan (relevant column shape)
 
-### `workspaces` (extended by migration 50)
+### `workspaces` (extended by migration `20260418000001` — planned name `migration 50`)
 
 | Column | Type | Default | Notes |
 |---|---|---|---|
@@ -4325,7 +4361,7 @@ export const bulkCreateLocationsTask = task({
 | shipstation_v2_inventory_location_id | text | null | (Phase 4) |
 | default_safety_stock | integer | 3 | (Phase 4) |
 
-### `warehouse_inventory_levels` (extended by migration 50)
+### `warehouse_inventory_levels` (extended by migration `20260418000001` — planned name `migration 50`)
 
 | Column | Type | Default | Notes |
 |---|---|---|---|
@@ -4342,7 +4378,7 @@ export const bulkCreateLocationsTask = task({
 | count_started_at | timestamptz | null | **NEW** |
 | count_started_by | uuid | null | **NEW** references users(id) |
 
-### `warehouse_locations` (extended by migration 50)
+### `warehouse_locations` (extended by migration `20260418000001` — planned name `migration 50`)
 
 | Column | Type | Default | Notes |
 |---|---|---|---|
@@ -4365,7 +4401,7 @@ export const bulkCreateLocationsTask = task({
 | quantity | integer | per-bin qty |
 | updated_at | timestamptz | used by `cancelCountSession({ rollback: true })` |
 
-### `warehouse_inventory_activity` (extended by migration 50)
+### `warehouse_inventory_activity` (extended by migration `20260418000001` — planned name `migration 50`)
 
 | Column | Type | Notes |
 |---|---|---|
@@ -4413,8 +4449,9 @@ Used by Rule #55. Required fields: `assigned_to`, `severity`, `sla_due_at`, `sup
 | Endpoint | Method | Wrapper | Used by | Idempotency key |
 |---|---|---|---|---|
 | `/v2/inventory` | GET | `listInventory({ skus })` | spot-check task, reconcile (existing) | n/a (read) |
-| `/v2/inventory_adjustments` | POST | `adjustInventoryV2({ transaction_type: 'modify', new_available })` | `shipstation-v2-sync-on-sku` (per-location + fallback) | `external_sync_events (system='shipstation_v2', correlation_id, sku, action='modify')` |
-| `/v2/inventory_adjustments` | POST | `adjustInventoryV2({ transaction_type: 'adjust', quantity: 0 })` | `shipstation-v2-sync-on-sku` for zero-quantity case (Patch D2) | same as above with `action='adjust'` |
+| `/v2/inventory_adjustments` | POST | `adjustInventoryV2({ transaction_type: 'increment'\|'decrement', quantity })` | **SHIPPED:** `shipstation-v2-decrement` (sales) + `shipstation-v2-adjust-on-sku` (manual counts + fanout — audit fix F1, 2026-04-13). Phase 0 Patch D2 contract — never `modify`. | `external_sync_events (system='shipstation_v2', correlation_id, sku, action='increment'\|'decrement')` |
+| `/v2/inventory_adjustments` | POST | `adjustInventoryV2({ transaction_type: 'modify', new_available })` | **DEFERRED:** per-location rewrite (§3f / §15.3) — would use `shipstation-v2-sync-on-sku` per-location form (Appendix C.5). Not currently called. | `external_sync_events (system='shipstation_v2', correlation_id, sku, action='modify')` |
+| `/v2/inventory_adjustments` | POST | `adjustInventoryV2({ transaction_type: 'adjust', quantity: 0 })` | **DEFERRED:** zero-quantity case for the per-location rewrite (Patch D2). Not currently called by shipped paths. | same as above with `action='adjust'` |
 | `/v2/inventory_locations` | POST | `createInventoryLocation({ inventory_warehouse_id, name })` | `createLocation()` Server Action | local DB row id (one-shot mirror) |
 | `/v2/inventory_locations/{id}` | PUT | `updateInventoryLocation(id, { name })` | `updateLocation()` Server Action when renaming | local DB row id |
 | `/v2/inventory_locations/{id}` | DELETE | `deleteInventoryLocation(id)` | DEFINED only — not auto-called this sprint | n/a |
@@ -4432,7 +4469,7 @@ All v2 calls flow through `shipstationQueue` (concurrencyLimit: 1) per Tier 1 ha
 
 | Task ID | File | Type | Queue | New / Existing | Cron / trigger source |
 |---|---|---|---|---|---|
-| `shipstation-v2-sync-on-sku` | `src/trigger/tasks/shipstation-v2-sync-on-sku.ts` | task | shipstationQueue | **NEW** | enqueued by `fanoutInventoryChange()` |
+| `shipstation-v2-adjust-on-sku` (planned as `shipstation-v2-sync-on-sku`) | `src/trigger/tasks/shipstation-v2-adjust-on-sku.ts` | task | shipstationQueue | **SHIPPED 2026-04-13** (audit fix F1) | enqueued by `fanoutInventoryChange()` AND by `submitManualInventoryCounts` Server Action |
 | `megaplan-spot-check` | `src/trigger/tasks/megaplan-spot-check.ts` | schedules.task | shipstationQueue (read-only) | **NEW** | cron `0 * * * *` Sat-Tue, then `0 9 * * *` |
 | `deferred-followups-reminder` | `src/trigger/tasks/deferred-followups-reminder.ts` | schedules.task | (default) | **NEW** | cron `0 9 * * *` |
 | `bandcamp-push-on-sku` | `src/trigger/tasks/bandcamp-push-on-sku.ts` | task | bandcampQueue | existing | enqueued by `fanoutInventoryChange()` (no change) |

@@ -465,7 +465,9 @@ journeys:
       - fanout-guard.ts is the single chokepoint — loadFanoutGuard(supabase, workspaceId) + guard.shouldFanout(integration, correlationId)
       - rollout bucketing is deterministic (32-bit FNV-1a over correlation_id → 0..99 bucket); same correlation_id always lands in the same bucket, so replays re-evaluate identically
       - global pause checked first, then integration-specific pause, then rollout percent (bucket < percent passes)
-      - inventory-fanout.ts consults the guard before each integration push (Clandestine Shopify, client stores, Bandcamp); ShipStation v2 fanout will be wired in Phase 4 against the same chokepoint
+      - inventory-fanout.ts consults the guard before each integration push (Clandestine Shopify, client stores, Bandcamp, ShipStation v2 SKU-total via shipstation-v2-adjust-on-sku — wired by audit fix F1, 2026-04-13). Per-location v2 rewrite still gated on §15.3 probe (`ws3-3f-per-location-rewrite`)
+      - audit fix F2 (2026-04-13) — fanoutInventoryChange() now early-returns when workspaces.inventory_sync_paused=true, so the global kill switch is immediate at the fanout entry, not just at downstream task entry
+      - echo-cancellation (Rule #65) — fanoutInventoryChange() skips the ShipStation v2 enqueue when the originating recordInventoryChange source is 'shipstation' (SHIP_NOTIFY) or 'reconcile' (drift sensor), preventing double-decrement / oscillation loops
       - guard cached per-call only — no in-process memoization, so a workspaces-row update takes effect on the next fanout invocation
       - fanout_rollout_percent = 100 is a no-op; 0 halts everything; values in between gate by bucket < percent (canary)
 
