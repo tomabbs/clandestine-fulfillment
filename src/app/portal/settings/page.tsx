@@ -1,18 +1,10 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
-import { submitClientStoreCredentials } from "@/actions/client-store-credentials";
 import { getPortalSettings, updateNotificationPreferences } from "@/actions/portal-settings";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
-import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
-
-type Connection = Awaited<ReturnType<typeof getPortalSettings>>["connections"][number];
 
 export default function PortalSettingsPage() {
   const { data, isLoading, error } = useAppQuery({
@@ -61,24 +53,12 @@ export default function PortalSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Store connections */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Store Connections</CardTitle>
-          <CardDescription>Manage your connected stores</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {data.connections.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No store connections yet.</p>
-          ) : (
-            <div className="space-y-4">
-              {data.connections.map((conn) => (
-                <ConnectionCard key={conn.id} connection={conn} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/*
+        Phase 0.8 — Store Connections card removed from client settings.
+        Inventory now syncs to client storefronts via ShipStation Inventory
+        Sync, configured by Clandestine staff. Per-row reactivation lives
+        at /admin/settings/client-store-reconnect for staff use only.
+      */}
 
       {/* Notification preferences */}
       <NotificationPreferences emailEnabled={data.notificationPreferences.email_enabled} />
@@ -128,52 +108,8 @@ function NotificationPreferences({ emailEnabled }: { emailEnabled: boolean }) {
   );
 }
 
-function ConnectionCard({ connection }: { connection: Connection }) {
-  const [apiKey, setApiKey] = useState("");
-  const [apiSecret, setApiSecret] = useState("");
-
-  const submitMut = useAppMutation({
-    mutationFn: () =>
-      submitClientStoreCredentials(connection.id, {
-        apiKey,
-        ...(apiSecret ? { apiSecret } : {}),
-      }),
-    invalidateKeys: [queryKeys.storeConnections.all],
-    onSuccess: () => {
-      setApiKey("");
-      setApiSecret("");
-    },
-  });
-
-  return (
-    <div className="border rounded-lg p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="font-medium capitalize">{connection.platform}</span>
-          <span className="text-muted-foreground text-sm ml-2">{connection.store_url}</span>
-        </div>
-        <Badge variant={connection.connection_status === "active" ? "default" : "secondary"}>
-          {connection.connection_status}
-        </Badge>
-      </div>
-
-      {connection.connection_status === "pending" && (
-        <div className="space-y-2">
-          <Input placeholder="API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-          <Input
-            placeholder="API Secret (optional)"
-            value={apiSecret}
-            onChange={(e) => setApiSecret(e.target.value)}
-          />
-          <Button
-            size="sm"
-            disabled={!apiKey || submitMut.isPending}
-            onClick={() => submitMut.mutate()}
-          >
-            {submitMut.isPending ? "Submitting..." : "Submit Credentials"}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
+// Phase 0.8 — ConnectionCard removed. Per-connection credential submission
+// from the client portal is no longer available; staff manage connections
+// at /admin/settings/store-connections and reactivate dormant rows at
+// /admin/settings/client-store-reconnect when ShipStation Inventory Sync
+// is insufficient for an edge case.

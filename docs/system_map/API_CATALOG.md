@@ -13,6 +13,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
 |---|---|---|---|
 | `GET` | `/api/health` | `src/app/api/health/route.ts` | Runtime health endpoint |
 | `POST` | `/api/webhooks/shopify` | `src/app/api/webhooks/shopify/route.ts` | Shopify webhook ingest (inventory, orders) |
+| `POST` | `/api/webhooks/shipstation` | `src/app/api/webhooks/shipstation/route.ts` | ShipStation `SHIP_NOTIFY` ingest (Phase 2). Verifies `x-ss-signature` HMAC against `SHIPSTATION_WEBHOOK_SECRET`, dedupes via `webhook_events` (`platform='shipstation'`, `external_webhook_id='shipstation:ship_notify:{resource_url}'`), enqueues `process-shipstation-shipment` task. Returns 200 in <500ms. |
 | `POST` | `/api/webhooks/shopify/gdpr` | `src/app/api/webhooks/shopify/gdpr/route.ts` | Combined Shopify GDPR compliance handler (HMAC verified) |
 | `POST` | `/api/webhooks/shopify/gdpr/customers-data-request` | `src/app/api/webhooks/shopify/gdpr/customers-data-request/route.ts` | Shopify GDPR customers data request (HMAC verified, idempotent) |
 | `POST` | `/api/webhooks/shopify/gdpr/customers-redact` | `src/app/api/webhooks/shopify/gdpr/customers-redact/route.ts` | Shopify GDPR customer redact (HMAC verified, idempotent) |
@@ -69,11 +70,18 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/inventory.ts`
   - `src/actions/catalog.ts`
   - `src/actions/product-images.ts`
+  - `src/actions/sku-conflicts.ts` — **Phase 0.5 (2026-04-17)** — SKU rectify queue (staff) + suggest UI (client)
 - Key exports:
   - inventory read/write: `getInventoryLevels`, `adjustInventory`, `getInventoryDetail`, `updateVariantFormat`
   - portal inventory: `getClientInventoryLevels` — starts from `warehouse_product_variants` (LEFT JOIN `warehouse_inventory_levels`) so zero-stock items are visible. Uses service role, filters by `org_id` explicitly.
   - catalog read/write: `getProducts`, `getCatalogStats`, `getProductDetail`, `updateProduct`, `updateVariants`, `searchProductVariants`, `getClientReleases`
   - images: `uploadProductImage`, `reorderProductImages`, `deleteProductImage`, `setFeaturedImage`
+  - SKU conflicts (staff): `listSkuConflicts`, `getSkuConflict`, `applyAliasResolution` (triggers `sku-rectify-via-alias`), `ignoreSkuConflict` — backed by `/admin/catalog/sku-conflicts`
+  - SKU conflicts (client): `listClientSkuMismatches`, `suggestCanonicalSku` — backed by `/portal/catalog/sku-alignment`. `suggestCanonicalSku` uses `createServiceRoleClient` after RLS-validated org_id check.
+- File: `src/actions/bandcamp-baseline.ts` — **Phase 1 (2026-04-17)** — Bandcamp baseline anomaly + multi-origin push_mode admin surface
+  - `forceBaselineScan({ workspaceId? })` — staff-only. Enqueues `bandcamp-baseline-audit` via `tasks.trigger` (Rule #48 + Rule #9). Cross-workspace force-scan rejected.
+  - `setBandcampPushMode({ mappingId, pushMode, reason })` — staff-only. Records `push_mode_set_by` so the next audit run preserves the manual decision (`manual_override` is NEVER auto-cleared by `bandcamp-baseline-audit`).
+  - `listBaselineAnomalies({ status?, limit? })` — staff-only. Reads `bandcamp_baseline_anomalies` scoped to the staff member's workspace; default filter is `status='open'` (resolved_at IS NULL).
 
 ### Inbound + Shipping Log + Orders + Scanning
 
@@ -103,6 +111,61 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `getShipStationOrders({ status?, page?, pageSize? })` — live read from ShipStation `/orders` API, no DB write; staff-only
 - Admin page: `/admin/shipstation-orders` — team's working order queue during bridge period
 - Pirate Ship import surfaced from Shipping Log header → `/admin/shipping/pirate-ship`
+
+### Manual inventory count (Saturday Workstream 2 — 2026-04-18)
+
+- File: `src/actions/manual-inventory-count.ts`
+- Backed by Trigger task: `shipstation-v2-adjust-on-sku` (queue-pinned to `shipstation`, ledger-gated via `external_sync_events`, fanout-guard aware)
+- Key exports (all staff-only via `requireStaff()`):
+  - `getManualCountTable({ orgId, search?, page?, pageSize? })` — returns SKUs filtered to one organization with current `available`, format, and `countStatus`. Used by the bulk table editor to render the editable grid.
+  - `submitManualInventoryCounts({ orgId, entries: [{ sku, newAvailable, force? }] })` — bulk write path. Per row: pre-fetch current available + variant org → compute delta → gate (negative-block / threshold confirm / count-in-progress skip / unknown SKU) → call `recordInventoryChange({ source:'manual_inventory_count', correlationId:'manual-count:{userId}:{batchId}:{sku}' })` → fire `tasks.trigger('shipstation-v2-adjust-on-sku', payload)`. `MAX_ENTRIES_PER_BATCH=200`. Returns per-row `EntryStatus` (`applied` / `no_change` / `blocked_negative` / `requires_confirm` / `skipped_count_in_progress` / `unknown_sku` / `error`).
+- Confirmation gate (chosen `absolute_with_threshold`): `force:true` is required when `|delta| > 10` OR `currentAvailable === 0 && newAvailable > 0` (rising_from_zero) OR `currentAvailable > 0 && newAvailable === 0` (falling_to_zero). UI re-submits the same rows with `force:true` after operator approval.
+- Negative handling (chosen `block_negative_review_queue`): submissions with `newAvailable < 0` are hard-blocked AND a `warehouse_review_queue` row is upserted (`category='manual_count_negative_block'`, `severity='high'`, `group_key='manual-count.negative-block:{workspaceId}:{sku}'`).
+- Fanout (chosen `respect_guard`): Bandcamp + Clandestine Shopify + client-store fanout happens automatically via `recordInventoryChange()` → `fanoutInventoryChange()` → existing `loadFanoutGuard` path. ShipStation v2 push uses the new sibling task because the central fanout pipeline does not include v2 (Phase 4 design intentionally kept v2 fanout direct).
+- Admin page: `/admin/inventory/manual-count` (linked from sidebar NAV_ITEMS as "Manual Count").
+
+### Inventory count sessions + locations (Saturday Workstream 3 — 2026-04-18)
+
+- Files: `src/actions/inventory-counts.ts`, `src/actions/locations.ts`
+- Backed by Trigger tasks: `bulk-create-locations` (queue-pinned to `shipstation` for ranged location mirror), `shipstation-v2-adjust-on-sku` (only fires on completion delta).
+- Schema (already shipped in WS1 migration `20260418000001_phase4b_megaplan_closeout_and_count_session.sql`): `warehouse_inventory_levels` gained `count_status` / `count_started_at` / `count_started_by` / `count_baseline_available` / `has_per_location_data`; `warehouse_locations` gained `shipstation_inventory_location_id` / `shipstation_synced_at` / `shipstation_sync_error`.
+- Count session exports (all staff-only via `requireStaff()`):
+  - `startCountSession(sku)` — flips `count_status` to `count_in_progress`, snapshots `count_baseline_available`, records `count_started_by`. Returns `ALREADY_IN_PROGRESS` / `UNKNOWN_SKU` for safe UI handling.
+  - `setVariantLocationQuantity({ sku, locationId, quantity })` — upserts `warehouse_variant_locations`. Suppresses fanout while `count_status='count_in_progress'`. Idle path routes any non-zero delta through `recordInventoryChange()`. Sets the sticky `has_per_location_data=true` flag on first per-location write.
+  - `completeCountSession(sku)` — re-reads current `available` (defends against concurrent sales), sums `warehouse_variant_locations.quantity_available`, computes delta vs current available (Scenario A: count POST-sale → delta=0; Scenario B: count completes BEFORE sale → delta picks up the live sale), and routes the single resulting delta through `recordInventoryChange({ source:'cycle_count' })`. Clears all `count_*` columns. Idempotent against `NO_ACTIVE_SESSION`.
+  - `cancelCountSession(sku, { rollbackLocationEntries })` — clears the session; optionally restores `warehouse_variant_locations` to baseline.
+  - `getCountSessionState(sku)` — read-only fetch returning `{ status, baselineAvailable, currentAvailable, locations, sumOfLocations, drift, hasPerLocationData }` for UI.
+- Locations exports (all staff-only via `requireStaff()`):
+  - `listLocations({ activeOnly?, search? })` — filtered + ordered list of `warehouse_locations`.
+  - `createLocation({ name, locationType, barcode? })` — inserts local row; one-way mirrors to ShipStation v2 via `createInventoryLocation` (resolves a 409 by calling `listInventoryLocations`). Returns `LOCATION_ALREADY_EXISTS` / `NO_V2_WAREHOUSE_CONFIGURED` / `INVALID_LOCATION_TYPE` for UI fallback.
+  - `createLocationRange({ prefix, start, end, locationType, barcodePrefix? })` — for ≤30 entries the action runs inline with throttling. For >30 it offloads to `tasks.trigger('bulk-create-locations', payload)` and returns `{ status:'enqueued', runId }`.
+  - `updateLocation(id, patch)` — calls ShipStation FIRST when renaming (v4 hardening: local row stays unchanged on v2 failure so retry has truth to retry from). Empty patch is a no-op.
+  - `deactivateLocation(id)` — blocked when any `warehouse_variant_locations.quantity_available > 0` references it.
+  - `retryShipstationLocationSync(id)` — operator-driven retry for rows with `shipstation_sync_error`.
+- Admin UI: existing `/admin/inventory` expanded-row detail now hosts `InventoryCountSessionPanel` (component at `src/components/admin/inventory-count-session-panel.tsx`) — provides "Start count" / in-progress badge / per-location editable list with debounced `setVariantLocationQuantity` / locator typeahead with inline `createLocation` / Complete + Cancel controls.
+- Admin UI: `/admin/inventory/locations` (added 2026-04-18, sprint #2 post-closeout) — operator surface for `warehouse_locations`. Search + filter (location_type, active-only/all), per-row ShipStation v2 sync state (Synced / Local only / Mirror failed with `shipstation_sync_error` on hover), Last-synced relative time, one-click Retry button (calls `retryShipstationLocationSync`), Deactivate button (Server Action refuses with `LOCATION_HAS_INVENTORY` if any `warehouse_variant_locations.quantity > 0`), New-location dialog (calls `createLocation`, surfaces all four `CreateLocationWarning` variants), New-range dialog (calls `createLocationRange`, shows inline-vs-Trigger badge live based on size — §15.5 cap of 30). Inline rename intentionally deferred (Server Action calls v2 first per v4 §17.1.b — failure UX needs more design). Sidebar `NAV_ITEMS` gained "Locations" entry under Inventory.
+
+### Mega-plan verification (Phase 6 closeout)
+
+- File: `src/actions/megaplan-spot-check.ts`
+- Backed by Trigger task: `megaplan-spot-check` (hourly during ramp; persistence rule for drift_major)
+- Key exports (all staff-only via `requireStaff()`):
+  - `triggerSpotCheck()` — enqueues a one-off `megaplan-spot-check` run via `tasks.trigger`. Returns `{ runHandleId }`. Used by the "Run spot-check now" button.
+  - `listSpotCheckRuns(limit = 50)` — reads recent `megaplan_spot_check_runs` rows (header + drift counts only). Used by the runs table.
+  - `getSpotCheckArtifact(runId)` — fetches `artifact_md` + `summary_json` for one run. Used by the per-run dialog.
+- Admin page: `/admin/settings/megaplan-verification` (linked from the settings sidebar group).
+- Rule #48 alignment: never calls ShipStation/Bandcamp/Redis directly — always delegates to the Trigger task.
+
+### ShipStation v2 Inventory Seed (Phase 3)
+
+- File: `src/actions/shipstation-seed.ts`
+- Underlying client: `src/lib/clients/shipstation-inventory-v2.ts` (`adjustInventoryV2`, `listInventoryWarehouses`, `listInventoryLocations`)
+- Key exports (all staff-only, all enforce `requireAuth().userRecord.workspace_id` matches the input `workspaceId`):
+  - `previewShipStationSeed({ workspaceId, inventoryWarehouseId, inventoryLocationId })` — enqueues `shipstation-seed-inventory` with `dryRun: true` and inline-polls up to 25s; returns `{ status: 'completed', taskRunId, output }` or `{ status: 'pending', taskRunId }` if the dry-run takes longer
+  - `triggerShipStationSeed({ … })` — enqueues the real seed run (Rule #41 — Server Action returns immediately with the task run id; the UI polls `listShipStationSeedRuns`)
+  - `listShipStationSeedRuns({ workspaceId, limit? })` — reads the most recent `channel_sync_log` rows where `channel='shipstation_v2'` and `sync_type='seed_inventory'`
+- Admin page: `/admin/settings/shipstation-seed`
+- Rule #48: never calls ShipStation directly — always routes via `tasks.trigger('shipstation-seed-inventory', …)`
 
 ### Billing + Reports + Review Queue
 
@@ -166,7 +229,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - trending: `getBandcampTrending` (live dig_deeper API proxy with client-artist highlighting + 3-min server cache)
   - Sales Report API: `salesReport`, `generateSalesReport`, `fetchSalesReport` (v4, all-time transaction history with catalog_number/upc/isrc); async generate/fetch deprecated in favor of sync sales_report
   - SKU management: `updateSku` (push SKUs to Bandcamp, behind feature flag)
-  - store connections and mappings: connection CRUD/test + mapping and reprocess ops
+  - store connections and mappings: connection CRUD/test + mapping and reprocess ops; **`reactivateClientStoreConnection({ connectionId })`** (Phase 0.8) — staff-only Server Action that flips `do_not_fanout = false`, sets `connection_status = 'active'`, clears `last_error`/`last_error_at`, and writes a `channel_sync_log` audit row tagged with the actor. The dormancy gate at `src/lib/server/client-store-fanout-gate.ts` (`shouldFanoutToConnection()`) is the single chokepoint consulted by `multi-store-inventory-push`, `client-store-order-detect`, `process-client-store-webhook`, and `createStoreSyncClient` — never bypass it. Admin UI: `/admin/settings/client-store-reconnect`.
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`
   - preorder tools: `getPreorderProducts`, `manualRelease` (triggers `preorder-release-variant` for single-variant release — NOT the full fulfillment job), `getPreorderAllocationPreview`
   - Shopify client additions: `inventoryItemUpdate`, `collectionCreate`, `collectionAddProducts`, `findOrCreateCollection`, `publishToSafeChannels`, `getPublicationIds` (all in `src/lib/clients/shopify-client.ts`). Variant input helper: `buildShopifyVariantInput` in `src/lib/clients/shopify-variant-input.ts`.

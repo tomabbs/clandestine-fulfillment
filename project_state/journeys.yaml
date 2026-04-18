@@ -1,5 +1,5 @@
 version: 1
-updated_at: 2026-04-15
+updated_at: 2026-04-18  # Saturday Workstream 3 (2026-04-18): added inventory_count_session + warehouse_locations_source_of_truth journeys (per-SKU count sessions with fanout suppression + cycle_count delta on completion; one-way mirror of warehouse_locations to ShipStation v2 via inline create + bulk-create-locations Trigger task; inline locator typeahead inside the existing /admin/inventory expanded-row detail). Saturday Workstream 2 (2026-04-18): added manual_inventory_count_entry journey (bulk table editor at /admin/inventory/manual-count, ShipStation v2 sibling task, hard-block + review queue on negative counts). Saturday Workstream 1 (Phase 6 closeout): added megaplan_verification journey.
 
 journeys:
   - id: staff_client_invite
@@ -231,6 +231,341 @@ journeys:
       - no silent shipment drop — all upsert errors return early with full context
       - org_id and order_id immutability preserved (Step B update never overwrites them)
 
+  - id: shipstation_ship_notify_inventory
+    area: inventory
+    description: ShipStation SHIP_NOTIFY → inventory decrement → Bandcamp/client store fanout (Phase 2, 2026-04-13)
+    paths:
+      - src/app/api/webhooks/shipstation/route.ts
+      - src/trigger/tasks/process-shipstation-shipment.ts
+      - src/lib/clients/shipstation.ts
+      - src/lib/clients/shipstation-inventory-v2.ts
+      - src/lib/server/record-inventory-change.ts
+      - src/trigger/lib/match-shipment-org.ts
+      - tests/unit/webhooks/shipstation-webhook.test.ts
+      - tests/unit/trigger/process-shipstation-shipment.test.ts
+      - tests/unit/lib/clients/shipstation-inventory-v2.test.ts
+    status: green
+    checks:
+      - route handler verifies x-ss-signature against SHIPSTATION_WEBHOOK_SECRET on raw req.text() body (Rule #36/#63)
+      - dedup via webhook_events UNIQUE(platform, external_webhook_id) keyed shipstation:ship_notify:{resource_url} (Rule #62)
+      - returns 200 in <500ms; heavy work delegated to process-shipstation-shipment task (Rule #66)
+      - processor pinned to shipstation queue (concurrencyLimit 1) and validates resource_url host = ssapi.shipstation.com (SSRF defense)
+      - voided shipments are skipped without org match or inventory write
+      - matchShipmentOrg() unresolvable → review queue severity:high, shipment blocked (no partial inventory writes against unknown org)
+      - findVariantBySkuOrAlias() resolution tiers — direct sku → client_store_sku_mappings.remote_sku → sku_remap_history.from_sku
+      - unknown SKU per line item → review queue severity:medium, other line items in same shipment continue (per-line failure isolation)
+      - inventory write goes through recordInventoryChange() with source:shipstation, correlationId ssv1:shipment:{id}:{sku}, metadata.source_subtype:ship_notify
+      - idempotency on retry via Redis SETNX guard (Rule #47) and warehouse_inventory_activity (sku, correlation_id) UNIQUE in record_inventory_change_txn
+      - Bandcamp / client store fanout happens automatically inside recordInventoryChange — processor never calls APIs directly (Rule #48)
+      - markWebhookEvent merges (does not clobber) the metadata payload set by the route handler when updating status
+
+  - id: shipstation_v2_inventory_batch_only
+    area: integrations
+    description: ShipStation v2 inventory client enforces batch-only reads (Phase 2, 2026-04-13)
+    paths:
+      - src/lib/clients/shipstation-inventory-v2.ts
+      - scripts/check-v2-inventory-batch.sh
+      - scripts/release-gate.sh
+    status: green
+    checks:
+      - listInventory() chunks SKU lists at V2_INVENTORY_LIST_BATCH_LIMIT=50 to bound URL length and rate burn
+      - cursor pagination drives full-tenant enumeration when skus is omitted (limit defaults to 100/page)
+      - api-key header used (NOT Basic auth — that is the v1 ssapi.shipstation.com path)
+      - adjustInventoryV2 rejects modify new_available:0 client-side (Phase 0 Patch D2 — API would 400 anyway, fail fast)
+      - adjustInventoryV2 rejects increment/decrement quantity:0 client-side
+      - adjustInventoryV2 accepts adjust quantity:0 (asymmetric safety net per Patch D2)
+      - module deliberately does NOT export getInventoryBySku — single-record reads do listInventory({skus:[s]})
+      - CI guard scripts/check-v2-inventory-batch.sh fails the release gate on reintroduction of single-SKU read helpers
+
+  - id: shipstation_v2_inventory_seed
+    area: integrations
+    description: One-shot ShipStation v2 inventory seed per workspace (Phase 3, 2026-04-13)
+    paths:
+      - src/trigger/tasks/shipstation-seed-inventory.ts
+      - src/trigger/tasks/shipstation-store-refresh.ts
+      - src/trigger/tasks/index.ts
+      - src/actions/shipstation-seed.ts
+      - src/app/admin/settings/shipstation-seed/page.tsx
+      - src/lib/server/bandcamp-effective-available.ts
+      - src/lib/clients/shipstation-inventory-v2.ts
+      - tests/unit/trigger/shipstation-seed-inventory.test.ts
+      - tests/unit/trigger/shipstation-store-refresh.test.ts
+      - tests/unit/lib/server/bandcamp-effective-available.test.ts
+      - tests/unit/actions/shipstation-seed.test.ts
+    status: green
+    checks:
+      - selection cascade: org_id IS NOT NULL (fulfillment client only) → not in bundle_components.bundle_variant_id (Phase 2.5(a) bundle exclusion) → bandcamp_product_mappings.push_mode='normal' → computeEffectiveBandcampAvailable(bandcamp_origin_quantities) > 0 → warehouse_inventory_levels.available > 0
+      - origin sum is computed from bandcamp_origin_quantities (Bandcamp's actual controlled stock), NOT the customer-facing TOP quantity_available which can be inflated by merchant-set baselines (Part 9 audit finding)
+      - push value = warehouse_inventory_levels.available via adjustInventoryV2({ transaction_type:'increment' }); the Phase 1 bandcamp-sync seed correction populates warehouse_inventory_levels from the origin sum upstream
+      - idempotent via external_sync_events ledger keyed by (system='shipstation_v2', correlation_id='seed:{workspace_id}:{run_id}', sku, action='increment') — retries with the same ctx.run.id short-circuit on duplicate insert
+      - pinned to shipstationQueue (concurrencyLimit 1, shared with process-shipstation-shipment) so seed bursts cannot starve real-time SHIP_NOTIFY processing or vice versa
+      - dryRun mode evaluates the full gate cascade without calling adjustInventoryV2 — drives the admin Preview button
+      - bulk-shaped operation — does NOT route through recordInventoryChange() (Rule #59); Phase 5 reconcile sensor catches drift
+      - Server Action gates: requireAuth + isStaff + workspaceId == userRecord.workspace_id; Rule #41 (no unbounded work — preview polls inline up to 25s then returns pending status); Rule #48 (never calls ShipStation directly — always tasks.trigger)
+      - run history written to channel_sync_log (channel='shipstation_v2', sync_type='seed_inventory') for the admin "Recent runs" panel
+      - shipstation-store-refresh task is currently a STUB returning status:'deferred' with reason 'endpoint_tbd_using_24h_auto_import_fallback' until Open Question #2 (public refresh endpoint) is resolved; logs the request to channel_sync_log so operators can see refresh attempts
+
+  - id: bandcamp_warehouse_seed_origin_truth
+    area: integrations
+    description: bandcamp-sync warehouse_inventory_levels seed reflects controlled stock (origin sum), not customer-facing TOP (Phase 1 follow-up #2, 2026-04-13)
+    paths:
+      - src/lib/server/bandcamp-effective-available.ts
+      - src/trigger/tasks/bandcamp-sync.ts
+      - tests/unit/lib/server/bandcamp-effective-available.test.ts
+    status: green
+    checks:
+      - computeBandcampSeedQuantity({ quantity_available, origin_quantities }) is the only function that decides the warehouse seed quantity from Bandcamp; both seed sites in bandcamp-sync.ts (existing-mapping bandcamp_initial branch and brand-new-variant block) consume it
+      - non-empty origin_quantities array → trust the origin sum (Lord Spikeheart shape: TOP=100, origin=0 → seed 0); empty/null → fall back to TOP and tag effective_source='top_fallback' so operators can grep warehouse_inventory_activity for merchants without origin metadata
+      - recordInventoryChange metadata always includes effective_source ∈ {origin_sum, top_fallback, zero}, effective_quantity, top_quantity_available
+      - hard prerequisite for Phase 4: SHIP_NOTIFY decrements would otherwise echo inflated values back to Bandcamp via update_quantities, doubling customer-visible stock
+
+  - id: bundle_availability_shared_helper
+    area: integrations
+    description: Single shared bundle availability math consumed by every fanout site (Phase 2.5(b), 2026-04-13)
+    paths:
+      - src/lib/server/bundles.ts
+      - src/trigger/tasks/bandcamp-inventory-push.ts
+      - tests/unit/lib/server/bundles-availability.test.ts
+    status: green
+    checks:
+      - computeBundleAvailability(components, componentInventory) returns +Infinity for empty components so callers chain naturally with Math.min(bundleStock, …)
+      - computeEffectiveBundleAvailable(bundleStockOnHand, components, componentInventory) is the canonical formula; bandcamp-inventory-push and (eventually) Phase 4 v2 fanout MUST consume it instead of inlining the MIN math
+      - per-unit quantity ≤ 0 is normalized to 1 (defensive; never propagates a divide-by-zero from misconfigured bundle rows)
+
+  - id: bundle_derived_drift_sensor
+    area: integrations
+    description: Hourly sensor that compares ShipStation v2 bundle SKU `available` to derived value (Phase 2.5(c), 2026-04-13)
+    paths:
+      - src/trigger/tasks/bundle-derived-drift.ts
+      - src/trigger/tasks/index.ts
+      - tests/unit/trigger/bundle-derived-drift.test.ts
+    status: green
+    checks:
+      - cron 0 * * * * pinned to shipstation queue (concurrencyLimit 1, shared with seed and SHIP_NOTIFY processing)
+      - per workspace: derived = computeEffectiveBundleAvailable(bundleStock, components, componentInventory); v2.available fetched via listInventory({ skus: [bundleSkus] }) (batch path — TRUTH_LAYER batch-only invariant)
+      - drift > BUNDLE_DRIFT_TOLERANCE (default 2) opens warehouse_review_queue row keyed group_key='bundle.derived_drift:{workspace_id}:{sku}' (Rule #55 dedupe — re-detection bumps occurrence_count on the open row instead of inserting a duplicate)
+      - bundle SKUs that v2 does NOT return are silently skipped (Phase 2.5(a) excludes bundles from seed by design — missing v2 row is the desired state, not a failure)
+      - sensor never writes inventory; Rule #20 write path untouched
+      - logs channel_sync_log row per workspace (channel='shipstation_v2', sync_type='bundle_derived_drift') so the run is observable from the admin Recent runs panel
+
+  - id: phase4_sale_to_shipstation_v2_decrement
+    area: inventory
+    description: Bandcamp sale → ShipStation v2 decrement focused push (Phase 4 forward leg, 2026-04-13)
+    paths:
+      - src/trigger/tasks/bandcamp-sale-poll.ts
+      - src/trigger/tasks/shipstation-v2-decrement.ts
+      - src/trigger/tasks/index.ts
+      - src/lib/server/external-sync-events.ts
+      - src/lib/server/fanout-guard.ts
+      - src/lib/clients/shipstation-inventory-v2.ts
+      - supabase/migrations/20260413000020_phase4_v2_warehouse_defaults.sql
+      - tests/unit/trigger/shipstation-v2-decrement.test.ts
+    status: green
+    checks:
+      - bandcamp-sale-poll.ts enqueues shipstation-v2-decrement after each successful recordInventoryChange() — never short-circuits the cron path
+      - new shipstation-v2-decrement task is pinned to shipstationQueue (concurrencyLimit 1, shared with seed + SHIP_NOTIFY processing) so v2 rate budget is honored
+      - correlation_id shape sale:{band_id}:{package_id}:{newSold}:{sku} — same shape across the sale-poll trigger and the v2 ledger row, so a replayed sale-poll run cannot double-decrement
+      - fanout-guard.evaluate('shipstation', correlationId) consulted first; pause flag or rollout bucket exclusion → status:'skipped_guard' (no ledger row, no API call)
+      - workspaces.shipstation_v2_inventory_warehouse_id / _location_id NULL → status:'skipped_no_v2_defaults' (operator hasn't wired v2 for this workspace yet)
+      - bundle parent SKU (warehouse_product_variants.id appears in bundle_components.bundle_variant_id) → status:'skipped_bundle_parent' (Phase 2.5(a) excludes bundles from v2 by design)
+      - external_sync_events ledger row keyed (system='shipstation_v2', correlation_id, sku, action='decrement') — duplicate insert returns acquired:false → status:'skipped_ledger_duplicate'
+      - adjustInventoryV2 called with transaction_type:'decrement' exclusively — NEVER modify (Phase 0 Patch D2 contract); client-side validator would reject the wrong shape anyway
+      - non-positive quantity payload rejected up-front (defensive — the wired call site never sends negatives)
+      - on API error, markExternalSyncError records the failure on the ledger row before re-throwing so the Trigger run lands in retry/error visibility AND the next replay observes the failed row (does NOT short-circuit on prior error)
+      - phase 4 ramp posture: every workspace starts at fanout_rollout_percent = 0; operator promotes 0 → 10 → 50 → 100 per integration after canary observation
+
+  - id: phase4_ship_notify_to_bandcamp_push
+    area: inventory
+    description: ShipStation SHIP_NOTIFY → Bandcamp focused per-SKU push (Phase 4 reverse leg, 2026-04-13)
+    paths:
+      - src/trigger/tasks/process-shipstation-shipment.ts
+      - src/trigger/tasks/bandcamp-push-on-sku.ts
+      - src/trigger/tasks/index.ts
+      - src/lib/server/external-sync-events.ts
+      - src/lib/server/fanout-guard.ts
+      - src/lib/clients/bandcamp.ts
+      - tests/unit/trigger/bandcamp-push-on-sku.test.ts
+    status: green
+    checks:
+      - process-shipstation-shipment.ts enqueues bandcamp-push-on-sku after each per-line successful recordInventoryChange() — per-line failure isolation preserved (one bad line never blocks fanout for the others)
+      - new bandcamp-push-on-sku task is pinned to bandcampQueue (concurrencyLimit 1) per Rule #9 so OAuth token use stays serialized across the sync/push/sale-poll/focused-push family
+      - correlation_id shape ship:{shipmentId}:{sku} — replays of the same shipment short-circuit on the same ledger row instead of re-pushing
+      - fanout-guard.evaluate('bandcamp', correlationId) consulted first; pause flag or rollout bucket exclusion → status:'skipped_guard'
+      - distro variant (warehouse_products.org_id IS NULL) → status:'skipped_distro' (Clandestine-owned items have no Bandcamp upstream)
+      - bundle parent SKU → status:'skipped_bundle_parent' (cron bandcamp-inventory-push handles bundles via derived availability)
+      - missing bandcamp_product_mappings → status:'skipped_no_mapping' (variant has no upstream Bandcamp item to push to)
+      - bandcamp_product_mappings.push_mode NOT IN ('normal','manual_override') → status:'skipped_push_mode' (blocked_baseline / blocked_multi_origin / etc. routes through cron only)
+      - option-level mapping (bandcamp_origin_quantities encodes per-option breakdown) → status:'skipped_option_level' (deferred to bandcamp-inventory-push cron in Phase 4; focused leg is package-level only)
+      - pushed_quantity = MAX(0, warehouse_inventory_levels.available - effective_safety_stock); never push negative
+      - external_sync_events ledger row keyed (system='bandcamp', correlation_id, sku, action='modify') — duplicate insert returns acquired:false → status:'skipped_ledger_duplicate'
+      - updateQuantities() called with refreshed access token via refreshBandcampToken(workspaceId); never retains stale token
+      - on API error, markExternalSyncError records the failure before re-throwing; cron bandcamp-inventory-push runs every 5 min as the safety net if focused push fails for any reason
+
+  - id: phase5_tiered_shipstation_v2_reconcile
+    area: inventory
+    description: Steady-state ShipStation v2 ↔ DB drift detector + auto-fixer (Phase 5, 2026-04-13)
+    paths:
+      - src/trigger/tasks/shipstation-bandcamp-reconcile.ts
+      - src/trigger/tasks/index.ts
+      - src/lib/server/record-inventory-change.ts
+      - src/lib/clients/shipstation-inventory-v2.ts
+      - src/lib/shared/types.ts
+      - supabase/migrations/20260413000030_phase5_reconcile_and_sku_sync_status.sql
+      - tests/unit/trigger/shipstation-bandcamp-reconcile.test.ts
+      - src/app/admin/settings/shipstation-inventory/page.tsx
+      - src/actions/shipstation-inventory-monitor.ts
+    status: green
+    checks:
+      - three Trigger.dev schedule wrappers (shipstation-bandcamp-reconcile-{hot,warm,cold}-schedule) plus on-demand shipstation-bandcamp-reconcile-task all delegate to a single runShipstationBandcampReconcile(tier, payload, ctx, deps) — schedule wrappers exist purely to bind the cron string; logic lives in one place
+      - all four pinned to shipstationQueue (concurrencyLimit 1, shared with seed + SHIP_NOTIFY processing + v2 decrement + bundle-derived-drift) so the v2 60 req/min budget stays serialized
+      - tier cron strings are FROZEN — hot */5, warm */30, cold 0 */6; changing any requires plan §7.1.6.1 amendment
+      - workspaces.shipstation_v2_inventory_warehouse_id / _location_id NULL → run records status:'skipped_no_v2_defaults' on channel_sync_log and exits without touching v2; operator must wire v2 defaults before reconcile activates
+      - bundle parents (warehouse_product_variants.id appears in bundle_components.bundle_variant_id) excluded from candidate set — Phase 2.5(c) bundle-derived-drift-sensor owns bundles
+      - candidate selection by tier — hot = warehouse_inventory_levels.available <= HOT_LOW_STOCK_THRESHOLD (10) UNION warehouse_inventory_activity rows where delta < 0 in last 24h; warm = 30-day negative-delta SKUs; cold = full per-workspace catalog
+      - v2 reads via listInventory({ skus, inventory_warehouse_id, inventory_location_id }) — Rule §7.1.6, NEVER per-SKU getInventoryBySku; client-side helper auto-chunks at V2_INVENTORY_LIST_BATCH_LIMIT
+      - SKU-at-zero equality (Phase 0 §4.2.3) — a v2 row missing for a SKU is treated as available:0; if our DB also says 0, drift is 0 and we skip; if our DB says > 0, drift is absorbed downward via recordInventoryChange
+      - drift thresholds (plan §7.1.6.1) — |drift| <= SILENT_DRIFT_TOLERANCE (1) silent auto-fix; 2 <= |drift| <= HIGH_SEVERITY_DRIFT_THRESHOLD (5) auto-fix + low-severity review row; |drift| > 5 auto-fix + high-severity review row (surfaced on Channels page)
+      - auto-fix flows ALWAYS through recordInventoryChange({ source:'reconcile', correlationId:'reconcile:{tier}:{run_id}:{sku}' }) — schema migration 20260413000030 extends warehouse_inventory_activity_source_check to admit 'reconcile'
+      - reconcile NEVER writes to v2 — v2 is the source of truth at this layer; writes to other downstream systems happen implicitly via the recordInventoryChange fanout step (no direct external API calls from this task)
+      - review queue dedup uses group_key='reconcile.qty_drift:{workspace_id}:{sku}' (Rule #55) — re-detection on an existing OPEN row bumps occurrence_count and may escalate severity low → high if drift widens; resolved rows are NOT auto-reopened
+      - per-tier channel_sync_log row written with channel='shipstation_v2', sync_type='reconcile_{tier}', status, drift_count payload — drives admin monitoring page tier cards
+      - on-demand shipstation-bandcamp-reconcile-task accepts { workspaceId, tier, dryRun? } and is invokable via triggerReconcileRun() Server Action for manual reruns from /admin/settings/shipstation-inventory
+      - reconcile + Phase 4 focused legs are complementary — focused legs catch real-time changes; reconcile catches what focused legs drop (transient v2 errors, retries that exceeded backoff, manual operator edits inside ShipStation UI)
+
+  - id: phase5_sku_sync_status_view
+    area: inventory
+    description: Canonical per-SKU sync state denormalized into one read (Phase 5, 2026-04-13)
+    paths:
+      - supabase/migrations/20260413000030_phase5_reconcile_and_sku_sync_status.sql
+      - src/actions/shipstation-inventory-monitor.ts
+      - src/app/admin/settings/shipstation-inventory/page.tsx
+    status: green
+    checks:
+      - sku_sync_status view exposes one row per warehouse_product_variant — workspace_id, org_id, sku, is_distro (org_id IS NULL), has_bandcamp_mapping, bandcamp_push_mode, bandcamp_push_blocked, baseline_anomaly_open, sku_conflict_open, last_shipstation_push_at, last_bandcamp_push_at, last_external_error, available, last_internal_write_at
+      - last_shipstation_push_at / last_bandcamp_push_at sourced from external_sync_events (system='shipstation_v2'/'bandcamp', status='success', MAX(completed_at)) — guaranteed accurate against the bidirectional bridge ledger
+      - last_external_error sourced from the latest external_sync_events row with status='error' for the SKU regardless of system — single field surfaces the most recent bridge failure
+      - available + last_internal_write_at sourced from warehouse_inventory_levels — last_internal_write_at is bumped by recordInventoryChange on every write (Rule #27 race-condition contract)
+      - bandcamp_push_blocked = (bandcamp_push_mode <> 'normal') — surfaces blocked_baseline / blocked_multi_origin / manual_override (Phase 1 contract) without callers knowing the enum values
+      - getSkuSyncStatus(workspaceId, sku) Server Action does a single SELECT against the view — admin SKU-spotlight panel does NOT reconstruct truth from 6+ joins per request
+      - LIVE view today; materialization deferred until any admin surface exceeds 500ms p95 (Open Question #9). Switching to a materialized view requires a refresh trigger on warehouse_inventory_levels + bandcamp_product_mappings + external_sync_events writes
+      - no RLS policy on the view itself — it inherits from the underlying tables (warehouse_product_variants, warehouse_products, bandcamp_product_mappings, etc.); is_staff_user() check happens upstream in the Server Action layer
+
+  - id: per_integration_kill_switches_and_rollouts
+    area: operational_hardening
+    description: Per-integration pause + percentage rollout via deterministic correlation_id bucketing (Tier 1 hardening #1, #13, 2026-04-13)
+    paths:
+      - supabase/migrations/20260413000010_tier1_hardening.sql
+      - src/lib/shared/types.ts
+      - src/lib/server/fanout-guard.ts
+      - src/lib/server/inventory-fanout.ts
+      - tests/unit/lib/server/fanout-guard.test.ts
+    status: green
+    checks:
+      - workspaces table carries shipstation_sync_paused, bandcamp_sync_paused, clandestine_shopify_sync_paused, client_store_sync_paused (each with _paused_at + _paused_by audit columns) and fanout_rollout_percent smallint NOT NULL DEFAULT 100 CHECK (BETWEEN 0 AND 100)
+      - fanout-guard.ts is the single chokepoint — loadFanoutGuard(supabase, workspaceId) + guard.shouldFanout(integration, correlationId)
+      - rollout bucketing is deterministic (32-bit FNV-1a over correlation_id → 0..99 bucket); same correlation_id always lands in the same bucket, so replays re-evaluate identically
+      - global pause checked first, then integration-specific pause, then rollout percent (bucket < percent passes)
+      - inventory-fanout.ts consults the guard before each integration push (Clandestine Shopify, client stores, Bandcamp); ShipStation v2 fanout will be wired in Phase 4 against the same chokepoint
+      - guard cached per-call only — no in-process memoization, so a workspaces-row update takes effect on the next fanout invocation
+      - fanout_rollout_percent = 100 is a no-op; 0 halts everything; values in between gate by bucket < percent (canary)
+
+  - id: external_sync_events_retention
+    area: operational_hardening
+    description: Daily ledger retention cron with backing partial index (Tier 1 hardening #14, 2026-04-13)
+    paths:
+      - supabase/migrations/20260413000010_tier1_hardening.sql
+      - src/trigger/tasks/external-sync-events-retention.ts
+      - src/trigger/tasks/index.ts
+      - tests/unit/trigger/external-sync-events-retention.test.ts
+      - docs/operations/runbooks/external-sync-events-retention.md
+    status: green
+    checks:
+      - cron 30 3 * * * America/New_York — runs daily after most overnight syncs settle
+      - deletes status='success' AND completed_at < now() - 7d
+      - deletes status='error' AND completed_at < now() - 30d (retained for forensics)
+      - backed by partial index idx_external_sync_events_completed_status (status, completed_at) WHERE completed_at IS NOT NULL — never table-scans
+      - logs deletion counts; missing rows is a no-op (idempotent)
+      - never touches in-flight rows (status='pending' or completed_at IS NULL); ledger idempotency contract intact
+
+  - id: daily_reconciliation_report
+    area: operational_hardening
+    description: Daily ops digest aggregating sync events, review queue, and channel_sync_log (Tier 1 hardening #11, 2026-04-13)
+    paths:
+      - src/trigger/tasks/daily-recon-summary.ts
+      - src/trigger/tasks/index.ts
+      - src/lib/shared/env.ts
+      - tests/unit/trigger/daily-recon-summary.test.ts
+      - docs/operations/runbooks/daily-recon-summary.md
+    status: green
+    checks:
+      - cron 0 12 * * * UTC
+      - aggregates last-24h external_sync_events grouped by (system, success|error)
+      - aggregates open warehouse_review_queue grouped by severity
+      - aggregates channel_sync_log failures + partials grouped by channel
+      - logs structured report; if OPS_ALERT_EMAIL is set, also delivers a plaintext email digest via Resend
+      - read-only by contract — never mutates state
+      - renderReportBody is a pure function and unit-tested independently of the email transport
+
+  - id: weekly_backup_verify
+    area: operational_hardening
+    description: Weekly probe of critical-table aliveness + freshness (Tier 1 hardening #8 agent slice, 2026-04-13)
+    paths:
+      - src/trigger/tasks/weekly-backup-verify.ts
+      - src/trigger/tasks/index.ts
+      - tests/unit/trigger/weekly-backup-verify.test.ts
+      - docs/operations/runbooks/weekly-backup-verify.md
+      - docs/operations/runbooks/backup-verify.md
+    status: green
+    checks:
+      - cron 0 9 * * 0 UTC (Sundays)
+      - probes workspaces, warehouse_inventory_levels, warehouse_product_variants, warehouse_orders, external_sync_events
+      - asserts non-zero count(*) per table
+      - asserts most-recent timestamp column within per-table freshness threshold (orders ≤ 14d, sync events ≤ 7d, etc.)
+      - emits alert-level log lines on stale or empty tables; SLO doc maps these to PagerDuty
+      - does NOT exercise full sandbox restore — operator-led, documented in backup-verify.md
+      - sensor-grade liveness only; restorability is the operator's responsibility
+
+  - id: tenant_isolation_integration_test
+    area: operational_hardening
+    description: Cross-workspace RLS denial test (Tier 1 hardening #3, 2026-04-13)
+    paths:
+      - tests/integration/tenant-isolation.test.ts
+      - vitest.integration.config.ts
+      - package.json
+    status: green
+    checks:
+      - vitest.integration.config.ts is the dedicated integration test config (timeout 60s, node env)
+      - pnpm test:integration is the canonical invocation
+      - test seeds two synthetic workspaces with overlapping data shapes via service-role client
+      - attempts cross-workspace reads from the anon client authenticated as workspace-A's user
+      - asserts RLS denies access to workspace-B's warehouse_products, warehouse_inventory_levels, and adjacent org-scoped tables
+      - skips gracefully when SUPABASE_INTEGRATION_* env vars are unset (so unit-test suites stay decoupled)
+      - wired into release-gate when integration secrets are available
+
+  - id: service_role_audit_and_ci_guard
+    area: operational_hardening
+    description: Manifest + CI guard preventing undocumented createServiceRoleClient introductions (Tier 1 hardening #2, 2026-04-13)
+    paths:
+      - docs/security/service-role-usage.md
+      - scripts/check-service-role-usage.sh
+    status: green
+    checks:
+      - manifest enumerates every createServiceRoleClient() call site under src/** with a justification (Trigger task / webhook / OAuth handler / Server Action / shared lib)
+      - CI script greps src/** for createServiceRoleClient (excluding tests + the helper itself), counts unique files, fails the build if the count drifts from manifest entries
+      - new service-role usages require a manifest entry in the same PR — preventing undocumented RLS bypass
+
+  - id: sentry_inventory_fanout_tracing
+    area: operational_hardening
+    description: Sentry distributed tracing wraps the inventory fanout entry point (Tier 1 hardening #4, 2026-04-13)
+    paths:
+      - src/lib/server/inventory-fanout.ts
+    status: green
+    checks:
+      - fanoutInventoryChange opens Sentry.startSpan({ name: 'inventory.fanout', op: 'fanout' }) with workspace_id, sku, delta, correlation_id as attributes
+      - each Shopify push wrapped in a child span
+      - errors inside the span auto-capture to Sentry (Trigger.dev tasks initialise @sentry/node per Rule #49)
+      - the span graph is the single observability handle for "what happened during a fanout"
+
   - id: shipping_billing_pipeline
     area: billing
     paths:
@@ -248,6 +583,92 @@ journeys:
       - monthly-billing pre-flight check verifies storage_fee exists
       - billing snapshot warnings embedded in snapshot_data
       - sensor_readings written on task completion/failure
+
+  - id: megaplan_verification
+    area: admin_settings
+    paths:
+      - src/app/admin/settings/megaplan-verification/page.tsx
+      - src/actions/megaplan-spot-check.ts
+      - src/trigger/tasks/megaplan-spot-check.ts
+      - src/trigger/tasks/deferred-followups-reminder.ts
+      - docs/DEFERRED_FOLLOWUPS.md
+      - docs/MEGA_PLAN_VERIFICATION_2026-04-13.md
+      - supabase/migrations/20260418000001_phase4b_megaplan_closeout_and_count_session.sql
+    status: green
+    checks:
+      - hourly cron samples 5 SKUs/client (15 during ramp) per workspace via megaplan_sample_skus_per_client RPC and persists artifact to megaplan_spot_check_runs
+      - drift_major review queue item only created when same SKU is drift_major in two consecutive runs (persistence rule v4 §5.3 — eliminates transient lag noise)
+      - count_in_progress SKUs are excluded from the sample (R-1 — transient drift expected mid-count)
+      - daily 09:00 UTC reminder cron upserts warehouse_review_queue item per workspace for every DEFERRED_FOLLOWUPS.md entry whose due_date <= today (group_key UNIQUE per migration 20260401000003)
+      - admin page surfaces recent runs table + "Run spot-check now" button (calls tasks.trigger via Server Action) + per-run markdown artifact dialog
+      - signed verification artifact docs/MEGA_PLAN_VERIFICATION_2026-04-13.md is the closeout signoff target (sections A automated gates, B phase closeouts, C deferred items, D Tier 1 status, E operator signoff)
+
+  - id: manual_inventory_count_entry
+    area: admin_inventory
+    paths:
+      - src/app/admin/inventory/manual-count/page.tsx
+      - src/actions/manual-inventory-count.ts
+      - src/trigger/tasks/shipstation-v2-adjust-on-sku.ts
+      - src/lib/server/record-inventory-change.ts
+      - src/lib/server/inventory-fanout.ts
+      - src/lib/shared/types.ts
+      - tests/unit/actions/manual-inventory-count.test.ts
+      - supabase/migrations/20260418000001_phase4b_megaplan_closeout_and_count_session.sql
+      - src/components/admin/admin-sidebar.tsx
+    status: green
+    checks:
+      - bulk table editor scoped per-client (defaults to picking from getOrganizations() — no cross-client mixing)
+      - confirmation gate fires on |delta| > 10 OR rising_from_zero OR falling_to_zero (force:true bypasses after operator approval)
+      - newAvailable < 0 hard-blocks the row AND upserts warehouse_review_queue with category=manual_count_negative_block, severity=high, group_key=manual-count.negative-block:{ws}:{sku} (occurrence_count auto-bumps via UNIQUE group_key)
+      - SKUs with count_status=count_in_progress are skipped (cycle count session has priority — Workstream 3)
+      - per-row write goes through recordInventoryChange({source:'manual_inventory_count'}) with stable correlationId manual-count:{userId}:{batchId}:{sku} (Rule #15 — safe retries)
+      - Bandcamp + Clandestine Shopify + client-store fanout fires automatically through fanoutInventoryChange() → loadFanoutGuard() (Rule #20 single write path) — respects fanout-guard kill switches and rollout percentages
+      - ShipStation v2 fanout via tasks.trigger('shipstation-v2-adjust-on-sku') — sibling of shipstation-v2-decrement, handles BOTH directions of delta, ledger-gated via external_sync_events, queue-pinned to shipstation (concurrency 1)
+      - failure to enqueue ShipStation v2 sync is logged but non-fatal (Phase 5 reconcile sensor is the backstop) — DB+Redis are already updated
+      - MAX_ENTRIES_PER_BATCH=200 caps Server Action runtime per Rule #41
+      - companion test covers 13 cases: applied, no_change, blocked_negative, requires_confirm × 3 reasons, force:true bypass, unknown_sku × 2, count_in_progress skip, ShipStation enqueue resilience, batch cap rejection, stable correlationId
+
+  - id: inventory_count_session
+    area: admin_inventory
+    paths:
+      - src/actions/inventory-counts.ts
+      - src/components/admin/inventory-count-session-panel.tsx
+      - src/app/admin/inventory/page.tsx
+      - src/lib/server/record-inventory-change.ts
+      - tests/unit/actions/inventory-counts.test.ts
+      - supabase/migrations/20260418000001_phase4b_megaplan_closeout_and_count_session.sql
+    status: green
+    checks:
+      - startCountSession flips warehouse_inventory_levels.count_status to count_in_progress, snapshots count_baseline_available, records count_started_by; ALREADY_IN_PROGRESS / UNKNOWN_SKU returned for safe UI handling
+      - setVariantLocationQuantity SUPPRESSES fanout while count_status=count_in_progress; idle-path non-zero deltas route through recordInventoryChange (Rule #20 single write path); first per-location write sets sticky has_per_location_data=true
+      - completeCountSession re-reads current available (defends against concurrent sales — Scenario A count POST-sale yields delta=0; Scenario B count BEFORE sale picks up the live sale), routes single delta through recordInventoryChange({source:'cycle_count', correlationId:'count-session:{ws}:{sku}:{startedAt}'}), then clears all count_* columns; idempotent against NO_ACTIVE_SESSION
+      - cancelCountSession({rollbackLocationEntries}) clears the session and optionally restores warehouse_variant_locations to baseline
+      - getCountSessionState returns {status, baselineAvailable, currentAvailable, locations, sumOfLocations, drift, hasPerLocationData} for the UI panel
+      - InventoryCountSessionPanel mounted in the existing /admin/inventory expanded-row detail (no standalone page) — Start/Complete/Cancel + per-location editable list with debounced saves + locator typeahead with inline createLocation; standalone /admin/inventory/locations deferred to Sunday
+      - schema columns (count_status, count_started_at, count_started_by, count_baseline_available, has_per_location_data) shipped in the WS1 migration so the WS3 sub-tasks add no new SQL
+      - companion test covers fanout-suppression-while-counting, idle-path delta routing, sticky has_per_location_data flag, ALREADY_IN_PROGRESS, UNKNOWN_SKU, UNKNOWN_LOCATION, INVALID_QUANTITY, Scenario A delta=0, non-zero delta exactly-once cycle_count, NO_ACTIVE_SESSION, recordInventoryChange failure surfacing
+
+  - id: warehouse_locations_source_of_truth
+    area: admin_inventory
+    paths:
+      - src/actions/locations.ts
+      - src/lib/clients/shipstation-inventory-v2.ts
+      - src/trigger/tasks/bulk-create-locations.ts
+      - src/components/admin/inventory-count-session-panel.tsx
+      - tests/unit/actions/locations.test.ts
+      - tests/unit/lib/clients/shipstation-inventory-v2.test.ts
+      - supabase/migrations/20260418000001_phase4b_megaplan_closeout_and_count_session.sql
+    status: green
+    checks:
+      - warehouse_locations is the source of truth — ShipStation v2 inventory locations are a one-way mirror via createInventoryLocation / updateInventoryLocation / deleteInventoryLocation
+      - createLocation inserts the local row first, then mirrors to v2 ONLY when workspaces.shipstation_v2_inventory_warehouse_id is set; 409 conflicts resolved by listInventoryLocations and stored as shipstation_inventory_location_id; non-409 mirror failures store shipstation_sync_error for retryShipstationLocationSync
+      - createLocationRange runs inline with throttling for ≤30 entries; >30 entries offload to tasks.trigger('bulk-create-locations') and return {status:'enqueued', runId} (Rule #41 — Server Actions stay bounded)
+      - updateLocation (rename) calls ShipStation FIRST so a v2 failure leaves the local row unchanged and a retry has truth to retry from (v4 hardening)
+      - deactivateLocation is blocked when any warehouse_variant_locations.quantity_available > 0 references it
+      - retryShipstationLocationSync handles operator-driven retries for rows with shipstation_sync_error
+      - bulk-create-locations Trigger task is pinned to the shipstation queue (concurrency 1, shares v2 60 req/min budget); respects workspaces.shipstation_sync_paused; partial failures surface as a single warehouse_review_queue row at task exit (category=location_bulk_mirror_partial)
+      - per-location semantics probe (plan §15.3) GATES the deferred per-location rewrite of shipstation-v2-sync-on-sku — until the probe outcome is in, writes route through the existing SKU-level v2 path (has_per_location_data is the sticky flag the rewrite will key on)
+      - companion tests cover: createLocation happy path + no_v2_warehouse_configured + 409 conflict resolution + non-409 mirror failure + invalid_location_type + duplicate name; createLocationRange Trigger routing vs inline; updateLocation rename mirror failure/success + empty patch; deactivateLocation blocked-with-inventory; retryShipstationLocationSync (already_synced, successful retry, 409 resolution, missing warehouse id); v2 client createInventoryLocation / updateInventoryLocation / deleteInventoryLocation (happy paths + 409 + 5xx + legacy shape defense)
 
   - id: list_pagination_session_prefs
     area: ui

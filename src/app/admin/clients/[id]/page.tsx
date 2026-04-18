@@ -981,7 +981,7 @@ function PortalPageVisibilityCard({
         </p>
         <div className="grid grid-cols-2 gap-4">
           {resolvedPages.map((page) => (
-            <label
+            <div
               key={page.key}
               className="flex items-center justify-between rounded-md border px-4 py-3"
             >
@@ -990,8 +990,9 @@ function PortalPageVisibilityCard({
                 checked={page.visible}
                 onCheckedChange={(checked: boolean) => handleToggle(page.key, checked)}
                 disabled={visibilityMut.isPending}
+                aria-label={`Toggle visibility of ${page.title}`}
               />
-            </label>
+            </div>
           ))}
         </div>
       </CardContent>

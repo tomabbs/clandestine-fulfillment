@@ -2,7 +2,6 @@
 
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
 import { getPortalDashboard } from "@/actions/portal-dashboard";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -87,49 +86,13 @@ export default function PortalHomePage() {
         </Card>
       )}
 
-      {/* Sync health */}
-      {data.connections.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Store Connections</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {data.connections.map((conn) => (
-                <div key={conn.id} className="flex items-center justify-between text-sm">
-                  <span className="capitalize">
-                    {conn.platform} — {conn.store_url}
-                  </span>
-                  <Badge variant={conn.connection_status === "active" ? "default" : "destructive"}>
-                    {conn.connection_status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Store connections */}
-      {data.connections.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Connected Stores</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {data.connections.map((c) => (
-                <div key={c.id} className="flex items-center justify-between text-sm">
-                  <span className="capitalize">{c.platform}</span>
-                  <span className="text-muted-foreground text-xs truncate max-w-[200px]">
-                    {c.store_url}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/*
+        Phase 0.8 — Store Connections / Connected Stores cards removed from
+        the client home. Inventory now flows through ShipStation Inventory
+        Sync, configured by Clandestine staff. Operators reactivate dormant
+        connectors per-row at /admin/settings/client-store-reconnect when
+        ShipStation is insufficient for an edge case.
+      */}
     </div>
   );
 }

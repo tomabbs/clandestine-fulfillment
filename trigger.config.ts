@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import * as Sentry from "@sentry/node";
-import { syncEnvVars } from "@trigger.dev/build/extensions/core";
+import { additionalFiles, syncEnvVars } from "@trigger.dev/build/extensions/core";
 import { defineConfig } from "@trigger.dev/sdk";
 import { parse } from "dotenv";
 
@@ -31,6 +31,10 @@ export default defineConfig({
   },
   build: {
     extensions: [
+      // Bundle deferred-followups registry into the Trigger build so the
+      // deferred-followups-reminder task can read it at runtime. The file
+      // sits outside src/ so we have to opt it in explicitly.
+      additionalFiles({ files: ["docs/DEFERRED_FOLLOWUPS.md"] }),
       syncEnvVars(async (ctx) => {
         // Pick the right .env file based on deploy environment.
         // prod → .env.production, everything else → .env.local

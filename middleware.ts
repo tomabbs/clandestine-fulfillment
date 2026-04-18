@@ -26,6 +26,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Phase 0.8 — /portal/stores is dormant. Redirect to /portal so legacy
+  // bookmarks land on the dashboard. The /portal/stores route file still
+  // exists as a fallback for direct hits that bypass middleware.
+  if (pathname === "/portal/stores" || pathname.startsWith("/portal/stores/")) {
+    const home = request.nextUrl.clone();
+    home.pathname = "/portal";
+    home.search = "";
+    return NextResponse.redirect(home);
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";

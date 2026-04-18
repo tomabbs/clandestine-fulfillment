@@ -27,10 +27,19 @@ const serverEnvSchema = z.object({
   SHOPIFY_API_VERSION: z.string().min(1),
   SHOPIFY_WEBHOOK_SECRET: z.string().default(""),
 
-  // ShipStation (legacy — kept for historical inventory data, not actively used)
+  // ShipStation v1 (legacy API — Basic auth; used by SKU-rectify alias path and
+  // SHIP_NOTIFY webhook. Kept active because v2 has no equivalent for product
+  // aliases or webhook signature secret. See plan §3 / §7.1.10.)
   SHIPSTATION_API_KEY: z.string().default(""),
   SHIPSTATION_API_SECRET: z.string().default(""),
   SHIPSTATION_WEBHOOK_SECRET: z.string().default(""),
+
+  // ShipStation v2 (api.shipstation.com — `api-key` header, NOT Basic auth).
+  // Used by the v2 inventory client (§7.1.6), seeding (Phase 3), reconcile
+  // (Phase 5), and the SHIP_NOTIFY → fanout path (Phase 4). Required from
+  // Phase 2 onward; default("") so the schema still parses in environments
+  // (local dev, CI) where the key has not yet been provisioned.
+  SHIPSTATION_V2_API_KEY: z.string().default(""),
 
   // EasyPost
   EASYPOST_API_KEY: z.string().default(""),
@@ -63,6 +72,11 @@ const serverEnvSchema = z.object({
   // Resend
   RESEND_API_KEY: z.string().min(1),
   RESEND_INBOUND_WEBHOOK_SECRET: z.string().min(1),
+
+  // Tier 1 hardening #11 — daily reconciliation report destination.
+  // Optional; if unset the daily-recon-summary task logs the report and skips
+  // the email send so the cron never errors on a fresh environment.
+  OPS_ALERT_EMAIL: z.string().email().optional(),
 
   // App
   NEXT_PUBLIC_APP_URL: z.string().url(),

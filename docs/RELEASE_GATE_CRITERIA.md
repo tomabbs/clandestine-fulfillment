@@ -8,6 +8,8 @@ This gate complements:
 - `scripts/sql/prod_parity_checks.sql`
 - `scripts/sql/webhook_health_snapshot.sql`
 
+> **Last full automated sweep:** 2026-04-13 (Phase 6 validation drill — see mega-plan Part 14.9 Phase 6 closeout). All Section A automated checks PASS (`pnpm typecheck` / `pnpm test` 1029/1029 / `pnpm build` / `pnpm exec biome check` 0 errors / inventory + webhook-dedup + fanout-gate + v2 batch CI guards). Section B (focused reliability tests via `pnpm release:gate`) PASS 8/8. Section C E2E subset and Sections C-E manual checks remain operator-led per their definitions below.
+
 ---
 
 ## Quick run

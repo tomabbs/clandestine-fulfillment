@@ -10,6 +10,7 @@
 import { schedules } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
+import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
@@ -50,14 +51,26 @@ export const multiStoreInventoryPushTask = schedules.task({
     let totalFailed = 0;
 
     for (const workspaceId of workspaceIds) {
-      const { data: connections } = await supabase
+      // Phase 0.8 — single dormancy gate. We still hint the SQL with the
+      // narrow filters for index efficiency, but the source-of-truth decision
+      // happens in shouldFanoutToConnection() below so future schema/columns
+      // (deleted_at, etc.) don't bypass dormancy.
+      const { data: rawConnections } = await supabase
         .from("client_store_connections")
         .select("*")
         .eq("workspace_id", workspaceId)
         .eq("do_not_fanout", false)
         .eq("connection_status", "active");
 
-      if (!connections || connections.length === 0) continue;
+      const connections = ((rawConnections ?? []) as ClientStoreConnection[]).filter((c) => {
+        const decision = shouldFanoutToConnection(c);
+        if (!decision.allow) {
+          console.log(`[multi-store-push] skip ${c.platform} ${c.id} (reason=${decision.reason})`);
+        }
+        return decision.allow;
+      });
+
+      if (connections.length === 0) continue;
 
       // Load workspace settings including pause flag
       const { data: ws } = await supabase
@@ -117,7 +130,7 @@ export const multiStoreInventoryPushTask = schedules.task({
       }
 
       // Process each connection independently — one failure must not block others
-      for (const connection of connections as ClientStoreConnection[]) {
+      for (const connection of connections) {
         try {
           const pushed = await pushConnectionInventory(
             supabase,

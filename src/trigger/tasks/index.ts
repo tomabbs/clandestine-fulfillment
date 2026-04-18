@@ -3,6 +3,8 @@
 // ── Existing tasks (alphabetical) ────────────────────────────────────────────
 
 export { aftershipRegisterTask } from "./aftership-register";
+// Phase 1 — Bandcamp baseline anomaly + multi-origin push_mode audit
+export { bandcampBaselineAuditTask } from "./bandcamp-baseline-audit";
 export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
 export {
   bandcampMarkShippedSchedule,
@@ -12,8 +14,12 @@ export {
   bandcampOrderSyncSchedule,
   bandcampOrderSyncTask,
 } from "./bandcamp-order-sync";
+export { bandcampPushOnSkuTask } from "./bandcamp-push-on-sku";
 export { bandcampSalePollTask } from "./bandcamp-sale-poll";
 export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
+// Phase 0.7 — Distro discriminator (creates warehouse_products with org_id=NULL
+// for Clandestine Shopify products without a Bandcamp upstream)
+export { clandestineShopifySyncTask } from "./clandestine-shopify-sync";
 export { clientStoreOrderDetectTask } from "./client-store-order-detect";
 export { inboundCheckinComplete } from "./inbound-checkin-complete";
 export { inboundProductCreate } from "./inbound-product-create";
@@ -23,9 +29,36 @@ export { pirateShipImportTask } from "./pirate-ship-import";
 export { preorderFulfillmentTask, preorderReleaseVariantTask } from "./preorder-fulfillment";
 export { preorderSetupTask } from "./preorder-setup";
 export { processClientStoreWebhookTask } from "./process-client-store-webhook";
+// Phase 2 — SHIP_NOTIFY processor (decrements via recordInventoryChange)
+export { processShipstationShipmentTask } from "./process-shipstation-shipment";
 export { processShopifyWebhookTask } from "./process-shopify-webhook";
 export { redisBackfillTask } from "./redis-backfill";
 export { sensorCheckTask } from "./sensor-check";
+// Phase 5 — tiered ShipStation v2 ↔ DB reconcile sensor.
+//          Three schedules (hot 5m / warm 30m / cold 6h) call the same
+//          inner runner. Drift thresholds: |drift|<=1 silent fix, 2-5
+//          low-severity review, >5 high-severity review. ALWAYS adjusts
+//          our DB to match v2 via recordInventoryChange(source:'reconcile').
+export {
+  shipstationBandcampReconcileColdSchedule,
+  shipstationBandcampReconcileHotSchedule,
+  shipstationBandcampReconcileTask,
+  shipstationBandcampReconcileWarmSchedule,
+} from "./shipstation-bandcamp-reconcile";
+// Phase 3 — ShipStation v2 inventory seed (one-shot per workspace)
+export { shipstationSeedInventoryTask } from "./shipstation-seed-inventory";
+// Phase 3 — ShipStation v1 manual store refresh (stub honoring Open Q #2)
+export { shipstationStoreRefreshTask } from "./shipstation-store-refresh";
+// Saturday Workstream 2 (2026-04-18) — manual-count → ShipStation v2 sync
+//   bridge. Sibling of shipstation-v2-decrement; handles BOTH directions of
+//   delta (manual writes can go up or down). Pinned to shipstationQueue,
+//   ledger-gated via external_sync_events, fanout-guard aware.
+export { shipstationV2AdjustOnSkuTask } from "./shipstation-v2-adjust-on-sku";
+// Phase 4 — bidirectional bridge: sale-poll → ShipStation v2 decrement
+//                                  SHIP_NOTIFY → Bandcamp focused push
+//          Both are ledger-gated via `external_sync_events` and respect
+//          fanout-guard kill switches + per-workspace rollout bucket.
+export { shipstationV2DecrementTask } from "./shipstation-v2-decrement";
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
 export { shopifyImageBackfillTask } from "./shopify-image-backfill";
 export { shopifyOrderSyncTask } from "./shopify-order-sync";
@@ -75,18 +108,49 @@ export { bandcampSalesSyncSchedule } from "./bandcamp-sales-sync";
 export { bandcampScrapeSweepTask } from "./bandcamp-scrape-sweep";
 // ── Bandcamp genre tag backfill (on-demand) ──────────────────────────────────
 export { bandcampTagBackfillTask } from "./bandcamp-tag-backfill";
+// Saturday Workstream 3 (2026-04-18) — bulk warehouse location creator.
+//   Pinned to shipstationQueue (concurrencyLimit: 1). Routes from
+//   createLocationRange() Server Action when range size > 30 (Vercel Server
+//   Action timeout fallback per plan §15.3 / Appendix C.17).
+export { bulkCreateLocationsTask } from "./bulk-create-locations";
 export { bundleAvailabilitySweepTask } from "./bundle-availability-sweep";
 // ── Bundle component tracking (inventory hardening) ───────────────────────────
 export { bundleComponentFanoutTask } from "./bundle-component-fanout";
+// Phase 2.5(c) — Bundle derived-drift sensor (compares v2 vs computed)
+export {
+  bundleDerivedDriftSensorSchedule,
+  bundleDerivedDriftSensorTask,
+} from "./bundle-derived-drift";
 // ── Catalog stats snapshot refresh (nightly + on-demand) ──────────────────────
 export { catalogStatsRefreshSchedule, catalogStatsRefreshTask } from "./catalog-stats-refresh";
+// Tier 1 hardening #11 — daily reconciliation summary (email + log)
+export { dailyReconSummarySchedule, dailyReconSummaryTask } from "./daily-recon-summary";
+// Phase 6 closeout — daily reminder cron parsing docs/DEFERRED_FOLLOWUPS.md
+// and upserting a warehouse_review_queue item per workspace for every entry
+// whose due_date <= today. Idempotent via group_key UNIQUE.
+export { deferredFollowupsReminderTask } from "./deferred-followups-reminder";
 export {
   discogsClientOrderSyncSchedule,
   discogsClientOrderSyncTask,
 } from "./discogs-client-order-sync";
+// Tier 1 hardening #14 — external_sync_events retention sweep (Patch D3)
+export {
+  externalSyncEventsRetentionSchedule,
+  externalSyncEventsRetentionTask,
+} from "./external-sync-events-retention";
+// Phase 6 closeout — automated cross-system inventory verification (hourly during
+// ramp, daily after Tuesday). Persists artifacts to megaplan_spot_check_runs
+// and creates a review queue item only when drift_major persists across two
+// consecutive runs (review pass v4 §5.3).
+export { megaplanSpotCheckTask } from "./megaplan-spot-check";
 // ── Bandcamp scraper reconciliation (every 6h, dead URL probes, auto-resolve) ──
 export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
+// ── SKU rectify infrastructure (Phase 0.5) ────────────────────────────────────
+export { skuRectifyViaAliasTask } from "./sku-rectify-via-alias";
+export { skuSyncAuditTask } from "./sku-sync-audit";
 // ── Tag cleanup (admin settings) ──────────────────────────────────────────────
 export { tagCleanupBackfillTask } from "./tag-cleanup-backfill";
+// Tier 1 hardening #8 — weekly Supabase backup verification probe
+export { weeklyBackupVerifySchedule, weeklyBackupVerifyTask } from "./weekly-backup-verify";

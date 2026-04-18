@@ -12,7 +12,6 @@ import {
   Receipt,
   Settings,
   ShoppingCart,
-  Store,
   TrendingUp,
   Truck,
 } from "lucide-react";
@@ -39,9 +38,11 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
+// Phase 0.8 — "Connected Stores" entry removed. Store connections are now
+// administered through ShipStation Inventory Sync; staff can re-enable the
+// first-party connectors per-row from /admin/settings/client-store-reconnect.
 const NAV_ITEMS = [
   { title: "Home", href: "/portal", icon: LayoutDashboard, alwaysVisible: true },
-  { title: "Connected Stores", href: "/portal/stores", icon: Store, key: "stores" },
   { title: "Inventory", href: "/portal/inventory", icon: Package, key: "inventory" },
   { title: "Catalog", href: "/portal/catalog", icon: Disc3, key: "catalog" },
   { title: "Inbound", href: "/portal/inbound", icon: PackagePlus, key: "inbound" },

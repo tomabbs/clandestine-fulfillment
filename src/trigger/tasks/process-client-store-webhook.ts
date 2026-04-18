@@ -8,8 +8,10 @@
 
 import { task, tasks } from "@trigger.dev/sdk";
 import { triggerBundleFanout } from "@/lib/server/bundles";
+import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import type { ClientStoreConnection } from "@/lib/shared/types";
 
 export const processClientStoreWebhookTask = task({
   id: "process-client-store-webhook",
@@ -34,6 +36,30 @@ export const processClientStoreWebhookTask = task({
 
     // Determine connection for echo cancellation check
     const connectionId = metadata.connection_id as string | undefined;
+
+    // Phase 0.8 — single dormancy gate. A webhook arriving from a dormant
+    // connection is logged-and-dropped: we never write inventory or orders on
+    // its behalf. The webhook_event row is marked `dormant_skipped` so we
+    // retain the audit trail (useful for proving a webhook URL is alive even
+    // while we're not acting on it).
+    if (connectionId) {
+      const { data: connection } = await supabase
+        .from("client_store_connections")
+        .select("*")
+        .eq("id", connectionId)
+        .maybeSingle();
+
+      if (connection) {
+        const decision = shouldFanoutToConnection(connection as ClientStoreConnection);
+        if (!decision.allow) {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "dormant_skipped" })
+            .eq("id", payload.webhookEventId);
+          return { processed: false, reason: "dormant_connection", denial: decision.reason };
+        }
+      }
+    }
 
     if (topic.includes("inventory") || topic.includes("stock")) {
       return await handleInventoryUpdate(supabase, event, webhookData, connectionId);

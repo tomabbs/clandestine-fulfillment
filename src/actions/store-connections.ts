@@ -159,6 +159,81 @@ export async function updateStoreConnection(
 }
 
 /**
+ * Phase 0.8 — admin "Reactivate" for dormant client store connections.
+ *
+ * The dormancy migration (20260417000003) marks every Shopify / WooCommerce /
+ * Squarespace connection `do_not_fanout = true` so ShipStation Inventory Sync
+ * becomes the canonical fanout path. Staff use this Server Action from
+ * /admin/settings/client-store-reconnect to opt a single connection back into
+ * first-party fanout (e.g. when ShipStation Inventory Sync doesn't cover a
+ * specific edge case for that store).
+ *
+ * Side effects:
+ *   - Sets do_not_fanout = false (the gate at client-store-fanout-gate.ts
+ *     starts allowing pushes immediately on the next cron tick).
+ *   - Sets connection_status = 'active' so the multi-store-push WHERE clause
+ *     also matches the row again.
+ *   - Clears last_error and last_error_at so the circuit breaker
+ *     (handleConnectionFailure in multi-store-inventory-push) starts a fresh
+ *     consecutive-failure count from zero.
+ *   - Writes a `channel_sync_log` audit row tagged with the actor's user id.
+ *
+ * No deactivate variant — for that, use `disableStoreConnection` (below).
+ */
+export async function reactivateClientStoreConnection(input: {
+  connectionId: string;
+}): Promise<{ success: true }> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = z.object({ connectionId: z.string().uuid() }).parse(input);
+  const serviceClient = createServiceRoleClient();
+
+  const { data: connection, error: fetchError } = await serviceClient
+    .from("client_store_connections")
+    .select("workspace_id, platform, store_url")
+    .eq("id", data.connectionId)
+    .single();
+  if (fetchError || !connection) throw new Error("Connection not found");
+
+  const now = new Date().toISOString();
+  const { error: updateError } = await serviceClient
+    .from("client_store_connections")
+    .update({
+      do_not_fanout: false,
+      connection_status: "active" as ConnectionStatus,
+      last_error: null,
+      last_error_at: null,
+      updated_at: now,
+    })
+    .eq("id", data.connectionId);
+
+  if (updateError) {
+    throw new Error(`Failed to reactivate connection: ${updateError.message}`);
+  }
+
+  // Audit trail — channel_sync_log is the canonical activity log and is
+  // already used by the multi-store push for state-change reporting.
+  await serviceClient.from("channel_sync_log").insert({
+    workspace_id: connection.workspace_id,
+    channel: "multi-store",
+    sync_type: "reactivate",
+    status: "completed",
+    items_processed: 1,
+    started_at: now,
+    completed_at: now,
+    metadata: {
+      connection_id: data.connectionId,
+      platform: connection.platform,
+      store_url: connection.store_url,
+      actor_user_id: auth.userRecord.id,
+      action: "reactivate",
+    },
+  });
+
+  return { success: true };
+}
+
+/**
  * Disable a connection — sets status to error and stops fanout.
  * Rule #53: do_not_fanout stops inventory pushes to degraded connections.
  */

@@ -1,8 +1,15 @@
+import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
 // Unified store sync interface — dispatches to platform-specific clients.
 // Rule #44: WooCommerce uses absolute quantities via updateStockQuantity.
 // Rule #15: Idempotency keys must be stable per logical adjustment.
+//
+// Phase 0.8 — last-line dormancy defense. Callers SHOULD consult
+// `shouldFanoutToConnection()` from src/lib/server/client-store-fanout-gate.ts
+// BEFORE calling createStoreSyncClient(). The constructor enforces it again
+// to catch any new caller that forgets — a dormant connection can never be
+// wrapped in a sync client. See plan §12.4 (single dormancy gate).
 
 export interface StoreSyncClient {
   /** Push inventory quantity to the remote store for a given SKU */
@@ -30,10 +37,25 @@ interface SkuMappingContext {
   remoteVariantId: string | null;
 }
 
+export class DormantConnectionError extends Error {
+  constructor(connection: ClientStoreConnection, reason: string | undefined) {
+    super(
+      `[fanout-gate] Refusing to wrap dormant ${connection.platform} connection ${connection.id} (reason=${reason ?? "unknown"})`,
+    );
+    this.name = "DormantConnectionError";
+  }
+}
+
 export function createStoreSyncClient(
   connection: ClientStoreConnection,
   skuMappings?: Map<string, SkuMappingContext>,
 ): StoreSyncClient {
+  // Phase 0.8 last-line defense. Callers should pre-check, but this throws
+  // loudly so a forgotten gate becomes a CI failure (test asserts throw),
+  // not a silent push to a dormant store.
+  const decision = shouldFanoutToConnection(connection);
+  if (!decision.allow) throw new DormantConnectionError(connection, decision.reason);
+
   switch (connection.platform) {
     case "shopify":
       return createShopifySync(connection);

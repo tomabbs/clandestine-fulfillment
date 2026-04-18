@@ -14,6 +14,7 @@
 import { schedules } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
+import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 import { clientStoreOrderQueue } from "@/trigger/lib/client-store-order-queue";
@@ -53,6 +54,17 @@ export const clientStoreOrderDetectTask = schedules.task({
       for (const connection of connections as ClientStoreConnection[]) {
         // Discogs handled by discogs-client-order-sync (OAuth 1.0a + Redis rate limiter)
         if (connection.platform === "discogs") continue;
+
+        // Phase 0.8 — single dormancy gate. Order polling counts as fanout
+        // because the stored order will trigger downstream pushes back to the
+        // client store. Drop polling on dormant connections at the source.
+        const fanoutDecision = shouldFanoutToConnection(connection);
+        if (!fanoutDecision.allow) {
+          console.log(
+            `[client-store-order-detect] skip ${connection.platform} ${connection.id} (reason=${fanoutDecision.reason})`,
+          );
+          continue;
+        }
 
         try {
           const since =

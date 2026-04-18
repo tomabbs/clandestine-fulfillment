@@ -1,5 +1,7 @@
+// Phase 0.8 — "stores" key removed. Store connections are now administered
+// through ShipStation Inventory Sync. Staff use /admin/settings/client-store-reconnect
+// to per-row reactivate first-party connectors when needed.
 export const TOGGLEABLE_PAGES = [
-  { key: "stores", title: "Connected Stores", href: "/portal/stores" },
   { key: "inventory", title: "Inventory", href: "/portal/inventory" },
   { key: "catalog", title: "Catalog", href: "/portal/catalog" },
   { key: "inbound", title: "Inbound", href: "/portal/inbound" },

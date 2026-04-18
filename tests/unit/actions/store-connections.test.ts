@@ -40,6 +40,7 @@ import {
   disableStoreConnection,
   getSkuMappings,
   getStoreConnections,
+  reactivateClientStoreConnection,
   updateStoreConnection,
 } from "@/actions/store-connections";
 // Import after mocks
@@ -268,6 +269,102 @@ describe("store-connections server actions", () => {
           connection_status: "error",
           do_not_fanout: true,
         }),
+      );
+    });
+  });
+
+  // === reactivateClientStoreConnection (Phase 0.8) ===
+
+  describe("reactivateClientStoreConnection", () => {
+    const validId = "11111111-1111-4111-8111-111111111111";
+
+    it("flips do_not_fanout=false, status=active, clears errors, writes audit log", async () => {
+      // Connection lookup
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: {
+                workspace_id: "ws-1",
+                platform: "shopify",
+                store_url: "https://shop.example.com",
+              },
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      const updateEq = vi.fn().mockResolvedValue({ error: null });
+      const updateFn = vi.fn().mockReturnValue({ eq: updateEq });
+      mockServiceFrom.mockReturnValueOnce({ update: updateFn });
+
+      const insertFn = vi.fn().mockResolvedValue({ error: null });
+      mockServiceFrom.mockReturnValueOnce({ insert: insertFn });
+
+      const result = await reactivateClientStoreConnection({ connectionId: validId });
+
+      expect(result).toEqual({ success: true });
+      expect(updateFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          do_not_fanout: false,
+          connection_status: "active",
+          last_error: null,
+          last_error_at: null,
+        }),
+      );
+      expect(updateEq).toHaveBeenCalledWith("id", validId);
+      expect(insertFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: "multi-store",
+          sync_type: "reactivate",
+          metadata: expect.objectContaining({
+            connection_id: validId,
+            actor_user_id: "user-1",
+            action: "reactivate",
+          }),
+        }),
+      );
+    });
+
+    it("rejects non-staff callers", async () => {
+      vi.mocked(requireAuth).mockResolvedValueOnce({
+        supabase: { from: mockFrom } as never,
+        authUserId: "auth-2",
+        userRecord: {
+          id: "user-2",
+          workspace_id: "ws-1",
+          org_id: "org-1",
+          role: "client",
+          email: "client@test.com",
+          name: "Client",
+        },
+        isStaff: false,
+      });
+
+      await expect(reactivateClientStoreConnection({ connectionId: validId })).rejects.toThrow(
+        /staff only/i,
+      );
+    });
+
+    it("rejects malformed connection ids before touching the database", async () => {
+      await expect(
+        reactivateClientStoreConnection({ connectionId: "not-a-uuid" }),
+      ).rejects.toThrow();
+      expect(mockServiceFrom).not.toHaveBeenCalled();
+    });
+
+    it("throws when connection is missing", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: null, error: { message: "not found" } }),
+          }),
+        }),
+      });
+
+      await expect(reactivateClientStoreConnection({ connectionId: validId })).rejects.toThrow(
+        "Connection not found",
       );
     });
   });

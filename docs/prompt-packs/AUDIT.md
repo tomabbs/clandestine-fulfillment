@@ -1,6 +1,5 @@
 # Prompt Pack — AUDIT
 
-Use this prompt for root-cause diagnosis, reliability audits, and remediation plans.
 
 ## Required Read-First (Hard Block)
 

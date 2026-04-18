@@ -14,7 +14,7 @@ import { readFileSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://yspmgzphxlkcnfalndbh.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzcG1nenBoeGxrY25mYWxuZGJoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzUxNDU1MCwiZXhwIjoyMDg5MDkwNTUwfQ.W6SHL1_GUjp7kLMSvXw7bqGySwit3v9QehGIGdsidEo";
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? (() => { throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY env var"); })();
 
 const envContent = readFileSync(".env.production", "utf8");
 const getEnv = (k) => envContent.match(new RegExp(`^${k}=["']?(.+?)["']?$`, "m"))?.[1]?.trim();

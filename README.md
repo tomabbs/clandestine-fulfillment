@@ -17,7 +17,7 @@
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js **22+** (see `.nvmrc`; aligns with CI)
 - pnpm 10+
 - Supabase CLI (for local development)
 
@@ -51,6 +51,11 @@ pnpm dev
 | `pnpm check` | Biome lint + format check |
 | `pnpm check:fix` | Auto-fix Biome issues |
 | `pnpm typecheck` | TypeScript type check |
+| `pnpm verify:cloud` | Lint, typecheck, test, production build (CI-style env), CI guard scripts — for [Cursor Cloud Agents](docs/CURSOR_CLOUD_AGENT.md) |
+
+## Cursor Cloud Agents
+
+Remote agents (e.g. from [cursor.com/agents](https://cursor.com/agents)) should read **[AGENTS.md](AGENTS.md)** and **[docs/CURSOR_CLOUD_AGENT.md](docs/CURSOR_CLOUD_AGENT.md)** for install commands, Secrets vs `.env`, and copy-paste prompts. This repo includes [`.cursor/environment.json`](.cursor/environment.json) with `pnpm install --frozen-lockfile` and [`scripts/cloud-agent-verify.sh`](scripts/cloud-agent-verify.sh) for CI-parity checks.
 
 ## Architecture
 
@@ -77,6 +82,7 @@ pnpm dev
 
 ## Documentation
 
+- [Cursor Cloud Agents](docs/CURSOR_CLOUD_AGENT.md) — Cloud Agent / Secrets, verify script, manual setup
 - [Deployment Guide](docs/DEPLOYMENT.md) — environment setup, webhook configuration, post-deploy checklist
 - [Operations Runbook](docs/RUNBOOK.md) — handling common incidents and operational procedures
 - [CLAUDE.md](CLAUDE.md) — 72 architectural rules and conventions
