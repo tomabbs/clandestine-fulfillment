@@ -127,6 +127,8 @@ journeys:
       - buildShopifyVariantInput helper used for consistent variant shape
       - CATEGORY_DEFAULT_WEIGHTS provides weight defaults by product type
       - write_publications scope added to Shopify app config
+      - bandcamp-sync unmatched path is DB-first (product/variant/mapping first, Shopify create second) so `UNIQUE(workspace_id, sku)` collisions cannot leak orphan Shopify drafts
+      - package-level dedup uses bandcamp_product_mappings `(workspace_id, bandcamp_item_id)` backstop index before SKU fallback matching
 
   - id: bandcamp_sales_data
     area: admin_settings

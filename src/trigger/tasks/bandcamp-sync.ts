@@ -1485,6 +1485,49 @@ export const bandcampSyncTask = task({
             tags.push("Pre-Order", "New Releases");
           }
 
+          // Primary dedup key: a Bandcamp package should map to one variant per workspace.
+          // SKU-only matching can miss when upstream SKU strings drift.
+          const { data: existingMappingByPackage } = await supabase
+            .from("bandcamp_product_mappings")
+            .select("id, variant_id")
+            .eq("workspace_id", workspaceId)
+            .eq("bandcamp_item_id", merchItem.package_id)
+            .maybeSingle();
+
+          if (existingMappingByPackage) {
+            await supabase
+              .from("bandcamp_product_mappings")
+              .update({
+                bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
+                bandcamp_type_name: merchItem.item_type,
+                product_category: classifyProduct(
+                  merchItem.item_type ?? null,
+                  merchItem.url ?? null,
+                  merchItem.title ?? null,
+                ),
+                bandcamp_new_date: merchItem.new_date,
+                bandcamp_url: merchItem.url ?? null,
+                bandcamp_url_source: merchItem.url ? "orders_api" : null,
+                bandcamp_subdomain: merchItem.subdomain ?? null,
+                bandcamp_album_title: merchItem.album_title ?? null,
+                bandcamp_price: merchItem.price ?? null,
+                bandcamp_currency: merchItem.currency ?? null,
+                bandcamp_is_set_price:
+                  merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : null,
+                bandcamp_options: merchItem.options ?? null,
+                bandcamp_origin_quantities: merchItem.origin_quantities ?? null,
+                bandcamp_option_skus: (merchItem.options ?? [])
+                  .map((o) => o.sku)
+                  .filter((s): s is string => !!s),
+                last_quantity_sold: merchItem.quantity_sold,
+                last_synced_at: new Date().toISOString(),
+                raw_api_data: merchItem,
+              })
+              .eq("id", existingMappingByPackage.id);
+            itemsProcessed++;
+            continue;
+          }
+
           const { data: existingVariant } = await supabase
             .from("warehouse_product_variants")
             .select("id")
@@ -1574,113 +1617,16 @@ export const bandcampSyncTask = task({
             // Non-critical — product still gets created without collection
           }
 
+          // DB-first creation order prevents leaking duplicate Shopify drafts when
+          // variant insert collides on UNIQUE(workspace_id, sku).
           let shopifyProductId: string | null = null;
-          try {
-            shopifyProductId = await productSetCreate({
-              title,
-              status: "DRAFT",
-              vendor: band?.name ?? connection.band_name,
-              productType: merchItem.item_type ?? "Merch",
-              tags,
-              ...(collectionId ? { collections: [collectionId] } : {}),
-              productOptions: [{ name: "Title", values: [{ name: "Default Title" }] }],
-              variants: [
-                buildShopifyVariantInput({
-                  sku: effectiveSku,
-                  price: bcPrice,
-                  cost: bcCost,
-                  currency: bcCurrency,
-                  barcode: bcBarcode,
-                  category: productCategory,
-                }),
-              ],
-              // Shopify ProductSetInput uses `files: [FileSetInput!]` (2024-10+).
-              // `media` is not a valid field on ProductSetInput and is silently ignored —
-              // passing it caused all Bandcamp-synced products to be created without images.
-              ...(bandcampImageUrl(merchItem.image_url)
-                ? {
-                    files: [
-                      {
-                        originalSource: bandcampImageUrl(merchItem.image_url),
-                        alt: title,
-                      },
-                    ],
-                  }
-                : {}),
-            });
-            logger.info("Created Shopify DRAFT product", { sku: effectiveSku, shopifyProductId });
-
-            if (shopifyProductId) {
-              try {
-                await publishToSafeChannels(shopifyProductId);
-              } catch (pubErr) {
-                logger.warn("Failed to publish product to channels", {
-                  shopifyProductId,
-                  error: String(pubErr),
-                });
-              }
-
-              // productSet doesn't reliably propagate weight — set via inventoryItemUpdate
-              const weight = CATEGORY_DEFAULT_WEIGHTS[productCategory];
-              if (weight) {
-                try {
-                  const varData = await shopifyGraphQL<{
-                    product: {
-                      variants: {
-                        nodes: Array<{ inventoryItem: { id: string } }>;
-                      };
-                    };
-                  }>(
-                    `query V($id: ID!) { product(id: $id) { variants(first: 1) { nodes { inventoryItem { id } } } } }`,
-                    { id: shopifyProductId },
-                  );
-                  const invItemId = varData?.product?.variants?.nodes?.[0]?.inventoryItem?.id;
-                  if (invItemId) {
-                    await inventoryItemUpdate(invItemId, {
-                      measurement: { weight: { value: weight.value, unit: weight.unit } },
-                    });
-                  }
-                } catch (weightErr) {
-                  logger.warn("Failed to set variant weight", {
-                    shopifyProductId,
-                    error: String(weightErr),
-                  });
-                }
-              }
-            }
-          } catch (shopifyError) {
-            logger.error("Failed to create Shopify product, continuing with warehouse-only", {
-              sku: effectiveSku,
-              error: String(shopifyError),
-            });
-            await supabase.from("warehouse_review_queue").upsert(
-              {
-                workspace_id: workspaceId,
-                org_id: connection.org_id ?? null,
-                category: "shopify_product_create",
-                severity: "medium" as const,
-                title: `Shopify product creation failed: ${title}`,
-                description: `SKU ${effectiveSku} was created in the warehouse but productSetCreate failed.`,
-                metadata: {
-                  sku: effectiveSku,
-                  bandcamp_item_id: String(merchItem.package_id),
-                  band_id: String(connection.band_id),
-                  error: String(shopifyError),
-                },
-                status: "open" as const,
-                group_key: `shopify_create_failed_${effectiveSku}`,
-                occurrence_count: 1,
-              },
-              { onConflict: "group_key", ignoreDuplicates: false },
-            );
-          }
 
           const { data: product, error: productError } = await supabase
             .from("warehouse_products")
             .insert({
               workspace_id: workspaceId,
               org_id: connection.org_id,
-              shopify_product_id: shopifyProductId,
+              shopify_product_id: null,
               title,
               vendor: band?.name ?? connection.band_name,
               product_type: merchItem.item_type ?? "Merch",
@@ -1709,7 +1655,7 @@ export const bandcampSyncTask = task({
             });
           }
 
-          const { data: newVariant } = await supabase
+          const { data: newVariant, error: variantInsertError } = await supabase
             .from("warehouse_product_variants")
             .insert({
               product_id: product.id,
@@ -1727,7 +1673,40 @@ export const bandcampSyncTask = task({
             .select("id")
             .single();
 
-          if (newVariant) {
+          if (variantInsertError || !newVariant) {
+            logger.error("Failed to create variant in unmatched path", {
+              sku: effectiveSku,
+              error: variantInsertError?.message ?? "missing variant id",
+              code: variantInsertError?.code ?? null,
+            });
+
+            await supabase.from("warehouse_products").delete().eq("id", product.id);
+            await supabase.from("warehouse_review_queue").upsert(
+              {
+                workspace_id: workspaceId,
+                org_id: connection.org_id ?? null,
+                category: "bandcamp_sync_variant_create_failed",
+                severity: "high" as const,
+                title: `Bandcamp variant creation failed: ${effectiveSku}`,
+                description:
+                  "Bandcamp sync could not create the warehouse variant; draft warehouse product row was rolled back before any Shopify create.",
+                metadata: {
+                  sku: effectiveSku,
+                  bandcamp_item_id: String(merchItem.package_id),
+                  band_id: String(connection.band_id),
+                  pg_error: variantInsertError?.message ?? null,
+                  pg_code: variantInsertError?.code ?? null,
+                },
+                status: "open" as const,
+                group_key: `bandcamp_variant_create_failed_${workspaceId}_${effectiveSku}`,
+                occurrence_count: 1,
+              },
+              { onConflict: "group_key", ignoreDuplicates: false },
+            );
+
+            itemsFailed++;
+            continue;
+          } else {
             // Step 1: Seed inventory row at zero (safe baseline)
             await supabase.from("warehouse_inventory_levels").upsert(
               {
@@ -1825,6 +1804,113 @@ export const bandcampSyncTask = task({
               connection,
               merchItem,
             );
+
+            try {
+              shopifyProductId = await productSetCreate({
+                title,
+                status: "DRAFT",
+                vendor: band?.name ?? connection.band_name,
+                productType: merchItem.item_type ?? "Merch",
+                tags,
+                ...(collectionId ? { collections: [collectionId] } : {}),
+                productOptions: [{ name: "Title", values: [{ name: "Default Title" }] }],
+                variants: [
+                  buildShopifyVariantInput({
+                    sku: effectiveSku,
+                    price: bcPrice,
+                    cost: bcCost,
+                    currency: bcCurrency,
+                    barcode: bcBarcode,
+                    category: productCategory,
+                  }),
+                ],
+                // Shopify ProductSetInput uses `files: [FileSetInput!]` (2024-10+).
+                // `media` is not a valid field on ProductSetInput and is silently ignored —
+                // passing it caused all Bandcamp-synced products to be created without images.
+                ...(bandcampImageUrl(merchItem.image_url)
+                  ? {
+                      files: [
+                        {
+                          originalSource: bandcampImageUrl(merchItem.image_url),
+                          alt: title,
+                        },
+                      ],
+                    }
+                  : {}),
+              });
+              logger.info("Created Shopify DRAFT product", { sku: effectiveSku, shopifyProductId });
+
+              await supabase
+                .from("warehouse_products")
+                .update({
+                  shopify_product_id: shopifyProductId,
+                  synced_at: new Date().toISOString(),
+                })
+                .eq("id", product.id);
+
+              try {
+                await publishToSafeChannels(shopifyProductId);
+              } catch (pubErr) {
+                logger.warn("Failed to publish product to channels", {
+                  shopifyProductId,
+                  error: String(pubErr),
+                });
+              }
+
+              // productSet doesn't reliably propagate weight — set via inventoryItemUpdate
+              const weight = CATEGORY_DEFAULT_WEIGHTS[productCategory];
+              if (weight) {
+                try {
+                  const varData = await shopifyGraphQL<{
+                    product: {
+                      variants: {
+                        nodes: Array<{ inventoryItem: { id: string } }>;
+                      };
+                    };
+                  }>(
+                    `query V($id: ID!) { product(id: $id) { variants(first: 1) { nodes { inventoryItem { id } } } } }`,
+                    { id: shopifyProductId },
+                  );
+                  const invItemId = varData?.product?.variants?.nodes?.[0]?.inventoryItem?.id;
+                  if (invItemId) {
+                    await inventoryItemUpdate(invItemId, {
+                      measurement: { weight: { value: weight.value, unit: weight.unit } },
+                    });
+                  }
+                } catch (weightErr) {
+                  logger.warn("Failed to set variant weight", {
+                    shopifyProductId,
+                    error: String(weightErr),
+                  });
+                }
+              }
+            } catch (shopifyError) {
+              logger.error("Failed to create Shopify product, continuing with warehouse-only", {
+                sku: effectiveSku,
+                error: String(shopifyError),
+              });
+              await supabase.from("warehouse_review_queue").upsert(
+                {
+                  workspace_id: workspaceId,
+                  org_id: connection.org_id ?? null,
+                  category: "shopify_product_create",
+                  severity: "medium" as const,
+                  title: `Shopify product creation failed: ${title}`,
+                  description: `SKU ${effectiveSku} was created in the warehouse but productSetCreate failed.`,
+                  metadata: {
+                    sku: effectiveSku,
+                    bandcamp_item_id: String(merchItem.package_id),
+                    band_id: String(connection.band_id),
+                    warehouse_product_id: product.id,
+                    error: String(shopifyError),
+                  },
+                  status: "open" as const,
+                  group_key: `shopify_create_failed_${effectiveSku}`,
+                  occurrence_count: 1,
+                },
+                { onConflict: "group_key", ignoreDuplicates: false },
+              );
+            }
           }
 
           itemsProcessed++;

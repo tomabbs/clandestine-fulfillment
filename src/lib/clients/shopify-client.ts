@@ -457,6 +457,17 @@ export async function productUpdate(input: Record<string, unknown>): Promise<{ i
   return { id: data.productUpdate.product?.id ?? "" };
 }
 
+/**
+ * Archive an existing product safely.
+ * Keeps recoverability in Shopify while removing it from active catalogs.
+ */
+export async function productArchive(productId: string): Promise<void> {
+  await productUpdate({
+    id: toProductGid(productId),
+    status: "ARCHIVED",
+  });
+}
+
 export async function productVariantsBulkUpdate(
   productId: string,
   variants: Array<Record<string, unknown>>,

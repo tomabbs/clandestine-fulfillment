@@ -1,0 +1,133 @@
+{
+  "ts": "2026-04-18T20-14-31-876Z",
+  "workspace": {
+    "id": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+    "name": "Clandestine Distribution",
+    "slug": "clandestine"
+  },
+  "workspace_v2_defaults_set": false,
+  "inventory_sync_paused": true,
+  "db": {
+    "variants_total": 1000,
+    "variants_with_sku": 1000,
+    "bandcamp_mapped": 0,
+    "client_store_mapped": 0,
+    "available_gt_zero": 0
+  },
+  "shipstation": {
+    "error": null,
+    "unique_skus": 935
+  },
+  "bandcamp": {
+    "error": null,
+    "catalog_rows": 1989,
+    "unique_skus": 1940,
+    "bands_queried": 17
+  },
+  "matrix": {
+    "db_intersect_ss": 82,
+    "db_only_not_ss": 918,
+    "ss_only_not_db": 853,
+    "db_intersect_bc_live": 790,
+    "db_bc_mapped_not_in_bc_live": 0,
+    "bc_live_not_in_db": 1150
+  },
+  "near_miss": {
+    "db_only_case_match_ss": 0,
+    "db_only_whitespace_match_ss": 0,
+    "db_only_case_match_bc": 0,
+    "bc_only_case_match_db": 0
+  },
+  "db_only_breakdown": {
+    "total": 918,
+    "available_gt_zero": 0,
+    "bandcamp_mapped": 0,
+    "client_store_mapped": 0
+  },
+  "samples": {
+    "db_only_first_25": [
+      "B-SP-SPTP",
+      "LP-FPR-010",
+      "LP-EHR-026-1",
+      "MT-L-L",
+      "LP-NS-100",
+      "BK-BKSP-LESC",
+      "LP-FPR-028",
+      "CD-BW-001",
+      "CS-EHR-022",
+      "CS-ENXPL-002",
+      "LP-WSR-055",
+      "LP-NS-133-PURP",
+      "LP-EHR-054",
+      "LP-WSR-020",
+      "CS-ENXPL-003",
+      "LP-FPR-TB-HRFTU",
+      "CS-NS-077",
+      "SI-NS-031",
+      "SI-NS-129",
+      "LP-NS-129D2F",
+      "LP-NS-082",
+      "LP-EHR-024",
+      "NS-2022-SALE-OUT",
+      "LR-BGHV",
+      "LP-NS-131D2F"
+    ],
+    "ss_only_first_25": [
+      "LP-ALC-120-BW",
+      "LP-ALC-125-GISPLAT",
+      "LP-ALC-125-GBSPLIT",
+      "LP-ALC-121-BPLBPSPLAT",
+      "LP-ALC-121-BYRSPLAT",
+      "LP-ALC-107-PINK",
+      "LP-ALC-111",
+      "LP-ALC-099-ECO",
+      "LP-ALC-093-PSPLAT",
+      "LP-ALC-110-SMOKE",
+      "LP-ALC-087-PINK",
+      "LP-ALC-118-BC",
+      "LP-ALC-114-BBSPLAT",
+      "LP-ALC-112-RED",
+      "LP-ALC-106",
+      "LP-MMJ-008",
+      "TOTE",
+      "LP-100-003",
+      "LP-4Q-003",
+      "LP-4Q-002",
+      "LP-4Q-002-BG",
+      "LP-4Q-002-WP",
+      "LP-ALC-138-TGREEN",
+      "LP-ALC-130",
+      "CD-AAD-040"
+    ],
+    "bc_only_first_25": [
+      "CD-NS-025-1",
+      "NSR-6PBH",
+      "TS-NS-LSPI",
+      "TS-NS-LSPIS",
+      "TS-NS-LSPIM",
+      "TS-NS-LSPIL",
+      "TS-NS-LSPIXL",
+      "TS-NS-LSPIXXL",
+      "CS-NORTHE-NIPOMO",
+      "NS-LP-170-BLACK",
+      "CD-NS-043",
+      "CD-NS-023",
+      "CD-NS-022",
+      "LP-NS-007",
+      "CD-NS-007",
+      "LP-NS-025-1",
+      "NSR-NSRP",
+      "TS-NS-G&T-S",
+      "TS-NS-G&T-M",
+      "TS-NS-G&T-L",
+      "TS-NS-G&T-XL",
+      "NSR-RPIO-1",
+      "NSR-RPIOa-SS",
+      "NSR-RPIOa-SS-1",
+      "NSR-RPIOa-SS-2"
+    ],
+    "bc_mapped_not_in_bc_live_first_25": [],
+    "case_mismatch_ss_first_25": [],
+    "whitespace_mismatch_ss_first_25": []
+  }
+}
