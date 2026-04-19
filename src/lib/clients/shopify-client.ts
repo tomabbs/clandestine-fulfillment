@@ -468,6 +468,35 @@ export async function productArchive(productId: string): Promise<void> {
   });
 }
 
+/**
+ * Hard-delete a Shopify product. IRREVERSIBLE — removes the product, its
+ * variants, and inventory rows from Shopify entirely. Caller MUST verify a
+ * non-archived twin exists first (or is otherwise certain the product is
+ * disposable). Used by `scripts/dedupe-archived-shopify-twins.ts`.
+ */
+export async function productDelete(productId: string): Promise<void> {
+  const mutation = `
+    mutation ProductDelete($input: ProductDeleteInput!) {
+      productDelete(input: $input) {
+        deletedProductId
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    productDelete: {
+      deletedProductId: string | null;
+      userErrors: Array<{ field: string[]; message: string }>;
+    };
+  }>(mutation, { input: { id: toProductGid(productId) } });
+
+  if (data.productDelete.userErrors.length > 0) {
+    throw new Error(
+      `productDelete errors: ${data.productDelete.userErrors.map((e) => e.message).join(", ")}`,
+    );
+  }
+}
+
 export async function productVariantsBulkUpdate(
   productId: string,
   variants: Array<Record<string, unknown>>,

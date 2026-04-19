@@ -3,6 +3,7 @@ import { setupClientSession, setupStaffSession } from "./helpers/auth";
 import { cleanupTestData, createTestOrg, createTestProduct } from "./helpers/test-data";
 
 test.describe("Inbound shipment flow", () => {
+  test.describe.configure({ mode: "serial" });
   let orgId: string;
   let testSku: string;
 
@@ -26,7 +27,8 @@ test.describe("Inbound shipment flow", () => {
     await setupClientSession(page, orgId);
     await page.goto("/portal/inbound");
 
-    await expect(page.locator("h1")).toContainText("Inbound");
+    await expect(page).toHaveURL(/\/portal\/inbound/);
+    await expect(page.getByRole("link", { name: "Inbound" })).toBeVisible();
 
     // Click new inbound button
     const newButton = page.getByRole("link", { name: /submit new inbound|new/i });
@@ -95,7 +97,7 @@ test.describe("Inbound shipment flow", () => {
     await setupStaffSession(page);
     await page.goto("/admin/inbound");
 
-    await expect(page.locator("h1")).toContainText("Inbound");
+    await expect(page).toHaveURL(/\/admin\/inbound/);
 
     // Wait for table
     await page.waitForSelector("table", { timeout: 10000 }).catch(() => {

@@ -4,8 +4,9 @@
  */
 
 import { getAdminClient } from "./auth";
+import { E2E_NAMESPACE, namespacedValue } from "./run-context";
 
-const TEST_PREFIX = "e2e-test-";
+const TEST_PREFIX = `${E2E_NAMESPACE}-`;
 
 export async function createTestOrg(name: string) {
   const supabase = getAdminClient();
@@ -19,7 +20,7 @@ export async function createTestOrg(name: string) {
     .from("organizations")
     .insert({
       workspace_id: workspace.id,
-      name: `${TEST_PREFIX}${name}`,
+      name: namespacedValue(name),
       slug,
       onboarding_state: { login_complete: true },
     })
@@ -43,7 +44,7 @@ export async function createTestProduct(
     .insert({
       workspace_id: workspaceId,
       org_id: orgId,
-      title: `${TEST_PREFIX}${title}`,
+      title: namespacedValue(title),
       status: "active",
     })
     .select("id")
@@ -56,7 +57,7 @@ export async function createTestProduct(
     .insert({
       product_id: product.id,
       workspace_id: workspaceId,
-      sku: `${TEST_PREFIX}${sku}`,
+      sku: namespacedValue(sku),
       title: "Default",
     })
     .select("id")
@@ -67,13 +68,13 @@ export async function createTestProduct(
   await supabase.from("warehouse_inventory_levels").insert({
     variant_id: variant.id,
     workspace_id: workspaceId,
-    sku: `${TEST_PREFIX}${sku}`,
+    sku: namespacedValue(sku),
     available: 100,
     committed: 0,
     incoming: 0,
   });
 
-  return { productId: product.id, variantId: variant.id, sku: `${TEST_PREFIX}${sku}` };
+  return { productId: product.id, variantId: variant.id, sku: namespacedValue(sku) };
 }
 
 export async function cleanupTestData() {
@@ -104,7 +105,7 @@ export async function cleanupTestData() {
     .like("title", `${TEST_PREFIX}%`);
   assertOk(products.error, "warehouse_products delete");
 
-  // Delete any users tied to test orgs and known E2E test emails.
+  // Delete any users tied to this run's scoped orgs and emails.
   const testOrgs = await supabase
     .from("organizations")
     .select("id")
@@ -117,7 +118,10 @@ export async function cleanupTestData() {
     assertOk(usersByOrg.error, "users delete by org_id");
   }
 
-  const usersByEmail = await supabase.from("users").delete().like("email", "%test.clandestine.dev");
+  const usersByEmail = await supabase
+    .from("users")
+    .delete()
+    .like("email", `%${E2E_NAMESPACE}%@test.clandestine.dev`);
   assertOk(usersByEmail.error, "users delete by email");
 
   const orgs = await supabase
@@ -129,8 +133,8 @@ export async function cleanupTestData() {
   // Also remove test users from Supabase Auth.
   const listed = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
   assertOk(listed.error, "auth.listUsers");
-  const testAuthUsers = (listed.data?.users ?? []).filter(
-    (u) => u.email && (u.email.endsWith("@test.clandestine.dev") || u.email.startsWith("e2e-")),
+  const testAuthUsers = (listed.data?.users ?? []).filter((u) =>
+    u.email?.includes(`${E2E_NAMESPACE}@test.clandestine.dev`),
   );
 
   for (const user of testAuthUsers) {

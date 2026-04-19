@@ -129,6 +129,8 @@ journeys:
       - write_publications scope added to Shopify app config
       - bandcamp-sync unmatched path is DB-first (product/variant/mapping first, Shopify create second) so `UNIQUE(workspace_id, sku)` collisions cannot leak orphan Shopify drafts
       - package-level dedup uses bandcamp_product_mappings `(workspace_id, bandcamp_item_id)` backstop index before SKU fallback matching
+      - bandcamp-sync exits early when `workspaces.bandcamp_sync_paused=true`, allowing operators to freeze create paths during incident remediation
+      - unmatched create re-checks definitive package mapping before Shopify create; if Shopify create succeeds but DB attach verification fails, product is auto-archived and review queue is raised to prevent unmanaged drafts
 
   - id: bandcamp_sales_data
     area: admin_settings

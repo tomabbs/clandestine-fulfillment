@@ -7,6 +7,7 @@
 
 import type { Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
+import { E2E_NAMESPACE } from "./run-context";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -37,22 +38,36 @@ function getAdminClient() {
 async function createTestSession(page: Page, email: string, role: string, orgId: string | null) {
   const admin = getAdminClient();
 
-  // Create auth user (or get existing)
-  let authUserId: string;
-  const { data: existingUsers } = await admin.auth.admin.listUsers();
-  const existing = existingUsers?.users?.find((u) => u.email === email);
+  const findExistingAuthUser = async () => {
+    for (let pageNum = 1; pageNum <= 10; pageNum += 1) {
+      const { data, error } = await admin.auth.admin.listUsers({ page: pageNum, perPage: 1000 });
+      if (error) throw new Error(`Failed to list test users: ${error.message}`);
+      const found = data.users.find((u) => u.email === email);
+      if (found) return found;
+      if (data.users.length < 1000) break;
+    }
+    return null;
+  };
 
-  if (existing) {
-    authUserId = existing.id;
-  } else {
+  // Create auth user (or safely reuse existing across parallel workers/retries).
+  let authUser = await findExistingAuthUser();
+  if (!authUser) {
     const { data: newUser, error } = await admin.auth.admin.createUser({
       email,
       password: `test-password-${Date.now()}`,
       email_confirm: true,
     });
-    if (error || !newUser.user) throw new Error(`Failed to create test user: ${error?.message}`);
-    authUserId = newUser.user.id;
+    if (!error && newUser.user) {
+      authUser = newUser.user;
+    } else {
+      const retryExisting = await findExistingAuthUser();
+      if (!retryExisting) {
+        throw new Error(`Failed to create test user: ${error?.message ?? "unknown error"}`);
+      }
+      authUser = retryExisting;
+    }
   }
+  const authUserId = authUser.id;
 
   // Ensure users table row exists
   const { data: workspaces } = await admin.from("workspaces").select("id").limit(1);
@@ -109,7 +124,6 @@ async function createTestSession(page: Page, email: string, role: string, orgId:
 }
 
 async function setSessionCookies(page: Page, accessToken: string, refreshToken: string) {
-  const _baseUrl = "http://localhost:3000";
   // Set Supabase auth cookies that @supabase/ssr expects
   await page.context().addCookies([
     {
@@ -128,11 +142,21 @@ async function setSessionCookies(page: Page, accessToken: string, refreshToken: 
 }
 
 export async function setupStaffSession(page: Page) {
-  await createTestSession(page, "e2e-staff@test.clandestine.dev", "super_admin", null);
+  await createTestSession(
+    page,
+    `e2e-staff-${E2E_NAMESPACE}@test.clandestine.dev`,
+    "super_admin",
+    null,
+  );
 }
 
 export async function setupClientSession(page: Page, orgId?: string) {
-  await createTestSession(page, "e2e-client@test.clandestine.dev", "client", orgId ?? null);
+  await createTestSession(
+    page,
+    `e2e-client-${E2E_NAMESPACE}@test.clandestine.dev`,
+    "client",
+    orgId ?? null,
+  );
 }
 
 export { getAdminClient };

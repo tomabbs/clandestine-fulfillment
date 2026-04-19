@@ -228,7 +228,9 @@ function dice(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 1;
   if (a.size === 0 || b.size === 0) return 0;
   let inter = 0;
-  for (const x of a) if (b.has(x)) inter++;
+  a.forEach((x) => {
+    if (b.has(x)) inter += 1;
+  });
   return (2 * inter) / (a.size + b.size);
 }
 
@@ -1017,7 +1019,7 @@ function labelMatchesAnyBcConnection(masterLabelNorm: string, bcConnNorm: Set<st
   if (bcConnNorm.has(masterLabelNorm)) return masterLabelNorm;
   // Token-overlap fallback: a Master label like "Northern Spy" should match
   // Bandcamp connection "Northern Spy Records".
-  for (const conn of bcConnNorm) {
+  for (const conn of Array.from(bcConnNorm)) {
     if (conn.includes(masterLabelNorm) || masterLabelNorm.includes(conn)) return conn;
   }
   return null;

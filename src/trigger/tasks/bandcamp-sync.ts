@@ -20,6 +20,7 @@ import {
 import {
   findOrCreateCollection,
   inventoryItemUpdate,
+  productArchive,
   productCreateMedia,
   productSetCreate,
   publishToSafeChannels,
@@ -1033,6 +1034,36 @@ export const bandcampSyncTask = task({
     let lastVariantQueryCount = 0;
 
     try {
+      const { data: workspaceSettings, error: workspaceSettingsError } = await supabase
+        .from("workspaces")
+        .select("bandcamp_sync_paused, bandcamp_scraper_settings")
+        .eq("id", workspaceId)
+        .single();
+
+      if (workspaceSettingsError) {
+        throw workspaceSettingsError;
+      }
+
+      if (workspaceSettings?.bandcamp_sync_paused) {
+        logger.warn("bandcamp-sync skipped: workspace bandcamp_sync_paused=true", {
+          workspaceId,
+        });
+        if (syncLogId) {
+          await supabase
+            .from("channel_sync_log")
+            .update({
+              status: "completed",
+              completed_at: new Date().toISOString(),
+              metadata: {
+                skipped: true,
+                reason: "bandcamp_sync_paused",
+              },
+            })
+            .eq("id", syncLogId);
+        }
+        return;
+      }
+
       const accessToken = await refreshBandcampToken(workspaceId);
       logger.info("Token refreshed", { workspaceId });
 
@@ -1413,14 +1444,8 @@ export const bandcampSyncTask = task({
         // Collect existing SKUs for collision detection during auto-generation
         const existingSkuSet = new Set(variants.map((v) => v.sku));
 
-        // Read workspace settings for SKU push flag
-        const { data: wsSettings } = await supabase
-          .from("workspaces")
-          .select("bandcamp_scraper_settings")
-          .eq("id", workspaceId)
-          .single();
         const enableSkuPush =
-          (wsSettings?.bandcamp_scraper_settings as Record<string, unknown>)?.enable_sku_push ===
+          (workspaceSettings?.bandcamp_scraper_settings as Record<string, unknown>)?.enable_sku_push ===
           true;
 
         for (const merchItem of unmatched) {
@@ -1805,6 +1830,52 @@ export const bandcampSyncTask = task({
               merchItem,
             );
 
+            const { data: mappingBeforeShopifyCreate, error: mappingCheckError } = await supabase
+              .from("bandcamp_product_mappings")
+              .select("id, variant_id")
+              .eq("workspace_id", workspaceId)
+              .eq("bandcamp_item_id", merchItem.package_id)
+              .maybeSingle();
+
+            if (
+              mappingCheckError ||
+              !mappingBeforeShopifyCreate ||
+              mappingBeforeShopifyCreate.variant_id !== newVariant.id
+            ) {
+              logger.error("Aborting Shopify create due to non-definitive mapping state", {
+                sku: effectiveSku,
+                packageId: merchItem.package_id,
+                mappingCheckError: mappingCheckError?.message ?? null,
+                mappingVariantId: mappingBeforeShopifyCreate?.variant_id ?? null,
+                expectedVariantId: newVariant.id,
+              });
+
+              await supabase.from("warehouse_review_queue").upsert(
+                {
+                  workspace_id: workspaceId,
+                  org_id: connection.org_id ?? null,
+                  category: "bandcamp_sync_mapping_guardrail",
+                  severity: "high" as const,
+                  title: `Bandcamp mapping guardrail blocked Shopify create: ${effectiveSku}`,
+                  description:
+                    "Skipped Shopify product creation because package-level dedup state was not definitive.",
+                  metadata: {
+                    sku: effectiveSku,
+                    packageId: merchItem.package_id,
+                    expected_variant_id: newVariant.id,
+                    actual_variant_id: mappingBeforeShopifyCreate?.variant_id ?? null,
+                    error: mappingCheckError?.message ?? null,
+                  },
+                  status: "open" as const,
+                  group_key: `bandcamp_mapping_guardrail_${workspaceId}_${merchItem.package_id}`,
+                  occurrence_count: 1,
+                },
+                { onConflict: "group_key", ignoreDuplicates: false },
+              );
+              itemsFailed++;
+              continue;
+            }
+
             try {
               shopifyProductId = await productSetCreate({
                 title,
@@ -1847,6 +1918,47 @@ export const bandcampSyncTask = task({
                   synced_at: new Date().toISOString(),
                 })
                 .eq("id", product.id);
+
+              const { data: productAttachedRow, error: attachError } = await supabase
+                .from("warehouse_products")
+                .select("id")
+                .eq("id", product.id)
+                .eq("shopify_product_id", shopifyProductId)
+                .maybeSingle();
+
+              if (attachError || !productAttachedRow) {
+                await productArchive(shopifyProductId);
+                logger.error("Archived Shopify product after DB attach verification failed", {
+                  sku: effectiveSku,
+                  shopifyProductId,
+                  attachError: attachError?.message ?? null,
+                  warehouseProductId: product.id,
+                });
+                await supabase.from("warehouse_review_queue").upsert(
+                  {
+                    workspace_id: workspaceId,
+                    org_id: connection.org_id ?? null,
+                    category: "shopify_product_create",
+                    severity: "high" as const,
+                    title: `Shopify product auto-archived: attach failed (${effectiveSku})`,
+                    description:
+                      "Shopify product was created but failed post-create DB attach verification; product was immediately archived to prevent unmanaged duplicates.",
+                    metadata: {
+                      sku: effectiveSku,
+                      shopify_product_id: shopifyProductId,
+                      warehouse_product_id: product.id,
+                      package_id: merchItem.package_id,
+                      attach_error: attachError?.message ?? null,
+                    },
+                    status: "open" as const,
+                    group_key: `shopify_attach_failed_autarchive_${workspaceId}_${effectiveSku}`,
+                    occurrence_count: 1,
+                  },
+                  { onConflict: "group_key", ignoreDuplicates: false },
+                );
+                itemsFailed++;
+                continue;
+              }
 
               try {
                 await publishToSafeChannels(shopifyProductId);

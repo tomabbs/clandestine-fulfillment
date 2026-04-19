@@ -3,6 +3,7 @@ import { setupStaffSession } from "./helpers/auth";
 import { cleanupTestData, createTestOrg, createTestProduct } from "./helpers/test-data";
 
 test.describe("Inventory adjustment flow", () => {
+  test.describe.configure({ mode: "serial" });
   let testSku: string;
 
   test.beforeAll(async () => {

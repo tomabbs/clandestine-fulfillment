@@ -260,7 +260,7 @@ interface DbVariantRow {
 }
 
 async function pageAll<T>(
-  fetcher: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>,
+  fetcher: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
 ): Promise<T[]> {
   const out: T[] = [];
   let from = 0;
@@ -396,7 +396,7 @@ interface CollisionRow {
   db_sku: string | null;
   db_variant_id: string;
   db_product_id: string;
-  db_artist: string;
+  db_artist: string | null;
   db_product_title: string;
   db_format: string;
   db_product_status: string | null;
@@ -421,7 +421,7 @@ interface DbOnlyRow {
   db_sku: string | null;
   db_variant_id: string;
   db_product_id: string;
-  db_artist: string;
+  db_artist: string | null;
   db_product_title: string;
   db_variant_title: string | null;
   db_format: string;
@@ -561,8 +561,8 @@ async function main() {
             sku: m.sku as string,
             field: "artist",
             master_value: m.artist,
-            db_value: v.product_vendor,
-            drift_note: classifyArtistDrift(m.artist, v.product_vendor, m.label),
+            db_value: v.product_vendor ?? "",
+            drift_note: classifyArtistDrift(m.artist, v.product_vendor ?? "", m.label),
             master_label: m.label,
             master_provenance: m.provenance,
             master_artist: m.artist,

@@ -68,7 +68,7 @@ function parseFlags(argv: string[]): CliFlags {
 }
 
 async function pageAll<T>(
-  fetcher: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>,
+  fetcher: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
 ): Promise<T[]> {
   const out: T[] = [];
   let from = 0;

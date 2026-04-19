@@ -497,7 +497,7 @@ async function processBand(
 
   // Emit historical-only rows: SKUs that have ever sold for this band but are
   // not present in the live merch listing.
-  for (const [sku, agg] of aggBySku.entries()) {
+  for (const [sku, agg] of Array.from(aggBySku.entries())) {
     if (liveSkus.has(sku)) continue;
     summary.sales_skus_not_in_live_catalog += 1;
     const o = agg.sample;
@@ -606,7 +606,7 @@ async function main() {
   const bands: BandSummaryRow[] = [];
   const startedAt = new Date().toISOString();
 
-  for (const [wsId, wsConns] of byWorkspace.entries()) {
+  for (const [wsId, wsConns] of Array.from(byWorkspace.entries())) {
     console.log(`[ws=${wsId}] refreshing token + loading my_bands`);
     const token = await refreshBandcampToken(wsId);
     const artistLookup = await buildArtistLookup(token);
