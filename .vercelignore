@@ -1,0 +1,10 @@
+reports/**
+docs/plans/**
+scripts/**
+supabase/**
+agent-transcripts/**
+.trigger/**
+.next/**
+node_modules/**
+.git/**
+playwright-report/**
