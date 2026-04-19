@@ -470,9 +470,69 @@ export async function getShipmentDetail(id: string) {
   };
 }
 
-// === Label Creation (Phase 5B) ===
+// === Label Creation (Phase 5B + Phase 3.1) ===
 
-export type OrderType = "fulfillment" | "mailorder";
+// Phase 3.1: extended union — "shipstation" sources rows from the
+// shipstation_orders mirror table (Phase 1.1) instead of warehouse_orders.
+export type OrderType = "fulfillment" | "mailorder" | "shipstation";
+
+interface OrderForRates {
+  /** Database row id (uuid for fulfillment/mailorder, uuid for shipstation_orders.id). */
+  id: string;
+  shipping_address: Record<string, unknown> | null;
+  customer_name: string | null;
+  /** Per-line item set used for media-mail eligibility + (in the task) customs. */
+  line_items: Array<{ sku?: string | null }>;
+  /** Optional default weight in oz from the order itself. Falls back to 16oz when unset. */
+  weight_oz?: number | null;
+}
+
+/**
+ * Phase 3.1 — fetch the minimum order shape needed to quote rates / buy a label,
+ * regardless of source. The task in Phase 3.2 follows the same dispatch pattern.
+ *
+ * Exposed for unit testing.
+ */
+export async function fetchOrderForRates(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  orderId: string,
+  orderType: OrderType,
+): Promise<OrderForRates | null> {
+  if (orderType === "shipstation") {
+    const { data: order } = await supabase
+      .from("shipstation_orders")
+      .select("id, ship_to, customer_name, weight")
+      .eq("id", orderId)
+      .single();
+    if (!order) return null;
+    const { data: items } = await supabase
+      .from("shipstation_order_items")
+      .select("sku")
+      .eq("shipstation_order_id", order.id);
+    const weight = order.weight as { value?: number; units?: string } | null;
+    return {
+      id: order.id,
+      shipping_address: order.ship_to as Record<string, unknown> | null,
+      customer_name: order.customer_name ?? null,
+      line_items: (items ?? []).map((i) => ({ sku: i.sku })),
+      weight_oz: typeof weight?.value === "number" ? weight.value : null,
+    };
+  }
+
+  const table = orderType === "fulfillment" ? "warehouse_orders" : "mailorder_orders";
+  const { data: order } = await supabase
+    .from(table)
+    .select("id, shipping_address, customer_name, line_items")
+    .eq("id", orderId)
+    .single();
+  if (!order) return null;
+  return {
+    id: order.id,
+    shipping_address: order.shipping_address as Record<string, unknown> | null,
+    customer_name: order.customer_name ?? null,
+    line_items: (order.line_items ?? []) as Array<{ sku?: string }>,
+  };
+}
 
 export interface RateOption {
   id: string;
@@ -509,22 +569,19 @@ export async function getShippingRates(
   await requireStaff();
   const supabase = createServiceRoleClient();
 
-  // Fetch the order
-  const table = orderType === "fulfillment" ? "warehouse_orders" : "mailorder_orders";
-  const { data: order } = await supabase
-    .from(table)
-    .select("id, shipping_address, customer_name, line_items")
-    .eq("id", orderId)
-    .single();
-
-  if (!order?.shipping_address) {
+  // Phase 3.1 — source-agnostic fetch.
+  const order = await fetchOrderForRates(supabase, orderId, orderType);
+  if (!order) {
+    return { rates: [], error: "Order not found" };
+  }
+  if (!order.shipping_address) {
     return { rates: [], error: "Order has no shipping address" };
   }
 
   // Determine media mail eligibility
-  const skus = (order.line_items as Array<{ sku?: string }>)
+  const skus = order.line_items
     .map((li) => li.sku)
-    .filter((s): s is string => !!s);
+    .filter((s): s is string => !!s && s !== "UNKNOWN");
 
   let mediaMailEligible = false;
   if (skus.length > 0) {
@@ -538,7 +595,7 @@ export async function getShippingRates(
     mediaMailEligible = found.length > 0 && found.every((s) => variantMap.get(s) === true);
   }
 
-  const toAddr = normalizeAddress(order.shipping_address as Record<string, unknown>);
+  const toAddr = normalizeAddress(order.shipping_address);
   const toAddressParams = {
     name: toAddr.name || (order.customer_name ?? ""),
     street1: toAddr.street1,
@@ -549,13 +606,15 @@ export async function getShippingRates(
     country: toAddr.country,
   };
   const isInternational = !isDomesticShipment(toAddr.country ?? "US");
+  // Phase 3.1 — use the SS order's recorded weight when present, else 16oz.
+  const previewWeight = order.weight_oz && order.weight_oz > 0 ? order.weight_oz : 16;
 
   const bestRateResult = await (async () => {
     try {
       const shipment = await createShipment({
         fromAddress: WAREHOUSE_ADDRESS,
         toAddress: toAddressParams,
-        parcel: { weight: 16 }, // default 1 lb for rate preview; dimensions defaulted in createShipment
+        parcel: { weight: previewWeight }, // dimensions defaulted in createShipment
         mediaMailEligible,
       });
       return { shipment, error: null };
@@ -574,7 +633,7 @@ export async function getShippingRates(
         {
           fromAddress: WAREHOUSE_ADDRESS,
           toAddress: toAddressParams,
-          parcel: { weight: 16 },
+          parcel: { weight: previewWeight },
         },
         [ASENDIA_CARRIER_ACCOUNT_ID],
       );
@@ -642,21 +701,35 @@ export async function createOrderLabel(
   orderId: string,
   params: {
     orderType: OrderType;
-    selectedRateId: string;
+    /** Legacy. Use `selectedRate` instead. Kept for callers not yet upgraded. */
+    selectedRateId?: string;
+    /**
+     * Phase 0.2 — stable key carried from the preview rate the staff clicked.
+     * Survives EP rate-ID churn between Shipment.create calls.
+     */
+    selectedRate?: {
+      carrier: string;
+      service: string;
+      rate: number;
+      deliveryDays?: number | null;
+    };
     weight?: number;
   },
 ): Promise<LabelResult> {
   await requireStaff();
 
-  // Delegate to the Trigger.dev task for full pipeline execution
+  if (!params.selectedRateId && !params.selectedRate) {
+    return { success: false, error: "Must provide selectedRateId or selectedRate" };
+  }
+
   try {
     const run = await tasks.trigger("create-shipping-label", {
       orderId,
       orderType: params.orderType,
       selectedRateId: params.selectedRateId,
+      selectedRate: params.selectedRate,
       weight: params.weight ?? 16,
     });
-    // Task has been enqueued — return the run ID for polling
     return { success: true, shipmentId: run.id };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

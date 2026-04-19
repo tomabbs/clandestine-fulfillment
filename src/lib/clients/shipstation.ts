@@ -207,6 +207,26 @@ const shipNotifyPayloadSchema = z.object({
 
 export type ShipNotifyPayload = z.infer<typeof shipNotifyPayloadSchema>;
 
+// Phase 1.3 — ORDER_NOTIFY webhook payload. Same shape as SHIP_NOTIFY, but
+// resource_url points to an /orders endpoint and the resource_type discriminator
+// is "ORDER_NOTIFY". ORDER_NOTIFY only fires for orders entering or transitioning
+// INTO a non-awaiting_payment status (per SS docs). Awaiting-payment orders are
+// covered by the 15-min poll cron in Phase 1.2.
+const orderNotifyPayloadSchema = z.object({
+  resource_url: z.string(),
+  resource_type: z.literal("ORDER_NOTIFY"),
+});
+
+export type OrderNotifyPayload = z.infer<typeof orderNotifyPayloadSchema>;
+
+// Either-or webhook payload. The route uses the discriminator on resource_type.
+const shipStationWebhookPayloadSchema = z.discriminatedUnion("resource_type", [
+  shipNotifyPayloadSchema,
+  orderNotifyPayloadSchema,
+]);
+
+export type ShipStationWebhookPayload = z.infer<typeof shipStationWebhookPayloadSchema>;
+
 // === Signature Verification ===
 
 export async function verifyShipStationSignature(
@@ -321,6 +341,16 @@ export async function fetchStores() {
 export function parseShipNotifyPayload(rawBody: string): ShipNotifyPayload {
   const parsed = JSON.parse(rawBody);
   return shipNotifyPayloadSchema.parse(parsed);
+}
+
+/**
+ * Phase 1.3 — parse a ShipStation webhook body and return either SHIP_NOTIFY
+ * or ORDER_NOTIFY shape. Throws on unrecognized payloads (caller should
+ * 400 the request — preserves SHIP_NOTIFY-only behavior of the legacy parser).
+ */
+export function parseShipStationWebhookPayload(rawBody: string): ShipStationWebhookPayload {
+  const parsed = JSON.parse(rawBody);
+  return shipStationWebhookPayloadSchema.parse(parsed);
 }
 
 /**
@@ -581,6 +611,105 @@ export async function removeAliasFromProduct({
     aliases: current.aliases.filter((a) => a.name !== aliasSku),
   };
   return putProduct(current.productId, next);
+}
+
+// ─── Phase 4.1 — v1 markasshipped (writeback FALLBACK path) ─────────────────
+//
+// POST /orders/markasshipped — used when v2 fulfillments isn't available
+// (no shipment_id) or returned an error. SS v1 is wider-supported across
+// stores and marketplaces but is on the long-term deprecation path (R16).
+//
+// CRITICAL idempotency notes (Phase 4.3 / J.5):
+// - Local outbox is the real dedup. Read shipstation_marked_shipped_at IS NULL
+//   before calling this.
+// - 409 with "already_shipped" = success (treat as idempotent). Do NOT retry.
+// - X-Idempotency-Key is sent as our internal trace key only; SS does not
+//   officially document remote idempotency semantics for this header.
+
+const markAsShippedResponseSchema = z.object({
+  orderId: z.number().nullable().optional(),
+  orderNumber: z.string().nullable().optional(),
+  customerNotifiedAt: z.string().nullable().optional(),
+});
+
+export type MarkAsShippedResponse = z.infer<typeof markAsShippedResponseSchema>;
+
+export interface MarkOrderShippedInput {
+  orderId: number;
+  carrierCode: string;
+  trackingNumber: string;
+  /** YYYY-MM-DD; defaults to today server-side. */
+  shipDate?: string;
+  notifyCustomer?: boolean;
+  notifySalesChannel?: boolean;
+  notes?: string;
+  /** Optional override for the customer notification email when SS account default is wrong. */
+  notifyCustomerEmail?: string;
+  /** Optional override for the sales-channel notification email. */
+  notifySalesChannelEmail?: string;
+  /** Internal trace key. Phase 4.1 note: SS does not officially honor this for remote dedup. */
+  idempotencyKey?: string;
+}
+
+export async function markOrderShipped(
+  input: MarkOrderShippedInput,
+): Promise<MarkAsShippedResponse> {
+  const body: Record<string, unknown> = {
+    orderId: input.orderId,
+    carrierCode: input.carrierCode,
+    trackingNumber: input.trackingNumber,
+    notifyCustomer: input.notifyCustomer ?? true,
+    notifySalesChannel: input.notifySalesChannel ?? true,
+  };
+  if (input.shipDate) body.shipDate = input.shipDate;
+  if (input.notes) body.notes = input.notes;
+  if (input.notifyCustomerEmail) body.notifyCustomerEmail = input.notifyCustomerEmail;
+  if (input.notifySalesChannelEmail) body.notifySalesChannelEmail = input.notifySalesChannelEmail;
+
+  const headers: Record<string, string> = {};
+  if (input.idempotencyKey) headers["X-Idempotency-Key"] = input.idempotencyKey;
+
+  const raw = await shipstationFetch<unknown>("/orders/markshipped", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers,
+  });
+  return markAsShippedResponseSchema.parse(raw);
+}
+
+// ─── Phase 4.1 — v1 GET /carriers (seeds shipstation_carrier_map) ───────────
+
+const shipStationCarrierSchema = z
+  .object({
+    name: z.string(),
+    code: z.string(),
+    accountNumber: z.string().nullable().optional(),
+    requiresFundedAccount: z.boolean().nullable().optional(),
+    balance: z.number().nullable().optional(),
+    nickname: z.string().nullable().optional(),
+    shippingProviderId: z.number().nullable().optional(),
+    primary: z.boolean().nullable().optional(),
+  })
+  .passthrough();
+
+export type ShipStationCarrier = z.infer<typeof shipStationCarrierSchema>;
+
+let _cachedCarriers: { value: ShipStationCarrier[]; expiresAt: number } | null = null;
+const CARRIERS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h per Phase 4.1
+
+export async function listCarriers(opts?: { force?: boolean }): Promise<ShipStationCarrier[]> {
+  if (!opts?.force && _cachedCarriers && _cachedCarriers.expiresAt > Date.now()) {
+    return _cachedCarriers.value;
+  }
+  const raw = await shipstationFetch<unknown[]>("/carriers");
+  const parsed = z.array(shipStationCarrierSchema).parse(raw);
+  _cachedCarriers = { value: parsed, expiresAt: Date.now() + CARRIERS_CACHE_TTL_MS };
+  return parsed;
+}
+
+/** For tests — drop the in-memory cache so a fresh fetch fires. */
+export function _resetListCarriersCache(): void {
+  _cachedCarriers = null;
 }
 
 // Exported for testing

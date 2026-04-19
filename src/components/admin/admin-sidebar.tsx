@@ -60,7 +60,9 @@ const NAV_ITEMS = [
   { title: "Manual Count", href: "/admin/inventory/manual-count", icon: ClipboardList },
   { title: "Locations", href: "/admin/inventory/locations", icon: Warehouse },
   { title: "Inbound", href: "/admin/inbound", icon: PackagePlus },
-  { title: "ShipStation Orders", href: "/admin/shipstation-orders", icon: Warehouse },
+  // Phase 2.3 — single "Orders" entry (was previously a dual sidebar with
+  // /admin/shipstation-orders, now 301-redirected to /admin/orders).
+  // /admin/orders-legacy is intentionally NOT in the sidebar — ops only.
   { title: "Orders", href: "/admin/orders", icon: ShoppingCart },
   { title: "Mail-Order", href: "/admin/mail-order", icon: Store },
   { title: "Catalog", href: "/admin/catalog", icon: Library },

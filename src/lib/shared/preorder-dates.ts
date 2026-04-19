@@ -37,13 +37,27 @@ export function isStreetDateOnOrBefore(dateStr: string | null | undefined): bool
   return d <= getTodayNY();
 }
 
-/** Returns true when the street_date is more than `days` days in the past. */
+/**
+ * Returns true when the street_date is at least `days` days in the past,
+ * measured in America/New_York to stay consistent with getTodayNY() and the
+ * preorder-fulfillment cron.
+ *
+ * Uses NY-local calendar arithmetic so a release that "turns N days old at
+ * NY midnight" flips on the same calendar day customers see on the storefront,
+ * regardless of where the server runs (UTC) or what the wall-clock UTC date is.
+ */
 export function isDaysAfterRelease(dateStr: string | null | undefined, days: number): boolean {
   const d = extractDateOnly(dateStr);
   if (!d) return false;
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  return d <= cutoff.toISOString().slice(0, 10);
+  // Parse today (NY) into a UTC-noon Date so DST shifts can't push us off-by-one,
+  // subtract N days, then reformat back to NY YYYY-MM-DD. Using noon UTC anchors
+  // us safely inside the NY calendar day.
+  const todayNY = getTodayNY();
+  const [y, m, day] = todayNY.split("-").map(Number);
+  const anchor = new Date(Date.UTC(y, m - 1, day, 12, 0, 0));
+  anchor.setUTCDate(anchor.getUTCDate() - days);
+  const cutoffNY = anchor.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  return d <= cutoffNY;
 }
 
 /**

@@ -662,9 +662,13 @@ TRIGGER TASK: aftership-register
   ↓ calls createTracking with tracking_number, carrier, emails[], customer_name
   ↓ AfterShip sends branded tracking email to customer
   ↓
-EasyPost tracking updates arrive at /api/webhooks/easypost
-  ↓ dedup via webhook_events (platform: "easypost", external_webhook_id: eventId)
-  ↓ inserts warehouse_tracking_events (description, event_time, location, source: "easypost")
+[Phase 0.5.8 fix] Tracking events today come via AfterShip webhooks
+(/api/webhooks/aftership), NOT EasyPost. There is no /api/webhooks/easypost
+route in the current code. The EP tracker webhook is planned in Phase 10.2 of
+the unified shipping workflow plan; this section will be revised then.
+  ↓ AfterShip webhook fires on tracker.update
+  ↓ dedup via webhook_events (platform: "aftership", external_webhook_id: eventId)
+  ↓ inserts warehouse_tracking_events (description, event_time, location, source: "aftership")
   ↓ updates warehouse_shipments.status
   ↓
 UI: /admin/shipping shows shipment with tracking timeline
@@ -792,7 +796,7 @@ After OAuth completes:
 | `src/app/api/squarespace/callback/route.ts` | Squarespace OAuth callback (GET) |
 | `src/app/api/discogs/auth/route.ts` | Discogs OAuth 1.0a initiation (GET) |
 | `src/app/api/discogs/callback/route.ts` | Discogs OAuth 1.0a callback (GET) |
-| `src/app/api/webhooks/easypost/route.ts` | EasyPost tracking webhook handler |
+| `src/app/api/webhooks/aftership/route.ts` | AfterShip tracking webhook handler (Phase 10.2 will replace with `/api/webhooks/easypost`) |
 | `src/app/portal/onboarding/page.tsx` | Client onboarding wizard page |
 | `src/trigger/tasks/create-shipping-label.ts` | EasyPost label creation + DB writes |
 | `src/trigger/tasks/mark-platform-fulfilled.ts` | Push shipping status back to source platform |
@@ -1047,7 +1051,7 @@ GET  /api/squarespace/auth      src/app/api/squarespace/auth/route.ts
 GET  /api/squarespace/callback  src/app/api/squarespace/callback/route.ts
 GET  /api/discogs/auth          src/app/api/discogs/auth/route.ts
 GET  /api/discogs/callback      src/app/api/discogs/callback/route.ts
-POST /api/webhooks/easypost     src/app/api/webhooks/easypost/route.ts
+POST /api/webhooks/aftership    src/app/api/webhooks/aftership/route.ts  (Phase 10.2 replaces with /api/webhooks/easypost)
 ```
 
 ### New Server Actions to Add

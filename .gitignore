@@ -63,6 +63,12 @@ reports/*.json
 reports/*.xlsx
 reports/*.txt
 reports/*.sql
+# Subdirectory dumps (e.g. reports/finish-line/*) — same intent.
+reports/**/*.csv
+reports/**/*.json
+reports/**/*.xlsx
+reports/**/*.txt
+reports/**/*.sql
 
 # integration test snapshots (env-coupled)
 tests/integration/__snapshots__/

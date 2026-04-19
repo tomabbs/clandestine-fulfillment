@@ -27,6 +27,17 @@ const nextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      // Phase 2.3 — old ShipStation Orders URL → new unified Orders cockpit.
+      // 301 (permanent) so SS deep links and bookmarks transparently follow.
+      {
+        source: "/admin/shipstation-orders",
+        destination: "/admin/orders",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default withSentryConfig(nextConfig, {

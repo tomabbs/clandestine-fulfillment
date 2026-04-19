@@ -126,6 +126,20 @@ export interface CreateShipmentInput {
     width?: number;
     height?: number;
   };
+  /**
+   * Phase 0.5.4 — pre-built customs items from line items. Use buildCustomsItems()
+   * from customs-builder.ts. When omitted, falls back to the legacy single-item
+   * "Vinyl Records / $25 / hs 8523.80" placeholder for back-compat.
+   */
+  customsItems?: Array<{
+    description: string;
+    quantity: number;
+    weight: number; // oz, per-line
+    value: number; // USD, per-line line total (qty × unit price)
+    hsTariffNumber: string;
+    originCountry?: string;
+  }>;
+  /** Legacy single-item shape — superseded by customsItems. */
   customsInfo?: {
     contentsType: string;
     hsCode: string;
@@ -141,7 +155,41 @@ export interface CreateShipmentInput {
 // Asendia/USA Export carrier account ID — requires explicit inclusion in
 // international shipment requests (not included in EasyPost default rate shopping).
 // Also requires parcel dimensions (not just weight) to return rates.
-export const ASENDIA_CARRIER_ACCOUNT_ID = "ca_0f7e073887204bd491a6230936baf754";
+//
+// Phase 0.5.3: pulled from env (EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID) so prod
+// vs sandbox can use different accounts without code changes. The env schema
+// defaults to the historical prod value so this rollout is non-breaking.
+//
+// Lazy getter so module import never throws when env hasn't been parsed yet
+// (e.g., in test files that don't set EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID).
+const ASENDIA_DEFAULT = "ca_0f7e073887204bd491a6230936baf754";
+let _asendiaCarrierAccountId: string | null = null;
+export function getAsendiaCarrierAccountId(): string {
+  if (_asendiaCarrierAccountId == null) {
+    try {
+      _asendiaCarrierAccountId =
+        env().EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID || ASENDIA_DEFAULT;
+    } catch {
+      // env() may throw if other required vars aren't set (e.g., test envs).
+      // Fall back to the historical hardcoded value so the module stays usable.
+      _asendiaCarrierAccountId = ASENDIA_DEFAULT;
+    }
+  }
+  return _asendiaCarrierAccountId;
+}
+
+/**
+ * @deprecated Phase 0.5.3 — use `getAsendiaCarrierAccountId()` instead so the
+ * value comes from env. Kept as a const for back-compat callers; resolves
+ * eagerly at module init using the same fallback path.
+ */
+export const ASENDIA_CARRIER_ACCOUNT_ID = (() => {
+  try {
+    return env().EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID || ASENDIA_DEFAULT;
+  } catch {
+    return ASENDIA_DEFAULT;
+  }
+})();
 
 // Default parcel dimensions for music packages.
 // Asendia requires all three dimensions; these work for standard LP mailers.
@@ -179,19 +227,40 @@ export async function createShipment(
   }
 
   if (!isDomesticShipment(input.toAddress.country)) {
-    params.customs_info = {
-      contents_type: input.customsInfo?.contentsType ?? "merchandise",
-      customs_items: [
-        {
-          description: input.customsInfo?.description ?? "Vinyl Records",
-          quantity: 1,
-          weight: parcel.weight,
-          value: input.customsInfo?.value ?? 25,
-          hs_tariff_number: input.customsInfo?.hsCode ?? "8523.80",
-          origin_country: "US",
-        },
-      ],
-    };
+    if (input.customsItems?.length) {
+      // Phase 0.5.4 — real per-line customs from order line items.
+      params.customs_info = {
+        contents_type: input.customsInfo?.contentsType ?? "merchandise",
+        customs_items: input.customsItems.map((it) => ({
+          description: it.description,
+          quantity: it.quantity,
+          weight: it.weight,
+          value: it.value,
+          hs_tariff_number: it.hsTariffNumber,
+          origin_country: it.originCountry ?? "US",
+        })),
+      };
+    } else {
+      // Legacy fallback — single placeholder item. Logged as a warning so
+      // operators can hunt down callers that haven't been migrated to the
+      // line-item customs path.
+      console.warn(
+        "[easypost] International shipment built without per-line customs items — falling back to placeholder. Update caller to pass customsItems[].",
+      );
+      params.customs_info = {
+        contents_type: input.customsInfo?.contentsType ?? "merchandise",
+        customs_items: [
+          {
+            description: input.customsInfo?.description ?? "Vinyl Records",
+            quantity: 1,
+            weight: parcel.weight,
+            value: input.customsInfo?.value ?? 25,
+            hs_tariff_number: input.customsInfo?.hsCode ?? "8523.80",
+            origin_country: "US",
+          },
+        ],
+      };
+    }
   }
 
   const shipment = await api.Shipment.create(params);

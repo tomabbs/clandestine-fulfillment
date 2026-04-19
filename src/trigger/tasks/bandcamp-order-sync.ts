@@ -14,6 +14,28 @@ import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
+/**
+ * Phase 0.4 — map Bandcamp payment_state to our financial_status.
+ *
+ * BC payment_state values seen in the wild: "paid", "pending", "failed",
+ * "refunded", "partially_refunded", null/undefined (older orders).
+ *
+ * Mapping rule (from plan): paid → paid, refunded/partially_refunded → refunded,
+ * everything else (incl. null/failed/pending) → pending. We default to pending
+ * rather than paid so unpaid/failed orders never get auto-fulfilled.
+ *
+ * Exposed for unit testing.
+ */
+export function mapBandcampPaymentState(
+  state: string | null | undefined,
+): "paid" | "refunded" | "pending" {
+  if (!state) return "pending";
+  const normalized = state.toLowerCase().trim();
+  if (normalized === "paid") return "paid";
+  if (normalized === "refunded" || normalized === "partially_refunded") return "refunded";
+  return "pending";
+}
+
 export const bandcampOrderSyncTask = task({
   id: "bandcamp-order-sync",
   queue: bandcampQueue,
@@ -130,7 +152,9 @@ export const bandcampOrderSyncTask = task({
               order_number: `BC-${paymentId}`,
               customer_name: first.buyer_name,
               customer_email: first.buyer_email,
-              financial_status: "paid",
+              // Phase 0.4: respect BC payment_state instead of assuming "paid".
+              // Unpaid/failed BC orders should NOT auto-flow into fulfillment.
+              financial_status: mapBandcampPaymentState(first.payment_state),
               fulfillment_status: first.ship_date ? "fulfilled" : "unfulfilled",
               total_price: first.order_total ?? 0,
               currency: first.currency ?? "USD",

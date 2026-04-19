@@ -82,6 +82,59 @@ describe("isDaysAfterRelease", () => {
     d44.setDate(d44.getDate() - 44);
     expect(isDaysAfterRelease(d44.toISOString().slice(0, 10), 45)).toBe(false);
   });
+
+  // NY-timezone hardening (Phase 0.1): the function MUST anchor on getTodayNY,
+  // not on the server's UTC clock. These cases would have failed under the old
+  // UTC-only impl when the UTC day differed from the NY day.
+  it("today (N=0) qualifies — releases today are 0 days after release", () => {
+    expect(isDaysAfterRelease(FIXED_TODAY_NY, 0)).toBe(true);
+  });
+
+  it("yesterday qualifies for N=1", () => {
+    expect(isDaysAfterRelease("2026-04-09", 1)).toBe(true);
+  });
+
+  it("today does NOT qualify for N=1", () => {
+    expect(isDaysAfterRelease(FIXED_TODAY_NY, 1)).toBe(false);
+  });
+
+  it("tomorrow does not qualify for any N >= 0", () => {
+    expect(isDaysAfterRelease("2026-04-11", 0)).toBe(false);
+    expect(isDaysAfterRelease("2026-04-11", 7)).toBe(false);
+  });
+
+  it("exactly N days after the release date qualifies", () => {
+    // Release 7 days before today = 2026-04-03 (NY)
+    expect(isDaysAfterRelease("2026-04-03", 7)).toBe(true);
+    // 6 days before today = 2026-04-04 — does NOT meet the 7-day threshold
+    expect(isDaysAfterRelease("2026-04-04", 7)).toBe(false);
+  });
+
+  it("DST forward jump (spring): cutoff still anchors on NY calendar", () => {
+    // Spring DST 2026 in NY = Sun Mar 8. Pin clock to right after the jump.
+    vi.setSystemTime(new Date("2026-03-09T15:00:00Z")); // 11 AM EDT (UTC-4)
+    // "today NY" = 2026-03-09. Release 7 days before = 2026-03-02 — qualifies.
+    expect(isDaysAfterRelease("2026-03-02", 7)).toBe(true);
+    expect(isDaysAfterRelease("2026-03-03", 7)).toBe(false);
+  });
+
+  it("DST fall back (autumn): cutoff still anchors on NY calendar", () => {
+    // Fall DST 2026 in NY = Sun Nov 1. Pin clock to right after the fall back.
+    vi.setSystemTime(new Date("2026-11-02T15:00:00Z")); // 10 AM EST (UTC-5)
+    // "today NY" = 2026-11-02. Release 7 days before = 2026-10-26 — qualifies.
+    expect(isDaysAfterRelease("2026-10-26", 7)).toBe(true);
+    expect(isDaysAfterRelease("2026-10-27", 7)).toBe(false);
+  });
+
+  it("UTC-vs-NY day boundary: late-evening NY (early-morning UTC next day) still uses NY calendar", () => {
+    // 03:30 UTC on 2026-04-11 is 23:30 EDT on 2026-04-10 — NY is still on the 10th.
+    vi.setSystemTime(new Date("2026-04-11T03:30:00Z"));
+    // "today NY" should be 2026-04-10. Release 1 day before = 2026-04-09 qualifies for N=1.
+    expect(isDaysAfterRelease("2026-04-09", 1)).toBe(true);
+    // Release "today NY" (2026-04-10) does NOT qualify for N=1 — would have erroneously
+    // qualified under the old UTC impl because UTC says it's already 2026-04-11.
+    expect(isDaysAfterRelease("2026-04-10", 1)).toBe(false);
+  });
 });
 
 describe("deriveStreetDateAndPreorder", () => {

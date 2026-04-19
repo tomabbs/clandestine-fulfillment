@@ -43,6 +43,14 @@ const serverEnvSchema = z.object({
 
   // EasyPost
   EASYPOST_API_KEY: z.string().default(""),
+  // Asendia (USA Export PBA) carrier account ID — required for international rate
+  // shopping. EP doesn't include Asendia in default rate responses; we must
+  // pass this carrier_account_id explicitly. Different ID per environment
+  // (prod vs sandbox). Default keeps the legacy hardcoded prod value so existing
+  // deploys without the env var set don't break (Phase 0.5.3).
+  EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID: z
+    .string()
+    .default("ca_0f7e073887204bd491a6230936baf754"),
 
   // Shopify OAuth (client store connections — NOT main Clandestine Shopify)
   SHOPIFY_CLIENT_ID: z.string().default(""),

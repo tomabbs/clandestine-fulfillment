@@ -389,6 +389,76 @@ export async function deleteInventoryLocation(inventoryLocationId: string): Prom
   await v2Fetch<unknown>(`/v2/inventory_locations/${inventoryLocationId}`, { method: "DELETE" });
 }
 
+// ─── Phase 4.1 — v2 Fulfillments (writeback PRIMARY path) ────────────────────
+//
+// POST /v2/fulfillments — writes shipping notification back to SS for one or
+// more shipment_ids. This is the PRIMARY writeback path per Phase 4.0.A
+// capability probe. Falls back to v1 markasshipped (in @/lib/clients/shipstation)
+// when shipment_id is unavailable or v2 returns errors.
+//
+// CRITICAL partial-success semantics (Reviewer 4 / Phase 4.3):
+// - Even on HTTP 200, response.has_errors may be true.
+// - response.fulfillments[] is in the SAME ORDER as the request items.
+// - Each item may have an error_message; iterate in lockstep with the request.
+// - "already fulfilled" error_messages are SUCCESS (idempotent path).
+
+export interface V2FulfillmentRequestItem {
+  shipment_id: string;
+  tracking_number: string;
+  carrier_code: string;
+  ship_date?: string; // YYYY-MM-DD; defaults server-side to today
+  notify_customer?: boolean;
+  notify_order_source?: boolean;
+}
+
+export interface V2FulfillmentResponseItem {
+  shipment_id?: string | null;
+  shipment_number?: string | null;
+  fulfillment_id?: string | null;
+  /** When set, this specific item failed even though the batch may have committed others. */
+  error_message?: string | null;
+  /** Public tracking URL (when SS surfaces one). */
+  tracking_url?: string | null;
+}
+
+export interface V2FulfillmentBatchResponse {
+  has_errors: boolean;
+  fulfillments: V2FulfillmentResponseItem[];
+}
+
+/**
+ * Phase 4.1 — POST /v2/fulfillments.
+ *
+ * Sends a batch of fulfillments to ShipStation v2. Returns the parsed
+ * response shape; callers MUST iterate per-item and handle partial-success
+ * (see Phase 4.3 task implementation for the canonical handler).
+ *
+ * Errors thrown by this function are network-level (HTTP non-2xx, JSON
+ * parse). Application-level errors live inside response.fulfillments[].error_message.
+ */
+export async function createFulfillments(args: {
+  fulfillments: V2FulfillmentRequestItem[];
+  /** Optional internal trace key — sent as X-Idempotency-Key. SS does not officially
+   *  guarantee remote dedup on this header; local outbox is the real protection. */
+  idempotencyKey?: string;
+}): Promise<V2FulfillmentBatchResponse> {
+  const headers: Record<string, string> = {};
+  if (args.idempotencyKey) headers["X-Idempotency-Key"] = args.idempotencyKey;
+
+  const json = await v2Fetch<Partial<V2FulfillmentBatchResponse>>("/v2/fulfillments", {
+    method: "POST",
+    body: JSON.stringify({ fulfillments: args.fulfillments }),
+    headers,
+  });
+
+  // Defensive normalization: SS v2 can return slightly different shapes
+  // depending on whether the batch was 1 or N. Always return both fields.
+  return {
+    has_errors: json.has_errors === true,
+    fulfillments: Array.isArray(json.fulfillments) ? json.fulfillments : [],
+  };
+}
+
 // ─── EXPLICITLY NOT EXPORTED ─────────────────────────────────────────────────
 // Do NOT add a single-SKU read helper. The CI lint guard at
 // scripts/check-v2-inventory-batch.sh greps this file for forbidden

@@ -1,7 +1,14 @@
 /**
  * Normalize shipping addresses to EasyPost format.
  * Handles Bandcamp ship_to_* fields and generic jsonb address objects.
+ *
+ * Phase 0.5.7: country code is normalized to ISO 3166-1 alpha-2 here so every
+ * downstream consumer (EP rate quoting, customs builder, isDomesticShipment)
+ * sees a consistent format regardless of source ("USA" / "United States" /
+ * "U.S." all collapse to "US"; "UK" → "GB"; etc.).
  */
+
+import { normalizeCountryCodeWithDefault } from "./country-codes";
 
 export interface NormalizedAddress {
   name: string;
@@ -53,7 +60,9 @@ export function normalizeAddress(
       city: bc.ship_to_city ?? "",
       state: bc.ship_to_state ?? "",
       zip: bc.ship_to_zip ?? "",
-      country: bc.ship_to_country_code ?? bc.ship_to_country ?? "US",
+      country: normalizeCountryCodeWithDefault(
+        bc.ship_to_country_code ?? bc.ship_to_country,
+      ),
     };
   }
 
@@ -66,7 +75,7 @@ export function normalizeAddress(
     city: gen.city ?? "",
     state: gen.state ?? "",
     zip: gen.postalCode ?? gen.zip ?? "",
-    country: gen.countryCode ?? gen.country ?? "US",
+    country: normalizeCountryCodeWithDefault(gen.countryCode ?? gen.country),
     phone: gen.phone,
   };
 }
