@@ -110,16 +110,24 @@ export function AdminSidebar() {
   }
 
   return (
-    <Sidebar>
-      <SidebarHeader className="border-b px-4 py-3">
+    // collapsible="icon" makes the sidebar shrink to icon-only width when
+    // toggled (rather than vanishing offcanvas). Pages like /admin/orders
+    // auto-collapse on mount so the table has more horizontal room; users
+    // can hit the SidebarTrigger in the header to expand back to full text.
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="border-b px-4 py-3 group-data-[collapsible=icon]:px-2">
+        {/* Full logo in expanded state — hidden when collapsed to icon mode. */}
         <Image
           src="/logo.webp"
           alt="Clandestine Distribution"
           width={216}
           height={43}
           priority
-          className="h-auto w-auto"
+          className="h-auto w-auto group-data-[collapsible=icon]:hidden"
         />
+        {/* Compact mark when collapsed — uses the Warehouse lucide icon
+            (no separate favicon asset). */}
+        <Warehouse className="hidden h-5 w-5 mx-auto group-data-[collapsible=icon]:block" />
       </SidebarHeader>
 
       <SidebarContent>
