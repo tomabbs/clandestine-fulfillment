@@ -236,7 +236,9 @@ export default function InventoryPage() {
         density="ops"
         itemKey={(row) => row.sku}
         ariaLabel="Inventory list"
-        virtualizeThreshold={200}
+        // Keep inventory in non-virtual mode for current pagination sizes (max 250)
+        // until variable-height virtualization is hardened for dense editable rows.
+        virtualizeThreshold={500}
         virtualizationHeightClassName="max-h-[72vh]"
         expandedKeys={expandedKeys}
         onExpandedKeysChange={(keys) => {
