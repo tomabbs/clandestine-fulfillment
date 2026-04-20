@@ -177,7 +177,7 @@ async function loadParentRows(
       )
       .in("id", slice);
     if (error) throw error;
-    for (const v of (data ?? []) as Array<{
+    for (const v of (data ?? []) as unknown as Array<{
       id: string;
       product_id: string;
       sku: string;

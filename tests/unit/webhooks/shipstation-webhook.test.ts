@@ -91,14 +91,20 @@ describe("POST /api/webhooks/shipstation (SHIP_NOTIFY)", () => {
     mockReadBody.mockImplementation(async (req: Request) => req.text());
   });
 
-  it("returns 401 when x-ss-signature header is missing", async () => {
+  it("accepts requests without x-ss-signature header (signing is best-effort per SS docs; revised 2026-04-20)", async () => {
+    // Now that we accept unsigned, the request reaches the supabase insert.
+    mockWebhookInsertSuccess();
     const req = new Request("https://example.com/api/webhooks/shipstation", {
       method: "POST",
       body: VALID_BODY,
     });
 
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
-    expect(res.status).toBe(401);
+    // Was 401 in original Phase 1.3; revised to 200 — SS doesn't always
+    // send x-ss-signature (depends on subscription type + payload version).
+    // Strict rejection broke legitimate webhook deliveries; we now accept
+    // unsigned events + log to Sentry once per cold start.
+    expect(res.status).toBe(200);
   });
 
   it("returns 401 when HMAC verification fails", async () => {
@@ -213,17 +219,17 @@ describe("POST /api/webhooks/shipstation (ORDER_NOTIFY — Phase 1.3)", () => {
   });
 });
 
-describe("POST /api/webhooks/shipstation (prod secret enforcement — Phase 1.3)", () => {
+describe("POST /api/webhooks/shipstation (Phase 1.3 — revised 2026-04-20)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockVerify.mockImplementation(async () => true);
     mockReadBody.mockImplementation(async (req: Request) => req.text());
   });
 
-  it("returns 500 in production when SHIPSTATION_WEBHOOK_SECRET is unset (deploy-blocking)", async () => {
+  it("accepts unsigned events in production when neither SHIPSTATION_WEBHOOK_SECRET nor SHIPSTATION_API_SECRET is set (SS doesn't expose a webhook secret in their dashboard; signing is best-effort)", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.doMock("@/lib/shared/env", () => ({
-      env: () => ({ SHIPSTATION_WEBHOOK_SECRET: "" }),
+      env: () => ({ SHIPSTATION_WEBHOOK_SECRET: "", SHIPSTATION_API_SECRET: "" }),
     }));
     vi.resetModules();
     try {
@@ -231,10 +237,42 @@ describe("POST /api/webhooks/shipstation (prod secret enforcement — Phase 1.3)
       const req = new Request("https://example.com/api/webhooks/shipstation", {
         method: "POST",
         body: VALID_BODY,
-        headers: { "x-ss-signature": "x" },
       });
       const res = await PostInProd(req as unknown as Parameters<typeof POST>[0]);
-      expect(res.status).toBe(500);
+      // Was 500 in original Phase 1.3; revised to 200 (accept) per SS docs.
+      expect(res.status).toBe(200);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.doUnmock("@/lib/shared/env");
+      vi.resetModules();
+    }
+  });
+
+  it("falls back to SHIPSTATION_API_SECRET when SHIPSTATION_WEBHOOK_SECRET is empty (SS reuses the API secret as the HMAC key per their docs)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.doMock("@/lib/shared/env", () => ({
+      env: () => ({
+        SHIPSTATION_WEBHOOK_SECRET: "",
+        SHIPSTATION_API_SECRET: "the-api-secret",
+      }),
+    }));
+    mockVerify.mockImplementation(async (_body, _sig, secret) => secret === "the-api-secret");
+    vi.resetModules();
+    try {
+      const { POST: PostInProd } = await import("@/app/api/webhooks/shipstation/route");
+      const req = new Request("https://example.com/api/webhooks/shipstation", {
+        method: "POST",
+        body: VALID_BODY,
+        headers: { "x-ss-signature": "valid-sig" },
+      });
+      const res = await PostInProd(req as unknown as Parameters<typeof POST>[0]);
+      expect(res.status).toBe(200);
+      // Confirms verifier was called with the API secret, not the webhook one.
+      expect(mockVerify).toHaveBeenCalledWith(
+        expect.any(String),
+        "valid-sig",
+        "the-api-secret",
+      );
     } finally {
       vi.unstubAllEnvs();
       vi.doUnmock("@/lib/shared/env");

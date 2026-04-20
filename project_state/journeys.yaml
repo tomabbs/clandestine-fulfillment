@@ -131,6 +131,7 @@ journeys:
       - package-level dedup uses bandcamp_product_mappings `(workspace_id, bandcamp_item_id)` backstop index before SKU fallback matching
       - bandcamp-sync exits early when `workspaces.bandcamp_sync_paused=true`, allowing operators to freeze create paths during incident remediation
       - unmatched create re-checks definitive package mapping before Shopify create; if Shopify create succeeds but DB attach verification fails, product is auto-archived and review queue is raised to prevent unmanaged drafts
+      - apparel multi-variant (Phase A, 2026-04-20) — packages exposing ≥2 distinct option SKUs materialize as N variants under one warehouse_product (option name inferred via `inferOptionName` — Size/Color/Variant, never Title); variants carry `bandcamp_option_id`/`bandcamp_option_title` per migration `20260420000005_variant_bandcamp_option.sql`; single mapping row per package satisfies `uq_bandcamp_mappings_workspace_item_id`; per-option inventory seeded via `recordInventoryChange()` with stable `bandcamp-seed:{band_id}:{package_id}:opt:{option_id}` correlation IDs; Shopify variant IDs back-filled via `fetchProductVariantsByProductId` after `productSetCreate`; SKU collisions raise `bandcamp_apparel_sku_collision` review items; pre-existing umbrella apparel left untouched (Path B/C structural backfill queued)
 
   - id: bandcamp_sales_data
     area: admin_settings

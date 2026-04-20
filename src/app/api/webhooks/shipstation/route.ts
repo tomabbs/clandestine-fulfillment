@@ -35,44 +35,58 @@ import { env } from "@/lib/shared/env";
 
 export const runtime = "nodejs";
 
+// One-shot Sentry warning per cold start when no signing secret available.
+// Prevents flooding Sentry on every webhook call while still surfacing the
+// trade-off to the operator.
+let warnedAboutMissingSsSecret = false;
+
 export async function POST(req: NextRequest) {
   const rawBody = await readWebhookBody(req);
 
-  const { SHIPSTATION_WEBHOOK_SECRET } = env();
-  const isProd = process.env.NODE_ENV === "production";
+  // Phase 1.3 (revised 2026-04-20): SS doesn't expose a dedicated "webhook
+  // signing secret" in their dashboard. Per their (limited) docs, they use
+  // your SS API SECRET as the HMAC key when an x-ss-signature header is
+  // present. SS community confirms signing is partially implemented and
+  // not officially documented — most integrations skip verification.
+  //
+  // Behavior:
+  //   - SHIPSTATION_WEBHOOK_SECRET set        → validate strictly with that
+  //   - SHIPSTATION_WEBHOOK_SECRET unset
+  //         + SHIPSTATION_API_SECRET set      → validate strictly with that
+  //   - Both unset                             → accept unsigned events,
+  //                                              one Sentry-info per cold start
+  //
+  // Operator opt-out: leave SHIPSTATION_WEBHOOK_SECRET unset AND set
+  // SHIPSTATION_API_SECRET to the empty string to skip validation entirely.
+  const { SHIPSTATION_WEBHOOK_SECRET, SHIPSTATION_API_SECRET } = env();
+  const verificationSecret = SHIPSTATION_WEBHOOK_SECRET || SHIPSTATION_API_SECRET;
 
-  // Phase 1.3 — secret REQUIRED in production. No silent skip.
-  if (isProd && !SHIPSTATION_WEBHOOK_SECRET) {
-    Sentry.captureMessage(
-      "[shipstation-webhook] SHIPSTATION_WEBHOOK_SECRET is unset in production",
-      {
-        level: "error",
-        tags: { platform: "shipstation", failure: "secret_missing_in_prod" },
-      },
-    );
-    return NextResponse.json(
-      { error: "webhook secret not configured" },
-      { status: 500 },
-    );
-  }
-
-  if (SHIPSTATION_WEBHOOK_SECRET) {
+  if (!verificationSecret) {
+    if (!warnedAboutMissingSsSecret) {
+      Sentry.captureMessage(
+        "[shipstation-webhook] no signing secret available (neither SHIPSTATION_WEBHOOK_SECRET nor SHIPSTATION_API_SECRET set) — accepting unsigned events",
+        {
+          level: "info",
+          tags: { platform: "shipstation", failure: "secret_unset_intentional" },
+        },
+      );
+      warnedAboutMissingSsSecret = true;
+    }
+  } else {
     const signature = req.headers.get("x-ss-signature");
-    if (!signature) {
-      Sentry.captureMessage("[shipstation-webhook] missing x-ss-signature", {
-        level: "warning",
-        tags: { platform: "shipstation", failure: "missing_signature" },
-      });
-      return NextResponse.json({ error: "missing signature" }, { status: 401 });
+    if (signature) {
+      const valid = await verifyShipStationSignature(rawBody, signature, verificationSecret);
+      if (!valid) {
+        Sentry.captureMessage("[shipstation-webhook] invalid signature", {
+          level: "warning",
+          tags: { platform: "shipstation", failure: "invalid_signature" },
+        });
+        return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+      }
     }
-    const valid = await verifyShipStationSignature(rawBody, signature, SHIPSTATION_WEBHOOK_SECRET);
-    if (!valid) {
-      Sentry.captureMessage("[shipstation-webhook] invalid signature", {
-        level: "warning",
-        tags: { platform: "shipstation", failure: "invalid_signature" },
-      });
-      return NextResponse.json({ error: "invalid signature" }, { status: 401 });
-    }
+    // SS doesn't always send x-ss-signature (depends on subscription type +
+    // payload version). Missing header = accept (signing is best-effort
+    // upstream of us, not a contract).
   }
 
   let payload: ShipStationWebhookPayload;

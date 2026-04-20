@@ -28,11 +28,6 @@ import {
   shopifyGraphQL,
 } from "@/lib/clients/shopify-client";
 import { buildShopifyVariantInput } from "@/lib/clients/shopify-variant-input";
-import {
-  detectMultiVariantOptions,
-  inferOptionName,
-  optionDisplayValue,
-} from "@/trigger/lib/bandcamp-apparel";
 import { computeBandcampSeedQuantity } from "@/lib/server/bandcamp-effective-available";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -45,6 +40,11 @@ import {
   isAlbumLinkedBundle,
   type ProductCategory,
 } from "@/lib/shared/product-categories";
+import {
+  detectMultiVariantOptions,
+  inferOptionName,
+  optionDisplayValue,
+} from "@/trigger/lib/bandcamp-apparel";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 import { bandcampScrapeQueue } from "@/trigger/lib/bandcamp-scrape-queue";
 import { crossReferenceAlbumUrls } from "@/trigger/lib/bandcamp-url-crossref";
@@ -1451,8 +1451,8 @@ export const bandcampSyncTask = task({
         const existingSkuSet = new Set(variants.map((v) => v.sku));
 
         const enableSkuPush =
-          (workspaceSettings?.bandcamp_scraper_settings as Record<string, unknown>)?.enable_sku_push ===
-          true;
+          (workspaceSettings?.bandcamp_scraper_settings as Record<string, unknown>)
+            ?.enable_sku_push === true;
 
         for (const merchItem of unmatched) {
           const memberBand = merchItem.member_band_id
@@ -1555,6 +1555,468 @@ export const bandcampSyncTask = task({
                 raw_api_data: merchItem,
               })
               .eq("id", existingMappingByPackage.id);
+            itemsProcessed++;
+            continue;
+          }
+
+          // Phase A — Apparel multi-variant create path.
+          //
+          // When a Bandcamp package exposes >=2 distinct option SKUs (typically
+          // apparel sizes), each option must materialize as a first-class
+          // warehouse_product_variants row + Shopify variant. We CANNOT add
+          // multiple bandcamp_product_mappings rows per package because of
+          // unique index `uq_bandcamp_mappings_workspace_item_id` on
+          // (workspace_id, bandcamp_item_id) — option attribution lives on
+          // each variant via `bandcamp_option_id` / `bandcamp_option_title`
+          // (migration 20260420000005_variant_bandcamp_option.sql).
+          const multiOptions = detectMultiVariantOptions(merchItem.options);
+
+          if (multiOptions) {
+            const optionSkus = multiOptions.map((o) => o.sku);
+
+            // Pre-flight collision check: if ANY option SKU already exists as a
+            // variant in this workspace we cannot safely auto-merge — the
+            // existing variant might be tied to a different package, Shopify
+            // product, or live inventory. Park as a review item and skip.
+            const { data: collisions } = await supabase
+              .from("warehouse_product_variants")
+              .select("sku")
+              .eq("workspace_id", workspaceId)
+              .in("sku", optionSkus);
+
+            if (collisions && collisions.length > 0) {
+              await supabase.from("warehouse_review_queue").upsert(
+                {
+                  workspace_id: workspaceId,
+                  org_id: connection.org_id ?? null,
+                  category: "bandcamp_apparel_sku_collision",
+                  severity: "high" as const,
+                  title: `Apparel option SKU collision: ${merchItem.title}`,
+                  description:
+                    "Bandcamp package exposes multiple option SKUs but one or more already exist as warehouse variants. Manual reconciliation required.",
+                  metadata: {
+                    bandcamp_item_id: String(merchItem.package_id),
+                    band_id: String(connection.band_id),
+                    option_skus: optionSkus,
+                    collided_skus: collisions.map((c) => c.sku),
+                    title: merchItem.title,
+                  },
+                  status: "open" as const,
+                  group_key: `bandcamp_apparel_collision_${workspaceId}_${merchItem.package_id}`,
+                  occurrence_count: 1,
+                },
+                { onConflict: "group_key", ignoreDuplicates: false },
+              );
+              itemsFailed++;
+              continue;
+            }
+
+            const bcPrice = merchItem.price ?? null;
+            const bcCurrency = (merchItem.currency as string) ?? "USD";
+            const bcCost: number | null = null;
+            const bcBarcode =
+              ((merchItem as Record<string, unknown>).barcode as string | null) ?? null;
+            const productCategory = classifyProduct(
+              merchItem.item_type ?? null,
+              merchItem.url ?? null,
+              merchItem.title ?? null,
+            );
+
+            let collectionId: string | null = null;
+            try {
+              collectionId = await findOrCreateCollection(band?.name ?? connection.band_name);
+            } catch {
+              // Non-critical
+            }
+
+            // DB-first: warehouse_products (no Shopify ID yet)
+            const { data: parentProduct, error: parentProductError } = await supabase
+              .from("warehouse_products")
+              .insert({
+                workspace_id: workspaceId,
+                org_id: connection.org_id,
+                shopify_product_id: null,
+                title,
+                vendor: band?.name ?? connection.band_name,
+                product_type: merchItem.item_type ?? "Merch",
+                status: "draft",
+                tags,
+                image_url: bandcampImageUrl(merchItem.image_url) ?? null,
+              })
+              .select("id")
+              .single();
+
+            if (parentProductError || !parentProduct) {
+              logger.error("Failed to create apparel parent product", {
+                package_id: merchItem.package_id,
+                error: parentProductError?.message,
+              });
+              itemsFailed++;
+              continue;
+            }
+
+            if (bandcampImageUrl(merchItem.image_url)) {
+              await supabase.from("warehouse_product_images").insert({
+                product_id: parentProduct.id,
+                src: bandcampImageUrl(merchItem.image_url),
+                alt: title,
+                position: 0,
+              });
+            }
+
+            // Insert N variants in a single call so all-or-nothing semantics hold.
+            const optionName = inferOptionName(multiOptions.map((o) => o.title));
+            const variantRows = multiOptions.map((opt, idx) => ({
+              product_id: parentProduct.id,
+              workspace_id: workspaceId,
+              sku: opt.sku,
+              title: optionDisplayValue(opt, idx),
+              price: bcPrice,
+              cost: bcCost,
+              weight: CATEGORY_DEFAULT_WEIGHTS[productCategory]?.value ?? 0.5,
+              weight_unit: "lb",
+              bandcamp_url: merchItem.url ?? null,
+              street_date: merchItem.new_date,
+              is_preorder: tags.includes("Pre-Order"),
+              option1_name: optionName,
+              option1_value: optionDisplayValue(opt, idx),
+              bandcamp_option_id: opt.optionId,
+              bandcamp_option_title: opt.title || null,
+            }));
+
+            const { data: insertedVariants, error: variantInsertError } = await supabase
+              .from("warehouse_product_variants")
+              .insert(variantRows)
+              .select("id, sku");
+
+            if (variantInsertError || !insertedVariants || insertedVariants.length === 0) {
+              logger.error("Failed to create apparel variants", {
+                package_id: merchItem.package_id,
+                error: variantInsertError?.message ?? "missing variant ids",
+                code: variantInsertError?.code ?? null,
+              });
+
+              await supabase.from("warehouse_products").delete().eq("id", parentProduct.id);
+              await supabase.from("warehouse_review_queue").upsert(
+                {
+                  workspace_id: workspaceId,
+                  org_id: connection.org_id ?? null,
+                  category: "bandcamp_sync_variant_create_failed",
+                  severity: "high" as const,
+                  title: `Bandcamp apparel variant insert failed: ${merchItem.title}`,
+                  description:
+                    "Bandcamp sync could not create the per-option warehouse variants for an apparel package; parent product row was rolled back before any Shopify create.",
+                  metadata: {
+                    bandcamp_item_id: String(merchItem.package_id),
+                    band_id: String(connection.band_id),
+                    pg_error: variantInsertError?.message ?? null,
+                    pg_code: variantInsertError?.code ?? null,
+                    option_skus: optionSkus,
+                  },
+                  status: "open" as const,
+                  group_key: `bandcamp_apparel_variant_create_failed_${workspaceId}_${merchItem.package_id}`,
+                  occurrence_count: 1,
+                },
+                { onConflict: "group_key", ignoreDuplicates: false },
+              );
+              itemsFailed++;
+              continue;
+            }
+
+            // Stable order for downstream operations: match insertion (option) order.
+            const variantBySku = new Map(insertedVariants.map((v) => [v.sku.toUpperCase(), v]));
+            const orderedVariants = multiOptions.map((opt) => {
+              const found = variantBySku.get(opt.sku.toUpperCase());
+              if (!found) {
+                throw new Error(
+                  `Apparel variant lookup failed: SKU ${opt.sku} not in insertedVariants`,
+                );
+              }
+              return { ...found, option: opt };
+            });
+            const primary = orderedVariants[0];
+
+            // Seed inventory rows + apply Bandcamp quantities via canonical write path.
+            for (const v of orderedVariants) {
+              await supabase.from("warehouse_inventory_levels").upsert(
+                {
+                  variant_id: v.id,
+                  workspace_id: workspaceId,
+                  sku: v.sku,
+                  available: 0,
+                  committed: 0,
+                  incoming: 0,
+                },
+                { onConflict: "variant_id", ignoreDuplicates: true },
+              );
+
+              if (v.option.quantityAvailable > 0) {
+                await recordInventoryChange({
+                  workspaceId,
+                  sku: v.sku,
+                  delta: v.option.quantityAvailable,
+                  source: "backfill",
+                  correlationId: `bandcamp-seed:${connection.band_id}:${merchItem.package_id}:opt:${v.option.optionId ?? v.sku}`,
+                  metadata: {
+                    band_id: connection.band_id,
+                    package_id: merchItem.package_id,
+                    bandcamp_option_id: v.option.optionId,
+                    bandcamp_option_title: v.option.title,
+                    apparel_multi_variant: true,
+                  },
+                });
+              }
+              existingSkuSet.add(v.sku);
+            }
+
+            // Single mapping row per package (unique index requires it). The
+            // mapping points at the FIRST option as the "primary" variant; per-
+            // option attribution lives on each variant via bandcamp_option_id.
+            const newOptionSkus = multiOptions.map((o) => o.sku);
+            const { error: mappingInsertError } = await supabase
+              .from("bandcamp_product_mappings")
+              .insert({
+                workspace_id: workspaceId,
+                variant_id: primary.id,
+                bandcamp_item_id: merchItem.package_id,
+                bandcamp_item_type: merchItem.item_type?.toLowerCase().includes("album")
+                  ? "album"
+                  : "package",
+                bandcamp_member_band_id: merchItem.member_band_id,
+                bandcamp_image_url: bandcampImageUrl(merchItem.image_url) ?? null,
+                bandcamp_type_name: merchItem.item_type,
+                product_category: productCategory,
+                bandcamp_new_date: merchItem.new_date,
+                bandcamp_url: merchItem.url ?? null,
+                bandcamp_url_source: merchItem.url ? "orders_api" : null,
+                bandcamp_subdomain: merchItem.subdomain ?? null,
+                bandcamp_album_title: merchItem.album_title ?? null,
+                bandcamp_price: merchItem.price ?? null,
+                bandcamp_currency: merchItem.currency ?? null,
+                bandcamp_is_set_price:
+                  merchItem.is_set_price != null ? Boolean(merchItem.is_set_price) : null,
+                bandcamp_options: merchItem.options ?? null,
+                bandcamp_origin_quantities: merchItem.origin_quantities ?? null,
+                bandcamp_option_skus: newOptionSkus,
+                last_quantity_sold: merchItem.quantity_sold,
+                last_synced_at: new Date().toISOString(),
+                authority_status: "bandcamp_initial",
+                raw_api_data: merchItem,
+              });
+
+            if (mappingInsertError) {
+              logger.error("Failed to create apparel mapping; rolling back", {
+                package_id: merchItem.package_id,
+                error: mappingInsertError.message,
+              });
+              await supabase
+                .from("warehouse_product_variants")
+                .delete()
+                .in(
+                  "id",
+                  insertedVariants.map((v) => v.id),
+                );
+              await supabase.from("warehouse_products").delete().eq("id", parentProduct.id);
+              itemsFailed++;
+              continue;
+            }
+
+            if (tags.includes("Pre-Order")) {
+              await preorderSetupTask.trigger({
+                variant_id: primary.id,
+                workspace_id: workspaceId,
+              });
+            }
+
+            await triggerScrapeIfNeeded(
+              supabase,
+              primary.id,
+              workspaceId,
+              band,
+              connection,
+              merchItem,
+            );
+
+            // Shopify CREATE — multi-variant productSet payload.
+            let shopifyProductIdMV: string | null = null;
+            try {
+              shopifyProductIdMV = await productSetCreate({
+                title,
+                status: "DRAFT",
+                vendor: band?.name ?? connection.band_name,
+                productType: merchItem.item_type ?? "Merch",
+                tags,
+                ...(collectionId ? { collections: [collectionId] } : {}),
+                productOptions: [
+                  {
+                    name: optionName,
+                    values: orderedVariants.map((v, idx) => ({
+                      name: optionDisplayValue(v.option, idx),
+                    })),
+                  },
+                ],
+                variants: orderedVariants.map((v, idx) =>
+                  buildShopifyVariantInput({
+                    sku: v.sku,
+                    optionName,
+                    optionValue: optionDisplayValue(v.option, idx),
+                    price: bcPrice,
+                    cost: bcCost,
+                    currency: bcCurrency,
+                    barcode: bcBarcode,
+                    category: productCategory,
+                  }),
+                ),
+                ...(bandcampImageUrl(merchItem.image_url)
+                  ? {
+                      files: [
+                        {
+                          originalSource: bandcampImageUrl(merchItem.image_url),
+                          alt: title,
+                        },
+                      ],
+                    }
+                  : {}),
+              });
+
+              logger.info("Created Shopify DRAFT product (multi-variant)", {
+                package_id: merchItem.package_id,
+                shopifyProductId: shopifyProductIdMV,
+                variant_count: orderedVariants.length,
+              });
+
+              await supabase
+                .from("warehouse_products")
+                .update({
+                  shopify_product_id: shopifyProductIdMV,
+                  synced_at: new Date().toISOString(),
+                })
+                .eq("id", parentProduct.id);
+
+              const { data: attachedRow, error: attachError } = await supabase
+                .from("warehouse_products")
+                .select("id")
+                .eq("id", parentProduct.id)
+                .eq("shopify_product_id", shopifyProductIdMV)
+                .maybeSingle();
+
+              if (attachError || !attachedRow) {
+                await productArchive(shopifyProductIdMV);
+                logger.error(
+                  "Archived multi-variant Shopify product after DB attach verification failed",
+                  {
+                    package_id: merchItem.package_id,
+                    shopifyProductId: shopifyProductIdMV,
+                    attachError: attachError?.message ?? null,
+                  },
+                );
+                await supabase.from("warehouse_review_queue").upsert(
+                  {
+                    workspace_id: workspaceId,
+                    org_id: connection.org_id ?? null,
+                    category: "shopify_product_create",
+                    severity: "high" as const,
+                    title: `Shopify apparel product auto-archived: attach failed (${merchItem.title})`,
+                    description:
+                      "Shopify multi-variant product was created but failed post-create DB attach verification; product was immediately archived.",
+                    metadata: {
+                      bandcamp_item_id: String(merchItem.package_id),
+                      shopify_product_id: shopifyProductIdMV,
+                      warehouse_product_id: parentProduct.id,
+                      attach_error: attachError?.message ?? null,
+                    },
+                    status: "open" as const,
+                    group_key: `shopify_attach_failed_apparel_${workspaceId}_${merchItem.package_id}`,
+                    occurrence_count: 1,
+                  },
+                  { onConflict: "group_key", ignoreDuplicates: false },
+                );
+                itemsFailed++;
+                continue;
+              }
+
+              try {
+                await publishToSafeChannels(shopifyProductIdMV);
+              } catch (pubErr) {
+                logger.warn("Failed to publish multi-variant product to channels", {
+                  shopifyProductId: shopifyProductIdMV,
+                  error: String(pubErr),
+                });
+              }
+
+              // Back-fill shopify_variant_id + shopify_inventory_item_id per
+              // warehouse variant (matched by SKU). Also set per-variant weight
+              // since productSet's measurement field doesn't always propagate.
+              try {
+                const shopVariants = await fetchProductVariantsByProductId(shopifyProductIdMV);
+                const shopBySku = new Map<string, (typeof shopVariants)[number]>();
+                for (const sv of shopVariants) {
+                  if (sv.sku) shopBySku.set(sv.sku.toUpperCase(), sv);
+                }
+                const weight = CATEGORY_DEFAULT_WEIGHTS[productCategory];
+
+                for (const v of orderedVariants) {
+                  const sv = shopBySku.get(v.sku.toUpperCase());
+                  if (!sv) continue;
+                  await supabase
+                    .from("warehouse_product_variants")
+                    .update({
+                      shopify_variant_id: sv.id,
+                      shopify_inventory_item_id: sv.inventoryItemId,
+                    })
+                    .eq("id", v.id);
+
+                  if (weight && sv.inventoryItemId) {
+                    try {
+                      await inventoryItemUpdate(sv.inventoryItemId, {
+                        measurement: { weight: { value: weight.value, unit: weight.unit } },
+                      });
+                    } catch (weightErr) {
+                      logger.warn("Failed to set apparel variant weight", {
+                        shopifyProductId: shopifyProductIdMV,
+                        sku: v.sku,
+                        error: String(weightErr),
+                      });
+                    }
+                  }
+                }
+              } catch (backfillErr) {
+                logger.warn("Failed to back-fill apparel Shopify variant IDs", {
+                  shopifyProductId: shopifyProductIdMV,
+                  error: String(backfillErr),
+                });
+              }
+            } catch (shopifyError) {
+              logger.error(
+                "Failed to create multi-variant Shopify product, continuing warehouse-only",
+                {
+                  package_id: merchItem.package_id,
+                  error: String(shopifyError),
+                },
+              );
+              await supabase.from("warehouse_review_queue").upsert(
+                {
+                  workspace_id: workspaceId,
+                  org_id: connection.org_id ?? null,
+                  category: "shopify_product_create",
+                  severity: "medium" as const,
+                  title: `Shopify apparel product creation failed: ${title}`,
+                  description: `Multi-variant Shopify product creation failed for package ${merchItem.package_id}.`,
+                  metadata: {
+                    bandcamp_item_id: String(merchItem.package_id),
+                    band_id: String(connection.band_id),
+                    warehouse_product_id: parentProduct.id,
+                    option_skus: optionSkus,
+                    error: String(shopifyError),
+                  },
+                  status: "open" as const,
+                  group_key: `shopify_create_failed_apparel_${workspaceId}_${merchItem.package_id}`,
+                  occurrence_count: 1,
+                },
+                { onConflict: "group_key", ignoreDuplicates: false },
+              );
+            }
+
             itemsProcessed++;
             continue;
           }

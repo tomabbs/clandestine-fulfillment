@@ -118,7 +118,7 @@ async function fetchDbIndices() {
       .range(from, from + 999);
     if (error) throw error;
     if (!data || data.length === 0) break;
-    for (const v of data as Array<{
+    for (const v of data as unknown as Array<{
       id: string;
       product_id: string;
       sku: string;
@@ -140,13 +140,18 @@ async function fetchDbIndices() {
 
   const mappingByPackage = new Map<
     string,
-    { id: string; variant_id: string; bandcamp_item_id: number }
+    {
+      id: string;
+      variant_id: string;
+      bandcamp_item_id: number;
+      bandcamp_option_skus: string[];
+    }
   >();
   from = 0;
   while (true) {
     const { data, error } = await sb
       .from("bandcamp_product_mappings")
-      .select("id, workspace_id, variant_id, bandcamp_item_id")
+      .select("id, workspace_id, variant_id, bandcamp_item_id, bandcamp_option_skus")
       .range(from, from + 999);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -155,11 +160,15 @@ async function fetchDbIndices() {
       workspace_id: string;
       variant_id: string;
       bandcamp_item_id: number;
+      bandcamp_option_skus: string[] | null;
     }>) {
       mappingByPackage.set(`${m.workspace_id}:${m.bandcamp_item_id}`, {
         id: m.id,
         variant_id: m.variant_id,
         bandcamp_item_id: m.bandcamp_item_id,
+        // Use the same normalization the Bandcamp side uses so apparel option
+        // SKUs with `&` / spaces match (e.g. `TS-NS-G&T-S` ↔ `TS-NS-GT-S`).
+        bandcamp_option_skus: (m.bandcamp_option_skus ?? []).map((s) => normSku(s)),
       });
     }
     if (data.length < 1000) break;
@@ -369,11 +378,24 @@ async function main() {
     const inShopifyNonArchived = shopMatches.some((p) => p.status !== "ARCHIVED");
     const inShopifyActive = shopMatches.some((p) => p.status === "ACTIVE");
 
+    // `tracked_as_metadata`: this option SKU is recorded inside an existing
+    // package mapping's `bandcamp_option_skus` array (legacy umbrella shape)
+    // but does NOT yet exist as a first-class warehouse_product_variants row.
+    // These are NOT lost data — they're awaiting Path B/C apparel restructure.
+    const trackedAsMetadata =
+      !variant &&
+      ns !== null &&
+      ns !== "" &&
+      mapping !== undefined &&
+      mapping.bandcamp_option_skus.includes(ns);
+
     let classification = "";
     if (mapping && variant && inShopifyNonArchived) classification = "fully_aligned";
-    else if (variant && inShopifyNonArchived && !mapping) classification = "in_db_and_shopify_no_bandcamp_mapping";
+    else if (variant && inShopifyNonArchived && !mapping)
+      classification = "in_db_and_shopify_no_bandcamp_mapping";
     else if (variant && !inShopifyNonArchived) classification = "in_db_missing_from_shopify";
     else if (!variant && inShopifyNonArchived) classification = "in_shopify_missing_from_db";
+    else if (trackedAsMetadata) classification = "tracked_as_metadata";
     else if (!variant && !inShopifyAny) classification = "missing_from_db_and_shopify";
     else classification = "other";
 
@@ -409,6 +431,7 @@ async function main() {
     coverage: {
       bandcamp_skus_in_db_variants: rows.filter((r) => r.in_db_variant_by_sku).length,
       bandcamp_skus_missing_from_db: rows.filter((r) => !r.in_db_variant_by_sku).length,
+      bandcamp_skus_tracked_as_metadata: rows.filter((r) => r.classification === "tracked_as_metadata").length,
       bandcamp_packages_with_db_mapping: rows.filter((r) => r.in_db_mapping).length,
       bandcamp_packages_without_db_mapping: rows.filter((r) => !r.in_db_mapping).length,
       bandcamp_skus_in_shopify_any: rows.filter((r) => r.in_shopify_any).length,
