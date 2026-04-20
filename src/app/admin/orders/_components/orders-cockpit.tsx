@@ -883,8 +883,22 @@ function CockpitRow({
 
       {isExpanded && (
         <TableRow>
-          <TableCell colSpan={11} className="bg-muted/20 px-4 py-3 align-top">
-            <div className="min-w-0">
+          {/* The cell itself extends to the table's full natural width
+              (colSpan=11). To prevent the drawer's content (Items panel,
+              Get Rates button, etc.) from being pushed past the visible
+              viewport when the table horizontally scrolls, the inner div
+              uses position:sticky + left:0 to pin to the visible left
+              edge, plus a max-width capped to the cockpit-main pane.
+              The 18.25rem reserve = 3.25rem admin sidebar (collapsed
+              default) + 15rem cockpit status sidebar. If the admin
+              sidebar is expanded (16rem) the drawer just gets a bit
+              narrower; horizontal scroll inside the drawer is acceptable
+              in that edge case. */}
+          <TableCell colSpan={11} className="bg-muted/20 p-0 align-top">
+            <div
+              className="sticky left-0 px-4 py-3 min-w-0"
+              style={{ maxWidth: "calc(100vw - 18.25rem)" }}
+            >
               <CockpitDrawer
                 order={order}
                 tagDefById={tagDefById}
