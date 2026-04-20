@@ -18,6 +18,8 @@ import {
   updateFormatCost,
 } from "@/actions/billing";
 import { getClients } from "@/actions/clients";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   DEFAULT_PAGE_SIZE,
   type PageSize,
@@ -153,6 +155,23 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function BillingMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "font-mono text-sm" : "text-sm"}>{value}</p>
+    </div>
+  );
+}
+
 // === Snapshots Tab ===
 
 function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
@@ -189,38 +208,31 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
               setPage(1);
             }}
           />
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-3 font-medium">Organization</th>
-                  <th className="text-left p-3 font-medium">Period</th>
-                  <th className="text-left p-3 font-medium">Status</th>
-                  <th className="text-right p-3 font-medium">Grand Total</th>
-                  <th className="text-right p-3 font-medium">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {data.snapshots.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="hover:bg-muted/30 cursor-pointer"
-                    onClick={() => setSelectedId(s.id)}
-                  >
-                    <td className="p-3">{s.organizations?.name ?? s.org_id}</td>
-                    <td className="p-3">{s.billing_period}</td>
-                    <td className="p-3">
-                      <StatusBadge status={s.status} />
-                    </td>
-                    <td className="p-3 text-right font-mono">${s.grand_total.toFixed(2)}</td>
-                    <td className="p-3 text-right text-muted-foreground">
-                      {formatDateUTC(s.created_at)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={data.snapshots}
+            itemKey={(s) => s.id}
+            density="ops"
+            ariaLabel="Billing snapshots"
+            renderHeader={({ row: s }) => (
+              <div>
+                <p className="font-medium">{s.organizations?.name ?? s.org_id}</p>
+                <p className="text-xs text-muted-foreground">{s.billing_period}</p>
+              </div>
+            )}
+            renderExceptionZone={({ row: s }) => <StatusBadge status={s.status} />}
+            renderBody={({ row: s }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <BillingMetric label="Grand Total" value={`$${s.grand_total.toFixed(2)}`} mono />
+                <BillingMetric label="Created" value={formatDateUTC(s.created_at)} />
+              </div>
+            )}
+            renderActions={({ row: s }) => (
+              <Button variant="outline" size="sm" onClick={() => setSelectedId(s.id)}>
+                View
+              </Button>
+            )}
+          />
 
           <PaginationBar
             page={page}
@@ -315,36 +327,28 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <div>
         <h3 className="text-sm font-semibold mb-2">Included Shipments ({included.length})</h3>
         {included.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No shipments included.</p>
+          <EmptyState title="No shipments included" compact />
         ) : (
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">Tracking</th>
-                  <th className="text-left p-2 font-medium">Ship Date</th>
-                  <th className="text-left p-2 font-medium">Carrier</th>
-                  <th className="text-left p-2 font-medium">Format</th>
-                  <th className="text-right p-2 font-medium">Shipping</th>
-                  <th className="text-right p-2 font-medium">Pick/Pack</th>
-                  <th className="text-right p-2 font-medium">Material</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {included.map((s) => (
-                  <tr key={s.shipment_id}>
-                    <td className="p-2 font-mono text-xs">{s.tracking_number ?? "—"}</td>
-                    <td className="p-2">{s.ship_date ?? "—"}</td>
-                    <td className="p-2">{s.carrier ?? "—"}</td>
-                    <td className="p-2">{s.format_name}</td>
-                    <td className="p-2 text-right font-mono">${s.shipping_cost.toFixed(2)}</td>
-                    <td className="p-2 text-right font-mono">${s.pick_pack_cost.toFixed(2)}</td>
-                    <td className="p-2 text-right font-mono">${s.material_cost.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={included}
+            itemKey={(s) => s.shipment_id}
+            density="ops"
+            ariaLabel="Included shipments"
+            renderHeader={({ row: s }) => (
+              <p className="font-mono text-xs">{s.tracking_number ?? "—"}</p>
+            )}
+            renderBody={({ row: s }) => (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <BillingMetric label="Ship Date" value={s.ship_date ?? "—"} />
+                <BillingMetric label="Carrier" value={s.carrier ?? "—"} />
+                <BillingMetric label="Format" value={s.format_name} />
+                <BillingMetric label="Shipping" value={`$${s.shipping_cost.toFixed(2)}`} mono />
+                <BillingMetric label="Pick/Pack" value={`$${s.pick_pack_cost.toFixed(2)}`} mono />
+                <BillingMetric label="Material" value={`$${s.material_cost.toFixed(2)}`} mono />
+              </div>
+            )}
+          />
         )}
       </div>
 
@@ -352,32 +356,31 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <div>
         <h3 className="text-sm font-semibold mb-2">Excluded Shipments ({excluded.length})</h3>
         {excluded.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No shipments excluded.</p>
+          <EmptyState title="No shipments excluded" compact />
         ) : (
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">Shipment ID</th>
-                  <th className="text-left p-2 font-medium">Tracking</th>
-                  <th className="text-left p-2 font-medium">Reason</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {excluded.map((s) => (
-                  <tr key={s.shipment_id}>
-                    <td className="p-2 font-mono text-xs">{s.shipment_id.slice(0, 8)}…</td>
-                    <td className="p-2 font-mono text-xs">{s.tracking_number ?? "—"}</td>
-                    <td className="p-2">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
-                        {s.reason.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={excluded}
+            itemKey={(s) => s.shipment_id}
+            density="ops"
+            ariaLabel="Excluded shipments"
+            renderHeader={({ row: s }) => (
+              <p className="font-mono text-xs">{s.shipment_id.slice(0, 8)}…</p>
+            )}
+            renderBody={({ row: s }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <BillingMetric label="Tracking" value={s.tracking_number ?? "—"} mono />
+                <div className="rounded-md border bg-background/60 p-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    Reason
+                  </p>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
+                    {s.reason.replace(/_/g, " ")}
+                  </span>
+                </div>
+              </div>
+            )}
+          />
         )}
       </div>
 
@@ -385,30 +388,22 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {storageItems.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Storage Charges</h3>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">SKU</th>
-                  <th className="text-right p-2 font-medium">Inventory</th>
-                  <th className="text-right p-2 font-medium">Active Stock</th>
-                  <th className="text-right p-2 font-medium">Billable</th>
-                  <th className="text-right p-2 font-medium">Fee</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {storageItems.map((item) => (
-                  <tr key={item.sku}>
-                    <td className="p-2 font-mono text-xs">{item.sku}</td>
-                    <td className="p-2 text-right">{item.total_inventory}</td>
-                    <td className="p-2 text-right">{item.active_stock_threshold}</td>
-                    <td className="p-2 text-right">{item.billable_units}</td>
-                    <td className="p-2 text-right font-mono">${item.storage_fee.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={storageItems}
+            itemKey={(item) => item.sku}
+            density="ops"
+            ariaLabel="Storage charges"
+            renderHeader={({ row: item }) => <p className="font-mono text-xs">{item.sku}</p>}
+            renderBody={({ row: item }) => (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <BillingMetric label="Inventory" value={String(item.total_inventory)} />
+                <BillingMetric label="Active Stock" value={String(item.active_stock_threshold)} />
+                <BillingMetric label="Billable" value={String(item.billable_units)} />
+                <BillingMetric label="Fee" value={`$${item.storage_fee.toFixed(2)}`} mono />
+              </div>
+            )}
+          />
         </div>
       )}
 
@@ -416,28 +411,20 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {adjustments.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Adjustments</h3>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">Reason</th>
-                  <th className="text-right p-2 font-medium">Amount</th>
-                  <th className="text-right p-2 font-medium">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {adjustments.map((a) => (
-                  <tr key={a.id}>
-                    <td className="p-2">{a.reason ?? "—"}</td>
-                    <td className="p-2 text-right font-mono">${a.amount.toFixed(2)}</td>
-                    <td className="p-2 text-right text-muted-foreground">
-                      {formatDateUTC(a.created_at)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={adjustments}
+            itemKey={(a) => a.id}
+            density="ops"
+            ariaLabel="Snapshot adjustments"
+            renderHeader={({ row: a }) => <p className="text-sm">{a.reason ?? "—"}</p>}
+            renderBody={({ row: a }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <BillingMetric label="Amount" value={`$${a.amount.toFixed(2)}`} mono />
+                <BillingMetric label="Date" value={formatDateUTC(a.created_at)} />
+              </div>
+            )}
+          />
         </div>
       )}
     </div>
@@ -555,91 +542,85 @@ function DefaultRatesTab({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
 
-      <div className="border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50">
-            <tr>
-              <th className="text-left p-3 font-medium">Name</th>
-              <th className="text-left p-3 font-medium">Type</th>
-              <th className="text-right p-3 font-medium">Current Rate</th>
-              <th className="text-left p-3 font-medium">Effective From</th>
-              <th className="text-right p-3 font-medium">Last Updated</th>
-              <th className="text-right p-3 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {rules.map((rule) => {
-              const isEditing = editingId === rule.id;
-              return (
-                <tr key={rule.id}>
-                  <td className="p-3">
-                    {isEditing ? (
-                      <Input
-                        value={editValues.rule_name ?? rule.rule_name}
-                        onChange={(e) =>
-                          setEditValues((v) => ({ ...v, rule_name: e.target.value }))
-                        }
-                      />
-                    ) : (
-                      rule.rule_name
-                    )}
-                  </td>
-                  <td className="p-3 text-muted-foreground">{rule.rule_type.replace(/_/g, " ")}</td>
-                  <td className="p-3 text-right font-mono">
-                    {isEditing ? (
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="text-right"
-                        value={editValues.amount ?? rule.amount}
-                        onChange={(e) =>
-                          setEditValues((v) => ({
-                            ...v,
-                            amount: Number.parseFloat(e.target.value) || 0,
-                          }))
-                        }
-                      />
-                    ) : (
-                      `$${rule.amount.toFixed(2)}`
-                    )}
-                  </td>
-                  <td className="p-3 text-muted-foreground">{rule.effective_from}</td>
-                  <td className="p-3 text-right text-muted-foreground">
-                    {formatDateUTC(rule.created_at)}
-                  </td>
-                  <td className="p-3 text-right">
-                    {isEditing ? (
-                      <div className="flex gap-1 justify-end">
-                        <Button size="sm" onClick={() => handleSave(rule.id)}>
-                          Save
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEditingId(rule.id);
-                          setEditValues({
-                            rule_name: rule.rule_name,
-                            amount: rule.amount,
-                            description: rule.description,
-                          });
-                        }}
-                      >
-                        Edit
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <BlockList
+        className="mt-2"
+        items={rules}
+        itemKey={(rule) => rule.id}
+        density="ops"
+        ariaLabel="Default billing rates"
+        renderHeader={({ row: rule }) => {
+          const isEditing = editingId === rule.id;
+          return isEditing ? (
+            <Input
+              value={editValues.rule_name ?? rule.rule_name}
+              onChange={(e) => setEditValues((v) => ({ ...v, rule_name: e.target.value }))}
+            />
+          ) : (
+            <div>
+              <p className="font-medium">{rule.rule_name}</p>
+              <p className="text-xs text-muted-foreground">{rule.rule_type.replace(/_/g, " ")}</p>
+            </div>
+          );
+        }}
+        renderBody={({ row: rule }) => {
+          const isEditing = editingId === rule.id;
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Current Rate
+                </p>
+                {isEditing ? (
+                  <Input
+                    type="number"
+                    step="0.01"
+                    className="text-right mt-1"
+                    value={editValues.amount ?? rule.amount}
+                    onChange={(e) =>
+                      setEditValues((v) => ({
+                        ...v,
+                        amount: Number.parseFloat(e.target.value) || 0,
+                      }))
+                    }
+                  />
+                ) : (
+                  <p className="font-mono">{`$${rule.amount.toFixed(2)}`}</p>
+                )}
+              </div>
+              <BillingMetric label="Effective From" value={rule.effective_from} />
+              <BillingMetric label="Last Updated" value={formatDateUTC(rule.created_at)} />
+            </div>
+          );
+        }}
+        renderActions={({ row: rule }) => {
+          const isEditing = editingId === rule.id;
+          return isEditing ? (
+            <div className="flex gap-1">
+              <Button size="sm" onClick={() => handleSave(rule.id)}>
+                Save
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setEditingId(rule.id);
+                setEditValues({
+                  rule_name: rule.rule_name,
+                  amount: rule.amount,
+                  description: rule.description,
+                });
+              }}
+            >
+              Edit
+            </Button>
+          );
+        }}
+      />
     </div>
   );
 }
@@ -765,41 +746,39 @@ function ClientOverridesTab({ workspaceId }: { workspaceId: string }) {
       {isLoading ? (
         <p className="text-muted-foreground text-sm">Loading overrides…</p>
       ) : !overrides?.length ? (
-        <p className="text-sm text-muted-foreground">
-          No client overrides configured. All clients use default rates.
-        </p>
+        <EmptyState
+          title="No client overrides configured"
+          description="All clients use default rates."
+          compact
+        />
       ) : (
-        <div className="border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left p-3 font-medium">Client</th>
-                <th className="text-left p-3 font-medium">Rule Type</th>
-                <th className="text-right p-3 font-medium">Override Rate</th>
-                <th className="text-left p-3 font-medium">Effective From</th>
-                <th className="text-right p-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {overrides.map((o) => (
-                <tr key={o.id}>
-                  <td className="p-3">{o.organizations.name}</td>
-                  <td className="p-3 text-muted-foreground">
-                    {o.warehouse_billing_rules.rule_name} (
-                    {o.warehouse_billing_rules.rule_type.replace(/_/g, " ")})
-                  </td>
-                  <td className="p-3 text-right font-mono">${o.override_amount.toFixed(2)}</td>
-                  <td className="p-3 text-muted-foreground">{o.effective_from}</td>
-                  <td className="p-3 text-right">
-                    <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(o.id)}>
-                      Remove
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <BlockList
+          className="mt-2"
+          items={overrides}
+          itemKey={(o) => o.id}
+          density="ops"
+          ariaLabel="Client billing overrides"
+          renderHeader={({ row: o }) => <p className="font-medium">{o.organizations.name}</p>}
+          renderBody={({ row: o }) => (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <BillingMetric
+                label="Rule Type"
+                value={`${o.warehouse_billing_rules.rule_name} (${o.warehouse_billing_rules.rule_type.replace(/_/g, " ")})`}
+              />
+              <BillingMetric
+                label="Override Rate"
+                value={`$${o.override_amount.toFixed(2)}`}
+                mono
+              />
+              <BillingMetric label="Effective From" value={o.effective_from} />
+            </div>
+          )}
+          renderActions={({ row: o }) => (
+            <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(o.id)}>
+              Remove
+            </Button>
+          )}
+        />
       )}
     </div>
   );
@@ -906,112 +885,109 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
 
-      <div className="border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50">
-            <tr>
-              <th className="text-left p-3 font-medium">Format Key</th>
-              <th className="text-left p-3 font-medium">Display Name</th>
-              <th className="text-right p-3 font-medium">Combined Cost</th>
-              <th className="text-left p-3 font-medium">Cost Breakdown</th>
-              <th className="text-right p-3 font-medium">Sort Order</th>
-              <th className="text-right p-3 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {costs.map((fc) => {
-              const isEditing = editingId === fc.id;
-              const combinedCost = fc.pick_pack_cost + fc.material_cost;
-              const breakdown = fc.cost_breakdown ?? {
-                pick_pack: fc.pick_pack_cost,
-                material: fc.material_cost,
-              };
-
-              return (
-                <tr key={fc.id}>
-                  <td className="p-3 font-mono text-xs">{fc.format_key ?? "—"}</td>
-                  <td className="p-3 font-medium">{fc.display_name ?? fc.format_name}</td>
-                  <td className="p-3 text-right font-mono">
-                    {isEditing ? (
-                      <div className="space-y-1">
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="text-right"
-                          placeholder="Pick & Pack"
-                          value={editValues.pick_pack_cost ?? fc.pick_pack_cost}
-                          onChange={(e) =>
-                            setEditValues((v) => ({
-                              ...v,
-                              pick_pack_cost: Number.parseFloat(e.target.value) || 0,
-                            }))
-                          }
-                        />
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="text-right"
-                          placeholder="Material"
-                          value={editValues.material_cost ?? fc.material_cost}
-                          onChange={(e) =>
-                            setEditValues((v) => ({
-                              ...v,
-                              material_cost: Number.parseFloat(e.target.value) || 0,
-                            }))
-                          }
-                        />
-                      </div>
-                    ) : (
-                      `$${combinedCost.toFixed(2)}`
-                    )}
-                  </td>
-                  <td className="p-3 text-xs text-muted-foreground">
-                    <span className="font-mono">
-                      P&P: ${(breakdown.pick_pack ?? 0).toFixed(2)}, Mat: $
-                      {(breakdown.material ?? 0).toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="p-3 text-right text-muted-foreground">{fc.sort_order}</td>
-                  <td className="p-3 text-right">
-                    {isEditing ? (
-                      <div className="flex gap-1 justify-end">
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            updateMutation.mutate(
-                              { id: fc.id, data: editValues },
-                              { onSuccess: () => setEditingId(null) },
-                            );
-                          }}
-                        >
-                          Save
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setEditingId(fc.id);
-                          setEditValues({
-                            pick_pack_cost: fc.pick_pack_cost,
-                            material_cost: fc.material_cost,
-                          });
-                        }}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <BlockList
+        className="mt-2"
+        items={costs}
+        itemKey={(fc) => fc.id}
+        density="ops"
+        ariaLabel="Format costs"
+        renderHeader={({ row: fc }) => (
+          <div>
+            <p className="font-medium">{fc.display_name ?? fc.format_name}</p>
+            <p className="font-mono text-xs text-muted-foreground">{fc.format_key ?? "—"}</p>
+          </div>
+        )}
+        renderBody={({ row: fc }) => {
+          const isEditing = editingId === fc.id;
+          const combinedCost = fc.pick_pack_cost + fc.material_cost;
+          const breakdown = fc.cost_breakdown ?? {
+            pick_pack: fc.pick_pack_cost,
+            material: fc.material_cost,
+          };
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Combined Cost
+                </p>
+                {isEditing ? (
+                  <div className="space-y-1 mt-1">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      className="text-right"
+                      placeholder="Pick & Pack"
+                      value={editValues.pick_pack_cost ?? fc.pick_pack_cost}
+                      onChange={(e) =>
+                        setEditValues((v) => ({
+                          ...v,
+                          pick_pack_cost: Number.parseFloat(e.target.value) || 0,
+                        }))
+                      }
+                    />
+                    <Input
+                      type="number"
+                      step="0.01"
+                      className="text-right"
+                      placeholder="Material"
+                      value={editValues.material_cost ?? fc.material_cost}
+                      onChange={(e) =>
+                        setEditValues((v) => ({
+                          ...v,
+                          material_cost: Number.parseFloat(e.target.value) || 0,
+                        }))
+                      }
+                    />
+                  </div>
+                ) : (
+                  <p className="font-mono">{`$${combinedCost.toFixed(2)}`}</p>
+                )}
+              </div>
+              <BillingMetric
+                label="Cost Breakdown"
+                value={`P&P: $${(breakdown.pick_pack ?? 0).toFixed(2)}, Mat: $${(breakdown.material ?? 0).toFixed(2)}`}
+                mono
+              />
+              <BillingMetric label="Sort Order" value={String(fc.sort_order)} />
+            </div>
+          );
+        }}
+        renderActions={({ row: fc }) => {
+          const isEditing = editingId === fc.id;
+          return isEditing ? (
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                onClick={() => {
+                  updateMutation.mutate(
+                    { id: fc.id, data: editValues },
+                    { onSuccess: () => setEditingId(null) },
+                  );
+                }}
+              >
+                Save
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setEditingId(fc.id);
+                setEditValues({
+                  pick_pack_cost: fc.pick_pack_cost,
+                  material_cost: fc.material_cost,
+                });
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          );
+        }}
+      />
     </div>
   );
 }

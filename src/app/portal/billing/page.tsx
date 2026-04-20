@@ -7,6 +7,7 @@ import {
   getClientBillingSnapshots,
   getClientCurrentMonthPreview,
 } from "@/actions/billing";
+import { BlockList } from "@/components/shared/block-list";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -29,6 +30,23 @@ function StatusBadge({ status }: { status: string }) {
     >
       {status}
     </span>
+  );
+}
+
+function BillingMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "font-mono text-sm" : "text-sm"}>{value}</p>
+    </div>
   );
 }
 
@@ -110,61 +128,49 @@ export default function BillingPage() {
       ) : !data?.snapshots.length ? (
         <p className="text-muted-foreground text-sm">No billing statements yet.</p>
       ) : (
-        <div className="border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left p-3 font-medium">Period</th>
-                <th className="text-left p-3 font-medium">Status</th>
-                <th className="text-right p-3 font-medium">Total</th>
-                <th className="text-right p-3 font-medium">Date</th>
-                <th className="text-right p-3 font-medium" />
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {data.snapshots.map((s) => {
-                const snapshotWarnings =
-                  ((s.snapshot_data as Record<string, unknown> | null)?.warnings as
-                    | string[]
-                    | undefined) ?? [];
-                return (
-                  <tr key={s.id} className="hover:bg-muted/30">
-                    <td className="p-3 font-medium">
-                      {s.billing_period}
-                      {snapshotWarnings.length > 0 && (
-                        <p className="text-xs text-yellow-600 mt-0.5">Billing note attached</p>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      <StatusBadge status={s.status} />
-                    </td>
-                    <td className="p-3 text-right font-mono">${s.grand_total.toFixed(2)}</td>
-                    <td className="p-3 text-right text-muted-foreground">
-                      {new Date(s.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex gap-2 justify-end">
-                        <Button variant="outline" size="sm" onClick={() => setSelectedId(s.id)}>
-                          View
-                        </Button>
-                        {s.stripe_invoice_id && (
-                          <a
-                            href={`https://invoice.stripe.com/i/${s.stripe_invoice_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center rounded-lg border border-border bg-background px-2.5 h-7 text-[0.8rem] font-medium hover:bg-muted hover:text-foreground transition-all"
-                          >
-                            Download
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <BlockList
+          className="mt-2"
+          items={data.snapshots}
+          itemKey={(s) => s.id}
+          density="ops"
+          ariaLabel="Billing statements"
+          renderHeader={({ row: s }) => (
+            <div>
+              <p className="font-medium">{s.billing_period}</p>
+              {((
+                (s.snapshot_data as Record<string, unknown> | null)?.warnings as
+                  | string[]
+                  | undefined
+              )?.length ?? 0) > 0 && (
+                <p className="text-xs text-yellow-600 mt-0.5">Billing note attached</p>
+              )}
+            </div>
+          )}
+          renderExceptionZone={({ row: s }) => <StatusBadge status={s.status} />}
+          renderBody={({ row: s }) => (
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <BillingMetric label="Total" value={`$${s.grand_total.toFixed(2)}`} mono />
+              <BillingMetric label="Date" value={new Date(s.created_at).toLocaleDateString()} />
+            </div>
+          )}
+          renderActions={({ row: s }) => (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setSelectedId(s.id)}>
+                View
+              </Button>
+              {s.stripe_invoice_id && (
+                <a
+                  href={`https://invoice.stripe.com/i/${s.stripe_invoice_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center rounded-lg border border-border bg-background px-2.5 h-7 text-[0.8rem] font-medium hover:bg-muted hover:text-foreground transition-all"
+                >
+                  Download
+                </a>
+              )}
+            </div>
+          )}
+        />
       )}
     </div>
   );
@@ -258,34 +264,26 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {included.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Shipments ({included.length})</h3>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">Tracking</th>
-                  <th className="text-left p-2 font-medium">Ship Date</th>
-                  <th className="text-left p-2 font-medium">Carrier</th>
-                  <th className="text-left p-2 font-medium">Format</th>
-                  <th className="text-right p-2 font-medium">Shipping</th>
-                  <th className="text-right p-2 font-medium">Pick/Pack</th>
-                  <th className="text-right p-2 font-medium">Material</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {included.map((s) => (
-                  <tr key={s.shipment_id}>
-                    <td className="p-2 font-mono text-xs">{s.tracking_number ?? "—"}</td>
-                    <td className="p-2">{s.ship_date ?? "—"}</td>
-                    <td className="p-2">{s.carrier ?? "—"}</td>
-                    <td className="p-2">{s.format_name}</td>
-                    <td className="p-2 text-right font-mono">${s.shipping_cost.toFixed(2)}</td>
-                    <td className="p-2 text-right font-mono">${s.pick_pack_cost.toFixed(2)}</td>
-                    <td className="p-2 text-right font-mono">${s.material_cost.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={included}
+            itemKey={(s) => s.shipment_id}
+            density="ops"
+            ariaLabel="Included shipments"
+            renderHeader={({ row: s }) => (
+              <p className="font-mono text-xs">{s.tracking_number ?? "—"}</p>
+            )}
+            renderBody={({ row: s }) => (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <BillingMetric label="Ship Date" value={s.ship_date ?? "—"} />
+                <BillingMetric label="Carrier" value={s.carrier ?? "—"} />
+                <BillingMetric label="Format" value={s.format_name} />
+                <BillingMetric label="Shipping" value={`$${s.shipping_cost.toFixed(2)}`} mono />
+                <BillingMetric label="Pick/Pack" value={`$${s.pick_pack_cost.toFixed(2)}`} mono />
+                <BillingMetric label="Material" value={`$${s.material_cost.toFixed(2)}`} mono />
+              </div>
+            )}
+          />
         </div>
       )}
 
@@ -293,26 +291,20 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {storageItems.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Storage Charges</h3>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">SKU</th>
-                  <th className="text-right p-2 font-medium">Billable Units</th>
-                  <th className="text-right p-2 font-medium">Fee</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {storageItems.map((item) => (
-                  <tr key={item.sku}>
-                    <td className="p-2 font-mono text-xs">{item.sku}</td>
-                    <td className="p-2 text-right">{item.billable_units}</td>
-                    <td className="p-2 text-right font-mono">${item.storage_fee.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={storageItems}
+            itemKey={(item) => item.sku}
+            density="ops"
+            ariaLabel="Storage charges"
+            renderHeader={({ row: item }) => <p className="font-mono text-xs">{item.sku}</p>}
+            renderBody={({ row: item }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <BillingMetric label="Billable Units" value={String(item.billable_units)} />
+                <BillingMetric label="Fee" value={`$${item.storage_fee.toFixed(2)}`} mono />
+              </div>
+            )}
+          />
         </div>
       )}
     </div>

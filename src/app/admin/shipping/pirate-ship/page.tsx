@@ -3,6 +3,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getImportDetail, getImportHistory, initiateImport } from "@/actions/pirate-ship";
+import { BlockList } from "@/components/shared/block-list";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -56,6 +57,23 @@ function parseImportErrors(raw: unknown): ParsedErrors {
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB client-side guard
 const DISPLAY_ROW_LIMIT = 100; // Cap rendered rows to prevent browser freeze on large imports
+
+function ImportMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "font-mono text-xs" : "text-sm"}>{value}</p>
+    </div>
+  );
+}
 
 export default function PirateShipImportPage() {
   const [uploading, setUploading] = useState(false);
@@ -234,51 +252,41 @@ export default function PirateShipImportPage() {
             No imports yet. Upload a Pirate Ship XLSX to get started.
           </div>
         ) : (
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-3 font-medium">File</th>
-                  <th className="text-left p-3 font-medium">Status</th>
-                  <th className="text-left p-3 font-medium">Rows</th>
-                  <th className="text-left p-3 font-medium">Processed</th>
-                  <th className="text-left p-3 font-medium">Errors</th>
-                  <th className="text-left p-3 font-medium">Date</th>
-                  <th className="text-left p-3 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {historyData.imports.map((imp: WarehousePirateShipImport) => (
-                  <tr key={imp.id} className="border-b last:border-0 hover:bg-muted/25">
-                    <td className="p-3 font-mono text-xs max-w-[200px] truncate">
-                      {imp.file_name}
-                    </td>
-                    <td className="p-3">
-                      <StatusBadge status={imp.status} />
-                    </td>
-                    <td className="p-3 tabular-nums">{imp.row_count ?? "-"}</td>
-                    <td className="p-3 tabular-nums">{imp.processed_count}</td>
-                    <td className="p-3 tabular-nums">{imp.error_count}</td>
-                    <td className="p-3 text-muted-foreground">
-                      {new Date(imp.created_at).toLocaleString()}
-                    </td>
-                    <td className="p-3">
-                      {imp.status === "completed" || imp.status === "failed" ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewDetail(imp.id)}
-                          disabled={loadingDetail}
-                        >
-                          Details
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={historyData.imports}
+            itemKey={(imp) => imp.id}
+            density="ops"
+            ariaLabel="Pirate Ship import history"
+            renderHeader={({ row: imp }) => (
+              <div>
+                <p className="font-mono text-xs truncate">{imp.file_name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {new Date(imp.created_at).toLocaleString()}
+                </p>
+              </div>
+            )}
+            renderExceptionZone={({ row: imp }) => <StatusBadge status={imp.status} />}
+            renderBody={({ row: imp }) => (
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <ImportMetric label="Rows" value={String(imp.row_count ?? "-")} />
+                <ImportMetric label="Processed" value={String(imp.processed_count)} />
+                <ImportMetric label="Errors" value={String(imp.error_count)} />
+              </div>
+            )}
+            renderActions={({ row: imp }) =>
+              imp.status === "completed" || imp.status === "failed" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleViewDetail(imp.id)}
+                  disabled={loadingDetail}
+                >
+                  Details
+                </Button>
+              ) : null
+            }
+          />
         )}
       </div>
 
@@ -393,38 +401,27 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
               </span>
             )}
           </h3>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-2 font-medium">Tracking</th>
-                  <th className="text-left p-2 font-medium">Carrier</th>
-                  <th className="text-left p-2 font-medium">Ship Date</th>
-                  <th className="text-left p-2 font-medium">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedShipments.map(
-                  (s: {
-                    id: string;
-                    tracking_number: string | null;
-                    carrier: string | null;
-                    ship_date: string | null;
-                    shipping_cost: number | null;
-                  }) => (
-                    <tr key={s.id} className="border-b last:border-0">
-                      <td className="p-2 font-mono text-xs">{s.tracking_number ?? "-"}</td>
-                      <td className="p-2">{s.carrier ?? "-"}</td>
-                      <td className="p-2">{s.ship_date ?? "-"}</td>
-                      <td className="p-2 tabular-nums">
-                        {s.shipping_cost != null ? `$${s.shipping_cost.toFixed(2)}` : "-"}
-                      </td>
-                    </tr>
-                  ),
-                )}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={displayedShipments}
+            itemKey={(s) => s.id}
+            density="ops"
+            ariaLabel="Matched shipments"
+            renderHeader={({ row: s }) => (
+              <p className="font-mono text-xs">{s.tracking_number ?? "-"}</p>
+            )}
+            renderBody={({ row: s }) => (
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <ImportMetric label="Carrier" value={s.carrier ?? "-"} />
+                <ImportMetric label="Ship Date" value={s.ship_date ?? "-"} />
+                <ImportMetric
+                  label="Cost"
+                  value={s.shipping_cost != null ? `$${s.shipping_cost.toFixed(2)}` : "-"}
+                  mono
+                />
+              </div>
+            )}
+          />
         </div>
       )}
 
@@ -439,38 +436,35 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
               </span>
             )}
           </h3>
-          <div className="border border-destructive/20 rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-destructive/5">
-                  <th className="text-left p-2 font-medium">Row</th>
-                  <th className="text-left p-2 font-medium">Recipient</th>
-                  <th className="text-left p-2 font-medium">Tracking</th>
-                  <th className="text-left p-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedUnmatched.map(
-                  (item: { id: string; metadata: Record<string, unknown>; status: string }) => (
-                    <tr key={item.id} className="border-b last:border-0">
-                      <td className="p-2">{(item.metadata?.row_index as number) ?? "-"}</td>
-                      <td className="p-2">
-                        {(item.metadata?.recipient_name as string) ??
-                          (item.metadata?.recipient_company as string) ??
-                          "-"}
-                      </td>
-                      <td className="p-2 font-mono text-xs">
-                        {(item.metadata?.tracking_number as string) ?? "-"}
-                      </td>
-                      <td className="p-2">
-                        <ReviewStatusBadge status={item.status} />
-                      </td>
-                    </tr>
-                  ),
-                )}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={displayedUnmatched}
+            itemKey={(item) => item.id}
+            density="ops"
+            ariaLabel="Unmatched review items"
+            renderHeader={({ row: item }) => (
+              <p className="font-mono text-xs">
+                {(item.metadata?.tracking_number as string) ?? "-"}
+              </p>
+            )}
+            renderExceptionZone={({ row: item }) => <ReviewStatusBadge status={item.status} />}
+            renderBody={({ row: item }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <ImportMetric
+                  label="Row"
+                  value={String((item.metadata?.row_index as number) ?? "-")}
+                />
+                <ImportMetric
+                  label="Recipient"
+                  value={
+                    ((item.metadata?.recipient_name as string) ??
+                      (item.metadata?.recipient_company as string) ??
+                      "-") as string
+                  }
+                />
+              </div>
+            )}
+          />
         </div>
       )}
 

@@ -11,7 +11,9 @@ import {
   type InboundDetailResult,
   markArrived,
 } from "@/actions/inbound";
+import { BlockList } from "@/components/shared/block-list";
 import { CollaborativePage, PresenceBar } from "@/components/shared/collaborative-page";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,7 +72,7 @@ function StatusProgressBar({ currentStatus }: { currentStatus: InboundStatus }) 
   );
 }
 
-function ItemCheckInRow({
+function ItemCheckInCard({
   item,
   isCheckingIn,
   onCheckIn,
@@ -92,25 +94,55 @@ function ItemCheckInRow({
   const hasDiscrepancy = isChecked && item.received_quantity !== item.expected_quantity;
 
   return (
-    <tr className={`border-b ${hasDiscrepancy ? "bg-yellow-50" : ""}`}>
-      <td className="p-3 font-mono text-xs">{item.sku}</td>
-      <td className="p-3">{item.expected_quantity}</td>
-      <td className="p-3">
-        {isCheckingIn && !isChecked ? (
-          <Input
-            type="number"
-            min={0}
-            value={receivedQty}
-            onChange={(e) => setReceivedQty(e.target.value)}
-            className="w-20 h-8"
-          />
-        ) : (
-          <span className={hasDiscrepancy ? "text-yellow-700 font-medium" : ""}>
-            {item.received_quantity ?? "—"}
-          </span>
-        )}
-      </td>
-      <td className="p-3">
+    <div
+      className={`space-y-3 ${hasDiscrepancy ? "rounded-md border border-yellow-200 bg-yellow-50 p-2" : ""}`}
+    >
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+        <div className="rounded-md border bg-background/60 p-2">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">SKU</p>
+          <p className="font-mono text-xs">{item.sku}</p>
+        </div>
+        <div className="rounded-md border bg-background/60 p-2">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Expected Qty</p>
+          <p>{item.expected_quantity}</p>
+        </div>
+        <div className="rounded-md border bg-background/60 p-2">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Received Qty</p>
+          {isCheckingIn && !isChecked ? (
+            <Input
+              type="number"
+              min={0}
+              value={receivedQty}
+              onChange={(e) => setReceivedQty(e.target.value)}
+              className="w-24 h-8 mt-1"
+            />
+          ) : (
+            <p className={hasDiscrepancy ? "text-yellow-700 font-medium" : ""}>
+              {item.received_quantity ?? "—"}
+            </p>
+          )}
+        </div>
+        <div className="rounded-md border bg-background/60 p-2">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Location</p>
+          <p>{item.location_id ? item.location_id.slice(0, 8) : "—"}</p>
+        </div>
+        <div className="rounded-md border bg-background/60 p-2">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</p>
+          {isChecked ? (
+            <span className="text-green-600 text-xs font-medium flex items-center gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Done
+            </span>
+          ) : (
+            <p className="text-xs text-muted-foreground">Pending</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-md border bg-background/60 p-2">
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+          Condition Notes
+        </p>
         {isCheckingIn && !isChecked ? (
           <Textarea
             value={conditionNotes}
@@ -119,31 +151,21 @@ function ItemCheckInRow({
             className="h-8 min-h-[2rem] text-sm"
           />
         ) : (
-          item.condition_notes || "—"
+          <p className="text-sm">{item.condition_notes || "—"}</p>
         )}
-      </td>
-      <td className="p-3">{item.location_id ? item.location_id.slice(0, 8) : "—"}</td>
-      <td className="p-3">
-        {isCheckingIn && !isChecked && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              onCheckIn(item.id, Number.parseInt(receivedQty, 10) || 0, conditionNotes)
-            }
-          >
-            <Check className="h-3.5 w-3.5 mr-1" />
-            Confirm
-          </Button>
-        )}
-        {isChecked && (
-          <span className="text-green-600 text-xs font-medium flex items-center gap-1">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Done
-          </span>
-        )}
-      </td>
-    </tr>
+      </div>
+
+      {isCheckingIn && !isChecked && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onCheckIn(item.id, Number.parseInt(receivedQty, 10) || 0, conditionNotes)}
+        >
+          <Check className="h-3.5 w-3.5 mr-1" />
+          Confirm
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -288,47 +310,35 @@ export default function InboundDetailPage() {
         {/* Status Progression */}
         <StatusProgressBar currentStatus={detail.status} />
 
-        {/* Items Table */}
+        {/* Items */}
         <div>
           <h2 className="text-lg font-medium mb-3">Items ({detail.items.length})</h2>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-3 font-medium">SKU</th>
-                  <th className="text-left p-3 font-medium">Expected Qty</th>
-                  <th className="text-left p-3 font-medium">Received Qty</th>
-                  <th className="text-left p-3 font-medium">Condition Notes</th>
-                  <th className="text-left p-3 font-medium">Location</th>
-                  <th className="text-left p-3 font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.items.map((item) => (
-                  <ItemCheckInRow
-                    key={item.id}
-                    item={item}
-                    isCheckingIn={detail.status === "checking_in"}
-                    onCheckIn={(itemId, receivedQty, conditionNotes, locationId) =>
-                      checkInItemMutation.mutate({
-                        itemId,
-                        receivedQty,
-                        conditionNotes,
-                        locationId,
-                      })
-                    }
-                  />
-                ))}
-                {detail.items.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="p-8 text-center text-muted-foreground">
-                      No items in this shipment.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          {detail.items.length === 0 ? (
+            <EmptyState title="No items in this shipment" compact />
+          ) : (
+            <BlockList
+              className="mt-2"
+              items={detail.items}
+              itemKey={(item) => item.id}
+              density="ops"
+              ariaLabel="Inbound shipment items"
+              renderHeader={({ row: item }) => <p className="font-mono text-xs">{item.sku}</p>}
+              renderBody={({ row: item }) => (
+                <ItemCheckInCard
+                  item={item}
+                  isCheckingIn={detail.status === "checking_in"}
+                  onCheckIn={(itemId, receivedQty, conditionNotes, locationId) =>
+                    checkInItemMutation.mutate({
+                      itemId,
+                      receivedQty,
+                      conditionNotes,
+                      locationId,
+                    })
+                  }
+                />
+              )}
+            />
+          )}
         </div>
       </div>
     </CollaborativePage>

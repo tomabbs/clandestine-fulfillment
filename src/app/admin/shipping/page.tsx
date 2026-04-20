@@ -23,6 +23,7 @@ import {
   getShipmentsSummary,
   setShipmentItemFormatOverride,
 } from "@/actions/shipping";
+import { EmptyState } from "@/components/shared/empty-state";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -271,43 +272,19 @@ export default function ShippingPage() {
           onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
         />
       )}
-      <div className="rounded-md border overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="px-4 py-3 text-left font-medium">Ship Date</th>
-              <th className="px-4 py-3 text-left font-medium">Order #</th>
-              <th className="px-4 py-3 text-left font-medium">Client</th>
-              <th className="px-4 py-3 text-left font-medium">Recipient</th>
-              <th className="px-4 py-3 text-left font-medium">Tracking</th>
-              <th className="px-4 py-3 text-center font-medium">Items</th>
-              <th className="px-4 py-3 text-left font-medium">Status</th>
-              <th className="px-4 py-3 text-right font-medium">Cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && [1, 2, 3, 4, 5].map((i) => <SkeletonRow key={i} />)}
-            {data?.shipments.map((shipment) => (
-              <ShipmentTableRow
-                key={shipment.id}
-                shipment={shipment}
-                isExpanded={expandedId === shipment.id}
-                onToggle={() =>
-                  setExpandedId((prev) => (prev === shipment.id ? null : shipment.id))
-                }
-                detail={expandedId === shipment.id ? detail : undefined}
-                detailLoading={expandedId === shipment.id && detailLoading}
-              />
-            ))}
-            {data && data.shipments.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
-                  No shipments found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="space-y-2">
+        {isLoading && [1, 2, 3, 4, 5].map((i) => <SkeletonRow key={i} />)}
+        {data?.shipments.map((shipment) => (
+          <ShipmentTableRow
+            key={shipment.id}
+            shipment={shipment}
+            isExpanded={expandedId === shipment.id}
+            onToggle={() => setExpandedId((prev) => (prev === shipment.id ? null : shipment.id))}
+            detail={expandedId === shipment.id ? detail : undefined}
+            detailLoading={expandedId === shipment.id && detailLoading}
+          />
+        ))}
+        {data && data.shipments.length === 0 && <EmptyState title="No shipments found" compact />}
       </div>
 
       {data && data.total > 0 && (
@@ -409,21 +386,32 @@ function ShipmentTableRow({
     customerCharged != null && fulfillmentTotal != null ? customerCharged - fulfillmentTotal : null;
 
   return (
-    <>
-      <tr
-        className="border-b cursor-pointer hover:bg-muted/30 transition-colors"
+    <div className="rounded-lg border bg-card">
+      <button
+        type="button"
+        className="w-full text-left p-3 hover:bg-muted/30 transition-colors"
         onClick={onToggle}
       >
-        <td className="px-4 py-3">
-          {shipment.ship_date
-            ? new Date(`${shipment.ship_date}T12:00:00`).toLocaleDateString()
-            : "---"}
-        </td>
-        <td className="px-4 py-3 font-mono text-xs">{displayOrderRef ?? "---"}</td>
-        <td className="px-4 py-3 text-sm text-muted-foreground">{clientName ?? "—"}</td>
-        <td className="px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm">{recipient?.name ?? "---"}</p>
+        <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-3 text-sm">
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ship Date</p>
+            <p>
+              {shipment.ship_date
+                ? new Date(`${shipment.ship_date}T12:00:00`).toLocaleDateString()
+                : "---"}
+            </p>
+          </div>
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Order #</p>
+            <p className="font-mono text-xs">{displayOrderRef ?? "---"}</p>
+          </div>
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Client</p>
+            <p>{clientName ?? "—"}</p>
+          </div>
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Recipient</p>
+            <p className="truncate">{recipient?.name ?? "---"}</p>
             {recipient?.city && (
               <p className="text-xs text-muted-foreground truncate">
                 {recipient.city}
@@ -431,98 +419,100 @@ function ShipmentTableRow({
               </p>
             )}
           </div>
-        </td>
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-1.5">
-            {carrierLabel && <Badge variant="secondary">{carrierLabel}</Badge>}
-            {labelSource === "shipstation" && (
-              <span className="text-xs bg-blue-100 text-blue-700 px-1 rounded">SS</span>
-            )}
-            {labelSource === "pirate_ship" && (
-              <span className="text-xs bg-orange-100 text-orange-700 px-1 rounded">PS</span>
-            )}
-            {labelSource === "easypost" && (
-              <span className="text-xs bg-green-100 text-green-700 px-1 rounded">EP</span>
-            )}
-            <span className="font-mono text-xs">{shipment.tracking_number ?? "---"}</span>
-            {trackingUrl && (
-              <a
-                href={trackingUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="text-blue-600 hover:text-blue-800 shrink-0"
-              >
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            )}
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Tracking</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {carrierLabel && <Badge variant="secondary">{carrierLabel}</Badge>}
+              {labelSource === "shipstation" && (
+                <span className="text-xs bg-blue-100 text-blue-700 px-1 rounded">SS</span>
+              )}
+              {labelSource === "pirate_ship" && (
+                <span className="text-xs bg-orange-100 text-orange-700 px-1 rounded">PS</span>
+              )}
+              {labelSource === "easypost" && (
+                <span className="text-xs bg-green-100 text-green-700 px-1 rounded">EP</span>
+              )}
+              <span className="font-mono text-xs">{shipment.tracking_number ?? "---"}</span>
+              {trackingUrl && (
+                <a
+                  href={trackingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-blue-600 hover:text-blue-800 shrink-0"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
           </div>
-        </td>
-        <td className="px-4 py-3 text-center">
-          <div className="inline-flex items-center gap-1 text-muted-foreground">
-            <Package className="h-3.5 w-3.5" />
-            <span className="tabular-nums">{itemCount}</span>
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Items</p>
+            <div className="inline-flex items-center gap-1 text-muted-foreground">
+              <Package className="h-3.5 w-3.5" />
+              <span className="tabular-nums">{itemCount}</span>
+            </div>
           </div>
-        </td>
-        <td className="px-4 py-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <StatusBadge status={shipment.status} />
-            {(
-              shipment as ShipmentRow & {
-                bandcamp_payment_id?: number | null;
-                bandcamp_synced_at?: string | null;
-              }
-            ).bandcamp_payment_id != null && (
-              <Badge variant="secondary" className="text-xs">
-                BC
-                {(shipment as ShipmentRow & { bandcamp_synced_at?: string | null })
-                  .bandcamp_synced_at
-                  ? " ✓"
-                  : ""}
-              </Badge>
-            )}
-          </div>
-        </td>
-        <td className="px-4 py-3 text-right font-mono">
-          <div className="flex items-center justify-end gap-1.5">
-            {fulfillmentPartial && (
-              <span
-                className="inline-block h-2 w-2 rounded-full flex-shrink-0 bg-amber-400"
-                title="Fulfillment cost is partial — some item SKUs or format costs could not be resolved"
-              />
-            )}
-            {!fulfillmentPartial && fulfillmentGap != null && (
-              <span
-                className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${
-                  fulfillmentGap >= 0 ? "bg-green-500" : "bg-red-500"
-                }`}
-                title={
-                  fulfillmentGap >= 0
-                    ? `Charged $${customerCharged?.toFixed(2)} / Fulfillment $${fulfillmentTotal?.toFixed(2)} (+$${fulfillmentGap.toFixed(2)})`
-                    : `Charged $${customerCharged?.toFixed(2)} / Fulfillment $${fulfillmentTotal?.toFixed(2)} (-$${Math.abs(fulfillmentGap).toFixed(2)} shortfall)`
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <StatusBadge status={shipment.status} />
+              {(
+                shipment as ShipmentRow & {
+                  bandcamp_payment_id?: number | null;
+                  bandcamp_synced_at?: string | null;
                 }
-              />
-            )}
-            {formatCurrency(fulfillmentTotal)}
+              ).bandcamp_payment_id != null && (
+                <Badge variant="secondary" className="text-xs">
+                  BC
+                  {(shipment as ShipmentRow & { bandcamp_synced_at?: string | null })
+                    .bandcamp_synced_at
+                    ? " ✓"
+                    : ""}
+                </Badge>
+              )}
+            </div>
           </div>
-        </td>
-      </tr>
+          <div className="rounded-md border bg-background/60 p-2">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Cost</p>
+            <div className="flex items-center gap-1.5 font-mono">
+              {fulfillmentPartial && (
+                <span
+                  className="inline-block h-2 w-2 rounded-full flex-shrink-0 bg-amber-400"
+                  title="Fulfillment cost is partial — some item SKUs or format costs could not be resolved"
+                />
+              )}
+              {!fulfillmentPartial && fulfillmentGap != null && (
+                <span
+                  className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${
+                    fulfillmentGap >= 0 ? "bg-green-500" : "bg-red-500"
+                  }`}
+                  title={
+                    fulfillmentGap >= 0
+                      ? `Charged $${customerCharged?.toFixed(2)} / Fulfillment $${fulfillmentTotal?.toFixed(2)} (+$${fulfillmentGap.toFixed(2)})`
+                      : `Charged $${customerCharged?.toFixed(2)} / Fulfillment $${fulfillmentTotal?.toFixed(2)} (-$${Math.abs(fulfillmentGap).toFixed(2)} shortfall)`
+                  }
+                />
+              )}
+              {formatCurrency(fulfillmentTotal)}
+            </div>
+          </div>
+        </div>
+      </button>
       {isExpanded && (
-        <tr className="border-b bg-muted/10">
-          <td colSpan={7} className="px-6 py-5">
-            {detailLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-48" />
-                <Skeleton className="h-4 w-64" />
-                <Skeleton className="h-4 w-40" />
-              </div>
-            ) : detail ? (
-              <ShipmentExpandedDetail detail={detail} onDetailRefresh={handleDetailRefresh} />
-            ) : null}
-          </td>
-        </tr>
+        <div className="border-t bg-muted/10 px-6 py-5">
+          {detailLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-4 w-64" />
+              <Skeleton className="h-4 w-40" />
+            </div>
+          ) : detail ? (
+            <ShipmentExpandedDetail detail={detail} onDetailRefresh={handleDetailRefresh} />
+          ) : null}
+        </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -661,23 +651,32 @@ function ShipmentExpandedDetail({
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground">No items recorded.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-1 pr-3 font-medium">Product</th>
-                    <th className="text-left py-1 pr-3 font-medium">SKU</th>
-                    <th className="text-right py-1 pr-3 font-medium">Qty</th>
-                    <th className="text-left py-1 font-medium">Format</th>
-                  </tr>
-                </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.id} className="border-b border-dashed">
-                    <td className="py-1 pr-3 text-sm">{item.product_title ?? "---"}</td>
-                    <td className="py-1 pr-3 font-mono text-xs">{item.sku}</td>
-                    <td className="py-1 pr-3 text-right tabular-nums">{item.quantity}</td>
-                    <td className="py-1">
+            <div className="space-y-2">
+              {items.map((item) => (
+                <div key={item.id} className="rounded-md border bg-background/60 p-2">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Product
+                      </p>
+                      <p>{item.product_title ?? "---"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        SKU
+                      </p>
+                      <p className="font-mono text-xs">{item.sku}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Qty
+                      </p>
+                      <p className="tabular-nums">{item.quantity}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Format
+                      </p>
                       <FormatCell
                         item={{
                           id: item.id,
@@ -689,11 +688,10 @@ function ShipmentExpandedDetail({
                         onSaved={onDetailRefresh}
                         formatOptions={formatOptions}
                       />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              </table>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -920,12 +918,12 @@ function StatusBadge({ status }: { status: string }) {
 
 function SkeletonRow() {
   return (
-    <tr className="border-b">
-      {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-        <td key={i} className="px-4 py-3">
-          <Skeleton className="h-4 w-full" />
-        </td>
-      ))}
-    </tr>
+    <div className="rounded-lg border p-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-3">
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+          <Skeleton key={i} className="h-14 w-full" />
+        ))}
+      </div>
+    </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { getSalesData } from "@/actions/portal-sales";
+import { BlockList } from "@/components/shared/block-list";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -110,32 +111,33 @@ export default function SalesPage() {
           <CardTitle>Recent Orders</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left p-2 font-medium">Date</th>
-                  <th className="text-left p-2 font-medium">Source</th>
-                  <th className="text-left p-2 font-medium">Order</th>
-                  <th className="text-right p-2 font-medium">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {data.orders.map((o) => (
-                  <tr key={o.id}>
-                    <td className="p-2 text-muted-foreground">
-                      {new Date(o.created_at).toISOString().slice(0, 10)}
-                    </td>
-                    <td className="p-2 capitalize">{o.source}</td>
-                    <td className="p-2 font-mono text-xs">{o.order_number ?? "—"}</td>
-                    <td className="p-2 text-right font-mono">
-                      {o.total_price != null ? `$${Number(o.total_price).toFixed(2)}` : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BlockList
+            className="mt-2"
+            items={data.orders}
+            itemKey={(o) => o.id}
+            density="ops"
+            ariaLabel="Recent orders"
+            renderHeader={({ row: o }) => (
+              <div>
+                <p className="font-mono text-xs">{o.order_number ?? "—"}</p>
+                <p className="text-xs text-muted-foreground capitalize">{o.source}</p>
+              </div>
+            )}
+            renderBody={({ row: o }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-md border bg-background/60 p-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Date</p>
+                  <p>{new Date(o.created_at).toISOString().slice(0, 10)}</p>
+                </div>
+                <div className="rounded-md border bg-background/60 p-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Total</p>
+                  <p className="font-mono">
+                    {o.total_price != null ? `$${Number(o.total_price).toFixed(2)}` : "—"}
+                  </p>
+                </div>
+              </div>
+            )}
+          />
         </CardContent>
       </Card>
     </div>
