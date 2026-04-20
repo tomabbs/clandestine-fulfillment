@@ -43,7 +43,6 @@ interface ShipmentRow {
   status: string | null;
   ship_date: string | null;
   delivery_date: string | null;
-  ship_to: Record<string, unknown> | null;
   label_data: Record<string, unknown> | null;
   shipstation_order_id: string | null;
   order_id: string | null;
@@ -88,11 +87,19 @@ function getStatusConfig(status: string | null | undefined) {
   );
 }
 
-function pickPublicCity(shipTo: Record<string, unknown> | null): string {
-  if (!shipTo) return "";
-  const city = typeof shipTo.city === "string" ? shipTo.city : "";
-  const state = typeof shipTo.state === "string" ? shipTo.state : "";
-  const country = typeof shipTo.country === "string" ? shipTo.country : "";
+function pickPublicCity(labelData: Record<string, unknown> | null): string {
+  // Pull the destination "City, State, Country" from EasyPost label_data.
+  // (warehouse_shipments has no dedicated ship_to column — destination
+  // lives on the source order or, conveniently for our purposes, inside
+  // the EasyPost shipment object stored in label_data.)
+  if (!labelData || typeof labelData !== "object") return "";
+  const ep = labelData as Record<string, unknown>;
+  const ship = (ep.shipment ?? ep) as Record<string, unknown>;
+  const to = ship.to_address as Record<string, unknown> | undefined;
+  if (!to) return "";
+  const city = typeof to.city === "string" ? to.city : "";
+  const state = typeof to.state === "string" ? to.state : "";
+  const country = typeof to.country === "string" ? to.country : "";
   return [city, state, country].filter(Boolean).join(", ");
 }
 
@@ -116,27 +123,15 @@ export default async function PublicTrackPage({ params }: PageProps) {
   // Look up the shipment by token. Token IS the auth — if a token doesn't
   // exist or hits a deleted shipment, 404. NEVER 500 (would leak existence
   // signal to enumerators).
-  const lookupResult = await supabase
+  const { data: rawShipment } = await supabase
     .from("warehouse_shipments")
     .select(
       `id, workspace_id, org_id, tracking_number, carrier, service, status,
-       ship_date, delivery_date, ship_to, label_data, shipstation_order_id,
+       ship_date, delivery_date, label_data, shipstation_order_id,
        order_id, mailorder_id`,
     )
     .eq("public_track_token", params.token)
     .maybeSingle();
-  const { data: rawShipment, error: lookupErr } = lookupResult;
-  // TEMP — diagnostic to find out why prod returns 404 for valid tokens.
-  // Remove after verifying.
-  console.log(
-    "[track/page] lookup",
-    JSON.stringify({
-      token_prefix: params.token.slice(0, 6),
-      data_present: !!rawShipment,
-      error: lookupErr?.message ?? null,
-      url_env: process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 30),
-    }),
-  );
 
   if (!rawShipment) {
     // Sensor for enumeration tracking — single insert per failed lookup,
@@ -213,7 +208,7 @@ export default async function PublicTrackPage({ params }: PageProps) {
   const currentStatusConfig = getStatusConfig(shipment.status);
   const StatusIcon = currentStatusConfig.icon;
   const carrierUrl = buildCarrierUrl(shipment.carrier, shipment.tracking_number);
-  const publicCity = pickPublicCity(shipment.ship_to);
+  const publicCity = pickPublicCity(shipment.label_data);
   const brand = branding.brand_color ?? "#111827";
 
   return (
