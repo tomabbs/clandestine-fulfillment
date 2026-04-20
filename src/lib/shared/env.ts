@@ -51,6 +51,14 @@ const serverEnvSchema = z.object({
   EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID: z
     .string()
     .default("ca_0f7e073887204bd491a6230936baf754"),
+  // Phase 10.2 — EasyPost Webhook signing secret (for tracker.* events at
+  // /api/webhooks/easypost). REQUIRED in production; the route returns 500
+  // when unset, by design (mirrors the SHIPSTATION_WEBHOOK_SECRET pattern).
+  // EP uses HMAC-SHA256 with the raw request body. We prefer the v2 header
+  // (`x-hmac-signature-v2`) which adds timestamp validation; v1
+  // (`x-hmac-signature`) remains supported as a fallback for older webhook
+  // configs that haven't been migrated. Default empty so dev/test runs.
+  EASYPOST_WEBHOOK_SECRET: z.string().default(""),
 
   // Shopify OAuth (client store connections — NOT main Clandestine Shopify)
   SHOPIFY_CLIENT_ID: z.string().default(""),

@@ -55,9 +55,10 @@ export const postLabelPurchaseTask = task({
 
     const triggered: string[] = [];
 
-    // Tracking enrichment — AfterShip today (Phase 10.5 will swap this for
-    // easypost-register-tracker once we've cut over). Kept centralized here
-    // so the swap is a single edit.
+    // Phase 10.2 — DUAL-MODE tracking enrichment: register with BOTH AfterShip
+    // and EasyPost Trackers. The Phase 10.5 parity sensor compares per-shipment
+    // event counts over a 30-day rolling window before we sunset AfterShip.
+    // Both calls are independent + non-fatal; one failing doesn't block the other.
     try {
       await tasks.trigger("aftership-register", { shipment_id: shipment.id });
       triggered.push("aftership-register");
@@ -66,6 +67,21 @@ export const postLabelPurchaseTask = task({
         warehouse_shipment_id,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+    // Phase 10.2 — only EP-purchased labels get an EP tracker registration via
+    // this orchestrator (Pirate Ship import calls easypost-register-tracker
+    // directly with carrier hint). For non-EP labels we skip — EP can still
+    // track them but the registration would happen elsewhere.
+    if (shipment.label_source === "easypost") {
+      try {
+        await tasks.trigger("easypost-register-tracker", { shipment_id: shipment.id });
+        triggered.push("easypost-register-tracker");
+      } catch (err) {
+        logger.warn("[post-label-purchase] easypost-register-tracker enqueue failed", {
+          warehouse_shipment_id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     // Source-specific platform fulfillment marking.

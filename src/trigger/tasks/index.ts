@@ -15,6 +15,12 @@ export { bandcampShippingVerifyTask } from "./bandcamp-shipping-verify";
 // Phase 9.1 — bulk label buy orchestrator + nightly print_batch_jobs purge.
 export { bulkBuyLabelsTask } from "./bulk-buy-labels";
 export { printBatchJobsPurgeTask } from "./print-batch-jobs-purge";
+// Phase 10.2 — EasyPost tracker registration (DUAL-MODE alongside aftership-register
+// until the Phase 10.5 sunset gate. Both tasks fire on every label.)
+export { easypostRegisterTrackerTask } from "./easypost-register-tracker";
+// Phase 10.5 prep — daily parity check between AfterShip and EasyPost trackers.
+// Diagnostic only; gates the eventual AfterShip sunset.
+export { trackerParitySensorTask } from "./tracker-parity-sensor";
 export {
   bandcampOrderSyncSchedule,
   bandcampOrderSyncTask,

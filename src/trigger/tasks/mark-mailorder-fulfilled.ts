@@ -123,7 +123,11 @@ async function markMainShopifyFulfilled(
       fulfillment: {
         line_items_by_fulfillment_order: [{ fulfillment_order_id: openFO.id }],
         tracking_info: { number: trackingNumber, company: carrier },
-        notify_customer: true, // Clandestine Shopify notifies customers
+        // Phase 10.4 — channel='shopify_main' under "hybrid" strategy →
+        // suppressShopifyEmail=false → Clandestine Shopify owns the
+        // confirmation email. Hardcoded true here matches the canonical
+        // matrix; flip via workspaces.flags.email_send_strategy if needed.
+        notify_customer: true,
       },
     }),
   });

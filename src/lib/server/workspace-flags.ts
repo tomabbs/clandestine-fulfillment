@@ -40,6 +40,20 @@ export interface WorkspaceFlags {
    * the bulk-tag/bulk-hold UI; the rest of the cockpit keeps working.
    */
   v1_features_enabled?: boolean;
+  /**
+   * Phase 10.4 — workspace-level kill switch for the notification ownership
+   * matrix. Default "hybrid" — channel-aware decisions per
+   * `deriveNotificationStrategy`. Flip to "ss_for_all" to centralize all
+   * confirmations on SS, or "resend_for_all" to bypass SS entirely (ours
+   * via Resend).
+   */
+  email_send_strategy?: "ss_for_all" | "hybrid" | "resend_for_all";
+  /**
+   * Phase 10.4 — when TRUE (default), suppress SS shipment confirmation for
+   * Bandcamp orders so customers receive only BC's on-brand email. Flip to
+   * FALSE if ops needs SS to also email for BC (e.g. testing).
+   */
+  bandcamp_skip_ss_email?: boolean;
 }
 
 const cache = new Map<string, { flags: WorkspaceFlags; expiresAt: number }>();

@@ -318,6 +318,47 @@ export async function buyLabel(shipmentId: string, rateId: string): Promise<Easy
   return shipmentSchema.parse(purchased);
 }
 
+// ── Phase 10.2 — EasyPost Trackers ─────────────────────────────────────────
+//
+// Replaces our AfterShip dependency. EP exposes first-class Tracker objects
+// for any tracking number (we don't need to have bought the label via EP),
+// plus tracker.* webhooks. We register a tracker:
+//   - For every label we buy via EP (`post-label-purchase` orchestrator).
+//   - For Pirate Ship emergency imports (called directly from the import job).
+//   - During backfill (`scripts/easypost-tracker-backfill.ts`).
+//
+// `Tracker.create` is idempotent on `(carrier, tracking_code)` within a
+// 3-month window per EP docs — calling it twice for the same shipment
+// returns the existing tracker instead of creating a duplicate.
+
+export interface CreateTrackerResult {
+  /** EP tracker id (`trk_...`). */
+  id: string;
+  status: string;
+  carrier: string | null;
+  tracking_code: string;
+  public_url: string | null;
+}
+
+export async function createTracker(input: {
+  trackingCode: string;
+  /** Optional. EP auto-detects from tracking-code prefix when omitted. */
+  carrier?: string;
+}): Promise<CreateTrackerResult> {
+  const api = getClient();
+  const body: Record<string, unknown> = { tracking_code: input.trackingCode };
+  if (input.carrier) body.carrier = input.carrier;
+  // The EP SDK accepts the same shape as the REST API.
+  const tracker = (await api.Tracker.create(body)) as unknown as Record<string, unknown>;
+  return {
+    id: String(tracker.id ?? ""),
+    status: String(tracker.status ?? "unknown"),
+    carrier: typeof tracker.carrier === "string" ? tracker.carrier : null,
+    tracking_code: String(tracker.tracking_code ?? input.trackingCode),
+    public_url: typeof tracker.public_url === "string" ? tracker.public_url : null,
+  };
+}
+
 export async function createScanForm(shipmentIds: string[]): Promise<EasyPostBatch> {
   const api = getClient();
 

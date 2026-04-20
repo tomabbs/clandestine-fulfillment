@@ -18,7 +18,12 @@
 import { task } from "@trigger.dev/sdk";
 import OAuth from "oauth-1.0a";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { env } from "@/lib/shared/env";
+import {
+  deriveNotificationStrategy,
+  type NotificationChannel,
+} from "@/lib/shared/notification-strategy";
 
 export const markPlatformFulfilledTask = task({
   id: "mark-platform-fulfilled",
@@ -53,10 +58,39 @@ export const markPlatformFulfilledTask = task({
 
     if (!connection) return { skipped: true, reason: "no_active_connection" };
 
+    // Phase 10.4 — derive notify decision from the canonical strategy fn
+    // BEFORE calling any platform API. Pass carrier so Asendia gap-fill is
+    // resolved correctly (no impact on Shopify but logged for audit).
+    const flags = await getWorkspaceFlags(order.workspace_id as string);
+    const channel: NotificationChannel =
+      order.source === "shopify"
+        ? "shopify_client"
+        : order.source === "squarespace"
+          ? "squarespace"
+          : order.source === "woocommerce"
+            ? "woocommerce"
+            : "unknown";
+    const strategy = deriveNotificationStrategy({
+      channel,
+      carrier,
+      workspaceFlags: {
+        email_send_strategy: flags.email_send_strategy,
+        bandcamp_skip_ss_email: flags.bandcamp_skip_ss_email,
+      },
+    });
+    const notifyCustomer = !strategy.suppressShopifyEmail;
+    await supabase.from("sensor_readings").insert({
+      workspace_id: order.workspace_id,
+      sensor_name: "notification.strategy_decision",
+      status: "healthy",
+      message: `[platform-fulfilled order=${order_id.slice(0, 8)}] channel=${channel} → ${strategy.rationale}`,
+      value: { channel, carrier, suppressShopifyEmail: strategy.suppressShopifyEmail },
+    });
+
     try {
       switch (order.source) {
         case "shopify":
-          await markShopifyFulfilled(connection, platformOrderId, tracking_number, carrier);
+          await markShopifyFulfilled(connection, platformOrderId, tracking_number, carrier, notifyCustomer);
           break;
         case "woocommerce":
           await markWooCommerceFulfilled(connection, platformOrderId, tracking_number, carrier);
@@ -116,6 +150,7 @@ async function markShopifyFulfilled(
   orderId: string,
   trackingNumber: string,
   carrier: string,
+  notifyCustomer: boolean,
 ): Promise<void> {
   const apiKey = connection.api_key;
   if (!apiKey) throw new Error("Missing api_key for Shopify connection");
@@ -143,7 +178,11 @@ async function markShopifyFulfilled(
       fulfillment: {
         line_items_by_fulfillment_order: [{ fulfillment_order_id: openFO.id }],
         tracking_info: { number: trackingNumber, company: carrier },
-        notify_customer: false, // AfterShip handles notifications
+        // Phase 10.4 — driven by deriveNotificationStrategy. Per the canonical
+        // matrix, shopify_client under "hybrid" sends Shopify's native email
+        // (notifyCustomer=true). The legacy "false → AfterShip handles" path
+        // is gone; AfterShip is now event-ingestion-only (Phase 10.5 sunset).
+        notify_customer: notifyCustomer,
       },
     }),
   });

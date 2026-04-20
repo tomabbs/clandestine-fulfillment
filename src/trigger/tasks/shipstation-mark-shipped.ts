@@ -25,6 +25,12 @@ import {
   resolveCarrierMapping,
 } from "@/lib/server/carrier-map";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
+import {
+  deriveNotificationStrategy,
+  inferChannelFromSSMarketplace,
+  type NotificationStrategy,
+} from "@/lib/shared/notification-strategy";
 import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
 
 interface ShipmentRow {
@@ -142,6 +148,11 @@ export const shipstationMarkShippedTask = task({
     const shipDate = row.ship_date ?? new Date().toISOString().slice(0, 10);
     const idempotencyKey = `ss-writeback:${row.workspace_id}:${row.id}:${row.tracking_number}`;
 
+    // Phase 10.4 — derive notify booleans via the canonical strategy fn so
+    // we obey workspace flags + per-channel ownership rules. Logged to
+    // sensor_readings for audit (see end of try blocks).
+    const strategy = await resolveStrategy(supabase, row);
+
     // ── 3. v2 PRIMARY when shipment_id present ──────────────────────────────
     if (row.shipstation_shipment_id) {
       try {
@@ -152,8 +163,8 @@ export const shipstationMarkShippedTask = task({
               tracking_number: row.tracking_number,
               carrier_code: mapping.mapping.shipstation_carrier_code,
               ship_date: shipDate,
-              notify_customer: true,
-              notify_order_source: true,
+              notify_customer: strategy.callShipstationNotifyCustomer,
+              notify_order_source: strategy.callShipstationNotifyOrderSource,
             },
           ],
           idempotencyKey,
@@ -213,8 +224,8 @@ export const shipstationMarkShippedTask = task({
         carrierCode: mapping.mapping.shipstation_carrier_code,
         trackingNumber: row.tracking_number,
         shipDate,
-        notifyCustomer: true,
-        notifySalesChannel: true,
+        notifyCustomer: strategy.callShipstationNotifyCustomer,
+        notifySalesChannel: strategy.callShipstationNotifyOrderSource,
         idempotencyKey,
       });
       await stampWritebackSuccess(supabase, row.id, "v1", {
@@ -299,6 +310,56 @@ async function stampWritebackError(
     error,
     attempts: prevAttempts + 1,
   });
+}
+
+// Phase 10.4 — load workspace flags + ss order marketplace_name + per-shipment
+// overrides, then call deriveNotificationStrategy. Logs the resulting
+// rationale to sensor_readings on every writeback for audit.
+async function resolveStrategy(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  row: ShipmentRow,
+): Promise<NotificationStrategy> {
+  // Look up the SS order's marketplace_name + per-shipment overrides in
+  // parallel. Both are best-effort; missing data falls back to safe defaults.
+  const [ssOrderRes, flags] = await Promise.all([
+    supabase
+      .from("shipstation_orders")
+      .select("marketplace_name")
+      .eq("id", row.shipstation_order_id as string)
+      .maybeSingle(),
+    getWorkspaceFlags(row.workspace_id),
+  ]);
+  const channel = inferChannelFromSSMarketplace(
+    (ssOrderRes.data?.marketplace_name as string | null) ?? null,
+  );
+  const overrides = (row.label_data ?? {}) as Record<string, unknown>;
+  const strategy = deriveNotificationStrategy({
+    channel,
+    carrier: row.carrier,
+    workspaceFlags: {
+      email_send_strategy: (flags as { email_send_strategy?: "ss_for_all" | "hybrid" | "resend_for_all" })
+        .email_send_strategy,
+      bandcamp_skip_ss_email: (flags as { bandcamp_skip_ss_email?: boolean })
+        .bandcamp_skip_ss_email,
+    },
+    shipmentOverrides: {
+      suppress_ss_email:
+        typeof overrides.suppress_ss_email === "boolean" ? overrides.suppress_ss_email : null,
+      suppress_shopify_email:
+        typeof overrides.suppress_shopify_email === "boolean"
+          ? overrides.suppress_shopify_email
+          : null,
+    },
+  });
+  // Audit trail — short rationale string, indexed-friendly.
+  await supabase.from("sensor_readings").insert({
+    workspace_id: row.workspace_id,
+    sensor_name: "notification.strategy_decision",
+    status: "healthy",
+    message: `[ss-writeback ${row.id.slice(0, 8)}] channel=${channel} carrier=${row.carrier} → ${strategy.rationale}`,
+    value: { channel, carrier: row.carrier, strategy: { ...strategy, rationale: undefined } },
+  });
+  return strategy;
 }
 
 // Exported for testing.
