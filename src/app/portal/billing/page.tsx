@@ -110,7 +110,7 @@ export default function BillingPage() {
       ) : !data?.snapshots.length ? (
         <p className="text-muted-foreground text-sm">No billing statements yet.</p>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
@@ -258,7 +258,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {included.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Shipments ({included.length})</h3>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -293,7 +293,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {storageItems.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Storage Charges</h3>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>

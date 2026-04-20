@@ -291,7 +291,7 @@ export default function InboundDetailPage() {
         {/* Items Table */}
         <div>
           <h2 className="text-lg font-medium mb-3">Items ({detail.items.length})</h2>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">

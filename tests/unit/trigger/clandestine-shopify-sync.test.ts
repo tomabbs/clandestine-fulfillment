@@ -219,7 +219,10 @@ describe("maybeCreateDistroProduct (Phase 0.7)", () => {
     expect(insertedProductPayload).toMatchObject({
       workspace_id: "ws-1",
       org_id: null,
-      shopify_product_id: "gid://shopify/Product/1",
+      // Normalized to numeric form by normalizeShopifyProductId() — see
+      // src/lib/shared/shopify-id.ts for why we strip the GID prefix
+      // (prevents the duplicate-product bug from mixed-format IDs).
+      shopify_product_id: "1",
       title: "Test Distro Product",
       status: "active",
     });

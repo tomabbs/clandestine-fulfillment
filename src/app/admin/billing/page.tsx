@@ -105,7 +105,7 @@ export default function BillingPage() {
     <div className="p-6 space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
 
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -189,7 +189,7 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
               setPage(1);
             }}
           />
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -317,7 +317,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
         {included.length === 0 ? (
           <p className="text-sm text-muted-foreground">No shipments included.</p>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -354,7 +354,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
         {excluded.length === 0 ? (
           <p className="text-sm text-muted-foreground">No shipments excluded.</p>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -385,7 +385,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {storageItems.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Storage Charges</h3>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -416,7 +416,7 @@ function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {adjustments.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold mb-2">Adjustments</h3>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -555,7 +555,7 @@ function DefaultRatesTab({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
@@ -769,7 +769,7 @@ function ClientOverridesTab({ workspaceId }: { workspaceId: string }) {
           No client overrides configured. All clients use default rates.
         </p>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
@@ -906,7 +906,7 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
         </div>
       )}
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>

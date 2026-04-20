@@ -311,7 +311,7 @@ export default function InventoryPage() {
               ))}
               {data?.rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-muted-foreground py-8 text-center">
+                  <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
                     No inventory found
                   </TableCell>
                 </TableRow>

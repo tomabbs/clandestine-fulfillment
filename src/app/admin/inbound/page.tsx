@@ -8,13 +8,22 @@ import {
   type InboundFilters,
   type InboundShipmentWithOrg,
 } from "@/actions/inbound";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageShell } from "@/components/shared/page-shell";
+import { PageToolbar } from "@/components/shared/page-toolbar";
 import {
   DEFAULT_PAGE_SIZE,
   type PageSize,
   PaginationBar,
 } from "@/components/shared/pagination-bar";
+import {
+  ResponsiveTable,
+  type ResponsiveTableColumn,
+} from "@/components/shared/responsive-table";
+import { ScrollableTabs, ScrollableTabsList } from "@/components/shared/scrollable-tabs";
+import { StatusBadge, type StatusIntent } from "@/components/shared/status-badge";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { TabsTrigger } from "@/components/ui/tabs";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -31,12 +40,13 @@ const STATUS_LABELS: Record<string, string> = {
   issue: "Issue",
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  expected: "bg-blue-100 text-blue-800",
-  arrived: "bg-yellow-100 text-yellow-800",
-  checking_in: "bg-orange-100 text-orange-800",
-  checked_in: "bg-green-100 text-green-800",
-  issue: "bg-red-100 text-red-800",
+// Map status → semantic intent. Replaces the old monochrome bg-*-100 colors.
+const STATUS_INTENT: Record<string, StatusIntent> = {
+  expected: "info",
+  arrived: "warning",
+  checking_in: "warning",
+  checked_in: "success",
+  issue: "danger",
 };
 
 export default function AdminInboundPage() {
@@ -63,168 +73,168 @@ export default function AdminInboundPage() {
     tier: CACHE_TIERS.REALTIME,
   });
 
-  const shipments = data?.data ?? [];
+  const allShipments = data?.data ?? [];
+  // Local org-name filter (server query handles status/dates/page).
+  const shipments = orgFilter
+    ? allShipments.filter((s) =>
+        s.org_name?.toLowerCase().includes(orgFilter.toLowerCase()),
+      )
+    : allShipments;
   const totalCount = data?.count ?? 0;
 
+  const columns: Array<ResponsiveTableColumn<InboundShipmentWithOrg>> = [
+    {
+      key: "tracking_number",
+      label: "Tracking Number",
+      primary: true,
+      mono: true,
+      render: (row) => row.tracking_number || "—",
+    },
+    {
+      key: "carrier",
+      label: "Carrier",
+      render: (row) => row.carrier || "—",
+    },
+    {
+      key: "org_name",
+      label: "Organization",
+      render: (row) => row.org_name || "—",
+    },
+    {
+      key: "expected_date",
+      label: "Expected Date",
+      hideBelow: "md",
+      render: (row) =>
+        row.expected_date
+          ? new Date(`${row.expected_date}T12:00:00`).toLocaleDateString()
+          : "—",
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (row) => (
+        <StatusBadge intent={STATUS_INTENT[row.status] ?? "neutral"}>
+          {STATUS_LABELS[row.status] ?? row.status}
+        </StatusBadge>
+      ),
+    },
+    {
+      key: "item_count",
+      label: "Items",
+      align: "right",
+      hideBelow: "md",
+      render: (row) => row.item_count,
+    },
+    {
+      key: "submitter_name",
+      label: "Submitted By",
+      hideBelow: "lg",
+      render: (row) => row.submitter_name || "—",
+    },
+  ];
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inbound Shipments</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage incoming shipments from labels and distributors.
-          </p>
-        </div>
-      </div>
+    <PageShell
+      title="Inbound Shipments"
+      description="Manage incoming shipments from labels and distributors."
+      toolbar={
+        <div className="space-y-4">
+          {/* Status tabs — ScrollableTabs handles the scroll on narrow screens */}
+          <ScrollableTabs value={activeTab} onValueChange={(v) => v && setActiveTab(v)}>
+            <ScrollableTabsList variant="line">
+              {STATUS_TABS.map((tab) => (
+                <TabsTrigger key={tab} value={tab}>
+                  {STATUS_LABELS[tab]}
+                </TabsTrigger>
+              ))}
+            </ScrollableTabsList>
+          </ScrollableTabs>
 
-      {/* Status Tabs — overflow-x-auto so on narrow screens the tabs scroll
-          horizontally inside their own row instead of pushing the page wide. */}
-      <div className="flex gap-1 border-b overflow-x-auto">
-        {STATUS_TABS.map((tab) => (
+          {/* Filters */}
+          <PageToolbar>
+            <div className="flex-1 min-w-[200px] max-w-xs">
+              <label htmlFor="inbound-search" className="text-sm font-medium mb-1 block">
+                Search
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="inbound-search"
+                  placeholder="Filter by org name..."
+                  value={orgFilter}
+                  onChange={(e) => setOrgFilter(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="inbound-date-from" className="text-sm font-medium mb-1 block">
+                From
+              </label>
+              <Input
+                id="inbound-date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+            <div>
+              <label htmlFor="inbound-date-to" className="text-sm font-medium mb-1 block">
+                To
+              </label>
+              <Input
+                id="inbound-date-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+          </PageToolbar>
+        </div>
+      }
+    >
+      <PaginationBar
+        page={page}
+        pageSize={pageSize}
+        total={totalCount}
+        onPageChange={setPage}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          setPage(1);
+        }}
+      />
+
+      <ResponsiveTable
+        rows={shipments}
+        columns={columns}
+        getRowId={(row) => row.id}
+        rowExpand={(row) => (
           <button
-            key={tab}
             type="button"
-            onClick={() => {
-              setActiveTab(tab);
-              setPage(1);
-            }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === tab
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
+            className="text-sm text-primary hover:underline"
+            onClick={() => router.push(`/admin/inbound/${row.id}`)}
           >
-            {STATUS_LABELS[tab]}
+            Open shipment details →
           </button>
-        ))}
-      </div>
-
-      {/* Filters — flex-wrap so the 3 inputs stack on narrow screens. */}
-      <div className="flex gap-4 items-end flex-wrap">
-        <div className="flex-1 min-w-[200px] max-w-xs">
-          <label htmlFor="inbound-search" className="text-sm font-medium mb-1 block">
-            Search
-          </label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="inbound-search"
-              placeholder="Filter by org name..."
-              value={orgFilter}
-              onChange={(e) => setOrgFilter(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <div>
-          <label htmlFor="inbound-date-from" className="text-sm font-medium mb-1 block">
-            From
-          </label>
-          <Input
-            id="inbound-date-from"
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
+        )}
+        loading={isLoading}
+        loadingRowCount={5}
+        density="ops"
+        ariaLabel="Inbound shipments"
+        emptyState={
+          <EmptyState
+            icon={Package}
+            title="No inbound shipments"
+            description="Shipments will appear here when they're created or imported."
           />
-        </div>
-        <div>
-          <label htmlFor="inbound-date-to" className="text-sm font-medium mb-1 block">
-            To
-          </label>
-          <Input
-            id="inbound-date-to"
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Table */}
-      <PaginationBar
-        page={page}
-        pageSize={pageSize}
-        total={totalCount}
-        onPageChange={setPage}
-        onPageSizeChange={(s) => {
-          setPageSize(s);
-          setPage(1);
-        }}
+        }
       />
-      <div className="border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="text-left p-3 font-medium">Tracking Number</th>
-              <th className="text-left p-3 font-medium">Carrier</th>
-              <th className="text-left p-3 font-medium">Organization</th>
-              <th className="text-left p-3 font-medium">Expected Date</th>
-              <th className="text-left p-3 font-medium">Status</th>
-              <th className="text-left p-3 font-medium">Items</th>
-              <th className="text-left p-3 font-medium">Submitted By</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              ["s1", "s2", "s3", "s4", "s5"].map((rowId) => (
-                <tr key={rowId} className="border-b">
-                  {["a", "b", "c", "d", "e", "f", "g"].map((colId) => (
-                    <td key={`${rowId}-${colId}`} className="p-3">
-                      <Skeleton className="h-4 w-full" />
-                    </td>
-                  ))}
-                </tr>
-              ))
-            ) : shipments.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="p-12 text-center text-muted-foreground">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  No inbound shipments found.
-                </td>
-              </tr>
-            ) : (
-              shipments
-                .filter((s) =>
-                  orgFilter ? s.org_name?.toLowerCase().includes(orgFilter.toLowerCase()) : true,
-                )
-                .map((shipment) => (
-                  <tr
-                    key={shipment.id}
-                    className="border-b hover:bg-muted/30 cursor-pointer transition-colors"
-                    onClick={() => router.push(`/admin/inbound/${shipment.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") router.push(`/admin/inbound/${shipment.id}`);
-                    }}
-                  >
-                    <td className="p-3 font-mono text-xs">{shipment.tracking_number || "—"}</td>
-                    <td className="p-3">{shipment.carrier || "—"}</td>
-                    <td className="p-3">{shipment.org_name || "—"}</td>
-                    <td className="p-3">
-                      {shipment.expected_date
-                        ? new Date(`${shipment.expected_date}T12:00:00`).toLocaleDateString()
-                        : "—"}
-                    </td>
-                    <td className="p-3">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[shipment.status] ?? "bg-gray-100 text-gray-800"}`}
-                      >
-                        {STATUS_LABELS[shipment.status] ?? shipment.status}
-                      </span>
-                    </td>
-                    <td className="p-3">{shipment.item_count}</td>
-                    <td className="p-3">{shipment.submitter_name || "—"}</td>
-                  </tr>
-                ))
-            )}
-          </tbody>
-        </table>
-      </div>
 
       <PaginationBar
         page={page}
@@ -236,6 +246,6 @@ export default function AdminInboundPage() {
           setPage(1);
         }}
       />
-    </div>
+    </PageShell>
   );
 }

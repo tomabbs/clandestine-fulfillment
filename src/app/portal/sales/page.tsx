@@ -41,7 +41,7 @@ export default function SalesPage() {
     <div className="p-6 space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Sales</h1>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Orders This Month</p>
@@ -110,7 +110,7 @@ export default function SalesPage() {
           <CardTitle>Recent Orders</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>

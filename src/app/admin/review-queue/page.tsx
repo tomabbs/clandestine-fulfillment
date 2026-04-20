@@ -120,7 +120,7 @@ export default function ReviewQueuePage() {
       </div>
 
       {/* Severity tabs */}
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto">
         {SEVERITY_TABS.map((t) => (
           <button
             key={t}
@@ -141,7 +141,7 @@ export default function ReviewQueuePage() {
       </div>
 
       {/* Filters + bulk actions */}
-      <div className="flex gap-3 items-center">
+      <div className="flex flex-wrap gap-3 items-center min-w-0">
         <Input
           placeholder="Filter by category..."
           value={filters.category}

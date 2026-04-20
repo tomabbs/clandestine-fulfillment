@@ -66,7 +66,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollableTabsList } from "@/components/shared/scrollable-tabs";
+import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { TOGGLEABLE_PAGES } from "@/lib/shared/portal-pages";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -165,7 +166,7 @@ export default function ClientDetailPage() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
             <Package className="h-5 w-5 text-muted-foreground" />
@@ -211,7 +212,7 @@ export default function ClientDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="products">
-        <TabsList variant="line">
+        <ScrollableTabsList variant="line">
           <TabsTrigger value="products">Products</TabsTrigger>
           <TabsTrigger value="shipments">Shipments</TabsTrigger>
           <TabsTrigger value="sales">Sales</TabsTrigger>
@@ -219,7 +220,7 @@ export default function ClientDetailPage() {
           <TabsTrigger value="stores">Stores</TabsTrigger>
           <TabsTrigger value="messages">Messages</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
+        </ScrollableTabsList>
 
         <TabsContent value="products">
           <ProductsTab orgId={orgId} />

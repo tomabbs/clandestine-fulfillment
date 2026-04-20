@@ -378,7 +378,7 @@ export default function InventoryPage() {
                     {/* Expanded detail */}
                     {expandedSku === row.sku && (
                       <TableRow key={`${row.variantId}-detail`}>
-                        <TableCell colSpan={8} className="bg-muted/30 p-4">
+                        <TableCell colSpan={10} className="bg-muted/30 p-4">
                           {detailLoading ? (
                             <Skeleton className="h-24 w-full" />
                           ) : detail ? (
@@ -455,7 +455,7 @@ export default function InventoryPage() {
                 ))}
                 {data?.rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-muted-foreground py-8 text-center">
+                    <TableCell colSpan={10} className="text-muted-foreground py-8 text-center">
                       No inventory found
                     </TableCell>
                   </TableRow>

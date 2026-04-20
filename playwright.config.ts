@@ -27,7 +27,15 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // --hide-scrollbars prevents OS-scrollbar width from triggering
+        // false positives in horizontal-overflow detection (per reviewer
+        // round 1 hardening on the responsive overhaul plan).
+        launchOptions: {
+          args: ["--hide-scrollbars"],
+        },
+      },
     },
   ],
   webServer: {

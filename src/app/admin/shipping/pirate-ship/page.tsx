@@ -234,7 +234,7 @@ export default function PirateShipImportPage() {
             No imports yet. Upload a Pirate Ship XLSX to get started.
           </div>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -393,7 +393,7 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
               </span>
             )}
           </h3>
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">
@@ -439,7 +439,7 @@ function ImportDetailPanel({ detail, onClose }: { detail: ImportDetail; onClose:
               </span>
             )}
           </h3>
-          <div className="border border-destructive/20 rounded-lg overflow-hidden">
+          <div className="border border-destructive/20 rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-destructive/5">

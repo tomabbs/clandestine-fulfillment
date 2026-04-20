@@ -289,3 +289,212 @@
   padding-bottom: 0.25rem;
   border-bottom: 1px solid var(--border);
 }
+
+/* ================================================================
+ * Phase 2 — Responsive overhaul: design tokens
+ * ================================================================
+ * Semantic status colors, brand accent (split into muted + saturated
+ * per reviewer round 1), surface refinements, typography, and the
+ * ResponsiveTable CSS toggle (table on md+, cards on <md).
+ *
+ * Coexists with the legacy --wh- tokens above. New shared components
+ * (StatusBadge, ResponsiveTable, etc.) consume the --status- and --brand-
+ * tokens. Existing pages keep using --wh- until migrated.
+ * ================================================================ */
+
+:root {
+  /* Semantic status — light-mode */
+  --status-success: oklch(0.55 0.16 145);   /* green-700-ish */
+  --status-warning: oklch(0.6 0.16 75);     /* amber-700-ish */
+  --status-danger:  oklch(0.55 0.22 25);    /* red-700-ish */
+  --status-info:    oklch(0.55 0.18 235);   /* blue-700-ish */
+  --status-neutral: oklch(0.5 0.02 250);    /* slate-600-ish */
+
+  /* Brand accent — two tones (reviewer feedback) */
+  --brand-muted: oklch(0.25 0.05 280);      /* near-black hex, for borders/accent rules */
+  --brand:       oklch(0.45 0.18 280);      /* saturated purple, for active states + CTAs */
+  --brand-foreground: oklch(0.99 0 0);      /* white-ish, for text on brand bg */
+}
+
+.dark {
+  --status-success: oklch(0.7 0.16 145);
+  --status-warning: oklch(0.78 0.16 75);
+  --status-danger:  oklch(0.7 0.22 25);
+  --status-info:    oklch(0.7 0.18 235);
+  --status-neutral: oklch(0.7 0.02 250);
+  --brand-muted: oklch(0.6 0.08 280);
+  --brand:       oklch(0.65 0.18 280);
+  --brand-foreground: oklch(0.15 0 0);
+}
+
+@theme inline {
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-danger:  var(--status-danger);
+  --color-status-info:    var(--status-info);
+  --color-status-neutral: var(--status-neutral);
+  --color-brand:          var(--brand);
+  --color-brand-muted:    var(--brand-muted);
+  --color-brand-foreground: var(--brand-foreground);
+}
+
+/* ================================================================
+ * Typography refinements (Phase 2c)
+ * ================================================================
+ * Inter font (loaded in app/layout.tsx) supports tabular figures —
+ * confirmed not a no-op. Apply tnum to all data cells so dollar
+ * columns and quantity columns visually align.
+ * ================================================================ */
+
+table,
+.tabular-nums,
+[data-tabular-nums="true"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ================================================================
+ * ResponsiveTable — CSS-only display toggle (Phase 3d)
+ * ================================================================
+ * Same <table> DOM in both modes. Below md, the table elements
+ * become block-level "cards" and column labels are injected via
+ * ::before pseudo-elements from the data-label attributes.
+ *
+ * No JS measurement, no DOM duplication. React composition works
+ * the same in both modes.
+ * ================================================================ */
+
+@media (max-width: 767px) {
+  .responsive-table table,
+  .responsive-table thead,
+  .responsive-table tbody,
+  .responsive-table th,
+  .responsive-table td,
+  .responsive-table tr {
+    display: block;
+    width: 100%;
+  }
+  .responsive-table thead {
+    /* Hide column header row; labels appear inline via ::before. */
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+  .responsive-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    background: var(--card);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.04);
+  }
+  .responsive-table td {
+    padding: 0.25rem 0;
+    border: none;
+    text-align: left !important;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .responsive-table td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted-foreground);
+    font-weight: 500;
+  }
+  .responsive-table td[data-primary="true"] {
+    /* Primary column = card title. Render full-width, larger weight. */
+    display: block;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .responsive-table td[data-primary="true"]::before {
+    /* Skip label injection on the title cell. */
+    display: none;
+  }
+  .responsive-table td[data-actions="true"] {
+    /* Actions column renders as a footer row inside the card. */
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    justify-content: flex-end;
+  }
+  .responsive-table td[data-actions="true"]::before {
+    display: none;
+  }
+}
+
+/* ================================================================
+ * Density modes (Phase 6.5 reviewer feedback)
+ * ================================================================
+ * Two row-density modes to keep ops UIs scannable. Applied via
+ * data-density attribute on a wrapping element (typically the
+ * .responsive-table wrapper).
+ * ================================================================ */
+
+[data-density="ops"] table th,
+[data-density="ops"] table td {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+[data-density="browse"] table th,
+[data-density="browse"] table td {
+  padding: 0.875rem 1rem;
+  font-size: 0.875rem;
+}
+
+/* ================================================================
+ * Brand accent utility classes
+ * ================================================================
+ * Convenience classes for the most common uses of the brand color
+ * so individual components don't have to repeat the variable.
+ * ================================================================ */
+
+.brand-text       { color: var(--brand); }
+.brand-bg         { background-color: var(--brand); color: var(--brand-foreground); }
+.brand-border     { border-color: var(--brand); }
+.brand-muted-text { color: var(--brand-muted); }
+
+/* ================================================================
+ * Surface refinements (Phase 2d)
+ * ================================================================
+ * Subtle zebra striping on tables for scannability on dense ops
+ * pages. Hover state stays neutral (not brand-tinted).
+ * ================================================================ */
+
+[data-zebra-rows="true"] tbody tr:nth-child(even) {
+  background-color: oklch(from var(--muted) l c h / 0.4);
+}
+[data-zebra-rows="true"] tbody tr:hover {
+  background-color: oklch(from var(--muted) l c h / 0.7);
+}
+
+/* ================================================================
+ * Skeleton shimmer (Phase 3g)
+ * ================================================================
+ * Used by <TableSkeleton> and any other shimmer loader.
+ * ================================================================ */
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    oklch(from var(--muted) l c h / 0.6) 25%,
+    oklch(from var(--muted) l c h / 0.9) 50%,
+    oklch(from var(--muted) l c h / 0.6) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
