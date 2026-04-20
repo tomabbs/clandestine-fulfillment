@@ -18,6 +18,7 @@ import {
   parseBandcampPage,
 } from "@/lib/clients/bandcamp-scraper";
 import {
+  fetchProductVariantsByProductId,
   findOrCreateCollection,
   inventoryItemUpdate,
   productArchive,
@@ -27,6 +28,11 @@ import {
   shopifyGraphQL,
 } from "@/lib/clients/shopify-client";
 import { buildShopifyVariantInput } from "@/lib/clients/shopify-variant-input";
+import {
+  detectMultiVariantOptions,
+  inferOptionName,
+  optionDisplayValue,
+} from "@/trigger/lib/bandcamp-apparel";
 import { computeBandcampSeedQuantity } from "@/lib/server/bandcamp-effective-available";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";

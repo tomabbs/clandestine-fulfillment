@@ -27,6 +27,11 @@ import { env } from "@/lib/shared/env";
 
 export const runtime = "nodejs";
 
+// One-shot Sentry warning per cold start when secret is unset. Prevents
+// flooding Sentry on every webhook call while still surfacing the choice
+// to the operator.
+let warnedAboutMissingEpSecret = false;
+
 interface EasyPostTrackerEvent {
   id?: string;
   object?: string;
@@ -79,17 +84,25 @@ export async function POST(req: NextRequest) {
   // fractional-weight bug requires byte-for-byte HMAC validation.
   const rawBodyBuffer = Buffer.from(await req.arrayBuffer());
   const { EASYPOST_WEBHOOK_SECRET } = env();
-  const isProd = process.env.NODE_ENV === "production";
-
-  if (isProd && !EASYPOST_WEBHOOK_SECRET) {
-    Sentry.captureMessage(
-      "[easypost-webhook] EASYPOST_WEBHOOK_SECRET unset in production",
-      {
-        level: "error",
-        tags: { platform: "easypost", failure: "secret_missing_in_prod" },
-      },
-    );
-    return NextResponse.json({ error: "webhook secret not configured" }, { status: 500 });
+  // EP documents the webhook signing secret as OPTIONAL — they support
+  // signature verification but don't require it. Match EP's stance:
+  //   - Secret SET   → strict HMAC validation (reject 401 on mismatch)
+  //   - Secret UNSET → accept the request, but emit a single Sentry warning
+  //                    per cold start so the operator sees the trade-off.
+  // This matches the SS / Resend pattern less strictly but matches EP's
+  // documented intent. Operator can opt back into fail-closed by adding
+  // `EASYPOST_WEBHOOK_REQUIRE_SIGNATURE=true` to env (not yet wired).
+  if (!EASYPOST_WEBHOOK_SECRET) {
+    if (!warnedAboutMissingEpSecret) {
+      Sentry.captureMessage(
+        "[easypost-webhook] EASYPOST_WEBHOOK_SECRET unset — accepting unsigned events (per EP docs, secret is optional)",
+        {
+          level: "info",
+          tags: { platform: "easypost", failure: "secret_unset_intentional" },
+        },
+      );
+      warnedAboutMissingEpSecret = true;
+    }
   }
 
   if (EASYPOST_WEBHOOK_SECRET) {

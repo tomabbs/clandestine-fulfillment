@@ -379,6 +379,46 @@ export async function productSetCreate(input: Record<string, unknown>): Promise<
   return data.productSet.product.id;
 }
 
+/**
+ * Fetch the variants of a Shopify product (id, sku, inventoryItem.id).
+ * Used after `productSetCreate` to back-fill `shopify_variant_id` and
+ * `shopify_inventory_item_id` on every warehouse_product_variants row when
+ * creating multi-variant (apparel) products.
+ *
+ * Read-only — safe to call from any context.
+ */
+export async function fetchProductVariantsByProductId(
+  productId: string,
+): Promise<Array<{ id: string; sku: string | null; inventoryItemId: string | null }>> {
+  const query = `
+    query V($id: ID!) {
+      product(id: $id) {
+        variants(first: 100) {
+          nodes {
+            id
+            sku
+            inventoryItem { id }
+          }
+        }
+      }
+    }
+  `;
+  const data = await shopifyGraphQL<{
+    product: {
+      variants: {
+        nodes: Array<{ id: string; sku: string | null; inventoryItem: { id: string } | null }>;
+      };
+    } | null;
+  }>(query, { id: productId });
+
+  const nodes = data?.product?.variants?.nodes ?? [];
+  return nodes.map((n) => ({
+    id: n.id,
+    sku: n.sku ?? null,
+    inventoryItemId: n.inventoryItem?.id ?? null,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Mutations — EDIT via productUpdate + productVariantsBulkUpdate (Rule #1)
 // ---------------------------------------------------------------------------
