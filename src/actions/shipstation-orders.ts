@@ -1,9 +1,20 @@
 "use server";
 
 import { tasks } from "@trigger.dev/sdk";
-import { fetchOrders, type ShipStationOrder } from "@/lib/clients/shipstation";
+import {
+  addOrderTag,
+  fetchOrders,
+  holdOrderUntil,
+  listTags as listShipStationTags,
+  removeOrderTag,
+  restoreOrderFromHold,
+  type ShipStationOrder,
+  type ShipStationTag,
+} from "@/lib/clients/shipstation";
+import { verifyAddress } from "@/lib/clients/easypost-client";
 import { requireStaff } from "@/lib/server/auth-context";
-import { createServerSupabaseClient } from "@/lib/server/supabase-server";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { parsePaymentIdFromCustomField } from "@/lib/shared/bandcamp-reconcile-helpers";
 
 export type { ShipStationOrder };
 
@@ -49,6 +60,10 @@ export interface CockpitFilters {
   page?: number;
   /** 50 / 100 / 250 (cap 500). */
   pageSize?: number;
+  /** Phase 8.5 — filter to orders that have ALL of these tag IDs. Empty = no filter. */
+  tagIds?: number[];
+  /** Phase 8.2 — filter to a specific SS storeId. */
+  storeId?: number;
 }
 
 export interface CockpitOrderItem {
@@ -91,6 +106,22 @@ export interface CockpitOrder {
   items: CockpitOrderItem[];
   /** Phase 4.5 — most recent EP-printed shipment for this order. Null when staff hasn't bought a label yet. */
   shipment: CockpitOrderShipment | null;
+  // Phase 8 extensions
+  tag_ids: number[];
+  hold_until_date: string | null;
+  ship_by_date: string | null;
+  deliver_by_date: string | null;
+  payment_date: string | null;
+  assignee_user_id: string | null;
+  allocation_status: string | null;
+}
+
+export interface StatusBucketCounts {
+  awaiting_payment: number;
+  awaiting_shipment: number;
+  on_hold: number;
+  shipped: number;
+  cancelled: number;
 }
 
 export interface CockpitTabCounts {
@@ -151,12 +182,17 @@ export async function getShipStationOrdersDb(
     eq: (col: string, val: unknown) => Filterable;
     is: (col: string, val: unknown) => Filterable;
     in: (col: string, vals: readonly unknown[]) => Filterable;
+    contains: (col: string, val: unknown) => Filterable;
   };
   const applyBaseFilter = (q: Filterable): Filterable => {
     let r = q;
     if (orderStatus !== "all") r = r.eq("order_status", orderStatus);
     if (filters.orgId === "unassigned") r = r.is("org_id", null);
     else if (filters.orgId) r = r.eq("org_id", filters.orgId);
+    if (filters.storeId) r = r.eq("store_id", filters.storeId);
+    if (filters.tagIds && filters.tagIds.length > 0) {
+      r = r.contains("tag_ids", filters.tagIds);
+    }
     return r;
   };
   const applyTabFilter = (q: Filterable): Filterable => {
@@ -249,6 +285,8 @@ export async function getShipStationOrdersDb(
       customer_email, customer_name, ship_to, store_id, amount_paid,
       shipping_paid, last_modified, preorder_state, preorder_release_date,
       org_id,
+      tag_ids, hold_until_date, ship_by_date, deliver_by_date,
+      payment_date, assignee_user_id, allocation_status,
       organizations ( name ),
       shipstation_order_items ( sku, name, quantity, unit_price, item_index )
       `,
@@ -299,6 +337,13 @@ export async function getShipStationOrdersDb(
     preorder_state: "none" | "preorder" | "ready";
     preorder_release_date: string | null;
     org_id: string | null;
+    tag_ids: number[] | null;
+    hold_until_date: string | null;
+    ship_by_date: string | null;
+    deliver_by_date: string | null;
+    payment_date: string | null;
+    assignee_user_id: string | null;
+    allocation_status: string | null;
     organizations: { name?: string } | null;
     shipstation_order_items: Array<{
       sku: string | null;
@@ -367,6 +412,13 @@ export async function getShipStationOrdersDb(
     org_name: r.organizations?.name ?? null,
     items: (r.shipstation_order_items ?? []).sort((a, b) => a.item_index - b.item_index),
     shipment: shipmentByOrder.get(String(r.shipstation_order_id)) ?? null,
+    tag_ids: r.tag_ids ?? [],
+    hold_until_date: r.hold_until_date,
+    ship_by_date: r.ship_by_date,
+    deliver_by_date: r.deliver_by_date,
+    payment_date: r.payment_date,
+    assignee_user_id: r.assignee_user_id,
+    allocation_status: r.allocation_status,
   }));
 
   const total = totalCount ?? 0;
@@ -416,4 +468,511 @@ export async function assignOrgToShipStationOrder(input: {
     .eq("id", input.shipstationOrderId);
   if (error) throw new Error(`assignOrgToShipStationOrder: ${error.message}`);
   return { ok: true };
+}
+
+// ── Phase 8.1 + 8.2 — Status-bucket counts for the left sidebar ──────────────
+
+/**
+ * Phase 8.1 — counts per order_status for the cockpit's left sidebar.
+ * Optionally scoped to an org or store. Returns 0 for missing buckets.
+ */
+export async function getStatusBucketCounts(filters: {
+  orgId?: string;
+  storeId?: number;
+} = {}): Promise<StatusBucketCounts> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  // One head-only count per status. 5 round-trips per render is acceptable
+  // at typical workspace scale (~1.2k SS orders today). If this becomes hot,
+  // promote to a single grouped query via .rpc() or a view.
+  const STATUSES = [
+    "awaiting_payment",
+    "awaiting_shipment",
+    "on_hold",
+    "shipped",
+    "cancelled",
+  ] as const;
+
+  const counts: StatusBucketCounts = {
+    awaiting_payment: 0,
+    awaiting_shipment: 0,
+    on_hold: 0,
+    shipped: 0,
+    cancelled: 0,
+  };
+
+  await Promise.all(
+    STATUSES.map(async (status) => {
+      let q = supabase
+        .from("shipstation_orders")
+        .select("id", { count: "exact", head: true })
+        .eq("order_status", status);
+      if (filters.orgId === "unassigned") q = q.is("org_id", null);
+      else if (filters.orgId) q = q.eq("org_id", filters.orgId);
+      if (filters.storeId) q = q.eq("store_id", filters.storeId);
+      const { count } = await q;
+      counts[status] = count ?? 0;
+    }),
+  );
+
+  return counts;
+}
+
+/**
+ * Phase 8.2 — distinct orgs that currently have awaiting_shipment orders, with
+ * counts. Powers the left-sidebar org list.
+ */
+export interface OrgBucketRow {
+  org_id: string | null;
+  org_name: string | null;
+  awaiting_shipment_count: number;
+}
+
+export async function getOrgBucketsForCockpit(): Promise<OrgBucketRow[]> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  // Pull awaiting-shipment rows joined to organizations, then aggregate in
+  // app code. Simpler than a custom view; bounded by total awaiting_shipment.
+  const { data } = await supabase
+    .from("shipstation_orders")
+    .select("org_id, organizations ( name )")
+    .eq("order_status", "awaiting_shipment");
+
+  const byOrg = new Map<string, OrgBucketRow>();
+  for (const row of (data ?? []) as Array<{
+    org_id: string | null;
+    organizations: { name?: string } | null;
+  }>) {
+    const key = row.org_id ?? "__unassigned__";
+    const existing = byOrg.get(key);
+    if (existing) {
+      existing.awaiting_shipment_count++;
+    } else {
+      byOrg.set(key, {
+        org_id: row.org_id,
+        org_name: row.organizations?.name ?? null,
+        awaiting_shipment_count: 1,
+      });
+    }
+  }
+
+  return Array.from(byOrg.values()).sort((a, b) => {
+    if (a.org_id === null && b.org_id !== null) return -1; // unassigned bubbles to top
+    if (b.org_id === null && a.org_id !== null) return 1;
+    return (a.org_name ?? "").localeCompare(b.org_name ?? "");
+  });
+}
+
+/**
+ * Phase 8 polish — list orgs in this workspace for the manual org-assignment
+ * dropdown in the "Needs assignment" drawer.
+ */
+export async function listOrgsForAssignment(): Promise<Array<{ id: string; name: string }>> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+  const { data } = await supabase
+    .from("organizations")
+    .select("id, name")
+    .order("name", { ascending: true });
+  return (data ?? []) as Array<{ id: string; name: string }>;
+}
+
+// ── Phase 8.5 — Tag editing ─────────────────────────────────────────────────
+
+/**
+ * Phase 8.5 — list all SS tags (cached 1h in the v1 client). Cockpit calls
+ * this to populate the Edit Tags dropdown.
+ */
+export async function listShipStationTagDefinitions(): Promise<ShipStationTag[]> {
+  await requireStaff();
+  return listShipStationTags();
+}
+
+/**
+ * Phase 8.5 — add/remove tags on a SS order. Optimistic local update +
+ * enqueue a windowed re-poll so the cockpit picks up the canonical state
+ * within ~30s.
+ */
+export async function editOrderTags(input: {
+  shipstationOrderUuid: string;
+  addTagIds: number[];
+  removeTagIds: number[];
+}): Promise<{ ok: true; remoteSuccess: boolean; localTagIds: number[] }> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: order } = await supabase
+    .from("shipstation_orders")
+    .select("workspace_id, shipstation_order_id, tag_ids")
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+  if (!order) throw new Error("editOrderTags: order not found");
+
+  const ssOrderId = Number(order.shipstation_order_id);
+
+  // Fire SS API calls. Each is a single round-trip; do not batch — we rely on
+  // shipstationFetch's rate limiter.
+  let remoteSuccess = true;
+  for (const tagId of input.addTagIds) {
+    try {
+      await addOrderTag(ssOrderId, tagId);
+    } catch {
+      remoteSuccess = false;
+    }
+  }
+  for (const tagId of input.removeTagIds) {
+    try {
+      await removeOrderTag(ssOrderId, tagId);
+    } catch {
+      remoteSuccess = false;
+    }
+  }
+
+  // Optimistic local update — remove → add to handle "re-add same tag" idempotently.
+  const current = (order.tag_ids ?? []) as number[];
+  const without = current.filter((t) => !input.removeTagIds.includes(t));
+  const localTagIds = Array.from(new Set([...without, ...input.addTagIds]));
+  await supabase
+    .from("shipstation_orders")
+    .update({ tag_ids: localTagIds, updated_at: new Date().toISOString() })
+    .eq("id", input.shipstationOrderUuid);
+
+  // Reconcile via windowed re-poll (cron + webhook also catch it eventually).
+  await tasks.trigger("shipstation-orders-poll-window", { windowMinutes: 5 });
+
+  return { ok: true, remoteSuccess, localTagIds };
+}
+
+// ── Phase 8.6 — Hold Until / Restore from Hold ──────────────────────────────
+
+/**
+ * Phase 8.6 — set a hold-until date on a SS order. SS moves the order to
+ * "on_hold" status until the date passes. holdUntilDate format: YYYY-MM-DD.
+ */
+export async function setOrderHoldUntil(input: {
+  shipstationOrderUuid: string;
+  holdUntilDate: string;
+}): Promise<{ ok: true; remoteSuccess: boolean }> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: order } = await supabase
+    .from("shipstation_orders")
+    .select("shipstation_order_id")
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+  if (!order) throw new Error("setOrderHoldUntil: order not found");
+
+  let remoteSuccess = true;
+  try {
+    await holdOrderUntil(Number(order.shipstation_order_id), input.holdUntilDate);
+  } catch {
+    remoteSuccess = false;
+  }
+
+  // Optimistic local update — flip to on_hold + stamp the date.
+  await supabase
+    .from("shipstation_orders")
+    .update({
+      hold_until_date: input.holdUntilDate,
+      order_status: "on_hold",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.shipstationOrderUuid);
+
+  await tasks.trigger("shipstation-orders-poll-window", { windowMinutes: 5 });
+
+  return { ok: true, remoteSuccess };
+}
+
+export async function restoreOrderFromHoldAction(input: {
+  shipstationOrderUuid: string;
+}): Promise<{ ok: true; remoteSuccess: boolean }> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: order } = await supabase
+    .from("shipstation_orders")
+    .select("shipstation_order_id")
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+  if (!order) throw new Error("restoreOrderFromHold: order not found");
+
+  let remoteSuccess = true;
+  try {
+    await restoreOrderFromHold(Number(order.shipstation_order_id));
+  } catch {
+    remoteSuccess = false;
+  }
+
+  await supabase
+    .from("shipstation_orders")
+    .update({
+      hold_until_date: null,
+      order_status: "awaiting_shipment",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.shipstationOrderUuid);
+
+  await tasks.trigger("shipstation-orders-poll-window", { windowMinutes: 5 });
+
+  return { ok: true, remoteSuccess };
+}
+
+// ── Phase 8.7 — Address verification preflight ──────────────────────────────
+
+export interface AddressVerifyResult {
+  verified: boolean;
+  errors: string[];
+}
+
+/**
+ * Phase 8.7 — run EP address verification on the persisted ship_to. Returns
+ * a verified flag + any error messages. Callers cache by shipstation_order_id
+ * for the session (UI hook).
+ */
+export async function verifyShipStationOrderAddress(input: {
+  shipstationOrderUuid: string;
+}): Promise<AddressVerifyResult> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: order } = await supabase
+    .from("shipstation_orders")
+    .select("ship_to")
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+  if (!order || !order.ship_to) {
+    return { verified: false, errors: ["No ship_to recorded for this order"] };
+  }
+
+  const st = order.ship_to as Record<string, unknown>;
+  const s = (k: string): string => {
+    const v = st[k];
+    return typeof v === "string" ? v : "";
+  };
+  // EP expects { name, street1, city, state, zip, country, phone? }.
+  return verifyAddress({
+    name: s("name"),
+    street1: s("street1"),
+    street2: s("street2") || undefined,
+    city: s("city"),
+    state: s("state"),
+    zip: s("postalCode") || s("zip"),
+    country: s("country") || "US",
+    phone: s("phone") || undefined,
+  });
+}
+
+/**
+ * Phase 8.7 — staff edits ship_to in the click-to-fix overlay; we persist the
+ * fixed address back to shipstation_orders.ship_to. Also enqueue a windowed
+ * re-poll so any SS-side transformations (e.g. SS auto-formats the city) get
+ * captured.
+ *
+ * Note: SS does not document a clean per-field address PATCH on v1 outside
+ * createorder (which is a full upsert). The local update is the source of
+ * truth for label printing; pushing the fixed address back to SS is left as
+ * a Phase 11 enrichment if needed.
+ */
+export async function updateShipStationOrderShipTo(input: {
+  shipstationOrderUuid: string;
+  ship_to: Record<string, unknown>;
+}): Promise<{ ok: true }> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase
+    .from("shipstation_orders")
+    .update({ ship_to: input.ship_to, updated_at: new Date().toISOString() })
+    .eq("id", input.shipstationOrderUuid);
+  if (error) throw new Error(`updateShipStationOrderShipTo: ${error.message}`);
+  return { ok: true };
+}
+
+// ── Phase 6.1 — Bandcamp reconciliation ─────────────────────────────────────
+
+export type BandcampMatchConfidence = "high" | "medium" | "low" | "none";
+
+export interface BandcampReconcileResult {
+  matched_warehouse_order_id: string | null;
+  bandcamp_payment_id: number | null;
+  /** Order number in our DB (e.g. "BC-1234567"). */
+  order_number: string | null;
+  confidence: BandcampMatchConfidence;
+  /** Why we matched (or didn't) — one short label per signal. */
+  matched_via: string;
+}
+
+/**
+ * Phase 6.1 — find the Bandcamp `warehouse_orders` row that corresponds to a
+ * ShipStation order, in priority order:
+ *   1. SS `advanced_options.customField1` carries the BC payment_id (high).
+ *   2. (customer_email + total_price) within ±7 days of SS order_date (medium).
+ *   3. ship-to name + city normalized (low).
+ *
+ * Returns null match with confidence='none' when no candidate fits. UI uses the
+ * confidence label to decide whether to show the badge as a confident match
+ * vs a "maybe" needs-staff-confirmation hint.
+ */
+export async function getBandcampMatchForShipStationOrder(input: {
+  shipstationOrderUuid: string;
+}): Promise<BandcampReconcileResult> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: ssOrder } = await supabase
+    .from("shipstation_orders")
+    .select(
+      "workspace_id, customer_email, customer_name, ship_to, amount_paid, order_date, advanced_options",
+    )
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+
+  if (!ssOrder) {
+    return {
+      matched_warehouse_order_id: null,
+      bandcamp_payment_id: null,
+      order_number: null,
+      confidence: "none",
+      matched_via: "ss_order_not_found",
+    };
+  }
+
+  // ── Tier 1: explicit payment_id in advanced_options.customField1 ──────────
+  const adv = (ssOrder.advanced_options ?? {}) as Record<string, unknown>;
+  const customField1Raw = typeof adv.customField1 === "string" ? adv.customField1 : null;
+  const explicitPaymentId = customField1Raw ? parsePaymentIdFromCustomField(customField1Raw) : null;
+
+  if (explicitPaymentId != null) {
+    const { data: bcOrder } = await supabase
+      .from("warehouse_orders")
+      .select("id, order_number, bandcamp_payment_id")
+      .eq("workspace_id", ssOrder.workspace_id)
+      .eq("source", "bandcamp")
+      .eq("bandcamp_payment_id", explicitPaymentId)
+      .maybeSingle();
+    if (bcOrder) {
+      return {
+        matched_warehouse_order_id: bcOrder.id,
+        bandcamp_payment_id: bcOrder.bandcamp_payment_id ?? explicitPaymentId,
+        order_number: bcOrder.order_number ?? null,
+        confidence: "high",
+        matched_via: "advanced_options.customField1 → bandcamp_payment_id",
+      };
+    }
+  }
+
+  // ── Tier 2: customer_email + total within ±7 days ─────────────────────────
+  if (ssOrder.customer_email && ssOrder.amount_paid != null && ssOrder.order_date) {
+    const orderDate = new Date(ssOrder.order_date);
+    if (!Number.isNaN(orderDate.getTime())) {
+      const lo = new Date(orderDate.getTime() - 7 * 86400000).toISOString();
+      const hi = new Date(orderDate.getTime() + 7 * 86400000).toISOString();
+      const { data: candidates } = await supabase
+        .from("warehouse_orders")
+        .select("id, order_number, bandcamp_payment_id, total_price")
+        .eq("workspace_id", ssOrder.workspace_id)
+        .eq("source", "bandcamp")
+        .eq("customer_email", ssOrder.customer_email)
+        .gte("created_at", lo)
+        .lte("created_at", hi);
+      const exact = (candidates ?? []).find(
+        (c) => Math.abs(Number(c.total_price ?? 0) - Number(ssOrder.amount_paid)) < 0.01,
+      );
+      if (exact) {
+        return {
+          matched_warehouse_order_id: exact.id,
+          bandcamp_payment_id: exact.bandcamp_payment_id ?? null,
+          order_number: exact.order_number ?? null,
+          confidence: "medium",
+          matched_via: "customer_email + total_price within 7d",
+        };
+      }
+    }
+  }
+
+  // ── Tier 3: ship-to name + city ──────────────────────────────────────────
+  const shipTo = (ssOrder.ship_to ?? {}) as Record<string, unknown>;
+  const shipName = typeof shipTo.name === "string" ? shipTo.name.trim().toLowerCase() : null;
+  const shipCity = typeof shipTo.city === "string" ? shipTo.city.trim().toLowerCase() : null;
+  if (shipName && shipCity) {
+    const { data: candidates } = await supabase
+      .from("warehouse_orders")
+      .select("id, order_number, bandcamp_payment_id, customer_name, shipping_address")
+      .eq("workspace_id", ssOrder.workspace_id)
+      .eq("source", "bandcamp")
+      .ilike("customer_name", `%${shipName.split(" ")[0]}%`)
+      .limit(20);
+    const match = (candidates ?? []).find((c) => {
+      const addr = (c.shipping_address ?? {}) as Record<string, unknown>;
+      const city = typeof addr.city === "string" ? addr.city.trim().toLowerCase() : null;
+      const name = typeof c.customer_name === "string" ? c.customer_name.trim().toLowerCase() : null;
+      return city === shipCity && name?.includes(shipName.split(" ")[0] ?? "");
+    });
+    if (match) {
+      return {
+        matched_warehouse_order_id: match.id,
+        bandcamp_payment_id: match.bandcamp_payment_id ?? null,
+        order_number: match.order_number ?? null,
+        confidence: "low",
+        matched_via: "ship_to.name first-token + city",
+      };
+    }
+  }
+
+  return {
+    matched_warehouse_order_id: null,
+    bandcamp_payment_id: null,
+    order_number: null,
+    confidence: "none",
+    matched_via: "no_candidate_found",
+  };
+}
+
+// Phase 6.1 — `parsePaymentIdFromCustomField` lives in
+// `src/lib/shared/bandcamp-reconcile-helpers.ts` because Server Action files
+// can't export sync functions.
+
+// ── Phase 8 polish — Retry write-back ───────────────────────────────────────
+
+/**
+ * Phase 8 polish — re-fire shipstation-mark-shipped for the most recent
+ * shipment with a writeback error on this order. Surfaces in the cockpit's
+ * writeback error banner.
+ */
+export async function retryShipStationWriteback(input: {
+  shipstationOrderUuid: string;
+}): Promise<{ ok: true; runId: string | null; warehouseShipmentId: string | null }> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  // Most recent open writeback failure for this order.
+  const { data: order } = await supabase
+    .from("shipstation_orders")
+    .select("workspace_id, shipstation_order_id")
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+  if (!order) throw new Error("retryShipStationWriteback: order not found");
+
+  const { data: shipment } = await supabase
+    .from("warehouse_shipments")
+    .select("id")
+    .eq("workspace_id", order.workspace_id)
+    .eq("shipstation_order_id", String(order.shipstation_order_id))
+    .not("shipstation_writeback_error", "is", null)
+    .is("shipstation_marked_shipped_at", null)
+    .order("ship_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!shipment) {
+    return { ok: true, runId: null, warehouseShipmentId: null };
+  }
+
+  const run = await tasks.trigger("shipstation-mark-shipped", {
+    warehouse_shipment_id: shipment.id,
+  });
+  return { ok: true, runId: run.id, warehouseShipmentId: shipment.id };
 }

@@ -21,5 +21,8 @@ export default async function AdminOrdersPage() {
   if (flags.shipstation_unified_shipping) {
     return <OrdersCockpit />;
   }
-  return <LegacyOrdersView />;
+  // Phase 6.3 — pre-cutover (cockpit flag OFF): legacy view IS the active label
+  // printing surface, so labels are always allowed there. After cutover the
+  // shim is removed entirely (this branch becomes dead code).
+  return <LegacyOrdersView canPrintLegacyLabels />;
 }

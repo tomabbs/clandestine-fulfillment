@@ -91,12 +91,16 @@ const BANDCAMP_TASK_REGISTRY: TaskExpectation[] = [
     expectedQueue: "bandcampQueue",
     rationale: "Calls refreshBandcampToken + updateShipped (OAuth)",
   },
+  // Phase 6.5 — bandcampMarkShippedSchedule was REMOVED. The new
+  // bandcamp-shipping-verify cron (verify-then-fallback) replaces it. The
+  // bandcamp-mark-shipped task itself remains for manual force-push from the
+  // shipping log + as the fallback target invoked by the verifier.
   {
-    file: "bandcamp-mark-shipped.ts",
-    exportName: "bandcampMarkShippedSchedule",
+    file: "bandcamp-shipping-verify.ts",
+    exportName: "bandcampShippingVerifyTask",
     constructor: "schedules.task",
     expectedQueue: "bandcampQueue",
-    rationale: "Schedules mark-shipped (OAuth) per connection",
+    rationale: "Verify-then-fallback BC sync (replaces 15-min direct-push cron)",
   },
   {
     file: "bandcamp-inventory-push.ts",

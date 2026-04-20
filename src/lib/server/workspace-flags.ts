@@ -27,6 +27,13 @@ export interface WorkspaceFlags {
   email_ownership?: string;
   shipstation_writeback_enabled?: boolean;
   easypost_buy_enabled?: boolean;
+  /**
+   * Phase 6.3 — when TRUE, the legacy orders view at /admin/orders-legacy
+   * still renders the per-row CreateLabelPanel even AFTER cutover (when
+   * shipstation_unified_shipping = true). Lets ops use the legacy surface
+   * for diagnostic label printing during the rollback window. Default false.
+   */
+  staff_diagnostics?: boolean;
 }
 
 const cache = new Map<string, { flags: WorkspaceFlags; expiresAt: number }>();

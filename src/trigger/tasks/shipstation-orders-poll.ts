@@ -173,6 +173,15 @@ async function upsertOrder(
   const orgId = orgMatch?.orgId ?? null;
   const isUnmatched = orgId == null;
 
+  // Phase 8.5 + 8.6 + 8.8 — denormalize SS-only fields into proper columns.
+  const tagIds = (ssOrder.tagIds ?? []).filter((n): n is number => typeof n === "number");
+  const holdUntilDate = ssOrder.holdUntilDate ? ssOrder.holdUntilDate.slice(0, 10) : null;
+  const shipByDate = ssOrder.shipByDate ? ssOrder.shipByDate.slice(0, 10) : null;
+  const deliverByDate = ssOrder.advancedOptions?.deliveryDate
+    ? ssOrder.advancedOptions.deliveryDate.slice(0, 10)
+    : null;
+  const allocationStatus = ssOrder.advancedOptions?.allocationStatus ?? null;
+
   const { data: upserted, error: upsertErr } = await supabase
     .from("shipstation_orders")
     .upsert(
@@ -192,6 +201,14 @@ async function upsertOrder(
         last_modified: ssOrder.modifyDate ?? null,
         synced_at: new Date().toISOString(),
         advanced_options: ssOrder.advancedOptions ?? {},
+        // Phase 8 — extended fields
+        tag_ids: tagIds,
+        hold_until_date: holdUntilDate,
+        ship_by_date: shipByDate,
+        deliver_by_date: deliverByDate,
+        payment_date: ssOrder.paymentDate ?? null,
+        assignee_user_id: ssOrder.userId ?? null,
+        allocation_status: allocationStatus,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "workspace_id,shipstation_order_id" },

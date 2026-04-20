@@ -43,7 +43,20 @@ const SOURCE_COLORS: Record<string, string> = {
   manual: "bg-gray-100 text-gray-800",
 };
 
-export function LegacyOrdersView() {
+export interface LegacyOrdersViewProps {
+  /**
+   * Phase 6.3 — when FALSE (default after cutover), per-row CreateLabelPanel
+   * is replaced with a "use the new cockpit" notice. Pass TRUE pre-cutover or
+   * when workspaces.flags.staff_diagnostics is set, so ops can still use
+   * the legacy surface for diagnostic label printing.
+   */
+  canPrintLegacyLabels?: boolean;
+}
+
+export function LegacyOrdersView({
+  canPrintLegacyLabels: canPrintLegacyLabelsProp = true,
+}: LegacyOrdersViewProps = {}) {
+  const canPrintLegacyLabels = canPrintLegacyLabelsProp;
   const [filters, setFilters] = useState({
     page: 1,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -198,7 +211,10 @@ export function LegacyOrdersView() {
                           {detailLoading ? (
                             <Skeleton className="h-32 w-full" />
                           ) : detail ? (
-                            <OrderDetailExpanded detail={detail} />
+                            <OrderDetailExpanded
+                              detail={detail}
+                              canPrintLegacyLabels={canPrintLegacyLabels}
+                            />
                           ) : null}
                         </TableCell>
                       </TableRow>
@@ -249,7 +265,13 @@ function cleanItemTitle(title: string | null): string | null {
   return title;
 }
 
-function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof getOrderDetail>> }) {
+function OrderDetailExpanded({
+  detail,
+  canPrintLegacyLabels,
+}: {
+  detail: Awaited<ReturnType<typeof getOrderDetail>>;
+  canPrintLegacyLabels: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const orderId = detail.order?.id as string;
   const order = detail.order as {
@@ -406,8 +428,11 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
         )}
       </div>
 
-      {/* Create Label — hidden when a shipment already exists */}
-      {!hasLinkedShipment && isUnfulfilled && orderId && (
+      {/* Create Label — hidden when a shipment already exists.
+          Phase 6.3: also gated by canPrintLegacyLabels — set to FALSE after
+          cutover so labels go through the new cockpit only. Set to TRUE pre-
+          cutover OR when workspaces.flags.staff_diagnostics is enabled. */}
+      {!hasLinkedShipment && isUnfulfilled && orderId && canPrintLegacyLabels && (
         <CreateLabelPanel
           orderId={orderId}
           orderType="fulfillment"
@@ -415,6 +440,17 @@ function OrderDetailExpanded({ detail }: { detail: Awaited<ReturnType<typeof get
             (detail.order as { shipping_cost?: number | null }).shipping_cost ?? null
           }
         />
+      )}
+      {!hasLinkedShipment && isUnfulfilled && orderId && !canPrintLegacyLabels && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">Label printing moved to the new Orders cockpit.</p>
+          <p className="text-xs mt-1">
+            Open <a href="/admin/orders" className="underline">/admin/orders</a> to print this
+            label. The legacy view stays available for diagnostics; flip{" "}
+            <code className="text-xs">workspaces.flags.staff_diagnostics = true</code> to
+            re-enable label printing here.
+          </p>
+        </div>
       )}
 
       {showBandcamp && (

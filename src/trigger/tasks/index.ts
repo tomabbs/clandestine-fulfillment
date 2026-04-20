@@ -6,10 +6,12 @@ export { aftershipRegisterTask } from "./aftership-register";
 // Phase 1 — Bandcamp baseline anomaly + multi-origin push_mode audit
 export { bandcampBaselineAuditTask } from "./bandcamp-baseline-audit";
 export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
-export {
-  bandcampMarkShippedSchedule,
-  bandcampMarkShippedTask,
-} from "./bandcamp-mark-shipped";
+// Phase 6.5 — `bandcampMarkShippedSchedule` (the 15-min direct-push cron) was
+// removed; the new `bandcamp-shipping-verify` cron (also exported below) does
+// verify-then-fallback at 30-min intervals. The bandcampMarkShippedTask itself
+// remains for the manual "Sync to Bandcamp" force-push button on the shipping log.
+export { bandcampMarkShippedTask } from "./bandcamp-mark-shipped";
+export { bandcampShippingVerifyTask } from "./bandcamp-shipping-verify";
 export {
   bandcampOrderSyncSchedule,
   bandcampOrderSyncTask,

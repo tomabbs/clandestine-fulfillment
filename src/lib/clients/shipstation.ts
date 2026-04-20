@@ -157,11 +157,21 @@ const shipmentsListResponseSchema = z.object({
 // advancedOptions.storeId overrides storeId for marketplace integrations
 // (Amazon, eBay, etc.). Always resolve via: advancedOptions?.storeId ?? storeId
 
+const shipStationOrderTagSchema = z
+  .object({
+    tagId: z.number(),
+    name: z.string().nullable().optional(),
+    color: z.string().nullable().optional(),
+  })
+  .passthrough();
+
 const shipStationOrderSchema = z.object({
   orderId: z.number(),
   orderNumber: z.string(),
   orderKey: z.string().nullable().optional(),
   orderDate: z.string().nullable().optional(),
+  paymentDate: z.string().nullable().optional(),
+  shipByDate: z.string().nullable().optional(),
   orderStatus: z.string(),
   customerUsername: z.string().nullable().optional(),
   customerEmail: z.string().nullable().optional(),
@@ -171,15 +181,29 @@ const shipStationOrderSchema = z.object({
   shippingAmount: z.number().nullable().optional(),
   taxAmount: z.number().nullable().optional(),
   storeId: z.number().nullable().optional(),
+  // Phase 8.5 — order tags surface here as objects.
+  tagIds: z.array(z.number()).nullable().optional(),
+  // Phase 8.6 — hold info.
+  holdUntilDate: z.string().nullable().optional(),
+  // Phase 8.8 — display-only fields. SS surfaces userId for the assignee.
+  userId: z.string().nullable().optional(),
   advancedOptions: z
     .object({
       storeId: z.number().nullable().optional(),
+      // Phase 8.8 — additional display-only.
+      deliveryDate: z.string().nullable().optional(),
+      mergedOrSplit: z.boolean().nullable().optional(),
+      mergedIds: z.array(z.number()).nullable().optional(),
+      parentId: z.number().nullable().optional(),
+      allocationStatus: z.string().nullable().optional(),
     })
     .nullable()
     .optional(),
   createDate: z.string().nullable().optional(),
   modifyDate: z.string().nullable().optional(),
 });
+
+export type ShipStationOrderTag = z.infer<typeof shipStationOrderTagSchema>;
 
 export type ShipStationOrder = z.infer<typeof shipStationOrderSchema>;
 
@@ -710,6 +734,96 @@ export async function listCarriers(opts?: { force?: boolean }): Promise<ShipStat
 /** For tests — drop the in-memory cache so a fresh fetch fires. */
 export function _resetListCarriersCache(): void {
   _cachedCarriers = null;
+}
+
+// ─── Phase 8.5 — v1 tag operations ───────────────────────────────────────────
+
+const shipStationTagSchema = z
+  .object({
+    tagId: z.number(),
+    name: z.string(),
+    color: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type ShipStationTag = z.infer<typeof shipStationTagSchema>;
+
+let _cachedTags: { value: ShipStationTag[]; expiresAt: number } | null = null;
+const TAGS_CACHE_TTL_MS = 60 * 60 * 1000; // 1h per Phase 8.5
+
+export async function listTags(opts?: { force?: boolean }): Promise<ShipStationTag[]> {
+  if (!opts?.force && _cachedTags && _cachedTags.expiresAt > Date.now()) {
+    return _cachedTags.value;
+  }
+  const raw = await shipstationFetch<unknown[]>("/accounts/listtags");
+  const parsed = z.array(shipStationTagSchema).parse(raw);
+  _cachedTags = { value: parsed, expiresAt: Date.now() + TAGS_CACHE_TTL_MS };
+  return parsed;
+}
+
+/** Test helper. */
+export function _resetListTagsCache(): void {
+  _cachedTags = null;
+}
+
+const tagOpResponseSchema = z
+  .object({
+    success: z.boolean().nullable().optional(),
+    message: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type TagOpResponse = z.infer<typeof tagOpResponseSchema>;
+
+export async function addOrderTag(orderId: number, tagId: number): Promise<TagOpResponse> {
+  const raw = await shipstationFetch<unknown>("/orders/addtag", {
+    method: "POST",
+    body: JSON.stringify({ orderId, tagId }),
+  });
+  return tagOpResponseSchema.parse(raw);
+}
+
+export async function removeOrderTag(orderId: number, tagId: number): Promise<TagOpResponse> {
+  const raw = await shipstationFetch<unknown>("/orders/removetag", {
+    method: "POST",
+    body: JSON.stringify({ orderId, tagId }),
+  });
+  return tagOpResponseSchema.parse(raw);
+}
+
+// ─── Phase 8.6 — v1 hold-until + restore-from-hold ──────────────────────────
+
+const holdResponseSchema = z
+  .object({
+    success: z.boolean().nullable().optional(),
+    message: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export type HoldResponse = z.infer<typeof holdResponseSchema>;
+
+/**
+ * POST /orders/holduntil — sets a hold-until date and moves the order to "on_hold".
+ * holdUntilDate format: YYYY-MM-DD.
+ */
+export async function holdOrderUntil(
+  orderId: number,
+  holdUntilDate: string,
+): Promise<HoldResponse> {
+  const raw = await shipstationFetch<unknown>("/orders/holduntil", {
+    method: "POST",
+    body: JSON.stringify({ orderId, holdUntilDate }),
+  });
+  return holdResponseSchema.parse(raw);
+}
+
+/** POST /orders/restorefromhold — clears the hold and moves the order back to "awaiting_shipment". */
+export async function restoreOrderFromHold(orderId: number): Promise<HoldResponse> {
+  const raw = await shipstationFetch<unknown>("/orders/restorefromhold", {
+    method: "POST",
+    body: JSON.stringify({ orderId }),
+  });
+  return holdResponseSchema.parse(raw);
 }
 
 // Exported for testing

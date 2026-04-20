@@ -5,6 +5,30 @@
  * Rule #48: API calls in Trigger tasks.
  *
  * Creates warehouse_orders with bandcamp_payment_id so shipments can be linked.
+ *
+ * Phase 6.4 — POST-CUTOVER ROLE:
+ *   After the unified-shipping cutover (Phase 6.3 flipped
+ *   `workspaces.flags.shipstation_unified_shipping = true`), staff prints
+ *   labels through the new ShipStation cockpit at /admin/orders. This task
+ *   no longer powers an active order-display surface. It now serves two
+ *   read-only purposes:
+ *
+ *     1. Confirmation data source for the Phase 6.1 reconciliation badge —
+ *        getBandcampMatchForShipStationOrder() looks up the warehouse_orders
+ *        row this task created, by bandcamp_payment_id, to confirm the SS
+ *        order in the cockpit corresponds to a real BC sale.
+ *
+ *     2. Enrichment data for Phase 11 (artist, buyer_note, ship_notes,
+ *        additional_fan_contribution, payment_state) which the cockpit and
+ *        packing slip surface alongside the SS-sourced fields.
+ *
+ *   Do NOT add label-printing or fulfillment-marking logic here. Phase 4.3
+ *   (shipstation-mark-shipped) owns the writeback path; Phase 6.5
+ *   (bandcamp-shipping-verify) owns the BC sync verifier.
+ *
+ *   Phase 0.4 also lives here: financial_status correctly derives from
+ *   payment_state via mapBandcampPaymentState() — pre-Phase-0 this was
+ *   silently always "paid".
  */
 
 import { logger, schedules, task } from "@trigger.dev/sdk";
