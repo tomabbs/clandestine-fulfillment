@@ -54,6 +54,7 @@ import {
   type CockpitOrder,
   type CockpitSort,
   type CockpitTab,
+  getBandcampEnrichmentForCockpit,
   getBandcampMatchForShipStationOrder,
   getShipStationOrdersDb,
   listOrgsForAssignment,
@@ -903,6 +904,8 @@ function CockpitDrawer({
     <div className="space-y-4">
       {/* ── Phase 6.2 — Bandcamp reconciliation badge ────────────────────── */}
       <BandcampReconcileBadge order={order} />
+      {/* ── Phase 11.2 — Bandcamp enrichment (note, gift, payment) ──────── */}
+      <BandcampDrawerEnrichment order={order} />
 
       {/* ── Writeback error banner (Phase 4.5 + 8 retry button) ──────────── */}
       {order.shipment?.shipstation_writeback_error && (
@@ -1466,6 +1469,87 @@ function BandcampReconcileBadge({ order }: { order: CockpitOrder }) {
         <strong>{m.confidence}</strong>{" "}
         <span className="opacity-75">({m.matched_via})</span>
       </span>
+    </div>
+  );
+}
+
+// ─── Phase 11.2 — Bandcamp drawer enrichment (note, gift, payment) ─────────
+
+function BandcampDrawerEnrichment({ order }: { order: CockpitOrder }) {
+  const enrichmentQuery = useAppQuery({
+    queryKey: ["bc-enrichment", order.id],
+    queryFn: () => getBandcampEnrichmentForCockpit({ shipstationOrderUuid: order.id }),
+    tier: CACHE_TIERS.SESSION,
+  });
+  if (enrichmentQuery.isLoading || !enrichmentQuery.data) return null;
+  const e = enrichmentQuery.data;
+  if (!e.has_data) return null;
+
+  // Render only sections that have content. Skip the panel entirely when
+  // every field is empty (defensive — has_data should already gate this).
+  const showNote = !!e.buyer_note;
+  const showGift = !!e.ship_notes;
+  const showTip = e.additional_fan_contribution != null && e.additional_fan_contribution > 0;
+  const showPayment = !!e.payment_state || !!e.paypal_transaction_id;
+  if (!showNote && !showGift && !showTip && !showPayment) return null;
+
+  return (
+    <div className="space-y-2">
+      {showNote && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
+          <div className="font-semibold uppercase tracking-wide opacity-75 mb-0.5">
+            Note from buyer
+          </div>
+          <div className="whitespace-pre-wrap text-blue-900">{e.buyer_note}</div>
+        </div>
+      )}
+      {showGift && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs">
+          <div className="font-semibold uppercase tracking-wide opacity-75 mb-0.5">
+            Gift / ship instructions
+          </div>
+          <div className="whitespace-pre-wrap text-rose-900">{e.ship_notes}</div>
+        </div>
+      )}
+      {(showTip || showPayment) && (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+          <div className="font-semibold uppercase tracking-wide opacity-75 mb-1">
+            Payment info
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {e.payment_state && (
+              <div>
+                <span className="opacity-75">State:</span>{" "}
+                <span
+                  className={
+                    e.payment_state === "paid"
+                      ? "text-emerald-700 font-medium"
+                      : e.payment_state === "refunded"
+                        ? "text-rose-700 font-medium"
+                        : "font-medium"
+                  }
+                >
+                  {e.payment_state}
+                </span>
+              </div>
+            )}
+            {e.paypal_transaction_id && (
+              <div className="font-mono text-[11px] truncate" title={e.paypal_transaction_id}>
+                <span className="opacity-75 not-italic">PayPal:</span>{" "}
+                {e.paypal_transaction_id}
+              </div>
+            )}
+            {showTip && (
+              <div className="col-span-2">
+                <span className="opacity-75">Fan tip:</span>{" "}
+                <span className="font-medium">
+                  +${e.additional_fan_contribution!.toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

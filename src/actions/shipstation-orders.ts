@@ -958,6 +958,122 @@ export async function getBandcampMatchForShipStationOrder(input: {
 // `src/lib/shared/bandcamp-reconcile-helpers.ts` because Server Action files
 // can't export sync functions.
 
+// ── Phase 11.2 — Bandcamp enrichment for cockpit drawer ────────────────────
+
+export interface BandcampEnrichmentForCockpit {
+  buyer_note: string | null;
+  ship_notes: string | null;
+  additional_fan_contribution: number | null;
+  payment_state: string | null;
+  paypal_transaction_id: string | null;
+  primary_artist: string | null;
+  /** True when ANY enrichment was found. UI uses to gate panel rendering. */
+  has_data: boolean;
+}
+
+/**
+ * Phase 11.2 — load BC enrichment fields for one SS order. Drawer calls this
+ * lazily when the row is expanded; result is cached at the SESSION tier so
+ * subsequent re-opens are free.
+ *
+ * Resolves the BC payment_id via:
+ *   1. SS advanced_options.customField1 parser (high-confidence match), then
+ *   2. The Phase 6.1 reconciliation matcher (email+total or name+city) as
+ *      fallback for orders that don't carry the BC id in customField1.
+ *
+ * Returns has_data=false when no BC payment_id can be resolved — the drawer
+ * just doesn't render the Payment panel in that case.
+ */
+export async function getBandcampEnrichmentForCockpit(input: {
+  shipstationOrderUuid: string;
+}): Promise<BandcampEnrichmentForCockpit> {
+  await requireStaff();
+  const supabase = createServiceRoleClient();
+
+  const { data: order } = await supabase
+    .from("shipstation_orders")
+    .select("workspace_id, advanced_options")
+    .eq("id", input.shipstationOrderUuid)
+    .maybeSingle();
+  if (!order) {
+    return emptyEnrichment();
+  }
+
+  // 1) Try customField1 (cheap, exact).
+  const adv = (order.advanced_options ?? {}) as Record<string, unknown>;
+  const cf1 = typeof adv.customField1 === "string" ? adv.customField1 : null;
+  let paymentId = parsePaymentIdFromCustomField(cf1);
+
+  // 2) Fall back to the Phase 6.1 matcher when no customField1 hit.
+  if (!paymentId) {
+    const reconcile = await getBandcampMatchForShipStationOrder({
+      shipstationOrderUuid: input.shipstationOrderUuid,
+    });
+    paymentId = reconcile.bandcamp_payment_id ?? null;
+  }
+  if (!paymentId) return emptyEnrichment();
+
+  const { data: salesRows } = await supabase
+    .from("bandcamp_sales")
+    .select(
+      "artist, buyer_note, ship_notes, additional_fan_contribution, payment_state, paypal_transaction_id",
+    )
+    .eq("workspace_id", order.workspace_id)
+    .eq("bandcamp_transaction_id", paymentId);
+
+  if (!salesRows || salesRows.length === 0) return emptyEnrichment();
+
+  // Take the first non-null per field (payment-level fields are identical
+  // across rows for the same transaction).
+  const first = (key: keyof (typeof salesRows)[number]): unknown => {
+    for (const r of salesRows) {
+      const v = r[key];
+      if (v != null && v !== "") return v;
+    }
+    return null;
+  };
+
+  // Most-frequent artist for the order header.
+  const artistTally = new Map<string, number>();
+  for (const r of salesRows) {
+    if (typeof r.artist === "string" && r.artist.length > 0) {
+      artistTally.set(r.artist, (artistTally.get(r.artist) ?? 0) + 1);
+    }
+  }
+  let primaryArtist: string | null = null;
+  let maxCount = 0;
+  for (const [artist, count] of artistTally) {
+    if (count > maxCount) {
+      primaryArtist = artist;
+      maxCount = count;
+    }
+  }
+
+  return {
+    buyer_note: (first("buyer_note") as string | null) ?? null,
+    ship_notes: (first("ship_notes") as string | null) ?? null,
+    additional_fan_contribution:
+      (first("additional_fan_contribution") as number | null) ?? null,
+    payment_state: (first("payment_state") as string | null) ?? null,
+    paypal_transaction_id:
+      (first("paypal_transaction_id") as string | null) ?? null,
+    primary_artist: primaryArtist,
+    has_data: true,
+  };
+}
+
+function emptyEnrichment(): BandcampEnrichmentForCockpit {
+  return {
+    buyer_note: null,
+    ship_notes: null,
+    additional_fan_contribution: null,
+    payment_state: null,
+    paypal_transaction_id: null,
+    primary_artist: null,
+    has_data: false,
+  };
+}
+
 // ── Phase 8 polish — Retry write-back ───────────────────────────────────────
 
 /**

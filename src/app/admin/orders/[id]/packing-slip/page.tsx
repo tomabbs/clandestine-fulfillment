@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import { requireStaff } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { fetchPackingSlipData } from "@/lib/shared/packing-slip-data";
+import { sanitizeBuyerText } from "@/lib/shared/sanitize-buyer-text";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,11 @@ export default async function PackingSlipPage({ params }: RouteParams) {
     0,
   );
 
+  // Phase 11.1 — international = country present and not "US". Drives whether
+  // we render customs_description lines under each item.
+  const isInternational =
+    !!data.ship_to.country && data.ship_to.country.toUpperCase() !== "US";
+
   return (
     <html lang="en">
       <head>
@@ -47,16 +53,33 @@ export default async function PackingSlipPage({ params }: RouteParams) {
           h1 { margin: 0; font-size: 22px; font-weight: 600; }
           h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #555; font-weight: 500; }
           .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 10px; }
+          .artist-line { margin: 6px 0 0 0; font-size: 14px; color: #333; font-style: italic; }
           .meta { text-align: right; font-size: 12px; color: #555; }
           .meta strong { color: #111; }
           .addresses { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin: 20px 0; }
           .addr-block address { font-style: normal; line-height: 1.4; font-size: 13px; }
           .addr-block .label { font-weight: 600; margin-bottom: 4px; }
+          .panel {
+            margin: 16px 0;
+            padding: 10px 14px;
+            border-left: 3px solid #555;
+            background: #fafafa;
+            font-size: 13px;
+            line-height: 1.4;
+          }
+          .panel.gift { border-left-color: #b91c1c; background: #fef2f2; }
+          .panel.note { border-left-color: #2563eb; background: #eff6ff; }
+          .panel-label { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin-bottom: 4px; }
+          .panel-body { white-space: pre-wrap; }
           table { width: 100%; border-collapse: collapse; font-size: 13px; }
-          th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #ddd; }
+          th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
           th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #555; font-weight: 500; }
           td.qty, td.price, th.qty, th.price { text-align: right; font-variant-numeric: tabular-nums; }
+          .item-meta { font-size: 11px; color: #777; margin-top: 2px; }
+          .item-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 3px; border: 1px solid #ddd; display: block; }
+          .customs-line { font-size: 11px; color: #555; margin-top: 3px; font-style: italic; }
           tfoot td { border-bottom: none; padding-top: 12px; font-weight: 600; }
+          .tip-line { font-size: 12px; color: #555; padding-top: 6px; }
           .footer { margin-top: 30px; padding-top: 14px; border-top: 1px solid #ddd; text-align: center; font-size: 12px; color: #555; }
           .barcode-area { font-family: monospace; font-size: 16px; letter-spacing: 0.06em; padding: 6px 12px; border: 1px solid #ddd; display: inline-block; }
           @media print {
@@ -72,6 +95,12 @@ export default async function PackingSlipPage({ params }: RouteParams) {
             <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#555" }}>
               {data.org_name ?? "Clandestine Distribution"}
             </p>
+            {/* Phase 11.1 — primary artist callout when BC enrichment landed. */}
+            {data.artist && (
+              <p className="artist-line">
+                {data.artist}
+              </p>
+            )}
           </div>
           <div className="meta">
             <div>
@@ -79,6 +108,11 @@ export default async function PackingSlipPage({ params }: RouteParams) {
             </div>
             {data.order_date && (
               <div>{new Date(data.order_date).toLocaleDateString()}</div>
+            )}
+            {isInternational && (
+              <div style={{ marginTop: "4px", color: "#b91c1c", fontWeight: 600 }}>
+                INTERNATIONAL — {data.ship_to.country}
+              </div>
             )}
             <div className="barcode-area" style={{ marginTop: "6px" }}>
               {data.order_number}
@@ -122,9 +156,26 @@ export default async function PackingSlipPage({ params }: RouteParams) {
           </div>
         </div>
 
+        {/* Phase 11.1 — Buyer note (regular comment from BC checkout). */}
+        {data.buyer_note && (
+          <div className="panel note">
+            <div className="panel-label">Note from buyer</div>
+            <div className="panel-body">{sanitizeBuyerText(data.buyer_note)}</div>
+          </div>
+        )}
+
+        {/* Phase 11.1 — Ship instructions (gift messages, address quirks). */}
+        {data.ship_notes && (
+          <div className="panel gift">
+            <div className="panel-label">Ship instructions / gift</div>
+            <div className="panel-body">{sanitizeBuyerText(data.ship_notes)}</div>
+          </div>
+        )}
+
         <table>
           <thead>
             <tr>
+              <th style={{ width: "48px" }}></th>
               <th style={{ width: "120px" }}>SKU</th>
               <th>Item</th>
               <th className="qty" style={{ width: "60px" }}>
@@ -138,10 +189,31 @@ export default async function PackingSlipPage({ params }: RouteParams) {
           <tbody>
             {data.items.map((it, idx) => (
               <tr key={`${it.sku ?? "x"}-${idx}`}>
+                <td>
+                  {/* Phase 11.1 — album thumbnail when BC mapping has one. */}
+                  {it.image_url && (
+                    // biome-ignore lint/a11y/useAltText: print-only context
+                    <img className="item-thumb" src={it.image_url} alt="" />
+                  )}
+                </td>
                 <td style={{ fontFamily: "monospace", fontSize: "12px", color: "#555" }}>
                   {it.sku ?? "—"}
                 </td>
-                <td>{it.name ?? "—"}</td>
+                <td>
+                  {it.name ?? "—"}
+                  {(it.artist || it.album_title) && (
+                    <div className="item-meta">
+                      {[it.artist, it.album_title].filter(Boolean).join(" — ")}
+                    </div>
+                  )}
+                  {/* Phase 11.1 — customs description on international slips
+                      so pickers + customs see the same line item. */}
+                  {isInternational && it.customs_description && (
+                    <div className="customs-line">
+                      Customs: {it.customs_description}
+                    </div>
+                  )}
+                </td>
                 <td className="qty">×{it.quantity}</td>
                 <td className="price">
                   {it.unit_price != null ? `$${it.unit_price.toFixed(2)}` : "—"}
@@ -151,11 +223,21 @@ export default async function PackingSlipPage({ params }: RouteParams) {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3} style={{ textAlign: "right" }}>
+              <td colSpan={4} style={{ textAlign: "right" }}>
                 Item total
               </td>
               <td className="price">${itemTotal.toFixed(2)}</td>
             </tr>
+            {/* Phase 11.1 — fan-tip footer line when buyer added an extra. */}
+            {data.additional_fan_contribution != null &&
+              data.additional_fan_contribution > 0 && (
+                <tr>
+                  <td colSpan={5} className="tip-line" style={{ textAlign: "center" }}>
+                    Thanks for tipping an extra ${" "}
+                    {data.additional_fan_contribution.toFixed(2)}.
+                  </td>
+                </tr>
+              )}
           </tfoot>
         </table>
 
@@ -169,6 +251,9 @@ export default async function PackingSlipPage({ params }: RouteParams) {
     </html>
   );
 }
+
+// Phase 11.1 — `sanitizeBuyerText` lives in
+// `src/lib/shared/sanitize-buyer-text.ts` so it's testable in isolation.
 
 // Tiny client component that auto-triggers Cmd+P on load. Kept inline to
 // avoid a separate file for one effect.
