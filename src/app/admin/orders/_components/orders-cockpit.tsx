@@ -325,15 +325,15 @@ export function OrdersCockpit() {
         }
       />
 
-      <main className="flex-1 overflow-y-auto p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
+      <main className="flex-1 min-w-0 overflow-y-auto p-6 space-y-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
             <p className="text-muted-foreground mt-1 text-sm">
               ShipStation orders mirrored locally. Showing {orders.length} of {total}.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <CockpitSavedViews
               currentViewState={state as unknown as Record<string, unknown>}
               onLoadView={(loaded) => {
@@ -557,7 +557,7 @@ export function OrdersCockpit() {
             <Loader2 className="h-4 w-4 animate-spin" /> Loading orders…
           </div>
         ) : (
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -878,8 +878,20 @@ function CockpitRow({
 
       {isExpanded && (
         <TableRow>
-          <TableCell colSpan={11} className="bg-muted/20 px-4 py-3">
-            <CockpitDrawer order={order} tagDefById={tagDefById} onRefetchOrders={onRefetchOrders} />
+          {/* Sticky-left + min-w-0 keeps the drawer pinned to the visible
+              viewport when the table is horizontally scrolled, so action
+              buttons (Get Rates, Buy Label) stay reachable on narrow screens. */}
+          <TableCell
+            colSpan={11}
+            className="bg-muted/20 px-4 py-3 align-top sticky left-0 max-w-[100vw]"
+          >
+            <div className="min-w-0">
+              <CockpitDrawer
+                order={order}
+                tagDefById={tagDefById}
+                onRefetchOrders={onRefetchOrders}
+              />
+            </div>
           </TableCell>
         </TableRow>
       )}
@@ -912,11 +924,20 @@ function CockpitDrawer({
         <WritebackErrorBanner order={order} onRefetch={onRefetchOrders} />
       )}
 
-      {/* ── Top grid: Ship To (with verify) + Display fields + Items ────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <ShipToWithVerify order={order} onRefetch={onRefetchOrders} />
-        <DisplayOnlyFieldsPanel order={order} />
-        <ItemsPanel order={order} />
+      {/* ── Top grid: Ship To (with verify) + Display fields + Items ──────
+          Stacks on small/medium screens. minmax(0, 1fr) on each column so
+          long content (item names, ship-to lines) wraps inside the column
+          rather than blowing the column out and forcing horizontal scroll. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-6">
+        <div className="min-w-0">
+          <ShipToWithVerify order={order} onRefetch={onRefetchOrders} />
+        </div>
+        <div className="min-w-0">
+          <DisplayOnlyFieldsPanel order={order} />
+        </div>
+        <div className="min-w-0">
+          <ItemsPanel order={order} />
+        </div>
       </div>
 
       {/* ── Tag chips + Edit Tags button (Phase 8.5) ────────────────────── */}
@@ -1208,20 +1229,23 @@ function DisplayOnlyFieldsPanel({ order }: { order: CockpitOrder }) {
 
 function ItemsPanel({ order }: { order: CockpitOrder }) {
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
         Items
       </p>
       <div className="space-y-1">
         {order.items.map((item) => (
-          <div key={item.item_index} className="flex items-baseline justify-between gap-4 text-sm">
-            <div className="min-w-0">
+          <div
+            key={item.item_index}
+            className="flex items-baseline justify-between gap-4 text-sm min-w-0"
+          >
+            <div className="min-w-0 flex-1 break-words">
               {item.sku && (
                 <span className="font-mono text-xs text-muted-foreground mr-1.5">
                   {item.sku}
                 </span>
               )}
-              <span>{item.name ?? "—"}</span>
+              <span className="break-words">{item.name ?? "—"}</span>
             </div>
             <span className="font-mono text-xs shrink-0 text-right whitespace-nowrap">
               x{item.quantity}
