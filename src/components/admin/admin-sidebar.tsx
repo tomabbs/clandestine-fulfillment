@@ -32,6 +32,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -161,42 +162,45 @@ export function AdminSidebar() {
               {/* Settings flyout — DropdownMenu opens a popover so the
                   submenu is reachable in both expanded and icon-collapsed
                   sidebar modes.
-                  IMPORTANT: do NOT pass `tooltip` to SidebarMenuButton
-                  here. That prop wraps the button in a <Tooltip> wrapper,
-                  which breaks DropdownMenuTrigger's render-prop forwarding
-                  (the trigger needs a single element to attach
-                  click/aria/ref handlers to). The popover header itself
-                  serves as the label when collapsed, so the tooltip is
-                  redundant.
-                  Items use onSelect+router.push (Base UI's MenuItem
-                  doesn't accept a Link via `render` — props don't proxy
-                  through cleanly to Next's anchor). */}
+                  Children (icon + label) live INSIDE the render element
+                  so Base UI's render-prop merge gives the SidebarMenuButton
+                  its visible content. Putting them as children of
+                  DropdownMenuTrigger (outside the render element) caused
+                  the button to render empty.
+                  Items use onSelect+router.push because Base UI's MenuItem
+                  doesn't accept a Link via render — props don't proxy
+                  through to Next's anchor. */}
               <SidebarMenuItem>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
                       <SidebarMenuButton
                         isActive={pathname.startsWith("/admin/settings")}
-                      />
-                    }
-                  >
-                    <Settings />
-                    <span>Settings</span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent side="right" align="start" className="w-60">
-                    <DropdownMenuLabel>Settings</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {SETTINGS_ITEMS.map((item) => (
-                      <DropdownMenuItem
-                        key={item.href}
-                        onSelect={() => router.push(item.href)}
-                        className={
-                          pathname === item.href ? "bg-accent font-medium" : undefined
-                        }
                       >
-                        {item.title}
-                      </DropdownMenuItem>
-                    ))}
+                        <Settings />
+                        <span>Settings</span>
+                      </SidebarMenuButton>
+                    }
+                  />
+                  <DropdownMenuContent side="right" align="start" className="w-60">
+                    {/* Group wrapper required — Base UI's MenuGroupLabel
+                        crashes ("MenuGroupRootContext is missing") when
+                        used outside a Menu.Group. */}
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Settings</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {SETTINGS_ITEMS.map((item) => (
+                        <DropdownMenuItem
+                          key={item.href}
+                          onSelect={() => router.push(item.href)}
+                          className={
+                            pathname === item.href ? "bg-accent font-medium" : undefined
+                          }
+                        >
+                          {item.title}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </SidebarMenuItem>
@@ -210,12 +214,16 @@ export function AdminSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
-              <DropdownMenuTrigger render={<SidebarMenuButton />}>
-                <Avatar className="h-6 w-6">
-                  <AvatarFallback className="text-xs">CF</AvatarFallback>
-                </Avatar>
-                <span className="truncate text-sm">Staff User</span>
-              </DropdownMenuTrigger>
+              <DropdownMenuTrigger
+                render={
+                  <SidebarMenuButton>
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback className="text-xs">CF</AvatarFallback>
+                    </Avatar>
+                    <span className="truncate text-sm">Staff User</span>
+                  </SidebarMenuButton>
+                }
+              />
               <DropdownMenuContent side="top" align="start" className="w-56">
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
