@@ -175,6 +175,164 @@ which UI bought the label.
 - **Cutover timestamp**: ⏳
 - **Cutover workspace UUID**: ⏳
 
+## Phase 12 — Unified branded customer email pipeline
+
+Code shipped 2026-04-19. **Currently deployed in `email_send_strategy='off'` mode**, meaning ShipStation continues to send all customer emails exactly as before. Nothing customer-facing has changed yet. Cutover happens when ops flips the strategy flag (via SQL).
+
+### Architecture (when activated)
+
+| Email | Sender |
+|---|---|
+| Order receipt | Bandcamp / Shopify (their existing native flows — untouched) |
+| Shipment Confirmation | **us via Resend** (`shipment-confirmation` template) |
+| Out for Delivery | **us via Resend** (`out-for-delivery` template) |
+| Delivered | **us via Resend** (`delivered` template) |
+| Exception (return/lost/cancelled) | **us via Resend** (`exception` template) |
+| ShipStation customer emails | **none** — `notify_customer: false` |
+| Customer tracking link | **always** `https://app.../track/[token]` (our branded page) |
+| Carrier event source | **EasyPost only** (replaces ShipStation tracking) |
+
+### Strategy flag values
+
+```
+workspaces.flags.email_send_strategy:
+  'off'             ← default; SS still emails per legacy hybrid matrix
+  'shadow'          ← parallel-run mode; SS continues to real customers,
+                       unified pipeline ALSO runs but redirects to
+                       workspaces.flags.shadow_recipients (ops only)
+  'unified_resend'  ← production target; SS stops emailing customers,
+                       unified pipeline takes over
+  'ss_for_all'      ← legacy / emergency-reverse; force everything to SS
+```
+
+### Per-shipment kill switch
+
+```
+warehouse_shipments.suppress_emails: boolean (default false)
+```
+
+Wins over EVERY workspace strategy. Use for one-off opt-outs.
+
+### Cutover sequence (single workspace)
+
+**Stage 1 — DONE:** code shipped, migration applied, Trigger.dev tasks
+deployed, 772 existing shipments backfilled with `public_track_token`. Mode
+defaults to `'off'`. Real-customer behavior unchanged.
+
+**Stage 2 — Pre-flight gates** (run BEFORE flipping to `shadow` or `unified_resend`):
+
+- [ ] `RESEND_WEBHOOK_SECRET` set in Vercel prod env (get from Resend
+      dashboard → Webhooks → endpoint signing secret).
+- [ ] Resend webhook URL configured in Resend dashboard pointing to
+      `https://app.clandestinedistro.com/api/webhooks/resend` for events:
+      `email.delivered`, `email.bounced`, `email.complained`.
+- [ ] `EASYPOST_WEBHOOK_SECRET` already set (Phase 10 prereq) + EP webhook
+      pointed at `/api/webhooks/easypost` for `tracker.updated`.
+- [ ] Shipping sender domain (`clandestinedistro.com`) DKIM/SPF/DMARC
+      passing in Resend dashboard.
+- [ ] Run mail-tester.com style deliverability check: send 5 manual test
+      emails per template via Resend to Gmail/Outlook/Yahoo/Apple/ProtonMail.
+      Confirm inbox placement, score ≥ 9/10, DKIM signed.
+
+**Stage 3 — Shadow mode (parallel-run review)**:
+
+```sql
+UPDATE workspaces
+SET flags = jsonb_set(
+  jsonb_set(flags, '{email_send_strategy}', '"shadow"'),
+  '{shadow_recipients}', '["tom@northern-spy.com"]'
+)
+WHERE id = '<ws-uuid>';
+```
+
+For as long as you want (recommended ≥ 3 days):
+- SS keeps emailing real customers exactly as before
+- Unified pipeline ALSO runs on every shipment; emails go to
+  `tom@northern-spy.com` only
+- Each shadow send writes a `notification_sends` row with
+  `status='shadow'` and `shadow_intended_recipient` = real customer email
+- Reconciliation cron fires daily at 04:30 UTC; will re-fire any missing
+  sends within 24h (idempotent — no double-sends possible)
+
+Manually review every email shape in your inbox: subject, branding,
+tracking link works, plain-text alt is sane.
+
+**Stage 4 — Cutover (flip to production unified mode)**:
+
+```sql
+UPDATE workspaces
+SET flags = jsonb_set(flags, '{email_send_strategy}', '"unified_resend"')
+WHERE id = '<ws-uuid>';
+```
+
+Within 30 seconds (per-process flag cache TTL):
+- SS stops emailing customers (`notify_customer=false` returned by strategy fn)
+- BC connector still pushes ship_date back (so BC marks orders shipped on
+  its own dashboard + sends BC's native receipt — the accepted "one
+  redundant store-platform email")
+- Shopify still sends its own emails for shopify_main / shopify_client
+- WE start sending to real customers
+
+**Stage 5 — Rollback (any time)**:
+
+```sql
+UPDATE workspaces SET flags = jsonb_set(flags, '{email_send_strategy}', '"off"') WHERE id = '<ws-uuid>';
+```
+
+Within 30 seconds:
+- Unified pipeline goes silent (skipped+audit row instead of sending)
+- SS resumes emailing per the legacy hybrid matrix
+- No data corruption, no manual cleanup needed
+
+### Monitoring after cutover
+
+The `notification_sends` table is the source of truth. Key SQL:
+
+```sql
+-- Sends in last 24h by status
+SELECT trigger_status, status, count(*) FROM notification_sends
+ WHERE sent_at > now() - interval '24 hours'
+ GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- Failure rate
+SELECT count(*) FILTER (WHERE status='failed') * 100.0 / count(*) AS pct_failed
+ FROM notification_sends WHERE sent_at > now() - interval '24 hours';
+
+-- Bounce / complaint list (recipients added to suppression)
+SELECT * FROM resend_suppressions ORDER BY created_at DESC LIMIT 50;
+
+-- Reconciliation gaps in last 24h
+SELECT message FROM sensor_readings
+ WHERE sensor_name = 'notification.reconciliation_misses'
+ ORDER BY created_at DESC LIMIT 5;
+```
+
+### In-flight shipments at cutover
+
+Shipments that already have `shipstation_marked_shipped_at` BEFORE the flag
+flip will NOT receive a Shipment Confirmation email retroactively (the
+recon cron only looks back 7 days AND requires a missing audit row — but
+those shipments will be MISSING audit rows, so the cron WOULD fire). To
+prevent that, before flipping insert `notification_sends` rows with
+`status='suppressed'` for every existing shipped row:
+
+```sql
+INSERT INTO notification_sends
+  (workspace_id, shipment_id, trigger_status, channel, template_id, recipient, status, error)
+SELECT
+  workspace_id, id, 'shipped', 'email', 'shipped', '(in-flight at cutover)',
+  'suppressed', 'inserted at Phase 12 cutover to prevent retroactive emails'
+FROM warehouse_shipments
+WHERE shipstation_marked_shipped_at IS NOT NULL
+  AND shipstation_marked_shipped_at > now() - interval '7 days'
+  AND id NOT IN (SELECT shipment_id FROM notification_sends WHERE trigger_status = 'shipped')
+ON CONFLICT DO NOTHING;
+```
+
+Run this AS the cutover SQL in the same transaction window if possible.
+The recon cron then only fires OOD/Delivered going forward, never the
+backfill confirmation.
+
 ## Architecture map (Phase 7.2 will expand)
 
 See the canonical plan doc + the per-phase retrospectives for full detail:

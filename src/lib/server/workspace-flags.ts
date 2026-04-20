@@ -41,17 +41,30 @@ export interface WorkspaceFlags {
    */
   v1_features_enabled?: boolean;
   /**
-   * Phase 10.4 — workspace-level kill switch for the notification ownership
-   * matrix. Default "hybrid" — channel-aware decisions per
-   * `deriveNotificationStrategy`. Flip to "ss_for_all" to centralize all
-   * confirmations on SS, or "resend_for_all" to bypass SS entirely (ours
-   * via Resend).
+   * Phase 12 — workspace-level mode flag. Replaced the Phase 10 hybrid /
+   * ss_for_all / resend_for_all set with this 4-mode enum.
+   *
+   * - 'off' (default): pre-Phase-12 hybrid behavior. SS emails per channel
+   *   matrix. Unified pipeline does not fire. Safe rollback target.
+   * - 'shadow': unified pipeline runs, but every send is REDIRECTED to
+   *   shadow_recipients (ops). Real customers receive nothing from us; SS
+   *   continues emailing them exactly as in 'off'. Use during soft-launch.
+   * - 'unified_resend': WE own all customer shipping emails via Resend.
+   *   SS stops emailing customers (notify_customer=false). BC connector
+   *   keeps pushing tracking → BC's native email still fires.
+   * - 'ss_for_all': legacy / emergency-reverse mode. SS owns all customer
+   *   emails. Disables the unified pipeline.
    */
-  email_send_strategy?: "ss_for_all" | "hybrid" | "resend_for_all";
+  email_send_strategy?: "off" | "shadow" | "unified_resend" | "ss_for_all";
   /**
-   * Phase 10.4 — when TRUE (default), suppress SS shipment confirmation for
-   * Bandcamp orders so customers receive only BC's on-brand email. Flip to
-   * FALSE if ops needs SS to also email for BC (e.g. testing).
+   * Phase 12 — when strategy is 'shadow', every unified-pipeline send goes
+   * to these recipients instead of the real customer. Min 1 entry expected.
+   * Operator sets via SQL: jsonb_set(flags, '{shadow_recipients}', '["ops@x"]').
+   */
+  shadow_recipients?: string[];
+  /**
+   * Phase 10.4 carry-forward — only consulted when strategy='off' (legacy
+   * hybrid mode). In unified_resend mode this flag is moot.
    */
   bandcamp_skip_ss_email?: boolean;
 }

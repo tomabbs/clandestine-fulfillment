@@ -109,7 +109,7 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
     );
 
     const data = await fetchPackingSlipData(
-      makeMockClient() as Parameters<typeof fetchPackingSlipData>[0],
+      makeMockClient() as unknown as Parameters<typeof fetchPackingSlipData>[0],
       "ord_1",
     );
     expect(data).not.toBeNull();
@@ -170,7 +170,7 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
     );
 
     const data = await fetchPackingSlipData(
-      makeMockClient() as Parameters<typeof fetchPackingSlipData>[0],
+      makeMockClient() as unknown as Parameters<typeof fetchPackingSlipData>[0],
       "ord_2",
     );
     expect(data?.bandcamp_enriched).toBe(true);
@@ -201,7 +201,7 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
     );
 
     const data = await fetchPackingSlipData(
-      makeMockClient() as Parameters<typeof fetchPackingSlipData>[0],
+      makeMockClient() as unknown as Parameters<typeof fetchPackingSlipData>[0],
       "ord_3",
     );
     expect(data?.artist).toBe("Band Beta"); // 2 vs 1
@@ -233,7 +233,7 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
     });
 
     const data = await fetchPackingSlipData(
-      makeMockClient() as Parameters<typeof fetchPackingSlipData>[0],
+      makeMockClient() as unknown as Parameters<typeof fetchPackingSlipData>[0],
       "ord_4",
     );
     expect(data?.items[0]?.customs_description).toBe("Vinyl Record - 1 piece");
@@ -250,7 +250,7 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
       organizations: null,
     });
     const data = await fetchPackingSlipData(
-      makeMockClient() as Parameters<typeof fetchPackingSlipData>[0],
+      makeMockClient() as unknown as Parameters<typeof fetchPackingSlipData>[0],
       "ord_5",
     );
     expect(data?.bandcamp_enriched).toBe(false);

@@ -21,6 +21,14 @@ export { easypostRegisterTrackerTask } from "./easypost-register-tracker";
 // Phase 10.5 prep — daily parity check between AfterShip and EasyPost trackers.
 // Diagnostic only; gates the eventual AfterShip sunset.
 export { trackerParitySensorTask } from "./tracker-parity-sensor";
+// Phase 12 — Unified customer-facing email pipeline (Resend). Single task
+// driven by post-label-purchase (shipped) + EP webhook (OOD/Delivered/exception).
+// Strategy-gated; safe to deploy pre-cutover.
+export { sendTrackingEmailTask } from "./send-tracking-email";
+// Phase 12 — Daily reconciliation: catches the 3.8% silent webhook failure
+// rate documented for EP at peak load. Re-fires send-tracking-email for any
+// shipment whose status warranted an email but no notification_sends row exists.
+export { sendTrackingEmailReconCronTask } from "./send-tracking-email-recon";
 export {
   bandcampOrderSyncSchedule,
   bandcampOrderSyncTask,

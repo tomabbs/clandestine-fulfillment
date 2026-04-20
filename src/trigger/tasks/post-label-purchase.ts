@@ -83,6 +83,23 @@ export const postLabelPurchaseTask = task({
         });
       }
     }
+    // Phase 12 — fire the unified shipment-confirmation email. The task
+    // itself consults deriveNotificationStrategy and skips quietly when
+    // workspaces.flags.email_send_strategy is 'off' or 'ss_for_all'. So
+    // wiring it here is safe even pre-cutover; nothing actually sends until
+    // the strategy flag flips to 'shadow' or 'unified_resend'.
+    try {
+      await tasks.trigger("send-tracking-email", {
+        shipment_id: shipment.id,
+        trigger_status: "shipped",
+      });
+      triggered.push("send-tracking-email:shipped");
+    } catch (err) {
+      logger.warn("[post-label-purchase] send-tracking-email enqueue failed", {
+        warehouse_shipment_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Source-specific platform fulfillment marking.
     if (shipment.shipstation_order_id) {

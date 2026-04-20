@@ -59,6 +59,10 @@ const serverEnvSchema = z.object({
   // (`x-hmac-signature`) remains supported as a fallback for older webhook
   // configs that haven't been migrated. Default empty so dev/test runs.
   EASYPOST_WEBHOOK_SECRET: z.string().default(""),
+  // Phase 12 — Resend webhook signing secret. REQUIRED in production.
+  // Get from Resend dashboard → Webhooks → your endpoint. Format is
+  // `whsec_<base64>` (Svix-compatible). Default empty so dev/test runs.
+  RESEND_WEBHOOK_SECRET: z.string().default(""),
 
   // Shopify OAuth (client store connections — NOT main Clandestine Shopify)
   SHOPIFY_CLIENT_ID: z.string().default(""),

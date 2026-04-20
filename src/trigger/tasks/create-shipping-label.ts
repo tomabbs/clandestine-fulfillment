@@ -26,6 +26,7 @@ import {
 } from "@/lib/server/label-purchase-idempotency";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { normalizeAddress } from "@/lib/shared/address-normalize";
+import { generatePublicTrackToken } from "@/lib/shared/public-track-token";
 import {
   aggregateParcelDimensions,
   buildCustomsItems,
@@ -552,6 +553,10 @@ export const createShippingLabelTask = task({
       const shipmentInsert: Record<string, unknown> = {
         workspace_id: order.workspace_id,
         org_id: order.org_id,
+        // Phase 12 — generate the public tracking page token at insert time.
+        // 22-char URL-safe random; UNIQUE constraint on the column dedupes.
+        public_track_token: generatePublicTrackToken(),
+        public_track_token_generated_at: new Date().toISOString(),
         tracking_number: purchased.tracking_code,
         carrier: chosenRate.carrier,
         service: chosenRate.service,

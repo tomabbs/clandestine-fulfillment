@@ -337,8 +337,7 @@ async function resolveStrategy(
     channel,
     carrier: row.carrier,
     workspaceFlags: {
-      email_send_strategy: (flags as { email_send_strategy?: "ss_for_all" | "hybrid" | "resend_for_all" })
-        .email_send_strategy,
+      email_send_strategy: flags.email_send_strategy,
       bandcamp_skip_ss_email: (flags as { bandcamp_skip_ss_email?: boolean })
         .bandcamp_skip_ss_email,
     },

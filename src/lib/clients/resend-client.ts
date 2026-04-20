@@ -97,6 +97,33 @@ export async function sendPortalInviteEmail(params: {
   return { messageId: data.id };
 }
 
+// Phase 12 — Customer-facing tracking email send.
+// Uses our shipping sender domain. Returns the Resend message id on success.
+export async function sendTrackingEmail(input: {
+  to: string;
+  fromName: string;
+  subject: string;
+  html: string;
+  text: string;
+  /** Tag for Resend dashboard search. */
+  tag?: string;
+}): Promise<{ messageId: string }> {
+  const resend = getResendClient();
+  const fromAddress = `${input.fromName} <shipping@clandestinedistro.com>`;
+  const { data, error } = await resend.emails.send({
+    from: fromAddress,
+    to: input.to,
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    tags: input.tag ? [{ name: "kind", value: input.tag }] : undefined,
+  });
+  if (error || !data) {
+    throw new Error(`Resend tracking-email send failed: ${error?.message ?? "unknown"}`);
+  }
+  return { messageId: data.id };
+}
+
 export const inboundEmailSchema = z.object({
   from: z.string(),
   to: z.string(),

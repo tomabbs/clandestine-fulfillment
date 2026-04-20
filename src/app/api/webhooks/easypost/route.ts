@@ -19,6 +19,7 @@
 // Failure surfaces: Sentry breadcrumbs for invalid sig + replay rejects.
 
 import * as Sentry from "@sentry/nextjs";
+import { tasks } from "@trigger.dev/sdk";
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyEasypostSignature } from "@/lib/server/easypost-webhook-signature";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -213,6 +214,37 @@ export async function POST(req: NextRequest) {
         }
       }
       await supabase.from("warehouse_shipments").update(update).eq("id", shipment.id);
+    }
+
+    // Phase 12 — trigger customer-facing email when the new status warrants
+    // one. send-tracking-email is the unified pipeline; it consults the
+    // workspace strategy flag + per-shipment overrides + dedup before
+    // actually sending. Safe to wire here even pre-cutover (nothing sends
+    // until strategy='shadow' or 'unified_resend'). Map only the customer-
+    // facing statuses; transient ones (in_transit, pre_transit) get no email.
+    let emailTrigger: "out_for_delivery" | "delivered" | "exception" | null = null;
+    if (top === "out_for_delivery") emailTrigger = "out_for_delivery";
+    else if (top === "delivered") emailTrigger = "delivered";
+    else if (top === "return_to_sender" || top === "failure" || top === "cancelled")
+      emailTrigger = "exception";
+    if (emailTrigger) {
+      try {
+        const lastDetail = details[details.length - 1];
+        await tasks.trigger("send-tracking-email", {
+          shipment_id: shipment.id,
+          trigger_status: emailTrigger,
+          event_date: lastDetail?.datetime ?? null,
+          exception_message:
+            emailTrigger === "exception"
+              ? (lastDetail?.message ?? lastDetail?.description ?? null)
+              : null,
+        });
+      } catch (err) {
+        // Non-fatal — recon cron picks up missed sends within 24h.
+        Sentry.captureException(err, {
+          tags: { platform: "easypost", failure: "trigger_send_tracking_email" },
+        });
+      }
     }
   } catch (err) {
     // ALWAYS return 200 from the route — Trigger.dev / EP will retry storms

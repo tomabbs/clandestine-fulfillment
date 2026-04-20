@@ -3,7 +3,16 @@ import { type NextRequest, NextResponse } from "next/server";
 import type { UserRole } from "@/lib/shared/constants";
 import { STAFF_ROLES } from "@/lib/shared/constants";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/health", "/terms", "/privacy"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth/callback",
+  "/api/health",
+  "/terms",
+  "/privacy",
+  // Phase 12 — public branded customer tracking surface. Token in URL is
+  // the auth: random 22-char base64url, 128 bits of entropy.
+  "/track",
+];
 
 function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith("/api/webhooks/")) return true;
