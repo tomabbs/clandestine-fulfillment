@@ -83,6 +83,7 @@ const SETTINGS_ITEMS = [
   { title: "Reconnect Client Stores", href: "/admin/settings/client-store-reconnect" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },
   { title: "Carrier Mapping", href: "/admin/settings/carrier-map" },
+  { title: "Feature Flags", href: "/admin/settings/feature-flags" },
   { title: "Channels", href: "/admin/channels" },
   { title: "Integrations", href: "/admin/settings/integrations" },
   { title: "Health", href: "/admin/settings/health" },

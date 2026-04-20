@@ -75,6 +75,13 @@ function shell(opts: {
   const supportLine = support
     ? `Questions? Reply to <a href="mailto:${escapeAttr(support)}">${escapeHtml(support)}</a>.`
     : "Questions? Just reply to this email.";
+  // Phase 12 follow-up — transactional emails are exempt from CAN-SPAM
+  // unsubscribe requirements but it's still best practice + reduces spam
+  // complaints. We don't have a per-recipient opt-out flow; for now we
+  // direct opt-out requests to support so they can land on the
+  // resend_suppressions list manually.
+  const optOutAddress = support || "support@clandestinedistro.com";
+  const optOutLine = `Don't want shipping updates from us? <a href="mailto:${escapeAttr(optOutAddress)}?subject=Unsubscribe%20from%20shipping%20updates">Email us to opt out</a>.`;
   const logoBlock = opts.org.logo_url
     ? `<img src="${escapeAttr(opts.org.logo_url)}" alt="${escapeAttr(opts.org.org_name)}" style="max-height:40px;max-width:200px;display:block;margin-bottom:8px"/>`
     : `<div style="font-size:18px;font-weight:600;color:${escapeAttr(brand)}">${escapeHtml(opts.org.org_name)}</div>`;
@@ -98,6 +105,7 @@ function shell(opts: {
     ${opts.bodyHtml}
     <hr>
     <p class="small">${supportLine}</p>
+    <p class="small" style="opacity:0.7">${optOutLine}</p>
     <p class="small">${escapeHtml(opts.org.org_name)}</p>
   </div></div>
 </body></html>`;
@@ -112,12 +120,14 @@ function textBlock(opts: {
   const support = opts.org.support_email
     ? `Questions? Reply to ${opts.org.support_email}.`
     : "Questions? Just reply to this email.";
+  const optOut = `Don't want shipping updates? Email ${opts.org.support_email ?? "support@clandestinedistro.com"} to opt out.`;
   return [
     opts.bodyText,
     "",
     `Track your order: ${opts.trackingUrl}`,
     "",
     support,
+    optOut,
     opts.org.org_name,
   ].join("\n");
 }

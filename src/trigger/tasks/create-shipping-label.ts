@@ -25,6 +25,7 @@ import {
   purchaseLabelIdempotent,
 } from "@/lib/server/label-purchase-idempotency";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { normalizeAddress } from "@/lib/shared/address-normalize";
 import { generatePublicTrackToken } from "@/lib/shared/public-track-token";
 import {
@@ -270,6 +271,20 @@ export const createShippingLabelTask = task({
       };
     }
 
+    // Phase 7.3 — workspace-level kill switch: easypost_buy_enabled. When
+    // false, refuse to attempt any EP label purchase. Default true (omit or
+    // explicit true). Used for emergency pause without code deploy.
+    {
+      const wsFlags = await getWorkspaceFlags(order.workspace_id);
+      if (wsFlags.easypost_buy_enabled === false) {
+        return {
+          success: false,
+          error:
+            "EasyPost label purchase is currently disabled for this workspace (workspaces.flags.easypost_buy_enabled=false). Re-enable to retry.",
+        };
+      }
+    }
+
     // ── Normalize address ─────────────────────────────────────────────────────
     const toAddress = normalizeAddress(order.shipping_address);
     const countryCode = toAddress.country;
@@ -438,9 +453,16 @@ export const createShippingLabelTask = task({
         return { success: false, error: "Could not select a shipping rate" };
       }
 
-      // ── Price-delta circuit breaker ───────────────────────────────────────────
+      // ── Price-delta circuit breaker (Phase 7.3 — workspace-flag-driven thresholds)
       if (selectedRate) {
-        const delta = assertRateDelta(selectedRate.rate, parseFloat(chosenRate.rate));
+        // Read workspaces.flags.rate_delta_thresholds; fall back to RATE_DELTA_DEFAULTS.
+        const wsFlags = await getWorkspaceFlags(order.workspace_id as string);
+        const wsThresh = wsFlags.rate_delta_thresholds ?? {};
+        const thresholds = {
+          warn: typeof wsThresh.warn === "number" ? wsThresh.warn : RATE_DELTA_DEFAULTS.warn,
+          halt: typeof wsThresh.halt === "number" ? wsThresh.halt : RATE_DELTA_DEFAULTS.halt,
+        };
+        const delta = assertRateDelta(selectedRate.rate, parseFloat(chosenRate.rate), thresholds);
         if (delta.verdict === "halt") {
           logger.error(
             `[create-shipping-label] Rate-delta circuit breaker HALT: expected $${selectedRate.rate}, actual $${chosenRate.rate} (delta $${delta.deltaUsd.toFixed(2)})`,
@@ -459,7 +481,7 @@ export const createShippingLabelTask = task({
           });
           return {
             success: false,
-            error: `Rate changed by $${delta.deltaUsd.toFixed(2)} between preview and purchase (limit $${RATE_DELTA_DEFAULTS.halt.toFixed(2)}); requires staff re-confirmation`,
+            error: `Rate changed by $${delta.deltaUsd.toFixed(2)} between preview and purchase (limit $${thresholds.halt.toFixed(2)}); requires staff re-confirmation`,
           };
         }
         if (delta.verdict === "warn") {

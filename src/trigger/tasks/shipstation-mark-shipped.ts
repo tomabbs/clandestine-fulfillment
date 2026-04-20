@@ -104,6 +104,24 @@ export const shipstationMarkShippedTask = task({
       return { ok: true, alreadyShipped: true };
     }
 
+    // Phase 7.3 — workspace-level kill switch: shipstation_writeback_enabled.
+    // When false, refuse to attempt any SS writeback. Default true (omit or
+    // explicit true). Used for emergency pause without code deploy. The
+    // recon cron will pick up + retry once the flag flips back to true.
+    {
+      const wsFlags = await getWorkspaceFlags(row.workspace_id);
+      if (wsFlags.shipstation_writeback_enabled === false) {
+        logger.warn("[shipstation-mark-shipped] writeback disabled by workspace flag", {
+          warehouse_shipment_id,
+          workspace_id: row.workspace_id,
+        });
+        return {
+          ok: false,
+          error: "writeback_disabled_by_workspace_flag",
+        };
+      }
+    }
+
     if (!row.shipstation_order_id) {
       // Not an SS-sourced shipment — orchestrator shouldn't have enqueued us.
       logger.warn("[shipstation-mark-shipped] no shipstation_order_id on shipment — refusing", {

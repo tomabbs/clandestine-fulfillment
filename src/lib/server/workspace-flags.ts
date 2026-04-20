@@ -19,7 +19,53 @@
  *   easypost_buy_enabled (bool) — Phase 0.3 kill switch.
  */
 
+import { z } from "zod";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+
+// Phase 7.3 — formal Zod schema for the documented flag keys. Used by the
+// admin UI for safe writes (rejects malformed input) and by readers that
+// want to coerce + default unknown shapes. The runtime TypeScript interface
+// below is kept in sync; both names are exported.
+export const workspaceFlagsSchema = z
+  .object({
+    shipstation_unified_shipping: z.boolean().optional(),
+    rate_delta_thresholds: z
+      .object({
+        warn: z.number().nonnegative().optional(),
+        halt: z.number().nonnegative().optional(),
+      })
+      .partial()
+      .optional(),
+    email_ownership: z.string().optional(),
+    shipstation_writeback_enabled: z.boolean().optional(),
+    easypost_buy_enabled: z.boolean().optional(),
+    staff_diagnostics: z.boolean().optional(),
+    v1_features_enabled: z.boolean().optional(),
+    email_send_strategy: z
+      .enum(["off", "shadow", "unified_resend", "ss_for_all"])
+      .optional(),
+    shadow_recipients: z.array(z.string().email()).optional(),
+    bandcamp_skip_ss_email: z.boolean().optional(),
+  })
+  .strict();
+
+/**
+ * Parse + validate a JSONB flags blob from the DB. Unknown keys are
+ * REJECTED (strict). Use this for any flag write path so we don't accept
+ * typos that would silently never take effect.
+ */
+export function parseWorkspaceFlags(raw: unknown): WorkspaceFlags {
+  return workspaceFlagsSchema.parse(raw ?? {});
+}
+
+/**
+ * Lenient parse for read paths that may encounter pre-existing rows with
+ * legacy keys we haven't formalized yet. Returns the raw object as the
+ * inferred type without throwing.
+ */
+export function parseWorkspaceFlagsLenient(raw: unknown): WorkspaceFlags {
+  return (raw ?? {}) as WorkspaceFlags;
+}
 
 export interface WorkspaceFlags {
   shipstation_unified_shipping?: boolean;

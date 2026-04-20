@@ -29,6 +29,8 @@ export { sendTrackingEmailTask } from "./send-tracking-email";
 // rate documented for EP at peak load. Re-fires send-tracking-email for any
 // shipment whose status warranted an email but no notification_sends row exists.
 export { sendTrackingEmailReconCronTask } from "./send-tracking-email-recon";
+// Phase 7.1 — hourly health metrics for the unified-shipping pipeline.
+export { unifiedShippingSensorsTask } from "./unified-shipping-sensors";
 export {
   bandcampOrderSyncSchedule,
   bandcampOrderSyncTask,

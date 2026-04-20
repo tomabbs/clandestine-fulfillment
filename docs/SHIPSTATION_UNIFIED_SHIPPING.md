@@ -333,6 +333,220 @@ Run this AS the cutover SQL in the same transaction window if possible.
 The recon cron then only fires OOD/Delivered going forward, never the
 backfill confirmation.
 
+## Phase 7 — Workspace feature flags (admin)
+
+All flags live in `workspaces.flags` JSONB and are managed via:
+
+- **Admin UI**: `/admin/settings/feature-flags` (Phase 7.3 page) — flip booleans, edit the `email_send_strategy` enum (with confirm gate), set `shadow_recipients`, tune `rate_delta_thresholds`. Writes are validated by the Zod schema in `src/lib/server/workspace-flags.ts` — typos are rejected before persisting.
+- **SQL** (cutover sequences in this doc use SQL because flag-flip is the operational moment).
+
+Documented keys (full schema in `src/lib/server/workspace-flags.ts`):
+
+| Key | Type | Purpose |
+|---|---|---|
+| `shipstation_unified_shipping` | bool | Phase 6 — gate the new cockpit at `/admin/orders` |
+| `email_send_strategy` | enum | Phase 12 — `off` / `shadow` / `unified_resend` / `ss_for_all` |
+| `shadow_recipients` | string[] | Phase 12 — recipients for shadow mode (≥ 1 required) |
+| `rate_delta_thresholds` | `{warn,halt}` | Phase 0.5.2 — circuit-breaker limits in USD |
+| `easypost_buy_enabled` | bool | Phase 7.3 — kill switch for EP label purchase (default true) |
+| `shipstation_writeback_enabled` | bool | Phase 7.3 — kill switch for SS mark-shipped (default true) |
+| `v1_features_enabled` | bool | Phase 9.5 — gate bulk tag/hold UI |
+| `staff_diagnostics` | bool | Phase 6.3 — re-enable legacy CreateLabelPanel post-cutover |
+| `bandcamp_skip_ss_email` | bool | Phase 10.4 — legacy hybrid mode only |
+
+## Phase 7.1 — Sensors emitted hourly
+
+The `unified-shipping-sensors` cron (every hour at :05) writes one
+`sensor_readings` row per workspace per metric. Latest readings are visible at
+`/admin/settings/health` (existing dashboard).
+
+| Sensor | Healthy | Warning | Critical |
+|---|---|---|---|
+| `shipstation.writeback_failed_count` | 0 | 1-5 | >5 |
+| `shipstation.label_printed_not_marked` | 0 | 1-10 | >10 |
+| `shipstation.orders_unmatched_count` | ≤25 | >25 | — |
+| `notification.send_failure_rate_24h` | <1% | 1-5% | >5% |
+| `notification.recon_cron_alive` | <25h since reading | ≥25h | — |
+| `resend.bounce_rate_24h` | <5% | ≥5% | — |
+| `resend.complaint_rate_24h` | <0.1% | — | ≥0.1% |
+| `tracker.parity_cron_alive` | <25h since reading | ≥25h | — |
+
+## Phase 7 — Operational runbooks
+
+### Runbook 1 — "Label printed but mark-shipped failing"
+
+Symptom: `shipstation.label_printed_not_marked` sensor in `warning` /
+`critical` state. Customer's package is shipping but the SS dashboard
+doesn't reflect it (so SS-side automation that depends on shipped status
+won't fire — though customer email is OUR responsibility in unified mode).
+
+Diagnosis:
+```sql
+-- Find affected shipments
+SELECT id, workspace_id, shipstation_order_id, tracking_number, carrier,
+       shipstation_writeback_error, shipstation_writeback_attempts,
+       shipstation_writeback_path, created_at
+  FROM warehouse_shipments
+ WHERE shipstation_marked_shipped_at IS NULL
+   AND shipstation_order_id IS NOT NULL
+   AND tracking_number IS NOT NULL
+   AND created_at < now() - interval '30 minutes'
+   AND created_at > now() - interval '24 hours'
+ ORDER BY created_at DESC;
+```
+
+Actions in priority order:
+
+1. **Check `shipstation_writeback_error`** column — common values:
+   - `mapping_blocked_by_low_confidence`: open `/admin/settings/carrier-map`,
+     find the EP carrier, click "Verify + allow" to flip
+     `block_auto_writeback=false`.
+   - `v1_fallback_no_order_id`: SS order missing from `shipstation_orders`.
+     Re-run `pnpm tsx scripts/shipstation-orders-backfill.ts --workspace=<id>`.
+   - 4xx from SS API: SS API key may have rotated; check `SHIPSTATION_API_KEY`
+     env var.
+2. **Manually retry** — open the order in `/admin/orders`, click the
+   "Retry write-back" button in the drawer's writeback-error banner.
+3. **Bulk retry**: invoke the trigger task directly via the dashboard:
+   `shipstation-mark-shipped` with payload
+   `{ warehouse_shipment_id: "..." }`.
+4. **If `shipstation_writeback_enabled = false`**: that's the kill switch.
+   Flip back to true via `/admin/settings/feature-flags`.
+
+### Runbook 2 — "Customer didn't receive Shipment Confirmation"
+
+Symptom: customer support ticket says "I never got a tracking email."
+
+Diagnosis:
+```sql
+-- Did we attempt the send?
+SELECT * FROM notification_sends
+ WHERE shipment_id = '<warehouse_shipment_id>'
+   AND trigger_status = 'shipped'
+ ORDER BY sent_at DESC;
+```
+
+Possible outcomes:
+- `status='sent'`: we DID send. Check Resend dashboard for the
+  `resend_message_id` to see delivery status. Likely junk-foldered or
+  recipient-side block.
+- `status='failed'`: send attempt errored. Check `error` column for the
+  Resend API response.
+- `status='bounced'` / `'complained'`: recipient is on `resend_suppressions`.
+  Confirm with customer that they actually want emails before manually
+  removing them.
+- `status='shadow'`: workspace is in shadow mode. Real customer never got
+  the email — by design.
+- `status='skipped'`: strategy gate skipped it. Check `error` column for
+  reason (e.g. `strategy=off → ...`).
+- `status='suppressed'`: recipient address is on suppression list.
+- **No row at all**: pipeline didn't fire. Daily recon cron should catch
+  this within 24h. Or trigger manually via Trigger.dev dashboard:
+  `send-tracking-email` with payload
+  `{ shipment_id: "...", trigger_status: "shipped" }`.
+
+### Runbook 3 — "Spam complaint rate spike"
+
+Symptom: `resend.complaint_rate_24h` sensor in `critical` (>0.1%).
+
+This is a deliverability emergency. Action immediately:
+
+1. **Stop sending**:
+   ```sql
+   UPDATE workspaces SET flags = jsonb_set(flags, '{email_send_strategy}', '"off"')
+    WHERE id = '<ws-uuid>';
+   ```
+   Within 30 seconds the unified pipeline goes silent and SS resumes the
+   legacy hybrid behavior.
+
+2. **Investigate**:
+   ```sql
+   SELECT recipient, error, sent_at FROM notification_sends
+    WHERE status = 'complained' AND sent_at > now() - interval '24 hours'
+    ORDER BY sent_at DESC;
+   ```
+   Common causes: wrong-recipient sends, sending to old email lists, content
+   that triggers spam filters. Each complaint row has the recipient address
+   added to `resend_suppressions` automatically.
+
+3. **Audit + remediate** before re-enabling. Domain reputation can take
+   days/weeks to recover from a complaint spike.
+
+### Runbook 4 — Carrier map maintenance
+
+The `shipstation_carrier_map` table maps EP carrier+service strings to SS
+carrier_code values. SS rejects writeback calls for carriers it doesn't
+recognize, so this map must be kept current.
+
+Add a new EP carrier:
+
+1. Go to `/admin/settings/carrier-map`.
+2. Click "Re-seed from SS" — pulls the latest list of SS carriers.
+3. Find the row for the new EP carrier; pick the matching SS carrier_code
+   from the dropdown.
+4. **Critical**: do a real test ship via the cockpit, watch the
+   `shipstation_marked_shipped_at` stamp on the shipment, then click
+   "Verify + allow" on the row to flip `block_auto_writeback=false` and
+   `mapping_confidence='verified'`.
+
+Until verified, that mapping returns `mapping_blocked_by_low_confidence` and
+the writeback task surfaces it in the cockpit's writeback-error banner.
+
+### Runbook 5 — Preorder tab semantics
+
+A SS order is in the "Preorders" tab when `shipstation_orders.preorder_state =
+'preorder'`. It moves to "Ready to ship" when `preorder_state = 'ready'`,
+which happens once any line-item's `street_date` is within
+`PREORDER_READY_WINDOW_DAYS` (default 7) of today (NY timezone).
+
+The state is recomputed by the `preorder-tab-refresh` cron (daily at 05:00
+NY) and by the SS order poll (every 15 min) when an order is
+ingested/updated.
+
+If preorder badges look wrong:
+
+```sql
+-- Inspect a specific order
+SELECT preorder_state, preorder_release_date, shipstation_order_id
+  FROM shipstation_orders WHERE order_number = '<...>';
+
+-- Force-refresh that one order (kicks the cron)
+-- via Trigger.dev dashboard: preorder-tab-refresh, payload {} → re-derives
+-- for all candidates including this one.
+```
+
+The `preorder.refresh_cron_stale` sensor (Phase 5 retro) alerts if the cron
+hasn't run in 25+ hours.
+
+### Runbook 6 — AfterShip sunset (Phase 10.5)
+
+Status: DEFERRED until tracker-parity sensor is green for ≥30 days
+(earliest 2026-05-19). Do NOT execute these steps until the gate is passed.
+
+When ready:
+
+1. Confirm parity:
+   ```sql
+   SELECT message FROM sensor_readings
+    WHERE sensor_name = 'tracker.parity_aftership_vs_easypost'
+      AND created_at > now() - interval '30 days'
+    ORDER BY created_at DESC LIMIT 30;
+   ```
+   Every reading should show `aftership_only=0`.
+
+2. Stop registering new shipments with AfterShip:
+   In `src/trigger/tasks/post-label-purchase.ts`, remove the
+   `tasks.trigger("aftership-register", ...)` block.
+
+3. Disable the AfterShip webhook:
+   In `src/app/api/webhooks/aftership/route.ts`, change to return 410 Gone
+   (log incoming for 14 days then delete).
+
+4. Cancel AfterShip subscription, rotate keys, delete:
+   - `src/lib/clients/aftership-client.ts`
+   - `src/trigger/tasks/aftership-register.ts`
+   - `AFTERSHIP_API_KEY` + `AFTERSHIP_WEBHOOK_SECRET` from `.env.example` + `env.ts`
+
 ## Architecture map (Phase 7.2 will expand)
 
 See the canonical plan doc + the per-phase retrospectives for full detail:
