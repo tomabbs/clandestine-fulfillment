@@ -31,7 +31,15 @@ const VARIANT_GID_PREFIX = "gid://shopify/ProductVariant/";
  *   normalizeShopifyProductId("gid://shopify/Product/123")  // "123"
  *   normalizeShopifyProductId("123")                        // "123"
  *   normalizeShopifyProductId(null)                         // null
+ *
+ * Overloaded so callers passing a known-non-null string get a non-null
+ * return type — avoids needing `!` everywhere when the input is provably
+ * non-null (e.g. wrapping the return of `productSetCreate` which throws
+ * on failure).
  */
+export function normalizeShopifyProductId(id: string): string;
+export function normalizeShopifyProductId(id: null | undefined): null;
+export function normalizeShopifyProductId(id: string | null | undefined): string | null;
 export function normalizeShopifyProductId(id: string | null | undefined): string | null {
   if (!id) return null;
   if (id.startsWith(PRODUCT_GID_PREFIX)) return id.slice(PRODUCT_GID_PREFIX.length);
@@ -54,6 +62,9 @@ export function toShopifyProductGid(id: string | null | undefined): string | nul
 /**
  * Same idea but for variant IDs.
  */
+export function normalizeShopifyVariantId(id: string): string;
+export function normalizeShopifyVariantId(id: null | undefined): null;
+export function normalizeShopifyVariantId(id: string | null | undefined): string | null;
 export function normalizeShopifyVariantId(id: string | null | undefined): string | null {
   if (!id) return null;
   if (id.startsWith(VARIANT_GID_PREFIX)) return id.slice(VARIANT_GID_PREFIX.length);

@@ -1902,7 +1902,11 @@ export const bandcampSyncTask = task({
                 .maybeSingle();
 
               if (attachError || !attachedRow) {
-                await productArchive(shopifyProductIdMV);
+                // Non-null assertion: productSetCreate just succeeded above
+                // (line ~1843), so shopifyProductIdMV is guaranteed string here.
+                // The let-typed `string | null` keeps TS from narrowing it
+                // automatically inside this branch.
+                await productArchive(shopifyProductIdMV as string);
                 logger.error(
                   "Archived multi-variant Shopify product after DB attach verification failed",
                   {
@@ -2396,7 +2400,9 @@ export const bandcampSyncTask = task({
                 .maybeSingle();
 
               if (attachError || !productAttachedRow) {
-                await productArchive(shopifyProductId);
+                // Non-null assertion same as the multi-variant branch above —
+                // productSetCreate just succeeded so shopifyProductId is string.
+                await productArchive(shopifyProductId as string);
                 logger.error("Archived Shopify product after DB attach verification failed", {
                   sku: effectiveSku,
                   shopifyProductId,
