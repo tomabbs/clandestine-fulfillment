@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { mockFrom, mockTrigger, mockVerify, mockReadBody } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockTrigger: vi.fn().mockResolvedValue({ id: "ssrun-1" }),
-  mockVerify: vi.fn(async () => true),
+  mockVerify: vi.fn<(body: string, sig: string | null, secret: string) => Promise<boolean>>(
+    async () => true,
+  ),
   mockReadBody: vi.fn(async (req: Request) => req.text()),
 }));
 
@@ -200,9 +202,7 @@ describe("POST /api/webhooks/shipstation (ORDER_NOTIFY — Phase 1.3)", () => {
             lastInsert = row;
             return {
               select: vi.fn().mockReturnValue({
-                single: vi
-                  .fn()
-                  .mockResolvedValue({ data: { id: "evt-on-1" }, error: null }),
+                single: vi.fn().mockResolvedValue({ data: { id: "evt-on-1" }, error: null }),
               }),
             };
           }),
@@ -268,11 +268,7 @@ describe("POST /api/webhooks/shipstation (Phase 1.3 — revised 2026-04-20)", ()
       const res = await PostInProd(req as unknown as Parameters<typeof POST>[0]);
       expect(res.status).toBe(200);
       // Confirms verifier was called with the API secret, not the webhook one.
-      expect(mockVerify).toHaveBeenCalledWith(
-        expect.any(String),
-        "valid-sig",
-        "the-api-secret",
-      );
+      expect(mockVerify).toHaveBeenCalledWith(expect.any(String), "valid-sig", "the-api-secret");
     } finally {
       vi.unstubAllEnvs();
       vi.doUnmock("@/lib/shared/env");
