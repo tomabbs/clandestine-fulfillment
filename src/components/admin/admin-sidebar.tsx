@@ -125,9 +125,16 @@ export function AdminSidebar() {
           priority
           className="h-auto w-auto group-data-[collapsible=icon]:hidden"
         />
-        {/* Compact mark when collapsed — uses the Warehouse lucide icon
-            (no separate favicon asset). */}
-        <Warehouse className="hidden h-5 w-5 mx-auto group-data-[collapsible=icon]:block" />
+        {/* Compact mark when collapsed — the Clandestine 'C' hex emblem
+            from public/icon-mark.png. Same source as the browser favicon. */}
+        <Image
+          src="/icon-mark.png"
+          alt="Clandestine"
+          width={32}
+          height={32}
+          priority
+          className="hidden h-7 w-7 mx-auto group-data-[collapsible=icon]:block"
+        />
       </SidebarHeader>
 
       <SidebarContent>
@@ -136,9 +143,15 @@ export function AdminSidebar() {
             <SidebarMenu>
               {NAV_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.href}>
+                  {/* tooltip prop auto-shows ONLY when sidebar is collapsed
+                      to icon mode (and is hidden on mobile) — courtesy of
+                      the shadcn SidebarMenuButton component. Tooltip text
+                      matches the menu item label so users know what each
+                      icon is when text labels are hidden. */}
                   <SidebarMenuButton
                     render={<Link href={item.href} />}
                     isActive={pathname === item.href}
+                    tooltip={item.title}
                   >
                     <item.icon />
                     <span>{item.title}</span>
@@ -152,7 +165,7 @@ export function AdminSidebar() {
                 className="group/collapsible"
               >
                 <SidebarMenuItem>
-                  <CollapsibleTrigger render={<SidebarMenuButton />}>
+                  <CollapsibleTrigger render={<SidebarMenuButton tooltip="Settings" />}>
                     <Settings />
                     <span>Settings</span>
                     <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180" />

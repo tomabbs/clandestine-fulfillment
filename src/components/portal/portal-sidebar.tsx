@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Truck,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -82,9 +83,21 @@ export function PortalSidebar() {
   }
 
   return (
-    <Sidebar>
-      <SidebarHeader className="border-b px-4 py-3">
-        <span className="text-sm font-semibold">Client Portal</span>
+    // collapsible="icon" — same pattern as AdminSidebar. Toggle button
+    // shrinks the sidebar to icon-only width instead of vanishing offcanvas.
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="border-b px-4 py-3 group-data-[collapsible=icon]:px-2">
+        <span className="text-sm font-semibold group-data-[collapsible=icon]:hidden">
+          Client Portal
+        </span>
+        <Image
+          src="/icon-mark.png"
+          alt="Clandestine"
+          width={32}
+          height={32}
+          priority
+          className="hidden h-7 w-7 mx-auto group-data-[collapsible=icon]:block"
+        />
       </SidebarHeader>
 
       <SidebarContent>
@@ -97,9 +110,11 @@ export function PortalSidebar() {
                 return visiblePages[item.key] !== false;
               }).map((item) => (
                 <SidebarMenuItem key={item.href}>
+                  {/* tooltip auto-shows when sidebar is in icon-only mode. */}
                   <SidebarMenuButton
                     render={<Link href={item.href} />}
                     isActive={pathname === item.href}
+                    tooltip={item.title}
                   >
                     <item.icon />
                     <span>{item.title}</span>
