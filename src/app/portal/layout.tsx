@@ -39,7 +39,7 @@ function PortalPageGuard({ children }: { children: React.ReactNode }) {
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider data-warehouse-theme>
+    <SidebarProvider defaultOpen={false} data-warehouse-theme>
       <PortalSidebar />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b px-4">

@@ -8,7 +8,11 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider data-warehouse-theme>
+    // defaultOpen={false} → first-visit lands users on the icon-collapsed
+    // sidebar (per design preference). Sidebar state is per-session in
+    // memory; users can hit the SidebarTrigger any time to expand to
+    // full text labels.
+    <SidebarProvider defaultOpen={false} data-warehouse-theme>
       <AdminSidebar />
       <SidebarInset>
         <header className="flex h-12 items-center gap-2 border-b px-4">

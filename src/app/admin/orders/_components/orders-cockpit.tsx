@@ -88,7 +88,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -191,18 +190,10 @@ export function OrdersCockpit() {
   useListPaginationPreference("admin/orders", state, setState);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Auto-collapse the global admin sidebar to icon-only width when the
-  // cockpit mounts. The cockpit has its own dedicated status sidebar, so
-  // the global one's text labels are redundant here AND eat ~150px of
-  // horizontal room that the wide order table needs. Users can hit the
-  // SidebarTrigger in the page header to expand back to full text any time
-  // (cookie persists their last preference for other pages).
-  const sidebar = useSidebar();
-  useEffect(() => {
-    if (sidebar.open) sidebar.setOpen(false);
-    // Run only on mount — don't fight user toggling during the session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // (Sidebar default is now collapsed-to-icon globally per app-wide
+  // setting in src/app/admin/layout.tsx. The cockpit no longer needs to
+  // force-collapse on mount — that just fought users who manually
+  // expanded it for this page.)
   // Phase 9.1 — multi-select. Set persists across pagination so staff can
   // assemble a 100-order batch from multiple pages. Reset on tab/filter
   // change to avoid the "I just assigned a label to an order I forgot was

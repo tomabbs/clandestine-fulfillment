@@ -3,7 +3,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import {
   AlertCircle,
-  ChevronDown,
   ClipboardList,
   FileBarChart,
   LayoutDashboard,
@@ -30,11 +29,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -47,9 +47,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { useTheme } from "@/contexts/ThemeContext";
 
@@ -86,6 +83,7 @@ const SETTINGS_ITEMS = [
   { title: "Feature Flags", href: "/admin/settings/feature-flags" },
   { title: "Channels", href: "/admin/channels" },
   { title: "Integrations", href: "/admin/settings/integrations" },
+  { title: "ShipStation Export", href: "/admin/settings/shipstation-export" },
   { title: "Health", href: "/admin/settings/health" },
   { title: "Mega-plan verification", href: "/admin/settings/megaplan-verification" },
 ] as const;
@@ -159,33 +157,41 @@ export function AdminSidebar() {
                 </SidebarMenuItem>
               ))}
 
-              {/* Settings collapsible */}
-              <Collapsible
-                defaultOpen={pathname.startsWith("/admin/settings")}
-                className="group/collapsible"
-              >
-                <SidebarMenuItem>
-                  <CollapsibleTrigger render={<SidebarMenuButton tooltip="Settings" />}>
+              {/* Settings flyout — uses a DropdownMenu so the submenu
+                  appears as a popover anchored to the icon. Works
+                  identically in both expanded and icon-collapsed sidebar
+                  modes (the previous inline-collapsible pattern hid the
+                  submenu entirely when the sidebar was at icon width). */}
+              <SidebarMenuItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <SidebarMenuButton
+                        tooltip="Settings"
+                        isActive={pathname.startsWith("/admin/settings")}
+                      />
+                    }
+                  >
                     <Settings />
                     <span>Settings</span>
-                    <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenuSub>
-                      {SETTINGS_ITEMS.map((item) => (
-                        <SidebarMenuSubItem key={item.href}>
-                          <SidebarMenuSubButton
-                            render={<Link href={item.href} />}
-                            isActive={pathname === item.href}
-                          >
-                            {item.title}
-                          </SidebarMenuSubButton>
-                        </SidebarMenuSubItem>
-                      ))}
-                    </SidebarMenuSub>
-                  </CollapsibleContent>
-                </SidebarMenuItem>
-              </Collapsible>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="right" align="start" className="w-60">
+                    <DropdownMenuLabel>Settings</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {SETTINGS_ITEMS.map((item) => (
+                      <DropdownMenuItem
+                        key={item.href}
+                        render={<Link href={item.href} />}
+                        className={
+                          pathname === item.href ? "bg-accent font-medium" : undefined
+                        }
+                      >
+                        {item.title}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
