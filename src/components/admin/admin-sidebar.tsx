@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useRef } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -90,6 +90,7 @@ const SETTINGS_ITEMS = [
 
 export function AdminSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const supabaseRef = useRef<ReturnType<typeof createBrowserClient> | null>(null);
 
   function getSupabase() {
@@ -157,17 +158,24 @@ export function AdminSidebar() {
                 </SidebarMenuItem>
               ))}
 
-              {/* Settings flyout — uses a DropdownMenu so the submenu
-                  appears as a popover anchored to the icon. Works
-                  identically in both expanded and icon-collapsed sidebar
-                  modes (the previous inline-collapsible pattern hid the
-                  submenu entirely when the sidebar was at icon width). */}
+              {/* Settings flyout — DropdownMenu opens a popover so the
+                  submenu is reachable in both expanded and icon-collapsed
+                  sidebar modes.
+                  IMPORTANT: do NOT pass `tooltip` to SidebarMenuButton
+                  here. That prop wraps the button in a <Tooltip> wrapper,
+                  which breaks DropdownMenuTrigger's render-prop forwarding
+                  (the trigger needs a single element to attach
+                  click/aria/ref handlers to). The popover header itself
+                  serves as the label when collapsed, so the tooltip is
+                  redundant.
+                  Items use onSelect+router.push (Base UI's MenuItem
+                  doesn't accept a Link via `render` — props don't proxy
+                  through cleanly to Next's anchor). */}
               <SidebarMenuItem>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
                       <SidebarMenuButton
-                        tooltip="Settings"
                         isActive={pathname.startsWith("/admin/settings")}
                       />
                     }
@@ -181,7 +189,7 @@ export function AdminSidebar() {
                     {SETTINGS_ITEMS.map((item) => (
                       <DropdownMenuItem
                         key={item.href}
-                        render={<Link href={item.href} />}
+                        onSelect={() => router.push(item.href)}
                         className={
                           pathname === item.href ? "bg-accent font-medium" : undefined
                         }
