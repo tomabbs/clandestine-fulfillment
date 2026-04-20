@@ -9,13 +9,25 @@
 // Sensitive flags (cutover-related) are tagged with a CONFIRM dialog
 // pattern in the client component to prevent accidental clicks.
 
-import { listWorkspaceFlags } from "@/actions/workspace-flags";
+import { requireStaff } from "@/lib/server/auth-context";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import type { WorkspaceFlags } from "@/lib/server/workspace-flags";
 import { FeatureFlagsForm } from "./_feature-flags-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function FeatureFlagsPage() {
-  const flags = await listWorkspaceFlags();
+  // Call requireStaff directly here so the middleware-redirect path
+  // works for unauthenticated requests (server actions have different
+  // throw semantics from server-component data loads).
+  const { workspaceId } = await requireStaff();
+  const supabase = createServiceRoleClient();
+  const { data } = await supabase
+    .from("workspaces")
+    .select("flags")
+    .eq("id", workspaceId)
+    .maybeSingle();
+  const flags = (data?.flags ?? {}) as WorkspaceFlags;
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
       <div>
