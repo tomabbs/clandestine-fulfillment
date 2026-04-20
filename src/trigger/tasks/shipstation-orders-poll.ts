@@ -96,7 +96,9 @@ async function runPoll(args: {
       sortDir: "ASC",
       // Pull every status — we need awaiting_payment + awaiting_shipment +
       // shipped + on_hold + cancelled in the cockpit so staff see history.
-      orderStatus: "all",
+      // SS API rejects orderStatus="all" with 400; omitting the param returns
+      // all statuses (verified prod 2026-04-19 against /shipstations/orders-poll
+      // run cmo6gwom025q50on5juzqra7b).
     });
 
     logger.info("[shipstation-orders-poll] page", {

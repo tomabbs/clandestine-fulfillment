@@ -322,7 +322,7 @@ export async function fetchShipments(params: FetchShipmentsParams = {}) {
 }
 
 export interface FetchOrdersParams {
-  orderStatus?: string; // 'awaiting_shipment' | 'shipped' | 'awaiting_payment' | 'all'
+  orderStatus?: string; // 'awaiting_shipment' | 'shipped' | 'awaiting_payment' | 'on_hold' | 'cancelled' — OMIT to get all statuses (SS rejects 'all' with 400)
   page?: number;
   pageSize?: number;
   storeId?: number;
