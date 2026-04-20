@@ -38,6 +38,7 @@
 import { schedules } from "@trigger.dev/sdk";
 import { fetchProducts, type ShopifyProduct } from "@/lib/clients/shopify-client";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 
 const PAGE_SIZE = 50;
 
@@ -195,7 +196,7 @@ export async function maybeCreateDistroProduct(
     .insert({
       workspace_id: workspaceId,
       org_id: null,
-      shopify_product_id: product.id,
+      shopify_product_id: normalizeShopifyProductId(product.id),
       title: product.title,
       vendor: product.vendor,
       product_type: product.productType,

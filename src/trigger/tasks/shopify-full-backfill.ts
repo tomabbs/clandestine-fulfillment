@@ -14,6 +14,7 @@ import type { ShopifyProduct } from "@/lib/clients/shopify-client";
 import { fetchInventoryLevels, fetchProducts } from "@/lib/clients/shopify-client";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
+import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 
 const PAGE_SIZE = 50;
 
@@ -142,7 +143,7 @@ async function upsertProductsBackfill(
       {
         workspace_id: workspaceId,
         org_id: orgId,
-        shopify_product_id: product.id,
+        shopify_product_id: normalizeShopifyProductId(product.id),
         title: product.title,
         vendor: product.vendor,
         product_type: product.productType,

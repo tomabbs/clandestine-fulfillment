@@ -18,6 +18,7 @@ import { fetchInventoryLevels, fetchProducts } from "@/lib/clients/shopify-clien
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
+import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 
 const OVERLAP_MINUTES = 2;
 const PAGE_SIZE = 50;
@@ -200,7 +201,7 @@ async function upsertProductsBulk(
         .from("warehouse_products")
         .select("id")
         .eq("workspace_id", workspaceId)
-        .eq("shopify_product_id", product.id)
+        .eq("shopify_product_id", normalizeShopifyProductId(product.id))
         .single();
 
       if (dbProd) {
@@ -219,7 +220,10 @@ async function upsertProductsBulk(
       {
         workspace_id: workspaceId,
         org_id: orgId,
-        shopify_product_id: product.id,
+        // Always store the canonical numeric form (strips
+        // gid://shopify/Product/ if Shopify gave us a GraphQL ID) so
+        // dedup constraints work — see src/lib/shared/shopify-id.ts.
+        shopify_product_id: normalizeShopifyProductId(product.id),
         ...(!warehouseOwnsTitle && { title: product.title }),
         vendor: product.vendor,
         product_type: product.productType,

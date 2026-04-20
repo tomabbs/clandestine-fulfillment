@@ -6,6 +6,7 @@ import { task } from "@trigger.dev/sdk";
 import { z } from "zod";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
+import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 
 const payloadSchema = z.object({
   inboundItemIds: z.array(z.string().uuid()).min(1),
@@ -119,7 +120,7 @@ export const inboundProductCreate = task({
           .insert({
             workspace_id: shipment.workspace_id,
             org_id: shipment.org_id,
-            shopify_product_id: shopifyProduct.id,
+            shopify_product_id: normalizeShopifyProductId(shopifyProduct.id),
             title: item.sku.startsWith("PENDING-") ? `New Inbound Item (${item.sku})` : item.sku,
             status: "draft",
             tags: ["inbound-created"],

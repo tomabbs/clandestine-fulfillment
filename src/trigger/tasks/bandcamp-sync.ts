@@ -33,6 +33,7 @@ import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { deriveStreetDateAndPreorder, isFutureReleaseDate } from "@/lib/shared/preorder-dates";
+import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 import {
   CATEGORY_DEFAULT_WEIGHTS,
   CATEGORY_EXPECTED_FIELDS,
@@ -1840,7 +1841,7 @@ export const bandcampSyncTask = task({
             // Shopify CREATE — multi-variant productSet payload.
             let shopifyProductIdMV: string | null = null;
             try {
-              shopifyProductIdMV = await productSetCreate({
+              shopifyProductIdMV = normalizeShopifyProductId(await productSetCreate({
                 title,
                 status: "DRAFT",
                 vendor: band?.name ?? connection.band_name,
@@ -1877,7 +1878,7 @@ export const bandcampSyncTask = task({
                       ],
                     }
                   : {}),
-              });
+              }));
 
               logger.info("Created Shopify DRAFT product (multi-variant)", {
                 package_id: merchItem.package_id,
@@ -2345,7 +2346,7 @@ export const bandcampSyncTask = task({
             }
 
             try {
-              shopifyProductId = await productSetCreate({
+              shopifyProductId = normalizeShopifyProductId(await productSetCreate({
                 title,
                 status: "DRAFT",
                 vendor: band?.name ?? connection.band_name,
@@ -2376,7 +2377,7 @@ export const bandcampSyncTask = task({
                       ],
                     }
                   : {}),
-              });
+              }));
               logger.info("Created Shopify DRAFT product", { sku: effectiveSku, shopifyProductId });
 
               await supabase
