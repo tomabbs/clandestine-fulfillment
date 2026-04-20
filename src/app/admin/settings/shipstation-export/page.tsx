@@ -17,17 +17,11 @@ import {
   type ShipstationExportRunRow,
   triggerShipstationExport,
 } from "@/actions/shipstation-export";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -191,95 +185,94 @@ export default function ShipstationExportPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {runsQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-            </div>
-          ) : runsQuery.data && runsQuery.data.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Mode</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Rows</TableHead>
-                  <TableHead className="text-right">Skipped dupes</TableHead>
-                  <TableHead>Cutoff</TableHead>
-                  <TableHead className="text-right">Files</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {runsQuery.data.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="text-xs whitespace-nowrap">
-                      {new Date(row.started_at).toLocaleString()}
-                    </TableCell>
-                    <TableCell>
-                      <ModeBadge mode={row.mode} />
-                    </TableCell>
-                    <TableCell>
-                      <RunStatusBadge status={row.status} />
-                      {row.error && (
-                        <div
-                          className="text-[10px] text-destructive mt-1 max-w-[240px] truncate"
-                          title={row.error}
-                        >
-                          {row.error}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.rows_written ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {row.duplicates_skipped ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground whitespace-nowrap">
-                      {row.mode === "incremental"
-                        ? row.since_ts
-                          ? `> ${new Date(row.since_ts).toLocaleString()}`
-                          : "(no prior — full)"
-                        : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={
-                            row.status !== "completed" ||
-                            !row.csv_storage_path ||
-                            (downloadMut.isPending && pendingDownloadId === row.id)
-                          }
-                          onClick={() => downloadMut.mutate({ runId: row.id, kind: "csv" })}
-                          title="Download CSV (upload this to ShipStation)"
-                        >
-                          <Download className="h-3 w-3 mr-1" /> CSV
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={
-                            row.status !== "completed" ||
-                            !row.xlsx_storage_path ||
-                            (downloadMut.isPending && pendingDownloadId === row.id)
-                          }
-                          onClick={() => downloadMut.mutate({ runId: row.id, kind: "xlsx" })}
-                          title="Download XLSX (human review)"
-                        >
-                          <FileSpreadsheet className="h-3 w-3 mr-1" /> XLSX
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">No exports yet — click a button above.</p>
-          )}
+          <BlockList
+            className="mt-3"
+            items={runsQuery.data ?? []}
+            itemKey={(row) => row.id}
+            loading={runsQuery.isLoading}
+            density="ops"
+            ariaLabel="ShipStation export runs"
+            renderHeader={({ row }) => (
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{new Date(row.started_at).toLocaleString()}</p>
+                <div className="mt-1">
+                  <ModeBadge mode={row.mode} />
+                </div>
+              </div>
+            )}
+            renderExceptionZone={({ row }) => (
+              <div className="space-y-1">
+                <RunStatusBadge status={row.status} />
+                {row.error && (
+                  <p className="text-xs text-destructive max-w-full break-words">{row.error}</p>
+                )}
+              </div>
+            )}
+            renderBody={({ row }) => (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                <RunMetric label="Rows written" value={row.rows_written ?? "—"} />
+                <RunMetric label="Skipped dupes" value={row.duplicates_skipped ?? "—"} />
+                <RunMetric
+                  label="Cutoff"
+                  value={
+                    row.mode === "incremental"
+                      ? row.since_ts
+                        ? `> ${new Date(row.since_ts).toLocaleString()}`
+                        : "(no prior - full)"
+                      : "—"
+                  }
+                />
+              </div>
+            )}
+            renderActions={({ row }) => (
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={
+                    row.status !== "completed" ||
+                    !row.csv_storage_path ||
+                    (downloadMut.isPending && pendingDownloadId === row.id)
+                  }
+                  onClick={() => downloadMut.mutate({ runId: row.id, kind: "csv" })}
+                  title="Download CSV (upload this to ShipStation)"
+                >
+                  <Download className="h-3 w-3 mr-1" /> CSV
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={
+                    row.status !== "completed" ||
+                    !row.xlsx_storage_path ||
+                    (downloadMut.isPending && pendingDownloadId === row.id)
+                  }
+                  onClick={() => downloadMut.mutate({ runId: row.id, kind: "xlsx" })}
+                  title="Download XLSX (human review)"
+                >
+                  <FileSpreadsheet className="h-3 w-3 mr-1" /> XLSX
+                </Button>
+              </div>
+            )}
+            emptyState={
+              <EmptyState
+                icon={FileSpreadsheet}
+                title="No exports yet"
+                description="Start a full or incremental export to populate this list."
+              />
+            }
+          />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function RunMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm tabular-nums">{value}</p>
     </div>
   );
 }

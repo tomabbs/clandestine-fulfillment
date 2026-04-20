@@ -3,6 +3,7 @@
 import { Loader2, Plus, Search, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { deactivateUser, getUsers, inviteUser, updateUserRole } from "@/actions/users";
+import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,14 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -127,61 +120,58 @@ export default function UsersPage() {
           </CardContent>
         </Card>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell className="font-medium">{user.name ?? "-"}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell>
-                  <Select
-                    value={user.role}
-                    onValueChange={(role) => {
-                      if (role) roleMut.mutate({ userId: user.id, role });
-                    }}
-                  >
-                    <SelectTrigger size="sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ALL_ROLE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <Badge variant="default">Active</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {formatDateUTC(user.created_at)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => deactivateMut.mutate({ userId: user.id })}
-                    disabled={deactivateMut.isPending}
-                  >
-                    Deactivate
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <BlockList
+          className="mt-3"
+          items={users}
+          itemKey={(user) => user.id}
+          density="ops"
+          ariaLabel="Workspace users"
+          renderHeader={({ row: user }) => (
+            <div className="min-w-0">
+              <p className="font-medium">{user.name ?? "-"}</p>
+              <p className="text-sm text-muted-foreground">{user.email}</p>
+            </div>
+          )}
+          renderExceptionZone={({ row: user }) => (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="default">Active</Badge>
+              <Badge variant="outline">Joined {formatDateUTC(user.created_at)}</Badge>
+            </div>
+          )}
+          renderBody={({ row: user }) => (
+            <div className="max-w-xs space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Role</p>
+              <Select
+                value={user.role}
+                onValueChange={(role) => {
+                  if (role) roleMut.mutate({ userId: user.id, role });
+                }}
+                disabled={roleMut.isPending}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALL_ROLE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          renderActions={({ row: user }) => (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => deactivateMut.mutate({ userId: user.id })}
+              disabled={deactivateMut.isPending}
+            >
+              Deactivate
+            </Button>
+          )}
+        />
       )}
     </div>
   );

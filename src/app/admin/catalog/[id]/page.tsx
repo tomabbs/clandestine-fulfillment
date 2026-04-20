@@ -4,25 +4,19 @@ import { ArrowLeftIcon, ExternalLinkIcon, Plus, Save } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { getProductDetail, updateProduct, updateVariants } from "@/actions/catalog";
+import { BlockList } from "@/components/shared/block-list";
 import {
   CollabField,
   CollaborativePage,
   PresenceBar,
 } from "@/components/shared/collaborative-page";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 // Tabs removed — all sections displayed vertically
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -406,79 +400,96 @@ export default function ProductDetailPage() {
               </span>
             </div>
           )}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Option Title</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead className="w-24">Price</TableHead>
-                <TableHead className="w-24">Cost</TableHead>
-                <TableHead className="w-24">Compare At</TableHead>
-                <TableHead className="w-20">Weight</TableHead>
-                <TableHead className="w-16">Unit</TableHead>
-                <TableHead>Barcode</TableHead>
-                <TableHead className="w-20">Format</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {variants.map((v) => {
+          {variants.length === 0 ? (
+            <EmptyState title="No variants" compact />
+          ) : (
+            <BlockList
+              className="mt-3"
+              items={variants}
+              itemKey={(v) => v.id}
+              density="ops"
+              ariaLabel="Editable product variants"
+              renderHeader={({ row: v }) => {
                 const e = vEdits[v.id];
                 if (!e) return null;
                 return (
-                  <TableRow key={v.id} className={dirty.has(v.id) ? "bg-amber-50/50" : ""}>
-                    <TableCell>
-                      <Input
-                        className="h-8 text-sm"
-                        value={e.title}
-                        onChange={(ev) => setField(v.id, "title", ev.currentTarget.value)}
-                      />
-                    </TableCell>
-                    <TableCell>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground mb-1">Option title</p>
+                    <Input
+                      className="h-8 text-sm"
+                      value={e.title}
+                      onChange={(ev) => setField(v.id, "title", ev.currentTarget.value)}
+                    />
+                  </div>
+                );
+              }}
+              renderExceptionZone={({ row: v }) => (
+                <div className="flex items-center gap-2">
+                  {dirty.has(v.id) ? (
+                    <Badge variant="outline" className="text-amber-700 border-amber-300">
+                      Unsaved
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">Saved</Badge>
+                  )}
+                  {v.format_name ? (
+                    <Badge variant="secondary" className="text-xs">
+                      {v.format_name}
+                    </Badge>
+                  ) : null}
+                </div>
+              )}
+              renderBody={({ row: v }) => {
+                const e = vEdits[v.id];
+                if (!e) return null;
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    <VariantInput label="SKU">
                       <Input
                         className="h-8 text-sm font-mono"
                         value={e.sku}
                         onChange={(ev) => setField(v.id, "sku", ev.currentTarget.value)}
                       />
-                    </TableCell>
-                    <TableCell>
+                    </VariantInput>
+                    <VariantInput label="Price">
                       <Input
-                        className="h-8 text-sm w-24"
+                        className="h-8 text-sm"
                         type="number"
                         step="0.01"
                         value={e.price}
                         onChange={(ev) => setField(v.id, "price", ev.currentTarget.value)}
                       />
-                    </TableCell>
-                    <TableCell>
+                    </VariantInput>
+                    <VariantInput label="Cost">
                       <Input
-                        className="h-8 text-sm w-24"
+                        className="h-8 text-sm"
                         type="number"
                         step="0.01"
                         value={e.cost}
                         onChange={(ev) => setField(v.id, "cost", ev.currentTarget.value)}
                       />
-                    </TableCell>
-                    <TableCell>
+                    </VariantInput>
+                    <VariantInput label="Compare at">
                       <Input
-                        className="h-8 text-sm w-24"
+                        className="h-8 text-sm"
                         type="number"
                         step="0.01"
                         value={e.compareAt}
                         onChange={(ev) => setField(v.id, "compareAt", ev.currentTarget.value)}
                       />
-                    </TableCell>
-                    <TableCell>
+                    </VariantInput>
+                    <VariantInput label="Weight">
                       <Input
-                        className="h-8 text-sm w-20"
+                        className="h-8 text-sm"
                         type="number"
                         step="0.01"
                         value={e.weight}
                         onChange={(ev) => setField(v.id, "weight", ev.currentTarget.value)}
                       />
-                    </TableCell>
-                    <TableCell>
+                    </VariantInput>
+                    <VariantInput label="Unit">
                       <select
-                        className="border-input bg-background h-8 rounded-md border px-2 text-xs"
+                        className="border-input bg-background h-8 rounded-md border px-2 text-xs w-full"
                         value={e.weightUnit}
                         onChange={(ev) => setField(v.id, "weightUnit", ev.target.value)}
                       >
@@ -488,35 +499,19 @@ export default function ProductDetailPage() {
                           </option>
                         ))}
                       </select>
-                    </TableCell>
-                    <TableCell>
+                    </VariantInput>
+                    <VariantInput label="Barcode">
                       <Input
                         className="h-8 text-sm"
                         value={e.barcode}
                         onChange={(ev) => setField(v.id, "barcode", ev.currentTarget.value)}
                       />
-                    </TableCell>
-                    <TableCell>
-                      {v.format_name ? (
-                        <Badge variant="secondary" className="text-xs">
-                          {v.format_name}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                    </VariantInput>
+                  </div>
                 );
-              })}
-              {variants.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
-                    No variants.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              }}
+            />
+          )}
           <Button variant="outline" size="sm" disabled>
             <Plus className="h-3 w-3 mr-1" /> Add Variant
           </Button>
@@ -583,24 +578,26 @@ export default function ProductDetailPage() {
                     <p className="text-sm text-muted-foreground mb-3">No inventory data.</p>
                   )}
                   {locs.length > 0 && (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Location</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Quantity</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {locs.map((loc) => (
-                          <TableRow key={loc.id}>
-                            <TableCell>{loc.warehouse_locations?.name ?? "Unknown"}</TableCell>
-                            <TableCell>{loc.warehouse_locations?.location_type ?? "—"}</TableCell>
-                            <TableCell>{loc.quantity}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <BlockList
+                      className="mt-2"
+                      items={locs}
+                      itemKey={(loc) => loc.id}
+                      density="ops"
+                      ariaLabel={`Locations for ${v.sku}`}
+                      renderHeader={({ row: loc }) => (
+                        <div className="min-w-0">
+                          <p className="text-sm">{loc.warehouse_locations?.name ?? "Unknown"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {loc.warehouse_locations?.location_type ?? "—"}
+                          </p>
+                        </div>
+                      )}
+                      renderBody={({ row: loc }) => (
+                        <div className="grid grid-cols-1 gap-3 text-sm">
+                          <VariantMetric label="Quantity" value={loc.quantity} />
+                        </div>
+                      )}
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -615,49 +612,65 @@ export default function ProductDetailPage() {
         <section>
           <h3 className="text-lg font-semibold mb-3">Bandcamp</h3>
           {bcMappings.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Variant</TableHead>
-                  <TableHead>Bandcamp URL</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>New Date</TableHead>
-                  <TableHead>Last Qty Sold</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bcMappings.map((m) => {
-                  const v = variants.find((x) => x.id === m.variant_id);
-                  return (
-                    <TableRow key={m.id}>
-                      <TableCell className="font-mono text-xs">{v?.sku ?? m.variant_id}</TableCell>
-                      <TableCell>
-                        {m.bandcamp_url ? (
-                          <a
-                            href={m.bandcamp_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                          >
-                            {m.bandcamp_url} <ExternalLinkIcon className="size-3" />
-                          </a>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell>{m.bandcamp_type_name ?? "—"}</TableCell>
-                      <TableCell>{m.bandcamp_new_date ?? "—"}</TableCell>
-                      <TableCell>{m.last_quantity_sold ?? "—"}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <BlockList
+              className="mt-2"
+              items={bcMappings}
+              itemKey={(m) => m.id}
+              density="ops"
+              ariaLabel="Bandcamp mappings"
+              renderHeader={({ row: m }) => {
+                const v = variants.find((x) => x.id === m.variant_id);
+                return (
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs">{v?.sku ?? m.variant_id}</p>
+                    <p className="text-xs text-muted-foreground">{m.bandcamp_type_name ?? "—"}</p>
+                  </div>
+                );
+              }}
+              renderExceptionZone={({ row: m }) =>
+                m.bandcamp_url ? (
+                  <a
+                    href={m.bandcamp_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-blue-600 hover:underline text-sm"
+                  >
+                    {m.bandcamp_url} <ExternalLinkIcon className="size-3" />
+                  </a>
+                ) : (
+                  <span className="text-sm text-muted-foreground">No Bandcamp URL</span>
+                )
+              }
+              renderBody={({ row: m }) => (
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <VariantMetric label="New date" value={m.bandcamp_new_date ?? "—"} />
+                  <VariantMetric label="Last qty sold" value={m.last_quantity_sold ?? "—"} />
+                </div>
+              )}
+            />
           ) : (
             <p className="text-muted-foreground py-4">No Bandcamp mappings for this product.</p>
           )}
         </section>
       </div>
     </CollaborativePage>
+  );
+}
+
+function VariantInput({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function VariantMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm">{value}</p>
+    </div>
   );
 }

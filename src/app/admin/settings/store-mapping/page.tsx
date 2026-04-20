@@ -24,18 +24,12 @@ import {
   unmapStore,
   updateStoreMapping,
 } from "@/actions/store-mapping";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -406,56 +400,52 @@ export default function StoreMappingPage() {
           <Loader2 className="h-4 w-4 animate-spin" />
         </div>
       ) : totalCount === 0 ? (
-        <div className="py-8 text-center text-muted-foreground">
-          No ShipStation stores found. Click &ldquo;Sync Stores&rdquo; to import.
-        </div>
+        <EmptyState
+          title="No ShipStation stores found"
+          description='Click "Sync Stores" to import.'
+        />
       ) : (
-        <div className="border rounded-lg overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Store Name</TableHead>
-                <TableHead>Store ID</TableHead>
-                <TableHead>Marketplace</TableHead>
-                <TableHead>Assigned Client</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {stores.map((store) => (
-                <TableRow key={store.id}>
-                  <TableCell className="font-medium">{store.store_name ?? "Unnamed"}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {store.store_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {store.marketplace_name ?? "—"}
-                  </TableCell>
-                  <TableCell className="overflow-visible">
-                    <OrgSelector
-                      value={store.org_id ?? null}
-                      orgName={store.org_name ?? null}
-                      orgs={orgs}
-                      onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
-                      onClear={() => unmapMutation.mutate(store.id)}
-                      onAddNew={() => openNewClientDialog(store.id)}
-                      disabled={assignMutation.isPending || unmapMutation.isPending}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {store.org_id ? (
-                      <Badge variant="default" className="gap-1">
-                        <CheckCircle2 className="h-3 w-3" /> Mapped
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline">Unmapped</Badge>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <BlockList
+          className="mt-3"
+          items={stores}
+          itemKey={(store) => store.id}
+          density="ops"
+          ariaLabel="Store mapping rows"
+          renderHeader={({ row: store }) => (
+            <div className="min-w-0">
+              <p className="font-medium">{store.store_name ?? "Unnamed"}</p>
+              <p className="font-mono text-xs text-muted-foreground">{store.store_id}</p>
+            </div>
+          )}
+          renderExceptionZone={({ row: store }) => (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">{store.marketplace_name ?? "—"}</Badge>
+              {store.org_id ? (
+                <Badge variant="default" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Mapped
+                </Badge>
+              ) : (
+                <Badge variant="outline">Unmapped</Badge>
+              )}
+            </div>
+          )}
+          renderBody={({ row: store }) => (
+            <div className="max-w-sm overflow-visible">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                Assigned client
+              </p>
+              <OrgSelector
+                value={store.org_id ?? null}
+                orgName={store.org_name ?? null}
+                orgs={orgs}
+                onSelect={(orgId) => assignMutation.mutate({ storeId: store.id, orgId })}
+                onClear={() => unmapMutation.mutate(store.id)}
+                onAddNew={() => openNewClientDialog(store.id)}
+                disabled={assignMutation.isPending || unmapMutation.isPending}
+              />
+            </div>
+          )}
+        />
       )}
 
       {/* Add New Client Dialog */}

@@ -23,6 +23,8 @@ import {
   type SpotCheckRunSummary,
   triggerSpotCheck,
 } from "@/actions/megaplan-spot-check";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,14 +34,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -122,56 +116,55 @@ export default function MegaplanVerificationPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {runsQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading runs...</p>
-          ) : (runsQuery.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No spot-check runs yet. Trigger one above or wait for the hourly cron.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Finished</TableHead>
-                  <TableHead className="text-right">SKUs</TableHead>
-                  <TableHead className="text-right">Agreed</TableHead>
-                  <TableHead className="text-right">Delayed</TableHead>
-                  <TableHead className="text-right">Minor</TableHead>
-                  <TableHead className="text-right">Major</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(runsQuery.data ?? []).map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs">
-                      {new Date(r.started_at).toLocaleString()}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {r.finished_at ? new Date(r.finished_at).toLocaleString() : "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{r.sampled_sku_count}</TableCell>
-                    <TableCell className="text-right font-mono">{r.drift_agreed_count}</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {r.delayed_propagation_count}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{r.drift_minor_count}</TableCell>
-                    <TableCell
-                      className={`text-right font-mono ${r.drift_major_count > 0 ? "text-red-600 font-bold" : ""}`}
-                    >
-                      {r.drift_major_count}
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm" onClick={() => setOpenRunId(r.id)}>
-                        View
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <BlockList
+            className="mt-3"
+            items={runsQuery.data ?? []}
+            itemKey={(row) => row.id}
+            loading={runsQuery.isLoading}
+            density="ops"
+            ariaLabel="Recent spot-check runs"
+            renderHeader={({ row }) => (
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{new Date(row.started_at).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">
+                  Finished: {row.finished_at ? new Date(row.finished_at).toLocaleString() : "—"}
+                </p>
+              </div>
+            )}
+            renderExceptionZone={({ row }) =>
+              row.drift_major_count > 0 ? (
+                <p className="text-xs font-medium text-red-600">
+                  Major drift detected: {row.drift_major_count}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">No major drift detected.</p>
+              )
+            }
+            renderBody={({ row }) => (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                <RunCountMetric label="SKUs" value={row.sampled_sku_count} />
+                <RunCountMetric label="Agreed" value={row.drift_agreed_count} />
+                <RunCountMetric label="Delayed" value={row.delayed_propagation_count} />
+                <RunCountMetric label="Minor" value={row.drift_minor_count} />
+                <RunCountMetric
+                  label="Major"
+                  value={row.drift_major_count}
+                  danger={row.drift_major_count > 0}
+                />
+              </div>
+            )}
+            renderActions={({ row }) => (
+              <Button variant="ghost" size="sm" onClick={() => setOpenRunId(row.id)}>
+                View
+              </Button>
+            )}
+            emptyState={
+              <EmptyState
+                title="No spot-check runs yet"
+                description="Trigger one above or wait for the hourly cron."
+              />
+            }
+          />
         </CardContent>
       </Card>
 
@@ -192,6 +185,23 @@ export default function MegaplanVerificationPage() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function RunCountMetric({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={`text-sm font-mono ${danger ? "text-red-600 font-semibold" : ""}`}>{value}</p>
     </div>
   );
 }

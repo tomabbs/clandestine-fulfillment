@@ -1,24 +1,14 @@
 "use client";
 
 import { AlertTriangle, CheckCircle2, Loader2, Package, RefreshCw } from "lucide-react";
-import React, { useState } from "react";
+import { useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import {
-  computeBundleAvailability,
-  getBundleComponents,
-  listBundles,
-} from "@/actions/bundle-components";
+import { getBundleComponents, listBundles } from "@/actions/bundle-components";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -77,82 +67,65 @@ export default function BundlesPage() {
 
       {bundles.length === 0 ? (
         <Card>
-          <CardContent className="py-8 text-center text-muted-foreground">
-            No bundles configured. Bundles are created by linking component variants to a bundle
-            variant.
+          <CardContent className="py-8">
+            <EmptyState
+              icon={Package}
+              title="No bundles configured"
+              description="Bundles are created by linking component variants to a bundle variant."
+            />
           </CardContent>
         </Card>
       ) : (
         <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[300px]">Bundle</TableHead>
-                  <TableHead className="w-[120px]">SKU</TableHead>
-                  <TableHead className="text-right w-[80px]">Components</TableHead>
-                  <TableHead className="text-right w-[100px]">Bundle Stock</TableHead>
-                  <TableHead className="text-right w-[100px]">Effective</TableHead>
-                  <TableHead className="w-[180px]">Constrained By</TableHead>
-                  <TableHead className="w-[100px]">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bundles.map((bundle) => {
-                  const isExpanded = expandedId === bundle.bundleVariantId;
-                  return (
-                    <React.Fragment key={bundle.bundleVariantId}>
-                      <TableRow
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => setExpandedId(isExpanded ? null : bundle.bundleVariantId)}
-                      >
-                        <TableCell className="font-medium">{bundle.title}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground font-mono">
-                          {bundle.sku}
-                        </TableCell>
-                        <TableCell className="text-right">{bundle.componentCount}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {bundle.bundleStock}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
-                          {bundle.effectiveAvailable}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {bundle.constrainedBy ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              bundle.status === "available"
-                                ? "default"
-                                : bundle.status === "low"
-                                  ? "secondary"
-                                  : "destructive"
-                            }
-                            className="text-xs"
-                          >
-                            {bundle.status === "available" && (
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                            )}
-                            {bundle.status === "unavailable" && (
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                            )}
-                            {bundle.status}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                      {isExpanded && (
-                        <tr>
-                          <td colSpan={7} className="p-0">
-                            <BundleComponentDetail bundleVariantId={bundle.bundleVariantId} />
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </TableBody>
-            </Table>
+          <CardContent className="p-4">
+            <BlockList
+              className="mt-2"
+              items={bundles}
+              itemKey={(bundle) => bundle.bundleVariantId}
+              density="ops"
+              ariaLabel="Bundle inventory rows"
+              expandedKeys={
+                expandedId
+                  ? new Set<string | number>([expandedId])
+                  : (new Set<string | number>() as Set<string | number>)
+              }
+              onExpandedKeysChange={(keys) => {
+                const next = Array.from(keys)[0];
+                setExpandedId(next ? String(next) : null);
+              }}
+              renderHeader={({ row: bundle }) => (
+                <div className="min-w-0">
+                  <p className="font-medium">{bundle.title}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{bundle.sku}</p>
+                </div>
+              )}
+              renderExceptionZone={({ row: bundle }) => (
+                <BundleStatusBadge status={bundle.status} />
+              )}
+              renderBody={({ row: bundle }) => (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <BundleMetric label="Components" value={bundle.componentCount} />
+                  <BundleMetric label="Bundle stock" value={bundle.bundleStock} />
+                  <BundleMetric label="Effective" value={bundle.effectiveAvailable} />
+                  <BundleMetric label="Constrained by" value={bundle.constrainedBy ?? "—"} />
+                </div>
+              )}
+              renderExpanded={({ row: bundle }) => (
+                <BundleComponentDetail bundleVariantId={bundle.bundleVariantId} />
+              )}
+              renderActions={({ toggleExpanded, expanded }) => (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleExpanded();
+                  }}
+                >
+                  {expanded ? "Hide components" : "View components"}
+                </Button>
+              )}
+            />
           </CardContent>
         </Card>
       )}
@@ -182,49 +155,70 @@ function BundleComponentDetail({ bundleVariantId }: { bundleVariantId: string })
   return (
     <div className="bg-muted/30 p-4">
       <p className="text-xs font-medium text-muted-foreground mb-2">Components</p>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Component</TableHead>
-            <TableHead>SKU</TableHead>
-            <TableHead className="text-right">Qty per Bundle</TableHead>
-            <TableHead className="text-right">Available</TableHead>
-            <TableHead className="text-right">Contribution</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.map((comp: Record<string, unknown>) => {
-            const variant = comp.warehouse_product_variants as Record<string, unknown> | null;
-            const levels = (variant as Record<string, unknown>)
-              ?.warehouse_inventory_levels as Record<string, unknown> | null;
-            const available = (levels?.available as number) ?? 0;
-            const qty = comp.quantity as number;
-            const contribution = Math.floor(available / qty);
-            const product = (variant as Record<string, unknown>)?.warehouse_products as Record<
-              string,
-              unknown
-            > | null;
+      <BlockList
+        items={data as Array<Record<string, unknown>>}
+        itemKey={(comp) => comp.id as string}
+        density="ops"
+        ariaLabel="Bundle component rows"
+        renderHeader={({ row: comp }) => {
+          const variant = comp.warehouse_product_variants as Record<string, unknown> | null;
+          const product = variant?.warehouse_products as Record<string, unknown> | null;
+          return (
+            <div className="min-w-0">
+              <p className="text-sm">
+                {(product?.title as string) ?? (variant?.title as string) ?? "—"}
+              </p>
+              <p className="text-xs font-mono text-muted-foreground">
+                {(variant?.sku as string) ?? "—"}
+              </p>
+            </div>
+          );
+        }}
+        renderBody={({ row: comp }) => {
+          const variant = comp.warehouse_product_variants as Record<string, unknown> | null;
+          const levels = variant?.warehouse_inventory_levels as Record<string, unknown> | null;
+          const available = (levels?.available as number) ?? 0;
+          const qty = comp.quantity as number;
+          const contribution = Math.floor(available / qty);
+          return (
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <BundleMetric label="Qty per bundle" value={qty} />
+              <BundleMetric label="Available" value={available} danger={available <= 0} />
+              <BundleMetric label="Contribution" value={contribution} />
+            </div>
+          );
+        }}
+      />
+    </div>
+  );
+}
 
-            return (
-              <TableRow key={comp.id as string}>
-                <TableCell className="text-sm">
-                  {(product?.title as string) ?? (variant?.title as string) ?? "—"}
-                </TableCell>
-                <TableCell className="text-xs font-mono text-muted-foreground">
-                  {(variant?.sku as string) ?? "—"}
-                </TableCell>
-                <TableCell className="text-right">{qty}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  <span className={available <= 0 ? "text-destructive font-medium" : ""}>
-                    {available}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{contribution}</TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+function BundleStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge
+      variant={status === "available" ? "default" : status === "low" ? "secondary" : "destructive"}
+      className="text-xs"
+    >
+      {status === "available" && <CheckCircle2 className="h-3 w-3 mr-1" />}
+      {status === "unavailable" && <AlertTriangle className="h-3 w-3 mr-1" />}
+      {status}
+    </Badge>
+  );
+}
+
+function BundleMetric({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number | string;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={`text-sm ${danger ? "text-destructive font-medium" : ""}`}>{value}</p>
     </div>
   );
 }

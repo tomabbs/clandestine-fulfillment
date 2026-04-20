@@ -5,6 +5,8 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getClientReleases } from "@/actions/catalog";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   DEFAULT_PAGE_SIZE,
   type PageSize,
@@ -12,14 +14,6 @@ import {
 } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -158,41 +152,33 @@ export default function CatalogPage() {
       {preorders.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-lg font-medium">Upcoming Pre-Orders</h2>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12" />
-                <TableHead>Title</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Street Date</TableHead>
-                <TableHead className="text-right">Committed</TableHead>
-                <TableHead className="text-right">Incoming</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {preorders.map((v) => {
-                const inv = v.warehouse_inventory_levels?.[0];
-                return (
-                  <TableRow key={v.id}>
-                    <TableCell>
-                      <VariantThumbnail variant={v} />
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {v.warehouse_products?.title ?? "—"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {v.sku}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{formatDateUTC(v.street_date)}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{inv?.committed ?? 0}</TableCell>
-                    <TableCell className="text-right font-mono">{inv?.incoming ?? 0}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <BlockList
+            items={preorders}
+            itemKey={(v) => v.id}
+            density="ops"
+            ariaLabel="Upcoming pre-orders"
+            renderHeader={({ row: v }) => (
+              <div className="min-w-0 flex items-start gap-3">
+                <VariantThumbnail variant={v} />
+                <div className="min-w-0">
+                  <p className="font-medium">{v.warehouse_products?.title ?? "—"}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{v.sku}</p>
+                </div>
+              </div>
+            )}
+            renderExceptionZone={({ row: v }) => (
+              <Badge variant="secondary">{formatDateUTC(v.street_date)}</Badge>
+            )}
+            renderBody={({ row: v }) => {
+              const inv = v.warehouse_inventory_levels?.[0];
+              return (
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <ReleaseMetric label="Committed" value={inv?.committed ?? 0} />
+                  <ReleaseMetric label="Incoming" value={inv?.incoming ?? 0} />
+                </div>
+              );
+            }}
+          />
         </div>
       )}
 
@@ -200,39 +186,33 @@ export default function CatalogPage() {
       {newReleases.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-lg font-medium">Recent Releases (30 days)</h2>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12" />
-                <TableHead>Title</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Release Date</TableHead>
-                <TableHead className="text-right">Available</TableHead>
-                <TableHead className="text-right">Committed</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {newReleases.map((v) => {
-                const inv = v.warehouse_inventory_levels?.[0];
-                return (
-                  <TableRow key={v.id}>
-                    <TableCell>
-                      <VariantThumbnail variant={v} />
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {v.warehouse_products?.title ?? "—"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {v.sku}
-                    </TableCell>
-                    <TableCell className="text-sm">{formatDateUTC(v.street_date)}</TableCell>
-                    <TableCell className="text-right font-mono">{inv?.available ?? 0}</TableCell>
-                    <TableCell className="text-right font-mono">{inv?.committed ?? 0}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <BlockList
+            items={newReleases}
+            itemKey={(v) => v.id}
+            density="ops"
+            ariaLabel="Recent releases"
+            renderHeader={({ row: v }) => (
+              <div className="min-w-0 flex items-start gap-3">
+                <VariantThumbnail variant={v} />
+                <div className="min-w-0">
+                  <p className="font-medium">{v.warehouse_products?.title ?? "—"}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{v.sku}</p>
+                </div>
+              </div>
+            )}
+            renderExceptionZone={({ row: v }) => (
+              <Badge variant="outline">{formatDateUTC(v.street_date)}</Badge>
+            )}
+            renderBody={({ row: v }) => {
+              const inv = v.warehouse_inventory_levels?.[0];
+              return (
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <ReleaseMetric label="Available" value={inv?.available ?? 0} />
+                  <ReleaseMetric label="Committed" value={inv?.committed ?? 0} />
+                </div>
+              );
+            }}
+          />
         </div>
       )}
 
@@ -244,7 +224,7 @@ export default function CatalogPage() {
         </div>
 
         {catalog.length === 0 ? (
-          <p className="text-muted-foreground text-sm py-4">No catalog items found.</p>
+          <EmptyState title="No catalog items found" />
         ) : (
           <>
             {total > 0 && (
@@ -259,59 +239,63 @@ export default function CatalogPage() {
                 }}
               />
             )}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12" />
-                  <TableHead>Title</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Release Date</TableHead>
-                  <TableHead className="text-right">Available</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {catalog.map((v) => {
-                  const inv = v.warehouse_inventory_levels?.[0];
-                  const isRecent =
-                    v.street_date &&
-                    new Date(v.street_date) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                  const productId = v.warehouse_products?.id;
-                  return (
-                    <TableRow
-                      key={v.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => productId && router.push(`/portal/catalog/${productId}`)}
-                    >
-                      <TableCell>
-                        <VariantThumbnail variant={v} />
-                      </TableCell>
-                      <TableCell className="font-medium max-w-[280px]">
-                        <span className="truncate block">{v.warehouse_products?.title ?? "—"}</span>
-                        <span className="flex gap-1 mt-0.5">
-                          {v.is_preorder && (
-                            <Badge variant="outline" className="text-xs">
-                              Pre-Order
-                            </Badge>
-                          )}
-                          {isRecent && !v.is_preorder && (
-                            <Badge variant="secondary" className="text-xs">
-                              New
-                            </Badge>
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {v.sku}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDateUTC(v.street_date)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">{inv?.available ?? 0}</TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <BlockList
+              className="mt-3"
+              items={catalog}
+              itemKey={(v) => v.id}
+              density="ops"
+              ariaLabel="Full catalog"
+              renderHeader={({ row: v }) => (
+                <div className="min-w-0 flex items-start gap-3">
+                  <VariantThumbnail variant={v} />
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{v.warehouse_products?.title ?? "—"}</p>
+                    <p className="font-mono text-xs text-muted-foreground">{v.sku}</p>
+                  </div>
+                </div>
+              )}
+              renderExceptionZone={({ row: v }) => {
+                const isRecent =
+                  v.street_date &&
+                  new Date(v.street_date) >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+                return (
+                  <div className="flex gap-1">
+                    {v.is_preorder ? (
+                      <Badge variant="outline" className="text-xs">
+                        Pre-Order
+                      </Badge>
+                    ) : null}
+                    {isRecent && !v.is_preorder ? (
+                      <Badge variant="secondary" className="text-xs">
+                        New
+                      </Badge>
+                    ) : null}
+                  </div>
+                );
+              }}
+              renderBody={({ row: v }) => {
+                const inv = v.warehouse_inventory_levels?.[0];
+                return (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <ReleaseMetric label="Release date" value={formatDateUTC(v.street_date)} />
+                    <ReleaseMetric label="Available" value={inv?.available ?? 0} />
+                  </div>
+                );
+              }}
+              renderActions={({ row: v }) => {
+                const productId = v.warehouse_products?.id;
+                return (
+                  <button
+                    type="button"
+                    className="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                    onClick={() => productId && router.push(`/portal/catalog/${productId}`)}
+                    disabled={!productId}
+                  >
+                    Open
+                  </button>
+                );
+              }}
+            />
 
             {total > 0 && (
               <PaginationBar
@@ -328,6 +312,15 @@ export default function CatalogPage() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function ReleaseMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm font-mono">{value}</p>
     </div>
   );
 }

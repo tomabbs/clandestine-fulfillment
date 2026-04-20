@@ -44,19 +44,13 @@ import {
   type SkuSyncStatusRow,
   triggerReconcileRun,
 } from "@/actions/shipstation-inventory-monitor";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -330,44 +324,68 @@ export default function ShipStationInventoryPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {runsQuery.isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : runsQuery.data && runsQuery.data.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Started</TableHead>
-                      <TableHead>Tier</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Evaluated</TableHead>
-                      <TableHead className="text-right">Drift</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {runsQuery.data.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>
-                          {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
-                        </TableCell>
-                        <TableCell>{row.sync_type.replace("reconcile_", "")}</TableCell>
-                        <TableCell>
-                          <Badge variant={row.status === "completed" ? "secondary" : "destructive"}>
-                            {row.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{row.items_processed ?? 0}</TableCell>
-                        <TableCell className="text-right">{row.items_failed ?? 0}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-sm text-muted-foreground">No reconcile runs yet.</p>
-              )}
+              <BlockList
+                className="mt-3"
+                items={runsQuery.data ?? []}
+                itemKey={(row) => row.id}
+                loading={runsQuery.isLoading}
+                density="ops"
+                ariaLabel="Recent reconcile runs"
+                renderHeader={({ row }) => (
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Tier: {row.sync_type.replace("reconcile_", "")}
+                    </p>
+                  </div>
+                )}
+                renderExceptionZone={({ row }) => (
+                  <Badge variant={row.status === "completed" ? "secondary" : "destructive"}>
+                    {row.status}
+                  </Badge>
+                )}
+                renderBody={({ row }) => (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <ReconcileMetric label="Evaluated" value={row.items_processed ?? 0} />
+                    <ReconcileMetric
+                      label="Drift"
+                      value={row.items_failed ?? 0}
+                      danger={(row.items_failed ?? 0) > 0}
+                    />
+                  </div>
+                )}
+                emptyState={
+                  <EmptyState
+                    title="No reconcile runs yet"
+                    description="Trigger a tier rerun above to populate this list."
+                  />
+                }
+              />
             </CardContent>
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+function ReconcileMetric({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={`text-sm font-mono ${danger ? "text-destructive font-semibold" : ""}`}>
+        {value}
+      </p>
     </div>
   );
 }

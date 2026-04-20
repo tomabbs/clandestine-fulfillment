@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  AlertTriangle,
   CheckCircle2,
   Globe,
   Loader2,
@@ -22,19 +21,12 @@ import {
   getStoreConnections,
   testStoreConnection,
 } from "@/actions/store-connections";
+import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -66,11 +58,6 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
       <Icon className="h-3 w-3" /> {status.replace(/_/g, " ")}
     </Badge>
   );
-}
-
-function TimeAgo({ date }: { date: string | null }) {
-  if (!date) return <span className="text-muted-foreground">Never</span>;
-  return <span className="text-muted-foreground text-xs">{new Date(date).toLocaleString()}</span>;
 }
 
 export default function StoreConnectionsPage() {
@@ -218,82 +205,77 @@ export default function StoreConnectionsPage() {
                 ({conns.length} connection{conns.length !== 1 ? "s" : ""})
               </span>
             </h2>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Platform</TableHead>
-                  <TableHead>Store URL</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">SKU Mappings</TableHead>
-                  <TableHead>Last Webhook</TableHead>
-                  <TableHead>Last Poll</TableHead>
-                  <TableHead>Last Error</TableHead>
-                  <TableHead className="w-36" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {conns.map((conn) => (
-                  <TableRow key={conn.id}>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {PLATFORM_LABELS[conn.platform] ?? conn.platform}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs max-w-[200px] truncate">
-                      {conn.store_url}
-                    </TableCell>
-                    <TableCell>
-                      <ConnectionStatusBadge status={conn.connection_status} />
-                    </TableCell>
-                    <TableCell className="text-right">{conn.sku_mapping_count}</TableCell>
-                    <TableCell>
-                      <TimeAgo date={conn.last_webhook_at} />
-                    </TableCell>
-                    <TableCell>
-                      <TimeAgo date={conn.last_poll_at} />
-                    </TableCell>
-                    <TableCell>
-                      {conn.last_error ? (
-                        <span
-                          className="text-xs text-red-600 max-w-[160px] truncate block"
-                          title={conn.last_error}
-                        >
-                          <AlertTriangle className="h-3 w-3 inline mr-1" />
-                          {conn.last_error}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">None</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={testMutation.isPending && testingId === conn.id}
-                          onClick={() => {
-                            setTestingId(conn.id);
-                            testMutation.mutate(conn.id);
-                          }}
-                        >
-                          {testMutation.isPending && testingId === conn.id ? "Testing..." : "Test"}
-                        </Button>
-                        {conn.connection_status === "active" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={disableMutation.isPending}
-                            onClick={() => disableMutation.mutate(conn.id)}
-                          >
-                            Disable
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <BlockList
+              className="mt-2"
+              items={conns}
+              itemKey={(conn) => conn.id}
+              density="ops"
+              ariaLabel={`${orgName} store connections`}
+              renderHeader={({ row: conn }) => (
+                <div className="min-w-0">
+                  <p>
+                    <Badge variant="secondary">
+                      {PLATFORM_LABELS[conn.platform] ?? conn.platform}
+                    </Badge>
+                  </p>
+                  <p className="mt-1 font-mono text-xs truncate max-w-[280px]">{conn.store_url}</p>
+                </div>
+              )}
+              renderExceptionZone={({ row: conn }) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <ConnectionStatusBadge status={conn.connection_status} />
+                  <Badge variant="outline">{conn.sku_mapping_count} SKU mappings</Badge>
+                </div>
+              )}
+              renderBody={({ row: conn }) => (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <ConnectionMetric
+                    label="Last webhook"
+                    value={
+                      conn.last_webhook_at
+                        ? new Date(conn.last_webhook_at).toLocaleString()
+                        : "Never"
+                    }
+                  />
+                  <ConnectionMetric
+                    label="Last poll"
+                    value={
+                      conn.last_poll_at ? new Date(conn.last_poll_at).toLocaleString() : "Never"
+                    }
+                  />
+                  <ConnectionMetric
+                    label="Last error"
+                    value={conn.last_error ?? "None"}
+                    danger={Boolean(conn.last_error)}
+                  />
+                </div>
+              )}
+              renderActions={({ row: conn }) => (
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={testMutation.isPending && testingId === conn.id}
+                    onClick={() => {
+                      setTestingId(conn.id);
+                      testMutation.mutate(conn.id);
+                    }}
+                  >
+                    {testMutation.isPending && testingId === conn.id ? "Testing..." : "Test"}
+                  </Button>
+                  {conn.connection_status === "active" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={disableMutation.isPending}
+                      onClick={() => disableMutation.mutate(conn.id)}
+                    >
+                      Disable
+                    </Button>
+                  )}
+                </div>
+              )}
+            />
           </div>
         ))
       )}
@@ -365,6 +347,23 @@ export default function StoreConnectionsPage() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ConnectionMetric({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={`text-sm truncate ${danger ? "text-red-600" : ""}`}>{value}</p>
     </div>
   );
 }

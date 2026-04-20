@@ -50,6 +50,7 @@ import {
   retryShipstationLocationSync,
   type WarehouseLocationRow,
 } from "@/actions/locations";
+import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,14 +72,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -302,83 +295,96 @@ export default function LocationsPage() {
           No locations match the current filters. Use “New location” or “New range” to create some.
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead className="hidden sm:table-cell">Type</TableHead>
-              <TableHead className="hidden md:table-cell">Barcode</TableHead>
-              <TableHead>ShipStation v2</TableHead>
-              <TableHead className="hidden lg:table-cell">Last synced</TableHead>
-              <TableHead className="hidden md:table-cell">Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredRows.map((row) => {
-              const badge = syncBadgeFor(row);
-              return (
-                <TableRow key={row.id}>
-                  <TableCell className="font-medium">
-                    {row.name}
-                    {!row.is_active ? (
-                      <Badge variant="outline" className="ml-2 text-xs">
-                        inactive
-                      </Badge>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
-                    {row.location_type}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground text-xs font-mono">
-                    {row.barcode ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    <SyncStateCell row={row} badge={badge} />
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground text-xs">
-                    {relativeTimeShort(row.shipstation_synced_at) ?? "—"}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-xs text-muted-foreground">
-                    {row.is_active ? "Active" : "Inactive"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {badge === "error" || badge === "local_only" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={retryMutation.isPending}
-                          onClick={() => retryMutation.mutate(row.id)}
-                          title="Retry ShipStation v2 mirror"
-                        >
-                          {retryMutation.isPending && retryMutation.variables === row.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-3 w-3" />
-                          )}
-                          <span className="ml-1 hidden sm:inline">Retry</span>
-                        </Button>
-                      ) : null}
-                      {row.is_active ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={deactivateMutation.isPending}
-                          onClick={() => deactivateMutation.mutate(row.id)}
-                          title="Deactivate (blocked if any inventory references this location)"
-                        >
-                          Deactivate
-                        </Button>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+        <BlockList
+          className="mt-3"
+          items={filteredRows}
+          itemKey={(row) => row.id}
+          density="ops"
+          ariaLabel="Warehouse locations"
+          renderHeader={({ row }) => (
+            <div className="min-w-0">
+              <p className="font-medium">
+                {row.name}
+                {!row.is_active ? (
+                  <Badge variant="outline" className="ml-2 text-xs">
+                    inactive
+                  </Badge>
+                ) : null}
+              </p>
+              <p className="text-xs text-muted-foreground">{row.location_type}</p>
+            </div>
+          )}
+          renderExceptionZone={({ row }) => (
+            <div className="flex items-center gap-2">
+              <SyncStateCell row={row} badge={syncBadgeFor(row)} />
+              <Badge variant="outline" className="text-xs">
+                {row.is_active ? "Active" : "Inactive"}
+              </Badge>
+            </div>
+          )}
+          renderBody={({ row }) => (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <LocationMetric label="Barcode" value={row.barcode ?? "—"} mono />
+              <LocationMetric
+                label="Last synced"
+                value={relativeTimeShort(row.shipstation_synced_at) ?? "—"}
+              />
+              <LocationMetric label="Location ID" value={row.id} mono />
+            </div>
+          )}
+          renderActions={({ row }) => {
+            const badge = syncBadgeFor(row);
+            return (
+              <div className="flex items-center gap-1">
+                {badge === "error" || badge === "local_only" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={retryMutation.isPending}
+                    onClick={() => retryMutation.mutate(row.id)}
+                    title="Retry ShipStation v2 mirror"
+                  >
+                    {retryMutation.isPending && retryMutation.variables === row.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    <span className="ml-1 hidden sm:inline">Retry</span>
+                  </Button>
+                ) : null}
+                {row.is_active ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={deactivateMutation.isPending}
+                    onClick={() => deactivateMutation.mutate(row.id)}
+                    title="Deactivate (blocked if any inventory references this location)"
+                  >
+                    Deactivate
+                  </Button>
+                ) : null}
+              </div>
+            );
+          }}
+        />
       )}
+    </div>
+  );
+}
+
+function LocationMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "text-sm font-mono" : "text-sm"}>{value}</p>
     </div>
   );
 }

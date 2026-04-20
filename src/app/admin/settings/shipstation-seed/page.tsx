@@ -8,19 +8,13 @@ import {
   previewShipStationSeed,
   triggerShipStationSeed,
 } from "@/actions/shipstation-seed";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -231,46 +225,62 @@ export default function ShipStationSeedPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {recentRunsQuery.isLoading ? (
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-            </div>
-          ) : recentRunsQuery.data && recentRunsQuery.data.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Seeded</TableHead>
-                  <TableHead className="text-right">Errors</TableHead>
-                  <TableHead>Run ID</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentRunsQuery.data.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="text-xs">
-                      {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <RunStatusBadge status={row.status} />
-                    </TableCell>
-                    <TableCell className="text-right">{row.items_processed ?? 0}</TableCell>
-                    <TableCell className="text-right">{row.items_failed ?? 0}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-xs">
-                      {(row.metadata?.run_id as string | undefined) ?? "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No previous runs for this workspace (or no workspace selected).
-            </p>
-          )}
+          <BlockList
+            className="mt-3"
+            items={recentRunsQuery.data ?? []}
+            itemKey={(row) => row.id}
+            loading={recentRunsQuery.isLoading}
+            density="ops"
+            ariaLabel="Recent ShipStation seed runs"
+            renderHeader={({ row }) => (
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Run ID: {(row.metadata?.run_id as string | undefined) ?? "—"}
+                </p>
+              </div>
+            )}
+            renderExceptionZone={({ row }) => <RunStatusBadge status={row.status} />}
+            renderBody={({ row }) => (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <SeedRunMetric label="Seeded" value={row.items_processed ?? 0} />
+                <SeedRunMetric
+                  label="Errors"
+                  value={row.items_failed ?? 0}
+                  danger={(row.items_failed ?? 0) > 0}
+                />
+              </div>
+            )}
+            emptyState={
+              <EmptyState
+                title="No previous runs"
+                description="Select a workspace and run preview or seed to populate this list."
+              />
+            }
+          />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function SeedRunMetric({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  danger?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={`text-sm font-mono ${danger ? "text-destructive font-semibold" : ""}`}>
+        {value}
+      </p>
     </div>
   );
 }

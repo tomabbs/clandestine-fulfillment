@@ -46,6 +46,9 @@ import {
   setParentOrganization,
 } from "@/actions/organizations";
 import { inviteUser, removeClientUser } from "@/actions/users";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ScrollableTabsList } from "@/components/shared/scrollable-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,15 +61,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { ScrollableTabsList } from "@/components/shared/scrollable-tabs";
 import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { TOGGLEABLE_PAGES } from "@/lib/shared/portal-pages";
@@ -114,6 +108,23 @@ function formatDate(dateStr: string | null | undefined) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function ClientDetailMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "text-sm font-mono truncate" : "text-sm truncate"}>{value}</p>
+    </div>
+  );
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -277,30 +288,25 @@ function ProductsTab({ orgId }: { orgId: string }) {
           <Loader2 className="h-4 w-4 animate-spin" /> Loading products...
         </div>
       ) : !products || products.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-8">No products found.</p>
+        <EmptyState title="No products found" compact />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Artist — Title — Format</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead className="text-center">Variants</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {products.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.title}</TableCell>
-                <TableCell>{p.product_type ?? "-"}</TableCell>
-                <TableCell className="text-center">{p.variant_count}</TableCell>
-                <TableCell>
-                  <Badge variant={statusBadgeVariant(p.status)}>{p.status}</Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <BlockList
+          className="mt-2"
+          items={products}
+          itemKey={(p) => p.id}
+          density="ops"
+          ariaLabel="Client products"
+          renderHeader={({ row: p }) => <p className="font-medium">{p.title}</p>}
+          renderExceptionZone={({ row: p }) => (
+            <Badge variant={statusBadgeVariant(p.status)}>{p.status}</Badge>
+          )}
+          renderBody={({ row: p }) => (
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <ClientDetailMetric label="Type" value={p.product_type ?? "-"} />
+              <ClientDetailMetric label="Variants" value={String(p.variant_count)} />
+            </div>
+          )}
+        />
       )}
     </div>
   );
@@ -338,47 +344,47 @@ function ShipmentsTab({ orgId }: { orgId: string }) {
           <Loader2 className="h-4 w-4 animate-spin" /> Loading shipments...
         </div>
       ) : !shipments || shipments.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-8">No shipments found.</p>
+        <EmptyState title="No shipments found" compact />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Order #</TableHead>
-              <TableHead>Ship Date</TableHead>
-              <TableHead>Carrier</TableHead>
-              <TableHead>Tracking</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Cost</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {shipments.map((s) => (
-              <TableRow key={s.id}>
-                <TableCell className="font-medium">{s.order_number ?? "-"}</TableCell>
-                <TableCell>{formatDate(s.ship_date)}</TableCell>
-                <TableCell>{s.carrier ?? "-"}</TableCell>
-                <TableCell>
-                  {s.tracking_number ? (
-                    <a
-                      href={trackingUrl(s.carrier, s.tracking_number)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline text-xs font-mono"
-                    >
-                      {s.tracking_number}
-                    </a>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={statusBadgeVariant(s.status)}>{s.status}</Badge>
-                </TableCell>
-                <TableCell className="text-right">{formatCurrency(s.shipping_cost)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <BlockList
+          className="mt-2"
+          items={shipments}
+          itemKey={(s) => s.id}
+          density="ops"
+          ariaLabel="Client shipments"
+          renderHeader={({ row: s }) => (
+            <div>
+              <p className="font-medium">Order {s.order_number ?? "-"}</p>
+              <p className="text-xs text-muted-foreground">{s.carrier ?? "-"}</p>
+            </div>
+          )}
+          renderExceptionZone={({ row: s }) => (
+            <Badge variant={statusBadgeVariant(s.status)}>{s.status}</Badge>
+          )}
+          renderBody={({ row: s }) => (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <ClientDetailMetric label="Ship date" value={formatDate(s.ship_date)} />
+              <ClientDetailMetric label="Cost" value={formatCurrency(s.shipping_cost)} />
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Tracking
+                </p>
+                {s.tracking_number ? (
+                  <a
+                    href={trackingUrl(s.carrier, s.tracking_number)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline text-xs font-mono"
+                  >
+                    {s.tracking_number}
+                  </a>
+                ) : (
+                  <p className="text-sm">-</p>
+                )}
+              </div>
+            </div>
+          )}
+        />
       )}
     </div>
   );
@@ -432,30 +438,24 @@ function SalesTab({ orgId }: { orgId: string }) {
       </div>
 
       {months.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-4">No sales data available.</p>
+        <EmptyState title="No sales data available" compact />
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Month</TableHead>
-              <TableHead className="text-right">Units</TableHead>
-              <TableHead className="text-right">Revenue</TableHead>
-              <TableHead className="text-right">Cost</TableHead>
-              <TableHead className="text-right">Margin %</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {months.map((m: MonthlySales) => (
-              <TableRow key={m.month}>
-                <TableCell className="font-medium">{formatMonth(m.month)}</TableCell>
-                <TableCell className="text-right">{m.units.toLocaleString()}</TableCell>
-                <TableCell className="text-right">{formatCurrency(m.revenue)}</TableCell>
-                <TableCell className="text-right">{formatCurrency(m.cost)}</TableCell>
-                <TableCell className="text-right">{m.margin_pct.toFixed(1)}%</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <BlockList
+          className="mt-2"
+          items={months as MonthlySales[]}
+          itemKey={(m) => m.month}
+          density="ops"
+          ariaLabel="Monthly sales"
+          renderHeader={({ row: m }) => <p className="font-medium">{formatMonth(m.month)}</p>}
+          renderBody={({ row: m }) => (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <ClientDetailMetric label="Units" value={m.units.toLocaleString()} />
+              <ClientDetailMetric label="Revenue" value={formatCurrency(m.revenue)} />
+              <ClientDetailMetric label="Cost" value={formatCurrency(m.cost)} />
+              <ClientDetailMetric label="Margin %" value={`${m.margin_pct.toFixed(1)}%`} />
+            </div>
+          )}
+        />
       )}
     </div>
   );
@@ -490,28 +490,23 @@ function BillingTab({ orgId }: { orgId: string }) {
 
   return (
     <div className="pt-4">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Period</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead>Created</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {snapshots.map((s) => (
-            <TableRow key={s.id}>
-              <TableCell className="font-medium">{s.billing_period}</TableCell>
-              <TableCell>
-                <Badge variant={statusBadgeVariant(s.status)}>{s.status}</Badge>
-              </TableCell>
-              <TableCell className="text-right">{formatCurrency(s.grand_total)}</TableCell>
-              <TableCell>{formatDate(s.created_at)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <BlockList
+        className="mt-2"
+        items={snapshots}
+        itemKey={(s) => s.id}
+        density="ops"
+        ariaLabel="Billing snapshots"
+        renderHeader={({ row: s }) => <p className="font-medium">{s.billing_period}</p>}
+        renderExceptionZone={({ row: s }) => (
+          <Badge variant={statusBadgeVariant(s.status)}>{s.status}</Badge>
+        )}
+        renderBody={({ row: s }) => (
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <ClientDetailMetric label="Total" value={formatCurrency(s.grand_total)} />
+            <ClientDetailMetric label="Created" value={formatDate(s.created_at)} />
+          </div>
+        )}
+      />
     </div>
   );
 }
@@ -547,34 +542,27 @@ function StoresTab({ orgId }: { orgId: string }) {
       {connections.length > 0 && (
         <div>
           <h4 className="text-sm font-semibold mb-2">Connected Stores</h4>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Platform</TableHead>
-                <TableHead>Store URL</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Connected</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {connections.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium capitalize">{c.platform}</TableCell>
-                  <TableCell className="font-mono text-xs">{c.store_url}</TableCell>
-                  <TableCell>
-                    <span
-                      className={`text-xs px-1.5 py-0.5 rounded ${c.connection_status === "active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
-                    >
-                      {c.connection_status}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {formatDate(c.created_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <BlockList
+            className="mt-2"
+            items={connections}
+            itemKey={(c) => c.id}
+            density="ops"
+            ariaLabel="Connected stores"
+            renderHeader={({ row: c }) => <p className="font-medium capitalize">{c.platform}</p>}
+            renderExceptionZone={({ row: c }) => (
+              <span
+                className={`text-xs px-1.5 py-0.5 rounded ${c.connection_status === "active" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
+              >
+                {c.connection_status}
+              </span>
+            )}
+            renderBody={({ row: c }) => (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <ClientDetailMetric label="Store URL" value={c.store_url} mono />
+                <ClientDetailMetric label="Connected" value={formatDate(c.created_at)} />
+              </div>
+            )}
+          />
         </div>
       )}
 
@@ -582,26 +570,21 @@ function StoresTab({ orgId }: { orgId: string }) {
       {legacy.length > 0 && (
         <div>
           <h4 className="text-sm font-semibold mb-2">Bandcamp / Legacy</h4>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Store Name</TableHead>
-                <TableHead>Marketplace</TableHead>
-                <TableHead>Store ID</TableHead>
-                <TableHead>Last Seen</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {legacy.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.store_name ?? "-"}</TableCell>
-                  <TableCell>{s.marketplace_name ?? "-"}</TableCell>
-                  <TableCell className="font-mono text-xs">{s.store_id}</TableCell>
-                  <TableCell>{formatDate(s.created_at)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <BlockList
+            className="mt-2"
+            items={legacy}
+            itemKey={(s) => s.id}
+            density="ops"
+            ariaLabel="Legacy stores"
+            renderHeader={({ row: s }) => <p className="font-medium">{s.store_name ?? "-"}</p>}
+            renderBody={({ row: s }) => (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <ClientDetailMetric label="Marketplace" value={s.marketplace_name ?? "-"} />
+                <ClientDetailMetric label="Store ID" value={s.store_id} mono />
+                <ClientDetailMetric label="Last seen" value={formatDate(s.created_at)} />
+              </div>
+            )}
+          />
         </div>
       )}
     </div>
@@ -634,51 +617,45 @@ function SupportHistoryTab({ orgId }: { orgId: string }) {
       <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         Message history combines in-app and email-threaded replies for this client.
       </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Subject</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Assigned</TableHead>
-            <TableHead className="text-center">Messages</TableHead>
-            <TableHead>Last Activity</TableHead>
-            <TableHead className="w-24 text-right">Open</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {conversations.map((conversation) => (
-            <TableRow key={conversation.id}>
-              <TableCell>
-                <div>
-                  <p className="font-medium">{conversation.subject}</p>
-                  {conversation.last_message_preview && (
-                    <p className="line-clamp-1 text-xs text-muted-foreground">
-                      {conversation.last_message_preview}
-                    </p>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Badge variant={statusBadgeVariant(conversation.status)}>
-                  {conversation.status.replace(/_/g, " ")}
-                </Badge>
-              </TableCell>
-              <TableCell>{conversation.assigned_name ?? "-"}</TableCell>
-              <TableCell className="text-center">{conversation.message_count}</TableCell>
-              <TableCell>
-                {formatDate(conversation.last_message_at ?? conversation.updated_at)}
-              </TableCell>
-              <TableCell className="text-right">
-                <Link href={`/admin/support?conversation=${conversation.id}`}>
-                  <Button variant="outline" size="sm">
-                    View
-                  </Button>
-                </Link>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <BlockList
+        className="mt-2"
+        items={conversations}
+        itemKey={(conversation) => conversation.id}
+        density="ops"
+        ariaLabel="Support conversation history"
+        renderHeader={({ row: conversation }) => (
+          <div>
+            <p className="font-medium">{conversation.subject}</p>
+            {conversation.last_message_preview ? (
+              <p className="line-clamp-1 text-xs text-muted-foreground">
+                {conversation.last_message_preview}
+              </p>
+            ) : null}
+          </div>
+        )}
+        renderExceptionZone={({ row: conversation }) => (
+          <Badge variant={statusBadgeVariant(conversation.status)}>
+            {conversation.status.replace(/_/g, " ")}
+          </Badge>
+        )}
+        renderBody={({ row: conversation }) => (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <ClientDetailMetric label="Assigned" value={conversation.assigned_name ?? "-"} />
+            <ClientDetailMetric label="Messages" value={String(conversation.message_count)} />
+            <ClientDetailMetric
+              label="Last activity"
+              value={formatDate(conversation.last_message_at ?? conversation.updated_at)}
+            />
+          </div>
+        )}
+        renderActions={({ row: conversation }) => (
+          <Link href={`/admin/support?conversation=${conversation.id}`}>
+            <Button variant="outline" size="sm">
+              View
+            </Button>
+          </Link>
+        )}
+      />
     </div>
   );
 }
@@ -897,24 +874,20 @@ function SettingsTab({ orgId }: { orgId: string }) {
           {billingRules.length === 0 ? (
             <p className="text-sm text-muted-foreground">No active billing rules.</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rule</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {billingRules.map((r) => (
-                  <TableRow key={r.rule_name}>
-                    <TableCell className="font-medium">{r.rule_name}</TableCell>
-                    <TableCell>{r.rule_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(r.amount)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <BlockList
+              className="mt-2"
+              items={billingRules}
+              itemKey={(r) => r.rule_name}
+              density="ops"
+              ariaLabel="Effective billing rates"
+              renderHeader={({ row: r }) => <p className="font-medium">{r.rule_name}</p>}
+              renderBody={({ row: r }) => (
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <ClientDetailMetric label="Type" value={r.rule_type.replace(/_/g, " ")} />
+                  <ClientDetailMetric label="Amount" value={formatCurrency(r.amount)} />
+                </div>
+              )}
+            />
           )}
         </CardContent>
       </Card>
@@ -1218,48 +1191,49 @@ function ClientUsersCard({ orgId }: { orgId: string }) {
             <Loader2 className="h-4 w-4 animate-spin" /> Loading users...
           </div>
         ) : (users ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No portal users yet. Click &ldquo;Invite User&rdquo; to send a magic link.
-          </p>
+          <EmptyState
+            title="No portal users yet"
+            description='Click "Invite User" to send a magic link.'
+            compact
+          />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Email</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Joined</TableHead>
-                <TableHead className="w-16" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(users ?? []).map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-mono text-xs">{user.email ?? "—"}</TableCell>
-                  <TableCell>{user.name ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={user.role === "client_admin" ? "default" : "secondary"}>
-                      {user.role === "client_admin" ? "Admin" : "Client"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
-                    {new Date(user.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => removeMut.mutate(user.id)}
-                      disabled={removeMut.isPending}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <BlockList
+            className="mt-2"
+            items={users ?? []}
+            itemKey={(user) => user.id}
+            density="ops"
+            ariaLabel="Client portal users"
+            renderHeader={({ row: user }) => (
+              <div>
+                <p className="font-mono text-xs">{user.email ?? "—"}</p>
+                <p className="text-sm">{user.name ?? "—"}</p>
+              </div>
+            )}
+            renderExceptionZone={({ row: user }) => (
+              <Badge variant={user.role === "client_admin" ? "default" : "secondary"}>
+                {user.role === "client_admin" ? "Admin" : "Client"}
+              </Badge>
+            )}
+            renderBody={({ row: user }) => (
+              <div className="grid grid-cols-1 gap-3 text-sm">
+                <ClientDetailMetric
+                  label="Joined"
+                  value={new Date(user.created_at).toLocaleDateString()}
+                />
+              </div>
+            )}
+            renderActions={({ row: user }) => (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => removeMut.mutate(user.id)}
+                disabled={removeMut.isPending}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+          />
         )}
       </CardContent>
     </Card>

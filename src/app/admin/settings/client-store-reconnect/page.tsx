@@ -2,17 +2,11 @@
 
 import { CheckCircle2, Globe, Loader2, PlugZap, ShieldAlert, XCircle } from "lucide-react";
 import { getStoreConnections, reactivateClientStoreConnection } from "@/actions/store-connections";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -97,64 +91,58 @@ export default function ClientStoreReconnectPage() {
               <Loader2 className="h-4 w-4 animate-spin" /> Loading...
             </div>
           ) : dormantStoreConnections.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No dormant store connections.</p>
+            <EmptyState
+              title="No dormant store connections"
+              description="All supported client store connections are currently active."
+            />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Org</TableHead>
-                  <TableHead>Platform</TableHead>
-                  <TableHead>Store URL</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last error</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dormantStoreConnections.map((conn) => (
-                  <TableRow key={conn.id}>
-                    <TableCell className="font-medium">{conn.org_name}</TableCell>
-                    <TableCell className="capitalize">
-                      <span className="inline-flex items-center gap-1">
-                        <Globe className="h-3 w-3 text-muted-foreground" />
-                        {conn.platform}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-xs">
-                      {conn.store_url}
-                    </TableCell>
-                    <TableCell>
-                      <ConnectionDormancyBadge
-                        doNotFanout={conn.do_not_fanout}
-                        status={conn.connection_status}
-                      />
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-xs">
-                      {conn.last_error ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        disabled={reactivateMut.isPending && reactivateMut.variables === conn.id}
-                        onClick={() => reactivateMut.mutate(conn.id)}
-                      >
-                        {reactivateMut.isPending && reactivateMut.variables === conn.id ? (
-                          <>
-                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                            Reactivating...
-                          </>
-                        ) : (
-                          <>
-                            <PlugZap className="h-3 w-3 mr-1" />
-                            Reactivate
-                          </>
-                        )}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <BlockList
+              className="mt-3"
+              items={dormantStoreConnections}
+              itemKey={(conn) => conn.id}
+              density="ops"
+              ariaLabel="Dormant store connections"
+              renderHeader={({ row }) => (
+                <div className="min-w-0">
+                  <p className="font-medium">{row.org_name}</p>
+                  <p className="text-xs text-muted-foreground inline-flex items-center gap-1 capitalize">
+                    <Globe className="h-3 w-3" />
+                    {row.platform}
+                  </p>
+                </div>
+              )}
+              renderExceptionZone={({ row }) => (
+                <ConnectionDormancyBadge
+                  doNotFanout={row.do_not_fanout}
+                  status={row.connection_status}
+                />
+              )}
+              renderBody={({ row }) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <ReconnectMetric label="Store URL" value={row.store_url} mono />
+                  <ReconnectMetric label="Last error" value={row.last_error ?? "—"} />
+                </div>
+              )}
+              renderActions={({ row }) => (
+                <Button
+                  size="sm"
+                  disabled={reactivateMut.isPending && reactivateMut.variables === row.id}
+                  onClick={() => reactivateMut.mutate(row.id)}
+                >
+                  {reactivateMut.isPending && reactivateMut.variables === row.id ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Reactivating...
+                    </>
+                  ) : (
+                    <>
+                      <PlugZap className="h-3 w-3 mr-1" />
+                      Reactivate
+                    </>
+                  )}
+                </Button>
+              )}
+            />
           )}
         </CardContent>
       </Card>
@@ -186,6 +174,23 @@ export default function ClientStoreReconnectPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function ReconnectMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "text-sm font-mono truncate" : "text-sm truncate"}>{value}</p>
     </div>
   );
 }

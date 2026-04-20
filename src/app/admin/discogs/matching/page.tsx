@@ -3,18 +3,11 @@
 import { Check, Link2, Search, X } from "lucide-react";
 import { useState } from "react";
 import { confirmMapping, getProductMappings, rejectMapping } from "@/actions/discogs-admin";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -76,108 +69,103 @@ export default function DiscogsMatchingPage() {
         </select>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Product / SKU</TableHead>
-              <TableHead>Discogs Release</TableHead>
-              <TableHead>Match Method</TableHead>
-              <TableHead>Confidence</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.mappings ?? []).map((m: MappingRow) => {
-              const variant = m.warehouse_product_variants as unknown as {
-                sku: string;
-                title: string | null;
-              } | null;
-              return (
-                <TableRow key={m.id}>
-                  <TableCell>
-                    <span className="font-mono text-sm">{variant?.sku ?? "—"}</span>
-                    {variant?.title && (
-                      <p className="text-xs text-muted-foreground mt-0.5">{variant.title}</p>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <a
-                      href={
-                        m.discogs_release_url ??
-                        `https://www.discogs.com/release/${m.discogs_release_id}`
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm font-mono text-blue-600 hover:underline flex items-center gap-1"
-                    >
-                      #{m.discogs_release_id}
-                      <Link2 className="h-3 w-3" />
-                    </a>
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                        MATCH_METHOD_COLORS[m.match_method] ?? "bg-gray-100"
-                      }`}
-                    >
-                      {m.match_method}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {m.match_confidence != null
-                      ? `${Math.round(Number(m.match_confidence) * 100)}%`
-                      : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={m.is_active ? "default" : "outline"}>
-                      {m.is_active ? "Active" : "Pending"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {!m.is_active && (
-                      <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-green-700 border-green-300"
-                          disabled={confirmMut.isPending}
-                          onClick={() => confirmMut.mutate(m.id)}
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-destructive border-destructive/30"
-                          disabled={rejectMut.isPending}
-                          onClick={() => rejectMut.mutate(m.id)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-            {(data?.mappings ?? []).length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                  No product mappings. Run discogs-catalog-match to discover matches.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      )}
+      <BlockList
+        className="mt-3"
+        items={(data?.mappings ?? []) as MappingRow[]}
+        itemKey={(m) => m.id}
+        loading={isLoading}
+        density="ops"
+        ariaLabel="Discogs product mappings"
+        renderHeader={({ row: m }) => {
+          const variant = m.warehouse_product_variants as unknown as {
+            sku: string;
+            title: string | null;
+          } | null;
+          return (
+            <div className="min-w-0">
+              <p className="font-mono text-sm">{variant?.sku ?? "—"}</p>
+              {variant?.title ? (
+                <p className="text-xs text-muted-foreground mt-0.5">{variant.title}</p>
+              ) : null}
+            </div>
+          );
+        }}
+        renderExceptionZone={({ row: m }) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                MATCH_METHOD_COLORS[m.match_method] ?? "bg-gray-100"
+              }`}
+            >
+              {m.match_method}
+            </span>
+            <Badge variant={m.is_active ? "default" : "outline"}>
+              {m.is_active ? "Active" : "Pending"}
+            </Badge>
+            <Badge variant="secondary">
+              {m.match_confidence != null
+                ? `${Math.round(Number(m.match_confidence) * 100)}%`
+                : "—"}
+            </Badge>
+          </div>
+        )}
+        renderBody={({ row: m }) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div className="rounded-md border bg-background/60 p-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Discogs release
+              </p>
+              <a
+                href={
+                  m.discogs_release_url ?? `https://www.discogs.com/release/${m.discogs_release_id}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-mono text-blue-600 hover:underline inline-flex items-center gap-1"
+              >
+                #{m.discogs_release_id}
+                <Link2 className="h-3 w-3" />
+              </a>
+            </div>
+            <div className="rounded-md border bg-background/60 p-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Mapping ID
+              </p>
+              <p className="text-sm font-mono">{m.id}</p>
+            </div>
+          </div>
+        )}
+        renderActions={({ row: m }) =>
+          !m.is_active ? (
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-green-700 border-green-300"
+                disabled={confirmMut.isPending}
+                onClick={() => confirmMut.mutate(m.id)}
+              >
+                <Check className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-destructive border-destructive/30"
+                disabled={rejectMut.isPending}
+                onClick={() => rejectMut.mutate(m.id)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : null
+        }
+        emptyState={
+          <EmptyState
+            title="No product mappings"
+            description="Run discogs-catalog-match to discover matches."
+          />
+        }
+      />
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide
 import Link from "next/link";
 import { useState } from "react";
 import { ignoreSkuConflict, listSkuConflicts, type SkuConflictRow } from "@/actions/sku-conflicts";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,14 +16,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -159,69 +153,70 @@ export default function SkuConflictsPage() {
         </Card>
       ) : (
         <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[110px]">Severity</TableHead>
-                  <TableHead className="w-[160px]">Type</TableHead>
-                  <TableHead>SKUs across platforms</TableHead>
-                  <TableHead className="w-[200px]">Title</TableHead>
-                  <TableHead className="w-[100px]">Status</TableHead>
-                  <TableHead className="w-[80px] text-right">Count</TableHead>
-                  <TableHead className="w-[180px] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {conflicts.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <Badge variant={SEVERITY_BADGE[row.severity] ?? "default"}>
-                        {row.severity}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{row.conflict_type}</TableCell>
-                    <TableCell className="text-xs">{formatPlatformsRow(row)}</TableCell>
-                    <TableCell
-                      className="truncate text-xs text-muted-foreground"
-                      title={row.example_product_title ?? ""}
+          <CardContent className="p-4">
+            <BlockList
+              items={conflicts}
+              itemKey={(row) => row.id}
+              density="ops"
+              ariaLabel="SKU conflict rows"
+              renderHeader={({ row }) => (
+                <div className="min-w-0 flex flex-wrap items-center gap-2">
+                  <Badge variant={SEVERITY_BADGE[row.severity] ?? "default"}>{row.severity}</Badge>
+                  <span className="font-mono text-xs">{row.conflict_type}</span>
+                </div>
+              )}
+              renderExceptionZone={({ row }) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={STATUS_BADGE[row.status] ?? "outline"}>{row.status}</Badge>
+                  <Badge variant="outline">Count: {row.occurrence_count ?? 1}</Badge>
+                </div>
+              )}
+              renderBody={({ row }) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <ConflictMetric label="SKUs across platforms" value={formatPlatformsRow(row)} />
+                  <ConflictMetric label="Title" value={row.example_product_title ?? "—"} />
+                </div>
+              )}
+              renderActions={({ row }) => (
+                <div className="flex gap-2">
+                  <Link
+                    href={`/admin/catalog/sku-conflicts/${row.id}`}
+                    className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[0.8rem] font-medium text-primary-foreground hover:bg-primary/80"
+                  >
+                    Review
+                  </Link>
+                  {row.status === "open" || row.status === "client_suggested" ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={ignoreMutation.isPending}
+                      onClick={() => ignoreMutation.mutate(row.id)}
                     >
-                      {row.example_product_title ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={STATUS_BADGE[row.status] ?? "outline"}>{row.status}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground">
-                      {row.occurrence_count ?? 1}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Link
-                          href={`/admin/catalog/sku-conflicts/${row.id}`}
-                          className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[0.8rem] font-medium text-primary-foreground hover:bg-primary/80"
-                        >
-                          Review
-                        </Link>
-                        {row.status === "open" || row.status === "client_suggested" ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={ignoreMutation.isPending}
-                            onClick={() => ignoreMutation.mutate(row.id)}
-                          >
-                            <XCircle className="mr-1 h-3 w-3" />
-                            Ignore
-                          </Button>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                      <XCircle className="mr-1 h-3 w-3" />
+                      Ignore
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+              emptyState={
+                <EmptyState
+                  title="No SKU conflicts found"
+                  description="The audit task runs daily at 02:00 UTC."
+                />
+              }
+            />
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function ConflictMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm break-words">{value}</p>
     </div>
   );
 }

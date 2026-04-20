@@ -35,6 +35,7 @@ import {
   submitManualInventoryCounts,
 } from "@/actions/manual-inventory-count";
 import { getOrganizations } from "@/actions/organizations";
+import { BlockList } from "@/components/shared/block-list";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,14 +57,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
@@ -335,81 +328,101 @@ function CountTable({
     );
   }
   return (
-    <div className="overflow-x-auto">
-      <Table className="min-w-[700px]">
-        <TableHeader>
-          <TableRow>
-            <TableHead>SKU</TableHead>
-            <TableHead>Product</TableHead>
-            <TableHead className="hidden md:table-cell">Format</TableHead>
-            <TableHead className="text-right">Current</TableHead>
-            <TableHead className="text-right w-32">New count</TableHead>
-            <TableHead className="text-right w-24">Δ</TableHead>
-            <TableHead className="w-32" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => {
-            const raw = dirty[row.sku] ?? "";
-            const parsed = raw === "" ? null : Number.parseInt(raw, 10);
-            const isValidNumber = parsed !== null && !Number.isNaN(parsed) && parsed >= 0;
-            const delta = isValidNumber ? (parsed as number) - row.currentAvailable : 0;
-            const willBeNegative = isValidNumber && (parsed as number) < 0;
-            const inProgress = row.countStatus === "count_in_progress";
+    <BlockList
+      className="mt-3"
+      items={rows}
+      itemKey={(row) => row.variantId}
+      density="ops"
+      ariaLabel="Manual inventory count rows"
+      renderHeader={({ row }) => (
+        <div className="min-w-0">
+          <p className="font-mono text-xs">{row.sku}</p>
+          <p className="text-sm">{row.productTitle}</p>
+          {row.variantTitle ? (
+            <p className="text-xs text-muted-foreground">{row.variantTitle}</p>
+          ) : null}
+        </div>
+      )}
+      renderExceptionZone={({ row }) => {
+        const raw = dirty[row.sku] ?? "";
+        const parsed = raw === "" ? null : Number.parseInt(raw, 10);
+        const isValidNumber = parsed !== null && !Number.isNaN(parsed) && parsed >= 0;
+        const delta = isValidNumber ? (parsed as number) - row.currentAvailable : 0;
+        const inProgress = row.countStatus === "count_in_progress";
+        const needsConfirm = isValidNumber && Math.abs(delta) > 10;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            {isValidNumber && delta !== 0 ? (
+              <Badge variant={delta > 0 ? "default" : "destructive"} className="font-mono text-xs">
+                {delta > 0 ? "+" : ""}
+                {delta}
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs">
+                No change
+              </Badge>
+            )}
+            {inProgress ? (
+              <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">
+                Count in progress
+              </Badge>
+            ) : needsConfirm ? (
+              <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">
+                Will confirm
+              </Badge>
+            ) : null}
+          </div>
+        );
+      }}
+      renderBody={({ row }) => {
+        const raw = dirty[row.sku] ?? "";
+        const parsed = raw === "" ? null : Number.parseInt(raw, 10);
+        const isValidNumber = parsed !== null && !Number.isNaN(parsed) && parsed >= 0;
+        const delta = isValidNumber ? (parsed as number) - row.currentAvailable : 0;
+        const inProgress = row.countStatus === "count_in_progress";
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+            <ManualCountMetric label="Format" value={row.formatName ?? "—"} />
+            <ManualCountMetric label="Current" value={String(row.currentAvailable)} mono />
+            <div className="rounded-md border bg-background/60 p-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">New count</p>
+              <Input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={raw}
+                onChange={(e) =>
+                  setDirty((d) => ({ ...d, [row.sku]: e.target.value.replace(/[^0-9]/g, "") }))
+                }
+                className="mt-1 h-8 w-full text-right font-mono"
+                placeholder={String(row.currentAvailable)}
+                disabled={disabled || inProgress}
+              />
+            </div>
+            <ManualCountMetric
+              label="Delta"
+              value={isValidNumber && delta !== 0 ? `${delta > 0 ? "+" : ""}${delta}` : "—"}
+              mono
+            />
+          </div>
+        );
+      }}
+    />
+  );
+}
 
-            return (
-              <TableRow key={row.variantId}>
-                <TableCell className="font-mono text-xs">{row.sku}</TableCell>
-                <TableCell>
-                  <div className="text-sm">{row.productTitle}</div>
-                  {row.variantTitle && (
-                    <div className="text-xs text-muted-foreground">{row.variantTitle}</div>
-                  )}
-                </TableCell>
-                <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
-                  {row.formatName ?? "—"}
-                </TableCell>
-                <TableCell className="text-right font-mono">{row.currentAvailable}</TableCell>
-                <TableCell className="text-right">
-                  <Input
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={raw}
-                    onChange={(e) =>
-                      setDirty((d) => ({ ...d, [row.sku]: e.target.value.replace(/[^0-9]/g, "") }))
-                    }
-                    className="h-8 w-24 ml-auto text-right font-mono"
-                    placeholder={String(row.currentAvailable)}
-                    disabled={disabled || inProgress}
-                  />
-                </TableCell>
-                <TableCell className="text-right">
-                  {isValidNumber && delta !== 0 ? (
-                    <Badge
-                      variant={delta > 0 ? "default" : "destructive"}
-                      className="font-mono text-xs"
-                    >
-                      {delta > 0 ? "+" : ""}
-                      {delta}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted-foreground text-xs">—</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {inProgress ? (
-                    <span className="text-xs text-amber-600">Count in progress</span>
-                  ) : willBeNegative ? (
-                    <span className="text-xs text-red-600">Will block</span>
-                  ) : isValidNumber && Math.abs(delta) > 10 ? (
-                    <span className="text-xs text-amber-600">Will confirm</span>
-                  ) : null}
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+function ManualCountMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "text-sm font-mono" : "text-sm"}>{value}</p>
     </div>
   );
 }

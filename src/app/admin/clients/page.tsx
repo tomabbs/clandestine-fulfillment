@@ -1,35 +1,17 @@
 "use client";
 
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Box,
-  Circle,
-  Loader2,
-  Plus,
-  Search,
-  Users,
-} from "lucide-react";
+import { AlertTriangle, Box, Circle, Loader2, Plus, Search, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { getUserContext } from "@/actions/auth";
-import type { ClientStats } from "@/actions/clients";
 import { createClient, getClientPresenceSummary, getClients } from "@/actions/clients";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { usePresenceTracking } from "@/lib/hooks/use-presence-tracking";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -126,24 +108,6 @@ export default function ClientsPage() {
     tier: CACHE_TIERS.REALTIME,
   });
 
-  function toggleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir("asc");
-    }
-  }
-
-  function SortIcon({ field }: { field: SortField }) {
-    if (sortField !== field) return <ArrowUpDown className="ml-1 h-3 w-3 inline opacity-40" />;
-    return sortDir === "asc" ? (
-      <ArrowUp className="ml-1 h-3 w-3 inline" />
-    ) : (
-      <ArrowDown className="ml-1 h-3 w-3 inline" />
-    );
-  }
-
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -209,80 +173,111 @@ export default function ClientsPage() {
         </Card>
       </div>
 
-      {/* Search */}
-      <div className="relative w-64">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by name..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-        />
+      {/* Search + Sort */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <select
+          value={sortField}
+          onChange={(e) => setSortField(e.target.value as SortField)}
+          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+        >
+          <option value="name">Sort: Client name</option>
+          <option value="productCount">Sort: Products</option>
+          <option value="variantCount">Sort: Variants</option>
+          <option value="shipmentsThisMonth">Sort: Shipments</option>
+          <option value="lastBillingTotal">Sort: Last billing</option>
+          <option value="stripeStatus">Sort: Stripe status</option>
+        </select>
+        <select
+          value={sortDir}
+          onChange={(e) => setSortDir(e.target.value as SortDir)}
+          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+        >
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
       </div>
 
-      {/* Table */}
+      {/* Client list */}
       {isLoading ? (
         <div className="flex justify-center py-8 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>
-                Client <SortIcon field="name" />
-              </TableHead>
-              <TableHead
-                className="text-right cursor-pointer select-none"
-                onClick={() => toggleSort("productCount")}
-              >
-                Products <SortIcon field="productCount" />
-              </TableHead>
-              <TableHead
-                className="text-right cursor-pointer select-none"
-                onClick={() => toggleSort("variantCount")}
-              >
-                Variants <SortIcon field="variantCount" />
-              </TableHead>
-              <TableHead
-                className="text-right cursor-pointer select-none"
-                onClick={() => toggleSort("shipmentsThisMonth")}
-              >
-                Shipments <SortIcon field="shipmentsThisMonth" />
-              </TableHead>
-              <TableHead
-                className="text-right cursor-pointer select-none"
-                onClick={() => toggleSort("lastBillingTotal")}
-              >
-                Last Billing <SortIcon field="lastBillingTotal" />
-              </TableHead>
-              <TableHead
-                className="cursor-pointer select-none"
-                onClick={() => toggleSort("stripeStatus")}
-              >
-                Stripe <SortIcon field="stripeStatus" />
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedClients.map((client) => (
-              <ClientRow
-                key={client.id}
-                client={client}
-                presence={presenceSummary?.byOrg[client.id]}
-                onClick={() => router.push(`/admin/clients/${client.id}`)}
+        <BlockList
+          className="mt-3"
+          items={sortedClients}
+          itemKey={(client) => client.id}
+          density="ops"
+          ariaLabel="Client list"
+          renderHeader={({ row: client }) => {
+            const presence = presenceSummary?.byOrg[client.id];
+            return (
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{client.name}</span>
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {client.slug}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
+                  <Circle
+                    className={`h-2.5 w-2.5 fill-current ${
+                      presence?.online ? "text-green-500" : "text-muted-foreground/60"
+                    }`}
+                  />
+                  {presence?.online
+                    ? `${presence.onlineCount} user${presence.onlineCount === 1 ? "" : "s"} online`
+                    : presence?.lastSeenAt
+                      ? `Last online ${formatTimeSince(new Date(presence.lastSeenAt))}`
+                      : "No recent activity"}
+                </div>
+              </div>
+            );
+          }}
+          renderExceptionZone={({ row: client }) =>
+            client.stripeStatus === "connected" ? (
+              <Badge variant="default">Stripe connected</Badge>
+            ) : (
+              <Badge variant="secondary">No Stripe connection</Badge>
+            )
+          }
+          renderBody={({ row: client }) => (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <ClientMetric label="Products" value={String(client.productCount)} mono />
+              <ClientMetric label="Variants" value={String(client.variantCount)} mono />
+              <ClientMetric
+                label="Shipments this month"
+                value={String(client.shipmentsThisMonth)}
+                mono
               />
-            ))}
-            {sortedClients.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                  <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  No clients found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              <ClientMetric
+                label="Last billing"
+                value={
+                  client.lastBillingTotal != null ? formatCurrency(client.lastBillingTotal) : "-"
+                }
+              />
+            </div>
+          )}
+          renderActions={({ row: client }) => (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.push(`/admin/clients/${client.id}`)}
+            >
+              Open
+            </Button>
+          )}
+          emptyState={<EmptyState icon={Users} title="No clients found" />}
+        />
       )}
 
       {/* Add Client Dialog */}
@@ -329,53 +324,20 @@ export default function ClientsPage() {
   );
 }
 
-function ClientRow({
-  client,
-  presence,
-  onClick,
+function ClientMetric({
+  label,
+  value,
+  mono = false,
 }: {
-  client: ClientStats;
-  presence?: { online: boolean; onlineCount: number; lastSeenAt: string | null };
-  onClick: () => void;
+  label: string;
+  value: string;
+  mono?: boolean;
 }) {
   return (
-    <TableRow className="cursor-pointer" onClick={onClick}>
-      <TableCell>
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{client.name}</span>
-            <Badge variant="outline" className="font-mono text-xs">
-              {client.slug}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Circle
-              className={`h-2.5 w-2.5 fill-current ${
-                presence?.online ? "text-green-500" : "text-muted-foreground/60"
-              }`}
-            />
-            {presence?.online
-              ? `${presence.onlineCount} user${presence.onlineCount === 1 ? "" : "s"} online`
-              : presence?.lastSeenAt
-                ? `Last online ${formatTimeSince(new Date(presence.lastSeenAt))}`
-                : "No recent activity"}
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="text-right">{client.productCount}</TableCell>
-      <TableCell className="text-right">{client.variantCount}</TableCell>
-      <TableCell className="text-right">{client.shipmentsThisMonth}</TableCell>
-      <TableCell className="text-right">
-        {client.lastBillingTotal != null ? formatCurrency(client.lastBillingTotal) : "-"}
-      </TableCell>
-      <TableCell>
-        {client.stripeStatus === "connected" ? (
-          <Badge variant="default">Connected</Badge>
-        ) : (
-          <Badge variant="secondary">No</Badge>
-        )}
-      </TableCell>
-    </TableRow>
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "text-sm font-mono" : "text-sm"}>{value}</p>
+    </div>
   );
 }
 

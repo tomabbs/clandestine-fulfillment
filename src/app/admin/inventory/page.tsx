@@ -324,6 +324,7 @@ export default function InventoryPage() {
             <div className="rounded-md border bg-background/60 p-2 space-y-1">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Available</p>
               <EditableNumberCell
+                as="div"
                 value={row.available}
                 prefix=""
                 placeholder="0"
@@ -369,6 +370,7 @@ export default function InventoryPage() {
                 Buffer
               </p>
               <EditableNumberCell
+                as="div"
                 value={row.safetyStock ?? 3}
                 prefix=""
                 placeholder="3"
@@ -385,6 +387,7 @@ export default function InventoryPage() {
             <div className="rounded-md border bg-background/60 p-2 space-y-1">
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Format</p>
               <EditableSelectCell
+                as="div"
                 value={row.formatName ?? ""}
                 options={FORMAT_OPTIONS}
                 className="text-sm"

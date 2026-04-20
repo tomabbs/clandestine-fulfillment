@@ -44,20 +44,64 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
 import { BC_GENRES } from "@/lib/shared/genre-taxonomy";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+import { cn } from "@/lib/utils";
+
+type BlockTableDivProps = React.HTMLAttributes<HTMLDivElement> & {
+  colSpan?: number;
+};
+
+function Table({ className, children, ...props }: BlockTableDivProps) {
+  return (
+    <div className={cn("min-w-0 space-y-2", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+function TableHeader(_props: BlockTableDivProps) {
+  return null;
+}
+
+function TableBody({ className, children, ...props }: BlockTableDivProps) {
+  return (
+    <div className={cn("space-y-2", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+function TableRow({ className, children, ...props }: BlockTableDivProps) {
+  return (
+    <div className={cn("rounded-lg border bg-card p-3 space-y-2 min-w-0", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+function TableHead({ className, children, ...props }: BlockTableDivProps) {
+  return (
+    <div
+      className={cn("text-xs uppercase tracking-wide text-muted-foreground", className)}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+function TableCell({ className, children, colSpan: _colSpan, ...props }: BlockTableDivProps) {
+  return (
+    <div className={cn("text-sm min-w-0 break-words", className)} {...props}>
+      {children}
+    </div>
+  );
+}
 
 function HealthBadge({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   if (!lastSyncedAt) {
@@ -378,7 +422,6 @@ function ScraperHealthTab({ workspaceId }: { workspaceId: string }) {
     rawApiData: 0,
     options: 0,
   };
-  const scraper = data.scraperCoverage ?? { artUrl: 0, about: 0, credits: 0, tracks: 0 };
   const sales = data.salesCoverage ?? { catalogNumber: 0, upc: 0 };
   const albumFmt = data.albumFormatCoverage ?? {
     total: 0,
@@ -909,11 +952,9 @@ function BackfillAuditCard({ workspaceId }: { workspaceId: string }) {
                     </TableCell>
                   </TableRow>
                   {isOpen && (
-                    <tr>
-                      <td colSpan={6} className="p-0">
-                        <MonthHeatmap monthGrid={acct.monthGrid} />
-                      </td>
-                    </tr>
+                    <div className="rounded-lg border bg-muted/10 p-0">
+                      <MonthHeatmap monthGrid={acct.monthGrid} />
+                    </div>
                   )}
                 </React.Fragment>
               );
@@ -944,59 +985,58 @@ function MonthHeatmap({
 
   return (
     <div className="p-3 overflow-x-auto">
-      <table className="w-full text-xs tabular-nums">
-        <thead>
-          <tr>
-            <th className="text-left font-medium text-muted-foreground w-[50px]">Year</th>
-            {MONTHS.map((m) => (
-              <th key={m} className="text-center font-medium text-muted-foreground w-[52px]">
-                {m}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {years.map((year) => (
-            <tr key={year}>
-              <td className="text-muted-foreground font-medium">{year}</td>
-              {Array.from({ length: 12 }, (_, i) => {
-                const cell = byYearMonth.get(`${year}-${i + 1}`);
-                if (!cell)
-                  return (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: month index in heatmap grid
-                    <td key={i} className="text-center">
-                      -
-                    </td>
-                  );
-
-                let bg = "bg-muted/30";
-                let text = "-";
-                if (cell.chunkStatus === "success" && cell.salesCount > 0) {
-                  bg = "bg-green-100 dark:bg-green-900/30";
-                  text = String(cell.salesCount);
-                } else if (cell.chunkStatus === "success" || cell.chunkStatus === "skipped") {
-                  bg = "bg-green-50 dark:bg-green-950/20";
-                  text = "0";
-                } else if (cell.chunkStatus === "failed") {
-                  bg = "bg-red-100 dark:bg-red-900/30";
-                  text = "!";
-                }
-
-                return (
-                  <td
-                    // biome-ignore lint/suspicious/noArrayIndexKey: month index in heatmap grid
-                    key={i}
-                    className={`text-center rounded px-1 py-0.5 ${bg}`}
-                    title={cell.error ?? undefined}
-                  >
-                    {text}
-                  </td>
-                );
-              })}
-            </tr>
+      <div className="w-full text-xs tabular-nums space-y-1">
+        <div className="grid gap-1 [grid-template-columns:50px_repeat(12,minmax(0,1fr))]">
+          <div className="text-left font-medium text-muted-foreground">Year</div>
+          {MONTHS.map((m) => (
+            <div key={m} className="text-center font-medium text-muted-foreground">
+              {m}
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+        {years.map((year) => (
+          <div
+            key={year}
+            className="grid gap-1 items-center [grid-template-columns:50px_repeat(12,minmax(0,1fr))]"
+          >
+            <div className="text-muted-foreground font-medium">{year}</div>
+            {Array.from({ length: 12 }, (_, i) => {
+              const cell = byYearMonth.get(`${year}-${i + 1}`);
+              if (!cell)
+                return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: month index in heatmap grid
+                  <div key={i} className="text-center">
+                    -
+                  </div>
+                );
+
+              let bg = "bg-muted/30";
+              let text = "-";
+              if (cell.chunkStatus === "success" && cell.salesCount > 0) {
+                bg = "bg-green-100 dark:bg-green-900/30";
+                text = String(cell.salesCount);
+              } else if (cell.chunkStatus === "success" || cell.chunkStatus === "skipped") {
+                bg = "bg-green-50 dark:bg-green-950/20";
+                text = "0";
+              } else if (cell.chunkStatus === "failed") {
+                bg = "bg-red-100 dark:bg-red-900/30";
+                text = "!";
+              }
+
+              return (
+                <div
+                  // biome-ignore lint/suspicious/noArrayIndexKey: month index in heatmap grid
+                  key={i}
+                  className={`text-center rounded px-1 py-0.5 ${bg}`}
+                  title={cell.error ?? undefined}
+                >
+                  {text}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
 
       {monthGrid.some((c) => c.chunkStatus === "failed") && (
         <div className="mt-2 space-y-1">

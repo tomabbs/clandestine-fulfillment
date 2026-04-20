@@ -39,6 +39,7 @@ interface EditableTextCellProps {
   onSave: (newValue: string) => Promise<void>;
   placeholder?: string;
   className?: string;
+  as?: "td" | "div";
 }
 
 export function EditableTextCell({
@@ -46,12 +47,14 @@ export function EditableTextCell({
   onSave,
   placeholder = "—",
   className = "",
+  as = "td",
 }: EditableTextCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState<FlashState>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const CellTag = as;
 
   const beginEdit = useCallback(() => {
     setDraft(value ?? "");
@@ -112,8 +115,7 @@ export function EditableTextCell({
 
   if (editing) {
     return (
-      // biome-ignore lint/a11y/useKeyWithClickEvents: input handles keyboard
-      <td className={`px-3 py-2 ${className}`} onClick={(e) => e.stopPropagation()}>
+      <CellTag className={`px-3 py-2 ${className}`} onClick={(e) => e.stopPropagation()}>
         <input
           ref={inputRef}
           type="text"
@@ -123,12 +125,12 @@ export function EditableTextCell({
           onKeyDown={onKeyDown}
           className="w-full px-2 py-1 text-sm border border-amber-400 rounded bg-background focus:outline-none focus:ring-2 focus:ring-amber-500"
         />
-      </td>
+      </CellTag>
     );
   }
 
   return (
-    <td
+    <CellTag
       className={`px-3 py-2 text-sm cursor-pointer group overflow-hidden transition-colors ${flashBg(flash)} ${className}`}
       onClick={startEdit}
       onKeyDown={cellKeyHandler(beginEdit)}
@@ -142,7 +144,7 @@ export function EditableTextCell({
         <span className="truncate">{value || placeholder}</span>
         <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
       </span>
-    </td>
+    </CellTag>
   );
 }
 
@@ -156,6 +158,7 @@ interface EditableNumberCellProps {
   className?: string;
   /** Decimal places for display. Default 2 (for prices). Use 0 for integer quantities. */
   precision?: number;
+  as?: "td" | "div";
 }
 
 export function EditableNumberCell({
@@ -165,12 +168,14 @@ export function EditableNumberCell({
   placeholder = "—",
   className = "",
   precision = 2,
+  as = "td",
 }: EditableNumberCellProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState<FlashState>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const CellTag = as;
 
   const beginEdit = useCallback(() => {
     setDraft(value != null ? String(value) : "");
@@ -235,8 +240,7 @@ export function EditableNumberCell({
 
   if (editing) {
     return (
-      // biome-ignore lint/a11y/useKeyWithClickEvents: input handles keyboard
-      <td className={`px-3 py-2 ${className}`} onClick={(e) => e.stopPropagation()}>
+      <CellTag className={`px-3 py-2 ${className}`} onClick={(e) => e.stopPropagation()}>
         <input
           ref={inputRef}
           type="number"
@@ -248,14 +252,14 @@ export function EditableNumberCell({
           onKeyDown={onKeyDown}
           className="w-20 px-2 py-1 text-sm border border-amber-400 rounded bg-background focus:outline-none focus:ring-2 focus:ring-amber-500"
         />
-      </td>
+      </CellTag>
     );
   }
 
   const display = value != null ? `${prefix}${value.toFixed(precision)}` : placeholder;
 
   return (
-    <td
+    <CellTag
       className={`px-3 py-2 text-sm text-right cursor-pointer group whitespace-nowrap transition-colors ${flashBg(flash)} ${className}`}
       onClick={startEdit}
       onKeyDown={cellKeyHandler(beginEdit)}
@@ -269,7 +273,7 @@ export function EditableNumberCell({
         <span className="text-muted-foreground">{display}</span>
         <Pencil className="h-3 w-3 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
       </span>
-    </td>
+    </CellTag>
   );
 }
 
@@ -280,6 +284,7 @@ interface EditableSelectCellProps {
   options: Array<{ value: string; label: string; className?: string }>;
   onSave: (newValue: string) => Promise<void>;
   className?: string;
+  as?: "td" | "div";
 }
 
 export function EditableSelectCell({
@@ -287,11 +292,13 @@ export function EditableSelectCell({
   options,
   onSave,
   className = "",
+  as = "td",
 }: EditableSelectCellProps) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState<FlashState>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
+  const CellTag = as;
 
   const beginEdit = useCallback(() => {
     setEditing(true);
@@ -335,8 +342,7 @@ export function EditableSelectCell({
 
   if (editing) {
     return (
-      // biome-ignore lint/a11y/useKeyWithClickEvents: select handles keyboard
-      <td className={`px-3 py-2 ${className}`} onClick={(e) => e.stopPropagation()}>
+      <CellTag className={`px-3 py-2 ${className}`} onClick={(e) => e.stopPropagation()}>
         <select
           ref={selectRef}
           value={value}
@@ -350,12 +356,12 @@ export function EditableSelectCell({
             </option>
           ))}
         </select>
-      </td>
+      </CellTag>
     );
   }
 
   return (
-    <td
+    <CellTag
       className={`px-3 py-2 text-sm cursor-pointer group whitespace-nowrap transition-colors ${flashBg(flash)} ${className}`}
       onClick={startEdit}
       onKeyDown={cellKeyHandler(beginEdit)}
@@ -369,6 +375,6 @@ export function EditableSelectCell({
         <span className={currentOption?.className}>{currentOption?.label ?? value}</span>
         <Pencil className="h-3 w-3 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
       </span>
-    </td>
+    </CellTag>
   );
 }

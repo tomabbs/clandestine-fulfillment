@@ -6,19 +6,12 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { getClientProductDetail, updateClientProduct } from "@/actions/catalog";
+import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -281,43 +274,43 @@ export default function PortalCatalogDetailPage() {
               Pricing and inventory are managed by Clandestine. Contact support to update these.
             </p>
           </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Format</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                  <TableHead className="text-right">Available</TableHead>
-                  <TableHead className="text-right">Committed</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {variants.map((v) => {
-                  const inv = v.warehouse_inventory_levels?.[0];
-                  return (
-                    <TableRow key={v.id}>
-                      <TableCell className="font-mono text-xs">{v.sku}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {v.format_name ?? v.title ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right text-sm">
-                        {v.price != null ? `$${v.price.toFixed(2)}` : "—"}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        {inv?.available ?? 0}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        {inv?.committed ?? 0}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+          <CardContent className="p-4">
+            <BlockList
+              items={variants}
+              itemKey={(v) => v.id}
+              density="ops"
+              ariaLabel="Product variants"
+              renderHeader={({ row: v }) => (
+                <div className="min-w-0">
+                  <p className="font-mono text-xs">{v.sku}</p>
+                  <p className="text-sm text-muted-foreground">{v.format_name ?? v.title ?? "—"}</p>
+                </div>
+              )}
+              renderExceptionZone={({ row: v }) => (
+                <Badge variant="outline">{v.price != null ? `$${v.price.toFixed(2)}` : "—"}</Badge>
+              )}
+              renderBody={({ row: v }) => {
+                const inv = v.warehouse_inventory_levels?.[0];
+                return (
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <VariantMetric label="Available" value={inv?.available ?? 0} />
+                    <VariantMetric label="Committed" value={inv?.committed ?? 0} />
+                  </div>
+                );
+              }}
+            />
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function VariantMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm font-mono">{value}</p>
     </div>
   );
 }

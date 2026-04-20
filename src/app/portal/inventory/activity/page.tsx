@@ -4,6 +4,10 @@ import { ArrowDown, ArrowUp, Download, Minus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { exportClientInventoryActivity, getClientInventoryActivity } from "@/actions/inventory";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageShell } from "@/components/shared/page-shell";
+import { PageToolbar } from "@/components/shared/page-toolbar";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -15,15 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -93,19 +88,14 @@ export default function InventoryActivityPage() {
   }
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inventory Activity Log</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Every inventory change for your catalog — orders, shipments, manual adjustments, and
-            inbound stock.
-          </p>
-        </div>
-        <div className="flex gap-2">
+    <PageShell
+      title="Inventory Activity Log"
+      description="Every inventory change for your catalog — orders, shipments, manual adjustments, and inbound stock."
+      actions={
+        <>
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
             <Download className="h-4 w-4 mr-1" />
-            {exporting ? "Exporting…" : "Export CSV"}
+            {exporting ? "Exporting..." : "Export CSV"}
           </Button>
           <Link
             href="/portal/inventory"
@@ -113,163 +103,167 @@ export default function InventoryActivityPage() {
           >
             ← Inventory
           </Link>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <Input
-          placeholder="Filter by SKU…"
-          value={filters.sku}
-          onChange={(e) => setFilters((f) => ({ ...f, sku: e.target.value, page: 1 }))}
-          className="w-52"
-        />
-        <Select
-          value={filters.source}
-          onValueChange={(v) =>
-            setFilters((f) => ({ ...f, source: !v || v === "__all__" ? "" : v, page: 1 }))
-          }
-        >
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="All sources" />
-          </SelectTrigger>
-          <SelectContent>
-            {SOURCE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value || "__all__"} value={opt.value || "__all__"}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={filters.dateRange}
-          onValueChange={(v) =>
-            setFilters((f) => ({ ...f, dateRange: v as typeof filters.dateRange, page: 1 }))
-          }
-        >
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DATE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {error && (
-        <p className="text-sm text-destructive">
-          {error instanceof Error ? error.message : "Failed to load activity."}
-        </p>
-      )}
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={`skel-act-${i.toString()}`} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : (
-        <>
-          {data && data.total > 0 && (
-            <PaginationBar
-              page={filters.page}
-              pageSize={filters.pageSize}
-              total={data.total}
-              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
-            />
-          )}
-
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-36">Date / Time</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead className="text-right w-20">Change</TableHead>
-                <TableHead className="text-right w-32 hidden md:table-cell">
-                  Before → After
-                </TableHead>
-                <TableHead>Cause</TableHead>
-                <TableHead className="hidden lg:table-cell">Reference</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data?.rows.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                    <div>{new Date(row.createdAt).toLocaleDateString()}</div>
-                    <div>
-                      {new Date(row.createdAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">{row.sku}</TableCell>
-                  <TableCell className="text-right">
-                    <span
-                      className={`inline-flex items-center gap-1 font-mono font-semibold ${
-                        row.delta > 0
-                          ? "text-green-600"
-                          : row.delta < 0
-                            ? "text-red-600"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {row.delta > 0 ? (
-                        <ArrowUp className="h-3 w-3" />
-                      ) : row.delta < 0 ? (
-                        <ArrowDown className="h-3 w-3" />
-                      ) : (
-                        <Minus className="h-3 w-3" />
-                      )}
-                      {row.delta > 0 ? `+${row.delta}` : row.delta}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right hidden md:table-cell">
-                    {row.previousQuantity != null && row.newQuantity != null ? (
-                      <span className="font-mono text-sm text-muted-foreground">
-                        {row.previousQuantity} → {row.newQuantity}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="text-xs font-normal">
-                      {row.sourceLabel}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
-                    {row.referenceId ?? "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {data?.rows.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-8 text-center text-muted-foreground text-sm">
-                    No activity found for the selected filters.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-
-          {data && data.total > 0 && (
-            <PaginationBar
-              page={filters.page}
-              pageSize={filters.pageSize}
-              total={data.total}
-              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
-            />
-          )}
         </>
+      }
+      toolbar={
+        <PageToolbar>
+          <Input
+            placeholder="Filter by SKU..."
+            value={filters.sku}
+            onChange={(e) => setFilters((f) => ({ ...f, sku: e.target.value, page: 1 }))}
+            className="w-52"
+          />
+          <Select
+            value={filters.source}
+            onValueChange={(v) =>
+              setFilters((f) => ({ ...f, source: !v || v === "__all__" ? "" : v, page: 1 }))
+            }
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All sources" />
+            </SelectTrigger>
+            <SelectContent>
+              {SOURCE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value || "__all__"} value={opt.value || "__all__"}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.dateRange}
+            onValueChange={(v) =>
+              setFilters((f) => ({ ...f, dateRange: v as typeof filters.dateRange, page: 1 }))
+            }
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </PageToolbar>
+      }
+    >
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
+
+      <BlockList
+        className="mt-3"
+        items={data?.rows ?? []}
+        totalCount={data?.total}
+        itemKey={(row) => row.id}
+        loading={isLoading}
+        density="ops"
+        ariaLabel="Inventory activity entries"
+        errorState={
+          error ? (
+            <p className="text-sm text-destructive">
+              {error instanceof Error ? error.message : "Failed to load activity."}
+            </p>
+          ) : undefined
+        }
+        renderHeader={({ row }) => (
+          <div className="min-w-0">
+            <p className="font-mono text-sm">{row.sku}</p>
+            <p className="text-xs text-muted-foreground">
+              {new Date(row.createdAt).toLocaleString()}
+            </p>
+          </div>
+        )}
+        renderExceptionZone={({ row }) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <DeltaBadge delta={row.delta} />
+            <Badge variant="secondary" className="text-xs font-normal">
+              {row.sourceLabel}
+            </Badge>
+          </div>
+        )}
+        renderBody={({ row }) => (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <ActivityMetric
+              label="Before -> After"
+              value={
+                row.previousQuantity != null && row.newQuantity != null
+                  ? `${row.previousQuantity} -> ${row.newQuantity}`
+                  : "—"
+              }
+              mono
+            />
+            <ActivityMetric label="Reference" value={row.referenceId ?? "—"} />
+            <ActivityMetric label="Entry ID" value={row.id} mono />
+          </div>
+        )}
+        emptyState={
+          <EmptyState
+            icon={Minus}
+            title="No activity found"
+            description="Try adjusting SKU, source, or date filters."
+          />
+        }
+      />
+
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
+      )}
+    </PageShell>
+  );
+}
+
+function DeltaBadge({ delta }: { delta: number }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-mono font-semibold ${
+        delta > 0
+          ? "text-green-600 border-green-200 bg-green-50"
+          : delta < 0
+            ? "text-red-600 border-red-200 bg-red-50"
+            : "text-muted-foreground border-border bg-muted/40"
+      }`}
+    >
+      {delta > 0 ? (
+        <ArrowUp className="h-3 w-3" />
+      ) : delta < 0 ? (
+        <ArrowDown className="h-3 w-3" />
+      ) : (
+        <Minus className="h-3 w-3" />
+      )}
+      {delta > 0 ? `+${delta}` : delta}
+    </span>
+  );
+}
+
+function ActivityMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "text-sm font-mono" : "text-sm"}>{value}</p>
     </div>
   );
 }
