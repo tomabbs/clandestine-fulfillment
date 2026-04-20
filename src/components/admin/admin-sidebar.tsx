@@ -226,7 +226,10 @@ function ThemeToggle() {
   ];
 
   return (
-    <div className="flex items-center justify-center gap-1 px-3 py-2">
+    // Horizontal row of 3 buttons when sidebar is expanded; stacks
+    // vertically (column) when sidebar is collapsed to icon mode so the
+    // 3 buttons don't spill outside the narrow icon-only width.
+    <div className="flex items-center justify-center gap-1 px-3 py-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:gap-0.5">
       {options.map((opt) => (
         <button
           key={opt.value}
