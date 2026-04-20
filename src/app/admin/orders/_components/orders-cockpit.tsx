@@ -47,7 +47,16 @@ import {
   User,
   UserPlus,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import {
+  assignOrders,
+  bulkAddOrdersTag,
+  bulkRemoveOrdersTag,
+  bulkSetOrdersHoldUntil,
+  getCockpitFeatureFlags,
+  listAssignableStaff,
+} from "@/actions/bulk-orders";
 import {
   assignOrgToShipStationOrder,
   type CockpitFilters,
@@ -66,18 +75,8 @@ import {
   updateShipStationOrderShipTo,
   verifyShipStationOrderAddress,
 } from "@/actions/shipstation-orders";
-import {
-  assignOrders,
-  bulkAddOrdersTag,
-  bulkRemoveOrdersTag,
-  bulkSetOrdersHoldUntil,
-  getCockpitFeatureFlags,
-  listAssignableStaff,
-} from "@/actions/bulk-orders";
-import { BulkBuyLabelsModal } from "./bulk-buy-labels-modal";
-import { ScanToVerifyModal } from "./scan-to-verify-modal";
-import { CreateLabelPanel } from "@/components/shipping/create-label-panel";
 import { PaginationBar } from "@/components/shared/pagination-bar";
+import { CreateLabelPanel } from "@/components/shipping/create-label-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,7 +87,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -97,6 +95,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import {
@@ -104,9 +103,11 @@ import {
   buildShipStationOrderPageUrl,
 } from "@/lib/shared/carrier-tracking-urls";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+import { BulkBuyLabelsModal } from "./bulk-buy-labels-modal";
 import { CockpitEditTagsModal } from "./cockpit-edit-tags-modal";
 import { CockpitSavedViews } from "./cockpit-saved-views";
 import { CockpitStatusSidebar } from "./cockpit-status-sidebar";
+import { ScanToVerifyModal } from "./scan-to-verify-modal";
 
 const STATUS_COLORS: Record<string, string> = {
   awaiting_shipment: "bg-yellow-100 text-yellow-800",
@@ -126,7 +127,16 @@ const STATUS_OPTIONS = [
 ];
 
 // Phase 8.4 — columns the user can show/hide. "core" columns are always on.
-type ColumnKey = "client" | "customer" | "ship_to" | "items" | "status" | "amount" | "order_date" | "tags" | "tracking";
+type ColumnKey =
+  | "client"
+  | "customer"
+  | "ship_to"
+  | "items"
+  | "status"
+  | "amount"
+  | "order_date"
+  | "tags"
+  | "tracking";
 const ALL_OPTIONAL_COLUMNS: Array<{ key: ColumnKey; label: string }> = [
   { key: "client", label: "Client" },
   { key: "customer", label: "Customer" },
@@ -178,16 +188,91 @@ const DEFAULT_STATE: CockpitState = {
   tagIds: [],
 };
 
+const URL_OVERRIDE_KEYS = [
+  "tab",
+  "status",
+  "search",
+  "sort",
+  "orgId",
+  "storeId",
+  "page",
+  "pageSize",
+  "tagIds",
+  "assignedUserId",
+] as const;
+
+const TAB_VALUES: CockpitTab[] = ["all", "preorder", "preorder_ready", "needs_assignment"];
+const SORT_VALUES: CockpitSort[] = ["client_then_date", "date", "order_number", "release_date"];
+
+function parseInteger(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+function parseUrlState(searchParams: URLSearchParams): Partial<CockpitState> {
+  const parsed: Partial<CockpitState> = {};
+  const tab = searchParams.get("tab");
+  if (tab && TAB_VALUES.includes(tab as CockpitTab)) {
+    parsed.tab = tab as CockpitTab;
+  }
+  const status = searchParams.get("status");
+  if (status) parsed.orderStatus = status;
+  const search = searchParams.get("search");
+  if (search !== null) parsed.search = search;
+  const sort = searchParams.get("sort");
+  if (sort && SORT_VALUES.includes(sort as CockpitSort)) {
+    parsed.sort = sort as CockpitSort;
+  }
+  const orgId = searchParams.get("orgId");
+  if (orgId !== null) parsed.orgId = orgId;
+  const page = parseInteger(searchParams.get("page"));
+  if (page) parsed.page = page;
+  const pageSize = parseInteger(searchParams.get("pageSize"));
+  if (pageSize) parsed.pageSize = pageSize;
+  const storeId = parseInteger(searchParams.get("storeId"));
+  if (storeId) parsed.storeId = storeId;
+  const assignedUserId = searchParams.get("assignedUserId");
+  if (assignedUserId) parsed.assignedUserId = assignedUserId;
+  const tagIds = searchParams
+    .get("tagIds")
+    ?.split(",")
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((num) => Number.isInteger(num) && num > 0);
+  if (tagIds && tagIds.length > 0) parsed.tagIds = tagIds;
+  return parsed;
+}
+
 function formatShipTo(shipTo: Record<string, unknown> | null): string {
   if (!shipTo) return "—";
-  const parts = [shipTo.name, shipTo.city, shipTo.state, shipTo.country]
-    .filter((v): v is string => typeof v === "string" && v.length > 0);
+  const parts = [shipTo.name, shipTo.city, shipTo.state, shipTo.country].filter(
+    (v): v is string => typeof v === "string" && v.length > 0,
+  );
   return parts.join(", ") || "—";
 }
 
 export function OrdersCockpit() {
+  const searchParams = useSearchParams();
   const [state, setState] = useState<CockpitState>(DEFAULT_STATE);
   useListPaginationPreference("admin/orders", state, setState);
+  const [urlStateApplied, setUrlStateApplied] = useState(false);
+  const hasUrlOverrides = useMemo(
+    () => URL_OVERRIDE_KEYS.some((key) => searchParams.has(key)),
+    [searchParams],
+  );
+
+  useEffect(() => {
+    if (urlStateApplied) return;
+    if (!hasUrlOverrides) {
+      setUrlStateApplied(true);
+      return;
+    }
+    const parsed = parseUrlState(searchParams);
+    setState((prev) => ({ ...prev, ...parsed }));
+    setUrlStateApplied(true);
+  }, [hasUrlOverrides, searchParams, urlStateApplied]);
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // (Sidebar default is now collapsed-to-icon globally per app-wide
@@ -275,8 +360,12 @@ export function OrdersCockpit() {
 
   const orders = data?.orders ?? [];
   const total = data?.total ?? 0;
-  const tabCounts =
-    data?.tabCounts ?? { all: 0, preorder: 0, preorder_ready: 0, needs_assignment: 0 };
+  const tabCounts = data?.tabCounts ?? {
+    all: 0,
+    preorder: 0,
+    preorder_ready: 0,
+    needs_assignment: 0,
+  };
 
   function patchState(patch: Partial<CockpitState>) {
     setState((s) => ({ ...s, ...patch }));
@@ -341,6 +430,7 @@ export function OrdersCockpit() {
           <div className="flex items-center gap-2 flex-wrap">
             <CockpitSavedViews
               currentViewState={state as unknown as Record<string, unknown>}
+              skipDefaultLoad={hasUrlOverrides}
               onLoadView={(loaded) => {
                 setState((s) => ({ ...s, ...(loaded as Partial<CockpitState>) }));
               }}
@@ -374,17 +464,28 @@ export function OrdersCockpit() {
         <Tabs value={state.tab} onValueChange={(v) => v && setTab(v as CockpitTab)}>
           <TabsList>
             <TabsTrigger value="all">
-              All <Badge variant="outline" className="ml-2">{tabCounts.all}</Badge>
+              All{" "}
+              <Badge variant="outline" className="ml-2">
+                {tabCounts.all}
+              </Badge>
             </TabsTrigger>
             <TabsTrigger value="preorder">
-              Preorders <Badge variant="outline" className="ml-2">{tabCounts.preorder}</Badge>
+              Preorders{" "}
+              <Badge variant="outline" className="ml-2">
+                {tabCounts.preorder}
+              </Badge>
             </TabsTrigger>
             <TabsTrigger value="preorder_ready">
-              Ready to Ship <Badge variant="outline" className="ml-2">{tabCounts.preorder_ready}</Badge>
+              Ready to Ship{" "}
+              <Badge variant="outline" className="ml-2">
+                {tabCounts.preorder_ready}
+              </Badge>
             </TabsTrigger>
             <TabsTrigger value="needs_assignment">
               Needs Assignment{" "}
-              <Badge variant="outline" className="ml-2">{tabCounts.needs_assignment}</Badge>
+              <Badge variant="outline" className="ml-2">
+                {tabCounts.needs_assignment}
+              </Badge>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -570,10 +671,7 @@ export function OrdersCockpit() {
                     <input
                       type="checkbox"
                       aria-label="Select all visible orders on this page"
-                      checked={
-                        orders.length > 0 &&
-                        orders.every((o) => selectedIds.has(o.id))
-                      }
+                      checked={orders.length > 0 && orders.every((o) => selectedIds.has(o.id))}
                       onChange={(e) => {
                         if (e.target.checked) selectVisible(orders.map((o) => o.id));
                         else clearSelection();
@@ -589,7 +687,9 @@ export function OrdersCockpit() {
                   {state.columnPrefs.status && <TableHead>Status</TableHead>}
                   {state.columnPrefs.amount && <TableHead className="text-right">Amount</TableHead>}
                   {state.columnPrefs.order_date && <TableHead>Order Date</TableHead>}
-                  {state.columnPrefs.tracking && <TableHead className="text-right">Tracking</TableHead>}
+                  {state.columnPrefs.tracking && (
+                    <TableHead className="text-right">Tracking</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -691,9 +791,7 @@ function GroupRows({
           key={o.id}
           order={o}
           isExpanded={rest.expandedId === o.id}
-          onToggle={() =>
-            rest.setExpandedId(rest.expandedId === o.id ? null : o.id)
-          }
+          onToggle={() => rest.setExpandedId(rest.expandedId === o.id ? null : o.id)}
           tagDefById={rest.tagDefById}
           columnPrefs={rest.columnPrefs}
           onToggleTagFilter={rest.onToggleTagFilter}
@@ -753,9 +851,7 @@ function CockpitRow({
               variant="outline"
               className="ml-2 bg-amber-50 text-amber-800 border-amber-200"
               title={
-                order.preorder_release_date
-                  ? `Releases ${order.preorder_release_date}`
-                  : undefined
+                order.preorder_release_date ? `Releases ${order.preorder_release_date}` : undefined
               }
             >
               preorder
@@ -771,9 +867,7 @@ function CockpitRow({
               variant="outline"
               className="ml-2 bg-emerald-50 text-emerald-800 border-emerald-200"
               title={
-                order.preorder_release_date
-                  ? `Releases ${order.preorder_release_date}`
-                  : undefined
+                order.preorder_release_date ? `Releases ${order.preorder_release_date}` : undefined
               }
             >
               ready
@@ -802,7 +896,7 @@ function CockpitRow({
                 <UserPlus className="h-3.5 w-3.5" /> Needs assignment
               </span>
             ) : (
-              order.org_name ?? "—"
+              (order.org_name ?? "—")
             )}
           </TableCell>
         )}
@@ -1006,20 +1100,13 @@ function CockpitDrawer({
 
 // ─── Drawer sub-panels ──────────────────────────────────────────────────────
 
-function ShipToWithVerify({
-  order,
-  onRefetch,
-}: {
-  order: CockpitOrder;
-  onRefetch: () => void;
-}) {
+function ShipToWithVerify({ order, onRefetch }: { order: CockpitOrder; onRefetch: () => void }) {
   const [showFix, setShowFix] = useState(false);
 
   // Phase 8.7 — verify on demand. We don't auto-run on every drawer open
   // because EP costs apply per address verification (small, but real).
   const verifyMut = useAppMutation({
-    mutationFn: () =>
-      verifyShipStationOrderAddress({ shipstationOrderUuid: order.id }),
+    mutationFn: () => verifyShipStationOrderAddress({ shipstationOrderUuid: order.id }),
   });
 
   return (
@@ -1125,7 +1212,8 @@ function FixAddressOverlay({
   onSaved: () => void;
 }) {
   const initial = (order.ship_to ?? {}) as Record<string, unknown>;
-  const init = (k: string): string => (typeof initial[k] === "string" ? (initial[k] as string) : "");
+  const init = (k: string): string =>
+    typeof initial[k] === "string" ? (initial[k] as string) : "";
   const [name, setName] = useState(init("name"));
   const [street1, setStreet1] = useState(init("street1"));
   const [street2, setStreet2] = useState(init("street2"));
@@ -1215,7 +1303,9 @@ function DisplayOnlyFieldsPanel({ order }: { order: CockpitOrder }) {
         Details
       </p>
       {visible.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">No additional fields from ShipStation.</p>
+        <p className="text-sm text-muted-foreground italic">
+          No additional fields from ShipStation.
+        </p>
       ) : (
         <dl className="text-sm space-y-0.5">
           {visible.map((f) => (
@@ -1254,18 +1344,14 @@ function ItemsPanel({ order }: { order: CockpitOrder }) {
           >
             <div className="min-w-0 flex-1 break-words">
               {item.sku && (
-                <span className="font-mono text-xs text-muted-foreground mr-1.5">
-                  {item.sku}
-                </span>
+                <span className="font-mono text-xs text-muted-foreground mr-1.5">{item.sku}</span>
               )}
               <span className="break-words">{item.name ?? "—"}</span>
             </div>
             <span className="font-mono text-xs shrink-0 text-right whitespace-nowrap">
               x{item.quantity}
               {item.unit_price != null && (
-                <span className="text-muted-foreground ml-1">
-                  · ${item.unit_price.toFixed(2)}
-                </span>
+                <span className="text-muted-foreground ml-1">· ${item.unit_price.toFixed(2)}</span>
               )}
             </span>
           </div>
@@ -1280,8 +1366,7 @@ function HoldUntilPanel({ order, onRefetch }: { order: CockpitOrder; onRefetch: 
     order.hold_until_date ?? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
   );
   const setMut = useAppMutation({
-    mutationFn: () =>
-      setOrderHoldUntil({ shipstationOrderUuid: order.id, holdUntilDate: date }),
+    mutationFn: () => setOrderHoldUntil({ shipstationOrderUuid: order.id, holdUntilDate: date }),
     onSuccess: () => onRefetch(),
   });
   const restoreMut = useAppMutation({
@@ -1300,7 +1385,12 @@ function HoldUntilPanel({ order, onRefetch }: { order: CockpitOrder; onRefetch: 
         onChange={(e) => setDate(e.target.value)}
         className="w-44 h-8"
       />
-      <Button size="sm" variant="outline" onClick={() => setMut.mutate()} disabled={setMut.isPending}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setMut.mutate()}
+        disabled={setMut.isPending}
+      >
         <Pause className="h-3.5 w-3.5 mr-1.5" />
         {order.hold_until_date ? "Update hold" : "Set hold"}
       </Button>
@@ -1370,9 +1460,7 @@ function NeedsAssignmentDropdown({
           disabled={!pickedOrgId || assignMut.isPending}
           onClick={() => assignMut.mutate()}
         >
-          {assignMut.isPending ? (
-            <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-          ) : null}
+          {assignMut.isPending ? <Loader2 className="h-3 w-3 mr-1.5 animate-spin" /> : null}
           Assign
         </Button>
       </div>
@@ -1501,9 +1589,8 @@ function BandcampReconcileBadge({ order }: { order: CockpitOrder }) {
       className={`rounded-md border px-3 py-2 text-xs flex items-center justify-between gap-2 ${style}`}
     >
       <span>
-        <strong>Bandcamp match:</strong>{" "}
-        {m.order_number ?? `BC-${m.bandcamp_payment_id}`} — confidence:{" "}
-        <strong>{m.confidence}</strong>{" "}
+        <strong>Bandcamp match:</strong> {m.order_number ?? `BC-${m.bandcamp_payment_id}`} —
+        confidence: <strong>{m.confidence}</strong>{" "}
         <span className="opacity-75">({m.matched_via})</span>
       </span>
     </div>
@@ -1550,9 +1637,7 @@ function BandcampDrawerEnrichment({ order }: { order: CockpitOrder }) {
       )}
       {(showTip || showPayment) && (
         <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
-          <div className="font-semibold uppercase tracking-wide opacity-75 mb-1">
-            Payment info
-          </div>
+          <div className="font-semibold uppercase tracking-wide opacity-75 mb-1">Payment info</div>
           <div className="grid grid-cols-2 gap-2">
             {e.payment_state && (
               <div>
@@ -1572,16 +1657,13 @@ function BandcampDrawerEnrichment({ order }: { order: CockpitOrder }) {
             )}
             {e.paypal_transaction_id && (
               <div className="font-mono text-[11px] truncate" title={e.paypal_transaction_id}>
-                <span className="opacity-75 not-italic">PayPal:</span>{" "}
-                {e.paypal_transaction_id}
+                <span className="opacity-75 not-italic">PayPal:</span> {e.paypal_transaction_id}
               </div>
             )}
             {showTip && (
               <div className="col-span-2">
                 <span className="opacity-75">Fan tip:</span>{" "}
-                <span className="font-medium">
-                  +${e.additional_fan_contribution!.toFixed(2)}
-                </span>
+                <span className="font-medium">+${e.additional_fan_contribution!.toFixed(2)}</span>
               </div>
             )}
           </div>
@@ -1701,9 +1783,7 @@ function DrawerBottomToolbar({
           onSuccess={() => onRefetchOrders()}
         />
       ) : (
-        <p className="text-xs text-amber-700">
-          Assign a client above before printing a label.
-        </p>
+        <p className="text-xs text-amber-700">Assign a client above before printing a label.</p>
       )}
     </div>
   );
@@ -1778,10 +1858,7 @@ function AssignToModal({
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          <Button
-            onClick={() => void apply(chosenUserId || null)}
-            disabled={submitting}
-          >
+          <Button onClick={() => void apply(chosenUserId || null)} disabled={submitting}>
             {submitting ? "Assigning…" : chosenUserId ? "Assign" : "Clear assignment"}
           </Button>
         </div>
@@ -1884,9 +1961,7 @@ function BulkTagModal({
               {submitting ? "Working…" : `${op === "add" ? "Add" : "Remove"} tag`}
             </Button>
           )}
-          {result && (
-            <Button onClick={onCompleted}>Refresh & close</Button>
-          )}
+          {result && <Button onClick={onCompleted}>Refresh & close</Button>}
         </div>
       </div>
     </div>
@@ -1940,9 +2015,7 @@ function BulkHoldModal({
             onChange={(e) => setDate(e.target.value)}
             className="w-full rounded border px-2 py-1.5 text-sm"
           />
-          <p className="text-xs text-amber-700">
-            ~{estSec}s wall-clock at the SS rate limit.
-          </p>
+          <p className="text-xs text-amber-700">~{estSec}s wall-clock at the SS rate limit.</p>
           {result && (
             <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
               Done — {result.ok} succeeded, {result.failed} failed.

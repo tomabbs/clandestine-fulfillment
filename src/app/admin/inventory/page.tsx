@@ -1,8 +1,8 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Download, ExternalLink, Minus, Package, Plus } from "lucide-react";
-import { useCallback, useState } from "react";
+import { ChevronsUpDown, Download, ExternalLink, Minus, Package, Plus } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import {
   adjustInventory,
   exportInventoryCsv,
@@ -17,20 +17,17 @@ import { getOrganizations } from "@/actions/organizations";
 //   Locations / Recent Activity 2-col grid). All five count Server Actions
 //   are wrapped inside the component; no plumbing needed at the page level.
 import { InventoryCountSessionPanel } from "@/components/admin/inventory-count-session-panel";
+import { BlockList } from "@/components/shared/block-list";
 import { EditableNumberCell, EditableSelectCell } from "@/components/shared/editable-cell";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageShell } from "@/components/shared/page-shell";
+import { PageToolbar } from "@/components/shared/page-toolbar";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
@@ -117,356 +114,362 @@ export default function InventoryPage() {
     },
   });
 
+  const rows = data?.rows ?? [];
+  const expandedKeys = useMemo(
+    () =>
+      expandedSku
+        ? (new Set<string | number>([expandedSku]) as Set<string | number>)
+        : (new Set<string | number>() as Set<string | number>),
+    [expandedSku],
+  );
+
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <Input
-          placeholder="Search SKU or title..."
-          value={filters.search}
-          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
-          className="w-64"
-        />
-        <select
-          value={filters.orgId}
-          onChange={(e) => setFilters((f) => ({ ...f, orgId: e.target.value, page: 1 }))}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm min-w-[180px]"
-        >
-          <option value="">All clients</option>
-          {(orgs ?? []).map((org) => (
-            <option key={org.id} value={org.id}>
-              {org.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filters.stockFilter}
-          onChange={(e) =>
-            setFilters((f) => ({
-              ...f,
-              stockFilter: e.target.value as "" | "in_stock" | "out_of_stock",
-              page: 1,
-            }))
-          }
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="">All stock levels</option>
-          <option value="in_stock">In stock</option>
-          <option value="out_of_stock">Out of stock</option>
-        </select>
-        <select
-          value={filters.format}
-          onChange={(e) => setFilters((f) => ({ ...f, format: e.target.value, page: 1 }))}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="">All formats</option>
-          {FORMAT_OPTIONS.filter((f) => f.value).map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filters.status}
-          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="">All statuses</option>
-          <option value="active">Active</option>
-          <option value="draft">Draft</option>
-          <option value="archived">Archived</option>
-        </select>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={exporting}
-          onClick={async () => {
-            setExporting(true);
-            try {
-              const csv = await exportInventoryCsv({
-                orgId: filters.orgId || undefined,
-                stockFilter: filters.stockFilter || undefined,
-                format: filters.format || undefined,
-                status: filters.status || undefined,
-                search: filters.search || undefined,
-              });
-              const blob = new Blob([csv], { type: "text/csv" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              const orgName = orgs?.find((o) => o.id === filters.orgId)?.name ?? "all-clients";
-              a.href = url;
-              a.download = `inventory-${orgName.replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().split("T")[0]}.csv`;
-              a.click();
-              URL.revokeObjectURL(url);
-            } finally {
-              setExporting(false);
+    <PageShell
+      title="Inventory"
+      maxWidth="full"
+      toolbar={
+        <PageToolbar>
+          <Input
+            placeholder="Search SKU or title..."
+            value={filters.search}
+            onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
+            className="w-64"
+          />
+          <select
+            value={filters.orgId}
+            onChange={(e) => setFilters((f) => ({ ...f, orgId: e.target.value, page: 1 }))}
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm min-w-[180px]"
+          >
+            <option value="">All clients</option>
+            {(orgs ?? []).map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.stockFilter}
+            onChange={(e) =>
+              setFilters((f) => ({
+                ...f,
+                stockFilter: e.target.value as "" | "in_stock" | "out_of_stock",
+                page: 1,
+              }))
             }
-          }}
-        >
-          <Download className="h-4 w-4 mr-1" />
-          {exporting ? "Exporting..." : "Export CSV"}
-        </Button>
-      </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={`skel-inv-${i.toString()}`} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : (
-        <>
-          {data && data.total > 0 && (
-            <PaginationBar
-              page={filters.page}
-              pageSize={filters.pageSize}
-              total={data.total}
-              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
-            />
-          )}
-          <div className="overflow-x-auto">
-            <Table className="min-w-[600px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12" />
-                  <TableHead>Product / SKU</TableHead>
-                  <TableHead className="hidden sm:table-cell">Label</TableHead>
-                  <TableHead className="text-right" title="Actual units in warehouse. Full truth.">
-                    Avail
-                  </TableHead>
-                  <TableHead
-                    className="hidden xl:table-cell text-right"
-                    title="Units shown on Bandcamp and connected stores. Reduced by the safety buffer."
-                  >
-                    Listed As
-                  </TableHead>
-                  <TableHead className="hidden md:table-cell text-right">Committed</TableHead>
-                  <TableHead className="hidden md:table-cell text-right">Incoming</TableHead>
-                  <TableHead
-                    className="hidden xl:table-cell text-right"
-                    title="Units held back from all sales channels. Default 3 covers Bandcamp's 5-min sync window."
-                  >
-                    Buffer
-                  </TableHead>
-                  <TableHead className="hidden lg:table-cell">Format</TableHead>
-                  <TableHead className="w-20" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data?.rows.map((row) => (
-                  <>
-                    <TableRow
-                      key={row.variantId}
-                      className="cursor-pointer"
-                      onClick={() => setExpandedSku((prev) => (prev === row.sku ? null : row.sku))}
-                    >
-                      <TableCell>
-                        {row.imageSrc ? (
-                          // biome-ignore lint/performance/noImgElement: external Shopify CDN URLs — next/image optimization not applicable
-                          <img
-                            src={row.imageSrc}
-                            alt={row.productTitle}
-                            className="h-8 w-8 rounded object-cover"
-                          />
-                        ) : (
-                          <div className="bg-muted flex h-8 w-8 items-center justify-center rounded">
-                            <Package className="text-muted-foreground h-4 w-4" />
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{row.productTitle}</div>
-                        <div className="text-muted-foreground text-xs">{row.sku}</div>
-                        {row.countStatus === "count_in_progress" ? (
-                          <div
-                            className="mt-1 inline-flex items-center gap-1.5 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200"
-                            title={
-                              row.countStartedAt
-                                ? `Count started ${new Date(row.countStartedAt).toLocaleString()}`
-                                : "Count in progress"
-                            }
-                          >
-                            <span
-                              aria-hidden
-                              className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500"
-                            />
-                            <span>Counting…</span>
-                            {row.countStartedAt ? (
-                              <span className="text-amber-700 dark:text-amber-300">
-                                · {formatRelativeTimeShort(row.countStartedAt)}
-                              </span>
-                            ) : null}
-                            {row.countStartedByName ? (
-                              <span className="text-amber-700 dark:text-amber-300">
-                                by {row.countStartedByName}
-                              </span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell text-muted-foreground text-sm">
-                        {row.orgName ?? "—"}
-                      </TableCell>
-                      <EditableNumberCell
-                        value={row.available}
-                        prefix=""
-                        placeholder="0"
-                        precision={0}
-                        className="text-right font-mono"
-                        onSave={async (newValue) => {
-                          const target = newValue ?? 0;
-                          const delta = target - row.available;
-                          if (delta === 0) return;
-                          await adjustInventory(row.sku, delta, "Inline quantity edit");
-                          invalidateInventory();
-                        }}
-                      />
-                      {/* Listed As = what channels actually see (buffered quantity) */}
-                      <TableCell className="hidden xl:table-cell text-right font-mono text-muted-foreground">
-                        {Math.max(
-                          0,
-                          row.available -
-                            ((row as { safetyStock?: number | null }).safetyStock ?? 3),
-                        )}
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell text-right font-mono">
-                        {row.committed}
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell text-right font-mono">
-                        {row.incoming}
-                      </TableCell>
-                      {/* Buffer — inline editable; null = uses workspace default (3) */}
-                      <EditableNumberCell
-                        value={(row as { safetyStock?: number | null }).safetyStock ?? 3}
-                        prefix=""
-                        placeholder="3"
-                        precision={0}
-                        className="hidden xl:table-cell text-right font-mono text-muted-foreground"
-                        onSave={async (newValue) => {
-                          const val = newValue ?? null;
-                          await updateInventoryBuffer(row.sku, val === 3 ? null : val);
-                          invalidateInventory();
-                        }}
-                      />
-                      <EditableSelectCell
-                        value={row.formatName ?? ""}
-                        options={FORMAT_OPTIONS}
-                        className="hidden lg:table-cell text-sm"
-                        onSave={async (newValue) => {
-                          await updateVariantFormat(row.variantId, newValue);
-                          invalidateInventory();
-                        }}
-                      />
-                      <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAdjustDialog({ sku: row.sku, title: row.productTitle });
-                          }}
-                        >
-                          Adjust
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-
-                    {/* Expanded detail */}
-                    {expandedSku === row.sku && (
-                      <TableRow key={`${row.variantId}-detail`}>
-                        <TableCell colSpan={10} className="bg-muted/30 p-4">
-                          {detailLoading ? (
-                            <Skeleton className="h-24 w-full" />
-                          ) : detail ? (
-                            <div className="grid grid-cols-2 gap-6">
-                              {/* WS3 3c — count session panel (full-width spans both columns) */}
-                              <InventoryCountSessionPanel sku={row.sku} />
-                              {/* Locations */}
-                              <div>
-                                <h4 className="mb-2 text-sm font-semibold">Locations</h4>
-                                {detail.locations.length === 0 ? (
-                                  <p className="text-muted-foreground text-sm">No location data</p>
-                                ) : (
-                                  <ul className="space-y-1 text-sm">
-                                    {detail.locations.map((loc) => (
-                                      <li key={loc.locationId} className="flex justify-between">
-                                        <span>
-                                          {loc.locationName}{" "}
-                                          <span className="text-muted-foreground">
-                                            ({loc.locationType})
-                                          </span>
-                                        </span>
-                                        <span className="font-mono">{loc.quantity}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                                {detail.bandcampUrl && (
-                                  <a
-                                    href={detail.bandcampUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
-                                  >
-                                    <ExternalLink className="h-3 w-3" />
-                                    Bandcamp
-                                  </a>
-                                )}
-                              </div>
-
-                              {/* Recent Activity */}
-                              <div>
-                                <h4 className="mb-2 text-sm font-semibold">Recent Activity</h4>
-                                {detail.recentActivity.length === 0 ? (
-                                  <p className="text-muted-foreground text-sm">No activity yet</p>
-                                ) : (
-                                  <ul className="space-y-1 text-sm">
-                                    {detail.recentActivity.slice(0, 10).map((a) => (
-                                      <li key={a.id} className="flex items-center justify-between">
-                                        <span className="flex items-center gap-1">
-                                          {a.delta > 0 ? (
-                                            <Plus className="h-3 w-3 text-green-600" />
-                                          ) : (
-                                            <Minus className="h-3 w-3 text-red-600" />
-                                          )}
-                                          <span className="font-mono">
-                                            {a.delta > 0 ? `+${a.delta}` : a.delta}
-                                          </span>
-                                          <span className="text-muted-foreground">{a.source}</span>
-                                        </span>
-                                        <span className="text-muted-foreground text-xs">
-                                          {new Date(a.createdAt).toLocaleDateString()}
-                                        </span>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </div>
-                            </div>
-                          ) : null}
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </>
-                ))}
-                {data?.rows.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={10} className="text-muted-foreground py-8 text-center">
-                      No inventory found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </>
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          >
+            <option value="">All stock levels</option>
+            <option value="in_stock">In stock</option>
+            <option value="out_of_stock">Out of stock</option>
+          </select>
+          <select
+            value={filters.format}
+            onChange={(e) => setFilters((f) => ({ ...f, format: e.target.value, page: 1 }))}
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          >
+            <option value="">All formats</option>
+            {FORMAT_OPTIONS.filter((f) => f.value).map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          >
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="draft">Draft</option>
+            <option value="archived">Archived</option>
+          </select>
+          <PageToolbar.Actions>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exporting}
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  const csv = await exportInventoryCsv({
+                    orgId: filters.orgId || undefined,
+                    stockFilter: filters.stockFilter || undefined,
+                    format: filters.format || undefined,
+                    status: filters.status || undefined,
+                    search: filters.search || undefined,
+                  });
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  const orgName = orgs?.find((o) => o.id === filters.orgId)?.name ?? "all-clients";
+                  a.href = url;
+                  a.download = `inventory-${orgName.replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().split("T")[0]}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } finally {
+                  setExporting(false);
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-1" />
+              {exporting ? "Exporting..." : "Export CSV"}
+            </Button>
+          </PageToolbar.Actions>
+        </PageToolbar>
+      }
+    >
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
       )}
 
-      {/* Pagination */}
+      <BlockList
+        items={rows}
+        totalCount={data?.total}
+        loading={isLoading}
+        density="ops"
+        itemKey={(row) => row.sku}
+        ariaLabel="Inventory list"
+        virtualizeThreshold={200}
+        virtualizationHeightClassName="max-h-[72vh]"
+        expandedKeys={expandedKeys}
+        onExpandedKeysChange={(keys) => {
+          const next = Array.from(keys)[0];
+          setExpandedSku(next ? String(next) : null);
+        }}
+        renderHeader={({ row, expanded, toggleExpanded }) => (
+          <div className="min-w-0 flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              {row.imageSrc ? (
+                // biome-ignore lint/performance/noImgElement: external Shopify CDN URLs — next/image optimization not applicable
+                <img
+                  src={row.imageSrc}
+                  alt={row.productTitle}
+                  className="h-10 w-10 rounded object-cover"
+                />
+              ) : (
+                <div className="bg-muted flex h-10 w-10 items-center justify-center rounded">
+                  <Package className="text-muted-foreground h-4 w-4" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="font-medium truncate">{row.productTitle}</p>
+                <p className="text-xs text-muted-foreground">{row.sku}</p>
+                {row.countStatus === "count_in_progress" && (
+                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Counting{" "}
+                    {row.countStartedAt ? `· ${formatRelativeTimeShort(row.countStartedAt)}` : ""}
+                    {row.countStartedByName ? ` by ${row.countStartedByName}` : ""}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setAdjustDialog({ sku: row.sku, title: row.productTitle });
+                }}
+              >
+                Adjust
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label={expanded ? "Collapse row details" : "Expand row details"}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleExpanded();
+                }}
+              >
+                <ChevronsUpDown className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+        renderExceptionZone={({ row }) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {row.available <= 0 ? (
+              <StatusBadge intent="danger">Out of stock</StatusBadge>
+            ) : (
+              <StatusBadge intent="success">In stock</StatusBadge>
+            )}
+            {row.countStatus === "count_in_progress" && (
+              <StatusBadge intent="warning">Count in progress</StatusBadge>
+            )}
+            {row.status !== "active" && <StatusBadge intent="neutral">{row.status}</StatusBadge>}
+          </div>
+        )}
+        renderBody={({ row }) => (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Client</p>
+              <p className="text-sm">{row.orgName ?? "—"}</p>
+            </div>
+
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Available</p>
+              <EditableNumberCell
+                value={row.available}
+                prefix=""
+                placeholder="0"
+                precision={0}
+                className="text-right font-mono"
+                onSave={async (newValue) => {
+                  const target = newValue ?? 0;
+                  const delta = target - row.available;
+                  if (delta === 0) return;
+                  await adjustInventory(row.sku, delta, "Inline quantity edit");
+                  invalidateInventory();
+                }}
+              />
+            </div>
+
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p
+                className="text-[11px] uppercase tracking-wide text-muted-foreground"
+                title="Units shown on channels after safety buffer."
+              >
+                Listed As
+              </p>
+              <p className="text-right font-mono text-sm">
+                {Math.max(0, row.available - (row.safetyStock ?? 3))}
+              </p>
+            </div>
+
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Committed</p>
+              <p className="text-right font-mono text-sm">{row.committed}</p>
+            </div>
+
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Incoming</p>
+              <p className="text-right font-mono text-sm">{row.incoming}</p>
+            </div>
+
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p
+                className="text-[11px] uppercase tracking-wide text-muted-foreground"
+                title="Units held back from channels."
+              >
+                Buffer
+              </p>
+              <EditableNumberCell
+                value={row.safetyStock ?? 3}
+                prefix=""
+                placeholder="3"
+                precision={0}
+                className="text-right font-mono"
+                onSave={async (newValue) => {
+                  const val = newValue ?? null;
+                  await updateInventoryBuffer(row.sku, val === 3 ? null : val);
+                  invalidateInventory();
+                }}
+              />
+            </div>
+
+            <div className="rounded-md border bg-background/60 p-2 space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Format</p>
+              <EditableSelectCell
+                value={row.formatName ?? ""}
+                options={FORMAT_OPTIONS}
+                className="text-sm"
+                onSave={async (newValue) => {
+                  await updateVariantFormat(row.variantId, newValue);
+                  invalidateInventory();
+                }}
+              />
+            </div>
+          </div>
+        )}
+        renderExpanded={({ row }) => (
+          <div className="rounded-md border bg-muted/30 p-4">
+            {detailLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : detail && expandedSku === row.sku ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <InventoryCountSessionPanel sku={row.sku} />
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold">Locations</h4>
+                  {detail.locations.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">No location data</p>
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {detail.locations.map((loc) => (
+                        <li key={loc.locationId} className="flex justify-between gap-2">
+                          <span className="min-w-0 break-words">
+                            {loc.locationName}{" "}
+                            <span className="text-muted-foreground">({loc.locationType})</span>
+                          </span>
+                          <span className="font-mono shrink-0">{loc.quantity}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {detail.bandcampUrl && (
+                    <a
+                      href={detail.bandcampUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Bandcamp
+                    </a>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold">Recent Activity</h4>
+                  {detail.recentActivity.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">No activity yet</p>
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {detail.recentActivity.slice(0, 10).map((a) => (
+                        <li key={a.id} className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1 min-w-0">
+                            {a.delta > 0 ? (
+                              <Plus className="h-3 w-3 text-green-600" />
+                            ) : (
+                              <Minus className="h-3 w-3 text-red-600" />
+                            )}
+                            <span className="font-mono shrink-0">
+                              {a.delta > 0 ? `+${a.delta}` : a.delta}
+                            </span>
+                            <span className="text-muted-foreground truncate">{a.source}</span>
+                          </span>
+                          <span className="text-muted-foreground text-xs shrink-0">
+                            {new Date(a.createdAt).toLocaleDateString()}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+        emptyState={
+          <EmptyState
+            title="No inventory found"
+            description="No products match the selected filters."
+          />
+        }
+      />
+
       {data && data.total > 0 && (
         <PaginationBar
           page={filters.page}
@@ -532,6 +535,6 @@ export default function InventoryPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

@@ -92,7 +92,7 @@ async function setSidebarState(page: Page, state: "collapsed" | "expanded") {
     {
       name: "sidebar:state",
       value: state === "expanded" ? "true" : "false",
-      domain: new URL(page.context().request.storageState ? "http://localhost:3000" : page.url()).hostname || "localhost",
+      domain: "localhost",
       path: "/",
     },
   ]);
@@ -135,45 +135,48 @@ async function checkOverflow(
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.waitForTimeout(150);
 
-    const measurement = await page.evaluate(({ tolerance }) => {
-      const docEl = document.documentElement;
-      const scrollWidth = docEl.scrollWidth;
-      const clientWidth = docEl.clientWidth;
-      const overflowPx = scrollWidth - clientWidth;
-      const offenders: Array<{ selector: string; width: number }> = [];
-      if (overflowPx > tolerance) {
-        const els = Array.from(document.querySelectorAll("*"));
-        for (const el of els) {
-          const r = el.getBoundingClientRect();
-          if (r.right > clientWidth + tolerance) {
-            // Skip elements clipped by an ancestor with overflow control.
-            let p: Element | null = el.parentElement;
-            let clipped = false;
-            while (p) {
-              const ox = getComputedStyle(p).overflowX;
-              if (ox === "hidden" || ox === "auto" || ox === "scroll" || ox === "clip") {
-                clipped = true;
-                break;
+    const measurement = await page.evaluate(
+      ({ tolerance }) => {
+        const docEl = document.documentElement;
+        const scrollWidth = docEl.scrollWidth;
+        const clientWidth = docEl.clientWidth;
+        const overflowPx = scrollWidth - clientWidth;
+        const offenders: Array<{ selector: string; width: number }> = [];
+        if (overflowPx > tolerance) {
+          const els = Array.from(document.querySelectorAll("*"));
+          for (const el of els) {
+            const r = el.getBoundingClientRect();
+            if (r.right > clientWidth + tolerance) {
+              // Skip elements clipped by an ancestor with overflow control.
+              let p: Element | null = el.parentElement;
+              let clipped = false;
+              while (p) {
+                const ox = getComputedStyle(p).overflowX;
+                if (ox === "hidden" || ox === "auto" || ox === "scroll" || ox === "clip") {
+                  clipped = true;
+                  break;
+                }
+                p = p.parentElement;
               }
-              p = p.parentElement;
-            }
-            if (!clipped) {
-              const tag = el.tagName.toLowerCase();
-              const cls =
-                el.className && typeof el.className === "string"
-                  ? `.${el.className.trim().split(/\s+/).slice(0, 3).join(".")}`
-                  : "";
-              offenders.push({
-                selector: `${tag}${cls}`.slice(0, 200),
-                width: Math.round(r.width),
-              });
-              if (offenders.length >= 5) break;
+              if (!clipped) {
+                const tag = el.tagName.toLowerCase();
+                const cls =
+                  el.className && typeof el.className === "string"
+                    ? `.${el.className.trim().split(/\s+/).slice(0, 3).join(".")}`
+                    : "";
+                offenders.push({
+                  selector: `${tag}${cls}`.slice(0, 200),
+                  width: Math.round(r.width),
+                });
+                if (offenders.length >= 5) break;
+              }
             }
           }
         }
-      }
-      return { scrollWidth, clientWidth, overflowPx, offenders };
-    }, { tolerance: OVERFLOW_TOLERANCE_PX });
+        return { scrollWidth, clientWidth, overflowPx, offenders };
+      },
+      { tolerance: OVERFLOW_TOLERANCE_PX },
+    );
     result.scrollWidth = measurement.scrollWidth;
     result.clientWidth = measurement.clientWidth;
     result.overflowPx = measurement.overflowPx;
