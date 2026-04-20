@@ -116,7 +116,7 @@ export default async function PublicTrackPage({ params }: PageProps) {
   // Look up the shipment by token. Token IS the auth — if a token doesn't
   // exist or hits a deleted shipment, 404. NEVER 500 (would leak existence
   // signal to enumerators).
-  const { data: rawShipment } = await supabase
+  const lookupResult = await supabase
     .from("warehouse_shipments")
     .select(
       `id, workspace_id, org_id, tracking_number, carrier, service, status,
@@ -125,6 +125,18 @@ export default async function PublicTrackPage({ params }: PageProps) {
     )
     .eq("public_track_token", params.token)
     .maybeSingle();
+  const { data: rawShipment, error: lookupErr } = lookupResult;
+  // TEMP — diagnostic to find out why prod returns 404 for valid tokens.
+  // Remove after verifying.
+  console.log(
+    "[track/page] lookup",
+    JSON.stringify({
+      token_prefix: params.token.slice(0, 6),
+      data_present: !!rawShipment,
+      error: lookupErr?.message ?? null,
+      url_env: process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 30),
+    }),
+  );
 
   if (!rawShipment) {
     // Sensor for enumeration tracking — single insert per failed lookup,

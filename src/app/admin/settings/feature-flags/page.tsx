@@ -9,18 +9,24 @@
 // Sensitive flags (cutover-related) are tagged with a CONFIRM dialog
 // pattern in the client component to prevent accidental clicks.
 
+import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { WorkspaceFlags } from "@/lib/server/workspace-flags";
 import { FeatureFlagsForm } from "./_feature-flags-form";
 
-export const dynamic = "force-dynamic";
-
 export default async function FeatureFlagsPage() {
-  // Call requireStaff directly here so the middleware-redirect path
-  // works for unauthenticated requests (server actions have different
-  // throw semantics from server-component data loads).
-  const { workspaceId } = await requireStaff();
+  // Wrap auth in try/catch — Next.js's force-dynamic + thrown async error
+  // path produces a raw 500 instead of routing to the nearest error.tsx
+  // boundary. Catching here lets us redirect to /login cleanly for the
+  // unauthenticated case.
+  let workspaceId: string;
+  try {
+    const ctx = await requireStaff();
+    workspaceId = ctx.workspaceId;
+  } catch {
+    redirect("/login");
+  }
   const supabase = createServiceRoleClient();
   const { data } = await supabase
     .from("workspaces")

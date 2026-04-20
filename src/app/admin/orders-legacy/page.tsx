@@ -11,12 +11,19 @@
 // workspaces.flags.staff_diagnostics. After cutover staff has to use the new
 // cockpit unless they flip staff_diagnostics for an explicit reason.
 
+import { redirect } from "next/navigation";
 import { requireStaff } from "@/lib/server/auth-context";
 import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { LegacyOrdersView } from "./_legacy-orders-view";
 
 export default async function AdminOrdersLegacyPage() {
-  const { workspaceId } = await requireStaff();
+  let workspaceId: string;
+  try {
+    const ctx = await requireStaff();
+    workspaceId = ctx.workspaceId;
+  } catch {
+    redirect("/login");
+  }
   const flags = await getWorkspaceFlags(workspaceId);
   const canPrintLegacyLabels =
     !flags.shipstation_unified_shipping || !!flags.staff_diagnostics;
