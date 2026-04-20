@@ -96,7 +96,7 @@ export function PortalSidebar() {
           width={32}
           height={32}
           priority
-          className="hidden h-7 w-7 mx-auto group-data-[collapsible=icon]:block"
+          className="hidden h-6 w-6 mx-auto group-data-[collapsible=icon]:block"
         />
       </SidebarHeader>
 

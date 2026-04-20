@@ -28,9 +28,9 @@ const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-// 3.5rem (56px) was 3rem — bumped to fit the 24px icons (50% bigger
-// than the previous 16px default) inside a 40px (size-10) icon button.
-const SIDEBAR_WIDTH_ICON = "3.5rem"
+// 3.25rem (52px) — sized to fit the 20px icons (size-5) inside a
+// 36px (size-9) collapsed button with ~8px breathing room each side.
+const SIDEBAR_WIDTH_ICON = "3.25rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -482,11 +482,14 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-          // [&_svg]:size-6 — nav icons are 24px (was 16px / size-4),
-          // 50% bigger per design preference. Collapsed button is
-          // size-10 (40px, was size-8 / 32px) so the bigger icons have
-          // ~8px breathing room on each side.
-          "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-6 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+          // Icon styling tuned for the bigger-but-not-too-big sidebar:
+          //   [&_svg]:size-5         → 20px icons (down from 24px / size-6,
+          //                            up from the original 16px / size-4)
+          //   [&_svg]:stroke-[1.5]   → thinner Lucide stroke (default is 2),
+          //                            keeps the bigger icons looking light
+          //   collapsed size-9!      → 36px button (down from size-10 / 40px),
+          //                            ~8px breathing room around 20px icon
+          "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:stroke-[1.5] [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
