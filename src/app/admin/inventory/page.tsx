@@ -230,6 +230,7 @@ export default function InventoryPage() {
       )}
 
       <BlockList
+        className="mt-3"
         items={rows}
         totalCount={data?.total}
         loading={isLoading}

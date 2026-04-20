@@ -156,6 +156,7 @@ export default function ReviewQueuePage() {
       )}
 
       <BlockList
+        className="mt-3"
         items={items}
         totalCount={data?.total}
         loading={isLoading}
