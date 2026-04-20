@@ -50,14 +50,17 @@ async function main() {
     }`,
   );
 
-  // Find shipments that are already marked-shipped on SS but have no
-  // notification_sends row for trigger_status='shipped'. Those are the
-  // candidates the recon cron WOULD retroactively email if we flip strategy.
+  // CRITICAL — this query MUST mirror send-tracking-email-recon.ts's WHERE
+  // clause exactly. The recon cron's scope is what determines who would get
+  // retroactively emailed; if we filter narrower here we leave a gap.
+  // Recon filter: updated_at>=now-7d, public_track_token NOT NULL,
+  //               tracking_number NOT NULL, suppress_emails=false.
   let q = supabase
     .from("warehouse_shipments")
     .select("id, workspace_id")
-    .not("shipstation_marked_shipped_at", "is", null)
-    .gte("shipstation_marked_shipped_at", sinceIso)
+    .gte("updated_at", sinceIso)
+    .not("public_track_token", "is", null)
+    .not("tracking_number", "is", null)
     .eq("suppress_emails", false);
   if (args.workspaceId) q = q.eq("workspace_id", args.workspaceId);
 
