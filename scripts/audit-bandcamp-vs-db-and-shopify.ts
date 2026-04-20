@@ -1,11 +1,7 @@
 import { config } from "dotenv";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  getMerchDetails,
-  getMyBands,
-  refreshBandcampToken,
-} from "@/lib/clients/bandcamp";
+import { getMerchDetails, refreshBandcampToken } from "@/lib/clients/bandcamp";
 import { shopifyGraphQL } from "@/lib/clients/shopify-client";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
@@ -144,13 +140,13 @@ async function fetchDbIndices() {
 
   const mappingByPackage = new Map<
     string,
-    { id: string; variant_id: string; bandcamp_item_id: number; bandcamp_option_id: number | null }
+    { id: string; variant_id: string; bandcamp_item_id: number }
   >();
   from = 0;
   while (true) {
     const { data, error } = await sb
       .from("bandcamp_product_mappings")
-      .select("id, workspace_id, variant_id, bandcamp_item_id, bandcamp_option_id")
+      .select("id, workspace_id, variant_id, bandcamp_item_id")
       .range(from, from + 999);
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -159,13 +155,11 @@ async function fetchDbIndices() {
       workspace_id: string;
       variant_id: string;
       bandcamp_item_id: number;
-      bandcamp_option_id: number | null;
     }>) {
       mappingByPackage.set(`${m.workspace_id}:${m.bandcamp_item_id}`, {
         id: m.id,
         variant_id: m.variant_id,
         bandcamp_item_id: m.bandcamp_item_id,
-        bandcamp_option_id: m.bandcamp_option_id,
       });
     }
     if (data.length < 1000) break;
@@ -224,47 +218,18 @@ async function pollBandcamp(connections: Connection[]): Promise<BandcampSku[]> {
       continue;
     }
 
-    let bands: Awaited<ReturnType<typeof getMyBands>>;
-    try {
-      bands = await getMyBands(token);
-    } catch (err) {
-      console.warn(`  [skip] getMyBands failed: ${err instanceof Error ? err.message : err}`);
-      continue;
-    }
-
-    const allBands = new Map<
-      number,
-      { band_id: number; name: string; subdomain: string; root_band_id: number; root_band_name: string }
-    >();
-    for (const b of bands) {
-      const root = { band_id: b.band_id, name: b.name, subdomain: b.subdomain ?? "" };
-      allBands.set(b.band_id, {
-        band_id: b.band_id,
-        name: b.name,
-        subdomain: b.subdomain ?? "",
-        root_band_id: b.band_id,
-        root_band_name: b.name,
-      });
-      for (const mb of b.member_bands ?? []) {
-        if (!allBands.has(mb.band_id)) {
-          allBands.set(mb.band_id, {
-            band_id: mb.band_id,
-            name: mb.name,
-            subdomain: mb.subdomain ?? "",
-            root_band_id: root.band_id,
-            root_band_name: root.name,
-          });
-        }
-      }
-    }
-
-    const connByBand = new Map<number, Connection>();
-    for (const c of conns) connByBand.set(c.band_id, c);
-
+    // Only poll the actual connection band_ids — only labels with credentials own merch APIs.
+    // Sub-artists/member_bands surface their releases under the parent label's catalog.
     let bIdx = 0;
-    for (const band of allBands.values()) {
+    for (const conn of conns) {
       bIdx += 1;
-      const conn = connByBand.get(band.root_band_id) ?? conns[0];
+      const band = {
+        band_id: conn.band_id,
+        name: conn.band_name ?? `band-${conn.band_id}`,
+        subdomain: "",
+        root_band_id: conn.band_id,
+        root_band_name: conn.band_name ?? "",
+      };
       try {
         const merch = await getMerchDetails(band.band_id, token);
         let pkgCount = 0;
@@ -326,11 +291,11 @@ async function pollBandcamp(connections: Connection[]): Promise<BandcampSku[]> {
           }
         }
         console.log(
-          `  [band ${bIdx}/${allBands.size}] ${band.name} (id=${band.band_id}) packages=${pkgCount} skus=${skuCount}`,
+          `  [conn ${bIdx}/${conns.length}] ${band.name} (id=${band.band_id}) packages=${pkgCount} skus=${skuCount}`,
         );
       } catch (err) {
         console.warn(
-          `  [band ${bIdx}/${allBands.size}] ${band.name} FAILED: ${err instanceof Error ? err.message : err}`,
+          `  [conn ${bIdx}/${conns.length}] ${band.name} FAILED: ${err instanceof Error ? err.message : err}`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
