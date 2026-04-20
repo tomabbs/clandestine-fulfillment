@@ -13,6 +13,7 @@ import {
   Clock,
   Pause,
   Truck,
+  User,
   UserPlus,
   X,
 } from "lucide-react";
@@ -66,9 +67,33 @@ export function CockpitStatusSidebar({ filters, onPatchFilters }: CockpitStatusS
 
   const activeStatus = filters.orderStatus ?? "awaiting_shipment";
   const activeOrg = filters.orgId ?? null;
+  const assignedToMe = filters.assignedUserId === "me";
 
   return (
     <aside className="w-60 shrink-0 border-r bg-muted/20 flex flex-col h-full overflow-hidden">
+      {/* Phase 9.3 — Assigned-to-me bucket */}
+      <div className="p-3 border-b">
+        <button
+          type="button"
+          onClick={() =>
+            onPatchFilters({
+              assignedUserId: assignedToMe ? undefined : "me",
+              page: 1,
+            })
+          }
+          className={`w-full flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors text-left ${
+            assignedToMe ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted"
+          }`}
+        >
+          <span className="inline-flex items-center gap-2">
+            <User className="h-3.5 w-3.5 opacity-70" />
+            Assigned to me
+          </span>
+          {assignedToMe && (
+            <X className="h-3 w-3 opacity-60" />
+          )}
+        </button>
+      </div>
       <div className="p-3 space-y-1 border-b">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground px-2">
           Status

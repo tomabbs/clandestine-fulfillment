@@ -39,6 +39,7 @@ import {
   Play,
   RefreshCw,
   RotateCw,
+  ScanLine,
   Search,
   Settings2,
   Tag as TagIcon,
@@ -64,6 +65,16 @@ import {
   updateShipStationOrderShipTo,
   verifyShipStationOrderAddress,
 } from "@/actions/shipstation-orders";
+import {
+  assignOrders,
+  bulkAddOrdersTag,
+  bulkRemoveOrdersTag,
+  bulkSetOrdersHoldUntil,
+  getCockpitFeatureFlags,
+  listAssignableStaff,
+} from "@/actions/bulk-orders";
+import { BulkBuyLabelsModal } from "./bulk-buy-labels-modal";
+import { ScanToVerifyModal } from "./scan-to-verify-modal";
 import { CreateLabelPanel } from "@/components/shipping/create-label-panel";
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
@@ -139,6 +150,8 @@ interface CockpitState {
   groupBy: "none" | "client";
   columnPrefs: Record<ColumnKey, boolean>;
   tagIds: number[];
+  /** Phase 9.3 — "me" or a specific staff user id; undefined for no filter. */
+  assignedUserId?: string | "me";
 }
 
 const DEFAULT_STATE: CockpitState = {
@@ -175,6 +188,43 @@ export function OrdersCockpit() {
   const [state, setState] = useState<CockpitState>(DEFAULT_STATE);
   useListPaginationPreference("admin/orders", state, setState);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Phase 9.1 — multi-select. Set persists across pagination so staff can
+  // assemble a 100-order batch from multiple pages. Reset on tab/filter
+  // change to avoid the "I just assigned a label to an order I forgot was
+  // selected on page 3" footgun.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Phase 9.1 — bulk-buy modal open state.
+  const [bulkBuyOpen, setBulkBuyOpen] = useState(false);
+  // Phase 9.3 — assign-to modal open state.
+  const [assignOpen, setAssignOpen] = useState(false);
+  // Phase 9.5 — bulk tag / hold modal open state. v1-DEPENDENT — hidden when
+  // v1_features_enabled is false.
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkHoldOpen, setBulkHoldOpen] = useState(false);
+  const featureFlagsQuery = useAppQuery({
+    queryKey: ["cockpit-feature-flags"],
+    queryFn: () => getCockpitFeatureFlags(),
+    tier: CACHE_TIERS.SESSION,
+  });
+  const v1Enabled = featureFlagsQuery.data?.v1_features_enabled === true;
+  function toggleSelect(id: string) {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function selectVisible(ids: string[]) {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
 
   const filters: CockpitFilters = useMemo(
     () => ({
@@ -187,6 +237,7 @@ export function OrdersCockpit() {
       page: state.page,
       pageSize: state.pageSize,
       tagIds: state.tagIds.length > 0 ? state.tagIds : undefined,
+      assignedUserId: state.assignedUserId,
     }),
     [state],
   );
@@ -236,6 +287,10 @@ export function OrdersCockpit() {
           ? "release_date"
           : s.sort,
     }));
+    // Phase 9.1 — reset selection on tab change. Staff would otherwise carry
+    // selections across tabs (e.g. select on Preorders, switch to Ready, click
+    // bulk-buy → buys against orders that aren't in the visible context).
+    clearSelection();
   }
 
   // ── Group by client when explicitly requested ─────────────────────────────
@@ -261,6 +316,9 @@ export function OrdersCockpit() {
             ...(patch.orderStatus != null && { orderStatus: patch.orderStatus }),
             ...(Object.hasOwn(patch, "orgId") && { orgId: patch.orgId ?? "" }),
             ...(Object.hasOwn(patch, "storeId") && { storeId: patch.storeId }),
+            ...(Object.hasOwn(patch, "assignedUserId") && {
+              assignedUserId: patch.assignedUserId,
+            }),
             ...(patch.page != null && { page: patch.page }),
           })
         }
@@ -281,6 +339,17 @@ export function OrdersCockpit() {
                 setState((s) => ({ ...s, ...(loaded as Partial<CockpitState>) }));
               }}
             />
+            {/* Phase 9.4 — Manual order entry deep link. SS owns the order
+                creation form; we just pop their tab. */}
+            <a
+              href="https://ship11.shipstation.com/orders/awaiting-shipment?createOrder=true"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm hover:bg-muted transition-colors"
+            >
+              <ExternalLink className="h-4 w-4" />
+              New SS order
+            </a>
             <Button
               variant="outline"
               size="sm"
@@ -422,6 +491,65 @@ export function OrdersCockpit() {
           </details>
         </div>
 
+        {/* Phase 9.1 — bulk action toolbar (sticky-ish, only visible when ≥1 selected). */}
+        {selectedIds.size > 0 && (
+          <BulkActionToolbar
+            selectedCount={selectedIds.size}
+            onClear={clearSelection}
+            onOpenBulkBuyLabels={() => setBulkBuyOpen(true)}
+            onOpenAssign={() => setAssignOpen(true)}
+            v1Enabled={v1Enabled}
+            onOpenBulkTag={() => setBulkTagOpen(true)}
+            onOpenBulkHold={() => setBulkHoldOpen(true)}
+          />
+        )}
+        {bulkBuyOpen && (
+          <BulkBuyLabelsModal
+            selectedIds={Array.from(selectedIds)}
+            visibleOrders={orders.filter((o) => selectedIds.has(o.id))}
+            onClose={() => setBulkBuyOpen(false)}
+            onCompleted={() => {
+              clearSelection();
+              setBulkBuyOpen(false);
+              void refetch();
+            }}
+          />
+        )}
+        {assignOpen && (
+          <AssignToModal
+            selectedIds={Array.from(selectedIds)}
+            onClose={() => setAssignOpen(false)}
+            onCompleted={() => {
+              clearSelection();
+              setAssignOpen(false);
+              void refetch();
+            }}
+          />
+        )}
+        {bulkTagOpen && (
+          <BulkTagModal
+            selectedIds={Array.from(selectedIds)}
+            tagsDef={tagsDefQuery.data ?? []}
+            onClose={() => setBulkTagOpen(false)}
+            onCompleted={() => {
+              clearSelection();
+              setBulkTagOpen(false);
+              void refetch();
+            }}
+          />
+        )}
+        {bulkHoldOpen && (
+          <BulkHoldModal
+            selectedIds={Array.from(selectedIds)}
+            onClose={() => setBulkHoldOpen(false)}
+            onCompleted={() => {
+              clearSelection();
+              setBulkHoldOpen(false);
+              void refetch();
+            }}
+          />
+        )}
+
         {/* Table */}
         {isLoading ? (
           <div className="flex items-center gap-2 py-8 text-muted-foreground">
@@ -432,6 +560,20 @@ export function OrdersCockpit() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[36px]">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all visible orders on this page"
+                      checked={
+                        orders.length > 0 &&
+                        orders.every((o) => selectedIds.has(o.id))
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) selectVisible(orders.map((o) => o.id));
+                        else clearSelection();
+                      }}
+                    />
+                  </TableHead>
                   <TableHead className="w-[160px]">Order #</TableHead>
                   {state.columnPrefs.client && <TableHead>Client</TableHead>}
                   {state.columnPrefs.customer && <TableHead>Customer</TableHead>}
@@ -447,7 +589,7 @@ export function OrdersCockpit() {
               <TableBody>
                 {orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
                       <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
                       No orders match these filters.
                     </TableCell>
@@ -470,6 +612,8 @@ export function OrdersCockpit() {
                         })
                       }
                       onRefetchOrders={refetch}
+                      selectedIds={selectedIds}
+                      onToggleSelect={toggleSelect}
                     />
                   ))
                 ) : (
@@ -490,6 +634,8 @@ export function OrdersCockpit() {
                         })
                       }
                       onRefetchOrders={refetch}
+                      selectedIds={selectedIds}
+                      onToggleSelect={toggleSelect}
                     />
                   ))
                 )}
@@ -517,6 +663,9 @@ interface RowSharedProps {
   columnPrefs: Record<ColumnKey, boolean>;
   onToggleTagFilter: (tagId: number) => void;
   onRefetchOrders: () => void;
+  // Phase 9.1 — multi-select.
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
 }
 
 function GroupRows({
@@ -526,7 +675,7 @@ function GroupRows({
   return (
     <>
       <TableRow className="bg-muted/30 hover:bg-muted/30">
-        <TableCell colSpan={10} className="font-semibold text-sm py-2">
+        <TableCell colSpan={11} className="font-semibold text-sm py-2">
           {group.name}{" "}
           <span className="text-muted-foreground font-normal">({group.rows.length})</span>
         </TableCell>
@@ -543,6 +692,8 @@ function GroupRows({
           columnPrefs={rest.columnPrefs}
           onToggleTagFilter={rest.onToggleTagFilter}
           onRefetchOrders={rest.onRefetchOrders}
+          selectedIds={rest.selectedIds}
+          onToggleSelect={rest.onToggleSelect}
         />
       ))}
     </>
@@ -557,6 +708,8 @@ function CockpitRow({
   columnPrefs,
   onToggleTagFilter,
   onRefetchOrders,
+  selectedIds,
+  onToggleSelect,
 }: {
   order: CockpitOrder;
   isExpanded: boolean;
@@ -565,10 +718,19 @@ function CockpitRow({
   const ssDeepLink = buildShipStationOrderPageUrl(order.shipstation_order_id);
   const itemCount = order.items.reduce((sum, i) => sum + (i.quantity ?? 1), 0);
   const isUnassigned = !order.org_id;
+  const isSelected = selectedIds.has(order.id);
 
   return (
     <>
       <TableRow className="cursor-pointer" onClick={onToggle}>
+        <TableCell onClick={(e) => e.stopPropagation()} className="w-[36px]">
+          <input
+            type="checkbox"
+            aria-label={`Select order ${order.order_number}`}
+            checked={isSelected}
+            onChange={() => onToggleSelect(order.id)}
+          />
+        </TableCell>
         <TableCell className="font-mono text-sm">
           <a
             href={ssDeepLink}
@@ -715,7 +877,7 @@ function CockpitRow({
 
       {isExpanded && (
         <TableRow>
-          <TableCell colSpan={10} className="bg-muted/20 px-4 py-3">
+          <TableCell colSpan={11} className="bg-muted/20 px-4 py-3">
             <CockpitDrawer order={order} tagDefById={tagDefById} onRefetchOrders={onRefetchOrders} />
           </TableCell>
         </TableRow>
@@ -799,32 +961,8 @@ function CockpitDrawer({
       {/* ── Manual org assignment (polish) — only when org_id IS NULL ────── */}
       {!order.org_id && <NeedsAssignmentDropdown order={order} onRefetch={onRefetchOrders} />}
 
-      {/* ── Bottom toolbar: Print Slip + Buy Label panel ─────────────────── */}
-      <div className="pt-3 border-t space-y-3">
-        <div className="flex flex-wrap gap-2 text-xs">
-          <a
-            href={`/admin/orders/${order.id}/packing-slip`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border hover:bg-muted transition-colors"
-          >
-            <FileText className="h-3.5 w-3.5" />
-            Print Packing Slip
-          </a>
-        </div>
-        {order.org_id ? (
-          <CreateLabelPanel
-            orderId={order.id}
-            orderType="shipstation"
-            customerShippingCharged={order.shipping_paid ?? null}
-            onSuccess={() => onRefetchOrders()}
-          />
-        ) : (
-          <p className="text-xs text-amber-700">
-            Assign a client above before printing a label.
-          </p>
-        )}
-      </div>
+      {/* ── Bottom toolbar: Print Slip + Scan-to-Verify + Buy Label panel ── */}
+      <DrawerBottomToolbar order={order} onRefetchOrders={onRefetchOrders} />
     </div>
   );
 }
@@ -1328,6 +1466,385 @@ function BandcampReconcileBadge({ order }: { order: CockpitOrder }) {
         <strong>{m.confidence}</strong>{" "}
         <span className="opacity-75">({m.matched_via})</span>
       </span>
+    </div>
+  );
+}
+
+// ─── Phase 9.1 — Bulk action toolbar ───────────────────────────────────────
+
+function BulkActionToolbar({
+  selectedCount,
+  onClear,
+  onOpenBulkBuyLabels,
+  onOpenAssign,
+  v1Enabled,
+  onOpenBulkTag,
+  onOpenBulkHold,
+}: {
+  selectedCount: number;
+  onClear: () => void;
+  onOpenBulkBuyLabels: () => void;
+  onOpenAssign: () => void;
+  v1Enabled: boolean;
+  onOpenBulkTag: () => void;
+  onOpenBulkHold: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
+      <div className="flex items-center gap-3">
+        <strong>{selectedCount}</strong>
+        <span className="text-muted-foreground">
+          order{selectedCount === 1 ? "" : "s"} selected
+        </span>
+        <Button variant="ghost" size="sm" onClick={onClear}>
+          Clear
+        </Button>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={onOpenAssign}>
+          Assign to…
+        </Button>
+        {v1Enabled && (
+          <>
+            <Button size="sm" variant="outline" onClick={onOpenBulkTag}>
+              Tags…
+            </Button>
+            <Button size="sm" variant="outline" onClick={onOpenBulkHold}>
+              Hold until…
+            </Button>
+          </>
+        )}
+        <Button size="sm" onClick={onOpenBulkBuyLabels}>
+          Buy + Print Labels…
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 9.2 — DrawerBottomToolbar (Print Slip + Scan-to-Verify + Buy Label)
+
+function DrawerBottomToolbar({
+  order,
+  onRefetchOrders,
+}: {
+  order: CockpitOrder;
+  onRefetchOrders: () => void;
+}) {
+  const [scanOpen, setScanOpen] = useState(false);
+  const [verified, setVerified] = useState(false);
+  return (
+    <div className="pt-3 border-t space-y-3">
+      <div className="flex flex-wrap gap-2 text-xs">
+        <a
+          href={`/admin/orders/${order.id}/packing-slip`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border hover:bg-muted transition-colors"
+        >
+          <FileText className="h-3.5 w-3.5" />
+          Print Packing Slip
+        </a>
+        <button
+          type="button"
+          onClick={() => setScanOpen(true)}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-colors ${
+            verified ? "bg-emerald-50 border-emerald-300 text-emerald-800" : "hover:bg-muted"
+          }`}
+        >
+          {verified ? (
+            <>
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Verified
+            </>
+          ) : (
+            <>
+              <ScanLine className="h-3.5 w-3.5" />
+              Scan to Verify
+            </>
+          )}
+        </button>
+      </div>
+      {scanOpen && (
+        <ScanToVerifyModal
+          items={order.items}
+          onClose={() => setScanOpen(false)}
+          onAllVerified={() => setVerified(true)}
+        />
+      )}
+      {order.org_id ? (
+        <CreateLabelPanel
+          orderId={order.id}
+          orderType="shipstation"
+          customerShippingCharged={order.shipping_paid ?? null}
+          onSuccess={() => onRefetchOrders()}
+        />
+      ) : (
+        <p className="text-xs text-amber-700">
+          Assign a client above before printing a label.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Phase 9.3 — Assign to staff modal ─────────────────────────────────────
+
+function AssignToModal({
+  selectedIds,
+  onClose,
+  onCompleted,
+}: {
+  selectedIds: string[];
+  onClose: () => void;
+  onCompleted: () => void;
+}) {
+  const staffQuery = useAppQuery({
+    queryKey: ["assignable-staff"],
+    queryFn: () => listAssignableStaff(),
+    tier: CACHE_TIERS.SESSION,
+  });
+  const [chosenUserId, setChosenUserId] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function apply(targetUserId: string | null) {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      await assignOrders({
+        shipstationOrderUuids: selectedIds,
+        assignedUserId: targetUserId,
+      });
+      onCompleted();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg bg-white shadow-lg">
+        <div className="border-b px-4 py-3 text-sm font-semibold">
+          Assign {selectedIds.length} order{selectedIds.length === 1 ? "" : "s"} to staff
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Local assignment only — does not update ShipStation. Pass empty / "Unassigned" to clear.
+          </p>
+          <select
+            value={chosenUserId}
+            onChange={(e) => setChosenUserId(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm"
+            disabled={staffQuery.isLoading}
+          >
+            <option value="">Unassigned</option>
+            {(staffQuery.data ?? []).map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.display_name ?? u.email ?? u.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+          {err && (
+            <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              {err}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void apply(chosenUserId || null)}
+            disabled={submitting}
+          >
+            {submitting ? "Assigning…" : chosenUserId ? "Assign" : "Clear assignment"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 9.5 — Bulk tag modal (v1-DEPENDENT) ────────────────────────────
+
+function BulkTagModal({
+  selectedIds,
+  tagsDef,
+  onClose,
+  onCompleted,
+}: {
+  selectedIds: string[];
+  tagsDef: Array<{ tagId: number; name: string; color?: string | null }>;
+  onClose: () => void;
+  onCompleted: () => void;
+}) {
+  const [tagId, setTagId] = useState<number | null>(tagsDef[0]?.tagId ?? null);
+  const [op, setOp] = useState<"add" | "remove">("add");
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: number; failed: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Estimated wall-clock at the SS rate limit (40 req/min = 1.5s/call).
+  const estSec = Math.ceil((selectedIds.length * 1500) / 1000);
+
+  async function apply() {
+    if (tagId == null) return;
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const fn = op === "add" ? bulkAddOrdersTag : bulkRemoveOrdersTag;
+      const r = await fn({ shipstationOrderUuids: selectedIds, tagId });
+      setResult({ ok: r.succeeded, failed: r.failed.length });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg bg-white shadow-lg">
+        <div className="border-b px-4 py-3 text-sm font-semibold">
+          Bulk {op === "add" ? "add" : "remove"} tag
+        </div>
+        <div className="p-4 space-y-3 text-sm">
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant={op === "add" ? "default" : "outline"}
+              onClick={() => setOp("add")}
+            >
+              Add
+            </Button>
+            <Button
+              size="sm"
+              variant={op === "remove" ? "default" : "outline"}
+              onClick={() => setOp("remove")}
+            >
+              Remove
+            </Button>
+          </div>
+          <select
+            value={tagId ?? ""}
+            onChange={(e) => setTagId(e.target.value ? Number(e.target.value) : null)}
+            className="w-full rounded border px-2 py-1.5 text-sm"
+          >
+            {tagsDef.map((t) => (
+              <option key={t.tagId} value={t.tagId}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-amber-700">
+            ~{estSec}s wall-clock for {selectedIds.length} orders at the SS rate limit.
+          </p>
+          {result && (
+            <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
+              Done — {result.ok} succeeded, {result.failed} failed.
+            </div>
+          )}
+          {err && (
+            <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              {err}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            {result ? "Close" : "Cancel"}
+          </Button>
+          {!result && (
+            <Button onClick={() => void apply()} disabled={submitting || tagId == null}>
+              {submitting ? "Working…" : `${op === "add" ? "Add" : "Remove"} tag`}
+            </Button>
+          )}
+          {result && (
+            <Button onClick={onCompleted}>Refresh & close</Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 9.5 — Bulk Hold-Until modal (v1-DEPENDENT) ─────────────────────
+
+function BulkHoldModal({
+  selectedIds,
+  onClose,
+  onCompleted,
+}: {
+  selectedIds: string[];
+  onClose: () => void;
+  onCompleted: () => void;
+}) {
+  const [date, setDate] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: number; failed: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const estSec = Math.ceil((selectedIds.length * 1500) / 1000);
+
+  async function apply() {
+    if (!date) return;
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const r = await bulkSetOrdersHoldUntil({
+        shipstationOrderUuids: selectedIds,
+        holdUntilDate: date,
+      });
+      setResult({ ok: r.succeeded, failed: r.failed.length });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-lg bg-white shadow-lg">
+        <div className="border-b px-4 py-3 text-sm font-semibold">
+          Hold {selectedIds.length} order{selectedIds.length === 1 ? "" : "s"} until…
+        </div>
+        <div className="p-4 space-y-3 text-sm">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full rounded border px-2 py-1.5 text-sm"
+          />
+          <p className="text-xs text-amber-700">
+            ~{estSec}s wall-clock at the SS rate limit.
+          </p>
+          {result && (
+            <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-800">
+              Done — {result.ok} succeeded, {result.failed} failed.
+            </div>
+          )}
+          {err && (
+            <div className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+              {err}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            {result ? "Close" : "Cancel"}
+          </Button>
+          {!result && (
+            <Button onClick={() => void apply()} disabled={submitting || !date}>
+              {submitting ? "Working…" : "Hold orders"}
+            </Button>
+          )}
+          {result && <Button onClick={onCompleted}>Refresh & close</Button>}
+        </div>
+      </div>
     </div>
   );
 }

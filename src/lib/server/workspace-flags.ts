@@ -34,6 +34,12 @@ export interface WorkspaceFlags {
    * for diagnostic label printing during the rollback window. Default false.
    */
   staff_diagnostics?: boolean;
+  /**
+   * Phase 9.5 — gate for v1-API-dependent bulk operations (bulk tag edit,
+   * bulk hold-until). When ShipStation v1 sunsets, flip this off to hide
+   * the bulk-tag/bulk-hold UI; the rest of the cockpit keeps working.
+   */
+  v1_features_enabled?: boolean;
 }
 
 const cache = new Map<string, { flags: WorkspaceFlags; expiresAt: number }>();

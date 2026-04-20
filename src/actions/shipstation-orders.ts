@@ -64,6 +64,9 @@ export interface CockpitFilters {
   tagIds?: number[];
   /** Phase 8.2 — filter to a specific SS storeId. */
   storeId?: number;
+  /** Phase 9.3 — filter to a specific assigned staff user (or "me" for the
+   *  current caller). NOT the SS-side assignee_user_id. */
+  assignedUserId?: string | "me";
 }
 
 export interface CockpitOrderItem {
@@ -114,6 +117,10 @@ export interface CockpitOrder {
   payment_date: string | null;
   assignee_user_id: string | null;
   allocation_status: string | null;
+  // Phase 9.3 — OUR staff assignment (NOT synced to SS). Distinct from
+  // assignee_user_id which mirrors the SS-side assignee.
+  assigned_user_id: string | null;
+  assigned_at: string | null;
 }
 
 export interface StatusBucketCounts {
@@ -184,6 +191,16 @@ export async function getShipStationOrdersDb(
     in: (col: string, vals: readonly unknown[]) => Filterable;
     contains: (col: string, val: unknown) => Filterable;
   };
+  // Resolve "me" to the current caller's auth.users.id so the cockpit can
+  // wire an "Assigned to me" sidebar bucket without juggling user ids client-
+  // side. We look it up once per call.
+  let resolvedAssignedUserId: string | null = null;
+  if (filters.assignedUserId === "me") {
+    const { data: who } = await supabase.auth.getUser();
+    resolvedAssignedUserId = who?.user?.id ?? null;
+  } else if (filters.assignedUserId) {
+    resolvedAssignedUserId = filters.assignedUserId;
+  }
   const applyBaseFilter = (q: Filterable): Filterable => {
     let r = q;
     if (orderStatus !== "all") r = r.eq("order_status", orderStatus);
@@ -193,6 +210,7 @@ export async function getShipStationOrdersDb(
     if (filters.tagIds && filters.tagIds.length > 0) {
       r = r.contains("tag_ids", filters.tagIds);
     }
+    if (resolvedAssignedUserId) r = r.eq("assigned_user_id", resolvedAssignedUserId);
     return r;
   };
   const applyTabFilter = (q: Filterable): Filterable => {
@@ -287,6 +305,7 @@ export async function getShipStationOrdersDb(
       org_id,
       tag_ids, hold_until_date, ship_by_date, deliver_by_date,
       payment_date, assignee_user_id, allocation_status,
+      assigned_user_id, assigned_at,
       organizations ( name ),
       shipstation_order_items ( sku, name, quantity, unit_price, item_index )
       `,
@@ -344,6 +363,8 @@ export async function getShipStationOrdersDb(
     payment_date: string | null;
     assignee_user_id: string | null;
     allocation_status: string | null;
+    assigned_user_id: string | null;
+    assigned_at: string | null;
     organizations: { name?: string } | null;
     shipstation_order_items: Array<{
       sku: string | null;
@@ -419,6 +440,8 @@ export async function getShipStationOrdersDb(
     payment_date: r.payment_date,
     assignee_user_id: r.assignee_user_id,
     allocation_status: r.allocation_status,
+    assigned_user_id: r.assigned_user_id,
+    assigned_at: r.assigned_at,
   }));
 
   const total = totalCount ?? 0;

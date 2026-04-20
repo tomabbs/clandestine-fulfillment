@@ -12,6 +12,9 @@ export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
 // remains for the manual "Sync to Bandcamp" force-push button on the shipping log.
 export { bandcampMarkShippedTask } from "./bandcamp-mark-shipped";
 export { bandcampShippingVerifyTask } from "./bandcamp-shipping-verify";
+// Phase 9.1 — bulk label buy orchestrator + nightly print_batch_jobs purge.
+export { bulkBuyLabelsTask } from "./bulk-buy-labels";
+export { printBatchJobsPurgeTask } from "./print-batch-jobs-purge";
 export {
   bandcampOrderSyncSchedule,
   bandcampOrderSyncTask,
