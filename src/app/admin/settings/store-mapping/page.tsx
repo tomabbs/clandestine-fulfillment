@@ -272,14 +272,14 @@ export default function StoreMappingPage() {
   return (
     <div className="p-6 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Store Mapping</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Map ShipStation stores to organizations for automatic shipment routing
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button
             variant="outline"
             size="sm"
@@ -410,7 +410,7 @@ export default function StoreMappingPage() {
           No ShipStation stores found. Click &ldquo;Sync Stores&rdquo; to import.
         </div>
       ) : (
-        <div className="[&>[data-slot=table-container]]:overflow-visible">
+        <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

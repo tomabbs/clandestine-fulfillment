@@ -67,8 +67,8 @@ export default function CarrierMapAdminPage() {
 
   return (
     <div className="p-6 space-y-4 max-w-5xl">
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">ShipStation carrier mapping</h1>
           <p className="text-muted-foreground mt-1 text-sm max-w-2xl">
             EasyPost returns carrier names like <code>USPS</code> / <code>UPS</code> /{" "}
@@ -79,7 +79,7 @@ export default function CarrierMapAdminPage() {
             verifies the mapping with a real round-trip test.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 flex-wrap">
           <Button
             size="sm"
             variant="outline"
@@ -113,7 +113,7 @@ export default function CarrierMapAdminPage() {
           <Loader2 className="h-4 w-4 animate-spin" /> Loading carrier map…
         </div>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>

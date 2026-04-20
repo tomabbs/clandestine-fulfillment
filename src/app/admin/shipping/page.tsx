@@ -166,14 +166,14 @@ export default function ShippingPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Shipping Log</h1>
           <p className="text-muted-foreground mt-1">
             {data ? `${data.total} shipment${data.total !== 1 ? "s" : ""}` : "Loading..."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Link href="/admin/shipping/pirate-ship">
             <Button variant="outline" size="sm">
               <Upload className="h-4 w-4 mr-1.5" />
@@ -188,7 +188,7 @@ export default function ShippingPage() {
       </div>
 
       {/* Summary Stat Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card size="sm">
           <CardContent className="pt-0">
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
@@ -271,7 +271,7 @@ export default function ShippingPage() {
           onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
         />
       )}
-      <div className="rounded-md border overflow-hidden">
+      <div className="rounded-md border overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
@@ -661,15 +661,16 @@ function ShipmentExpandedDetail({
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground">No items recorded.</p>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-1 pr-3 font-medium">Product</th>
-                  <th className="text-left py-1 pr-3 font-medium">SKU</th>
-                  <th className="text-right py-1 pr-3 font-medium">Qty</th>
-                  <th className="text-left py-1 font-medium">Format</th>
-                </tr>
-              </thead>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-1 pr-3 font-medium">Product</th>
+                    <th className="text-left py-1 pr-3 font-medium">SKU</th>
+                    <th className="text-right py-1 pr-3 font-medium">Qty</th>
+                    <th className="text-left py-1 font-medium">Format</th>
+                  </tr>
+                </thead>
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id} className="border-b border-dashed">
@@ -692,7 +693,8 @@ function ShipmentExpandedDetail({
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           )}
         </div>
 

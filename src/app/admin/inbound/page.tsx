@@ -77,8 +77,9 @@ export default function AdminInboundPage() {
         </div>
       </div>
 
-      {/* Status Tabs */}
-      <div className="flex gap-1 border-b">
+      {/* Status Tabs — overflow-x-auto so on narrow screens the tabs scroll
+          horizontally inside their own row instead of pushing the page wide. */}
+      <div className="flex gap-1 border-b overflow-x-auto">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab}
@@ -98,9 +99,9 @@ export default function AdminInboundPage() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-4 items-end">
-        <div className="flex-1 max-w-xs">
+      {/* Filters — flex-wrap so the 3 inputs stack on narrow screens. */}
+      <div className="flex gap-4 items-end flex-wrap">
+        <div className="flex-1 min-w-[200px] max-w-xs">
           <label htmlFor="inbound-search" className="text-sm font-medium mb-1 block">
             Search
           </label>
@@ -156,7 +157,7 @@ export default function AdminInboundPage() {
           setPage(1);
         }}
       />
-      <div className="border rounded-lg overflow-hidden">
+      <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/50">

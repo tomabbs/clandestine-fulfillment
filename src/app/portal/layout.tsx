@@ -45,7 +45,7 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
         <header className="flex h-12 items-center gap-2 border-b px-4">
           <SidebarTrigger />
         </header>
-        <main className="flex-1">
+        <main className="flex-1 min-w-0">
           <PortalPageGuard>{children}</PortalPageGuard>
         </main>
       </SidebarInset>

@@ -48,16 +48,26 @@ export interface ShipmentFormatDetection extends FormatDetection {
 
 /** SKU prefix → format mapping (checked first, highest confidence) */
 const SKU_PREFIX_RULES: Array<{ prefix: string; formatKey: string; displayName: string }> = [
-  { prefix: "LP-", formatKey: "LP", displayName: "Vinyl LP" },
   { prefix: "2XLP-", formatKey: "LP", displayName: "2xLP" },
+  { prefix: "LP-", formatKey: "LP", displayName: "Vinyl LP" },
+  { prefix: "MLP-", formatKey: "LP", displayName: "Mini LP" },
   { prefix: "CD-", formatKey: "CD", displayName: "CD" },
   { prefix: "CS-", formatKey: "Cassette", displayName: "Cassette" },
   { prefix: "7IN-", formatKey: '7"', displayName: '7" Single' },
   { prefix: "SI-", formatKey: '7"', displayName: '7" Single' },
   { prefix: "MAG-", formatKey: "Other", displayName: "Magazine" },
+  { prefix: "SHIRT-", formatKey: "T-Shirt", displayName: "T-Shirt" },
   { prefix: "TS-", formatKey: "T-Shirt", displayName: "T-Shirt" },
   { prefix: "TB-", formatKey: "Cassette", displayName: "Cassette" },
   { prefix: "EB-", formatKey: "Other", displayName: "Book" },
+  { prefix: "BOOK-", formatKey: "Other", displayName: "Book" },
+  { prefix: "BK-", formatKey: "Other", displayName: "Book" },
+  { prefix: "BAG-", formatKey: "Other", displayName: "Bag" },
+  { prefix: "TOTE-", formatKey: "Other", displayName: "Tote Bag" },
+  { prefix: "POSTER-", formatKey: "Other", displayName: "Poster" },
+  { prefix: "PATCH-", formatKey: "Other", displayName: "Patch" },
+  { prefix: "MERCH-", formatKey: "Other", displayName: "Merch" },
+  { prefix: "FRAME-", formatKey: "Other", displayName: "Frame" },
 ];
 
 /** Title keyword → format mapping (checked second, medium confidence) */
@@ -239,6 +249,40 @@ export async function loadFormatRules(
   // them into the detection engine yet. For now they're used by the billing calculator.
   // The built-in SKU_PREFIX_RULES and TITLE_KEYWORD_RULES cover the main cases.
   logger.info(`Loaded ${dbRules?.length ?? 0} format rules from DB`, { workspaceId });
+}
+
+/**
+ * Map a Bandcamp `api_data.type_name` value (or any free-text format hint)
+ * to one of our canonical `format_name` strings. Returns null if the input
+ * doesn't confidently map to a known format.
+ *
+ * Used by the format backfill to leverage Bandcamp metadata for variants
+ * whose `format_name` is NULL but whose Bandcamp mapping has a clear type.
+ *
+ * Canonical output set matches the existing `format_name` distribution:
+ *   "LP" | "CD" | "Cassette" | "7\"" | "T-Shirt" | "Other"
+ */
+export function bandcampTypeNameToFormat(typeName: string | null | undefined): string | null {
+  if (!typeName) return null;
+  const t = typeName.trim().toLowerCase();
+  if (t.length === 0) return null;
+  // Order matters: 7" / Cassette / CD checked BEFORE LP/vinyl (Bandcamp uses
+  // strings like `7" Vinyl` and `Cassette Tape` that would otherwise hit LP).
+  if (/(7 ?inch|7"|flexi|single)/.test(t)) return '7"';
+  if (/(cassette|tape)/.test(t)) return "Cassette";
+  if (/(compact disc|^cd$|cd reissue|cd ep|cd album)/.test(t)) return "CD";
+  if (/(record\/vinyl|vinyl|^lp$|lp record|2x ?lp|12 ?inch|12")/.test(t)) return "LP";
+  if (/(t-?shirt|shirt|tee|hoodie|sweater|sweatshirt|long ?sleeve|crewneck|hat|cap)/.test(t)) {
+    return "T-Shirt";
+  }
+  if (
+    /(bag|tote|poster|print|sticker|pin|patch|button|zine|book|magazine|slipmat|bandana|merch|usb)/.test(
+      t,
+    )
+  ) {
+    return "Other";
+  }
+  return null;
 }
 
 /**

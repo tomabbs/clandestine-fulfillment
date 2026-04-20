@@ -878,13 +878,7 @@ function CockpitRow({
 
       {isExpanded && (
         <TableRow>
-          {/* Sticky-left + min-w-0 keeps the drawer pinned to the visible
-              viewport when the table is horizontally scrolled, so action
-              buttons (Get Rates, Buy Label) stay reachable on narrow screens. */}
-          <TableCell
-            colSpan={11}
-            className="bg-muted/20 px-4 py-3 align-top sticky left-0 max-w-[100vw]"
-          >
+          <TableCell colSpan={11} className="bg-muted/20 px-4 py-3 align-top">
             <div className="min-w-0">
               <CockpitDrawer
                 order={order}

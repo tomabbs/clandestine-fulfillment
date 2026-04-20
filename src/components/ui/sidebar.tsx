@@ -305,8 +305,14 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
   return (
     <main
       data-slot="sidebar-inset"
+      // min-w-0 is critical: SidebarInset is a flex child of SidebarProvider
+      // (flex w-full). Without min-w-0 it defaults to min-width: auto = its
+      // content's intrinsic width, so a wide table/form in any page would
+      // push the entire layout past the viewport, producing page-level
+      // horizontal scroll instead of letting overflow-x-auto inner containers
+      // scroll within their own bounds.
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        "relative flex w-full min-w-0 flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}
