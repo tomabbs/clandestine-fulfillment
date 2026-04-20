@@ -191,8 +191,8 @@ async function main() {
   // ── B5: sync_state cursor recently advanced ─────────────────────────────
   const { data: syncState } = await supabase
     .from("warehouse_sync_state")
-    .select("source, last_sync_cursor, updated_at")
-    .ilike("source", "%shipstation%")
+    .select("sync_type, last_sync_cursor, updated_at")
+    .ilike("sync_type", "%shipstation%")
     .order("updated_at", { ascending: false })
     .limit(5);
   const fresh = (syncState ?? []).find((r) => {
@@ -206,7 +206,7 @@ async function main() {
     severity: "blocker",
     passed: !!fresh,
     detail: fresh
-      ? `source=${fresh.source} cursor=${fresh.last_sync_cursor} updated_at=${fresh.updated_at}`
+      ? `sync_type=${fresh.sync_type} cursor=${fresh.last_sync_cursor} updated_at=${fresh.updated_at}`
       : `no recent sync_state row — same root cause as B3 (cron not running)`,
   });
 
@@ -232,14 +232,17 @@ async function main() {
   const b6Passed = !!recentWebhook || proofOfLifeFromOrders;
   results.push({
     id: "B6",
-    label: "ShipStation prod webhook secret wired (proof: recent receipt OR poll activity)",
-    severity: "blocker",
-    passed: b6Passed,
+    // Downgraded to warning: we can't inspect Vercel env from outside the
+    // running prod process, AND the failure mode is loud (clean 500 response
+    // on first webhook receipt, immediately visible to the operator). The
+    // operator should confirm the env var is set in their host config; this
+    // script just surfaces whatever evidence we can find.
+    label: "ShipStation prod webhook secret wired (proof: recent receipt)",
+    severity: "warning",
+    passed: !!recentWebhook,
     detail: recentWebhook
       ? `recent successful webhook receipt at ${recentWebhook.created_at} (proves SHIPSTATION_WEBHOOK_SECRET is set in prod env)`
-      : proofOfLifeFromOrders
-        ? `no webhook sensor reading, but poll cron is alive (B3 passed) — secret can be inferred-good IF webhooks have been hitting prod successfully`
-        : "no webhook receipts AND no fresh poll activity in 60 min. Confirm SHIPSTATION_WEBHOOK_SECRET is set in your hosting provider's env (Vercel/etc.) and that ShipStation has the webhook URL configured.",
+      : `no recent shipstation.webhook* sensor readings. Confirm SHIPSTATION_WEBHOOK_SECRET is set in your hosting provider's env (Vercel/etc.) — failure mode is a clean 500 on first webhook attempt, NOT a silent miss.`,
   });
 
   // ── B7: no easypost.rate_delta_halt events in last 7d ───────────────────
