@@ -3,18 +3,13 @@
 import { ChevronDown, ChevronRight, MapPin, Store } from "lucide-react";
 import { useState } from "react";
 import { getMailOrders } from "@/actions/mail-orders";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageShell } from "@/components/shared/page-shell";
+import { PageToolbar } from "@/components/shared/page-toolbar";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -166,152 +161,143 @@ export default function AdminMailOrderPage() {
   });
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Mail-Order</h1>
-      <p className="text-sm text-muted-foreground">
-        Consignment orders from Clandestine Shopify and Discogs. Each row is one client's share of
-        an order. Payout = 50% of their items' subtotal.
-      </p>
-
-      <div className="flex flex-wrap gap-3">
-        <Input
-          placeholder="Search order number…"
-          value={filters.search}
-          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
-          className="w-64"
+    <PageShell
+      title="Mail-Order"
+      description="Consignment orders from Clandestine Shopify and Discogs."
+      maxWidth="full"
+      toolbar={
+        <PageToolbar>
+          <Input
+            placeholder="Search order number…"
+            value={filters.search}
+            onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
+            className="w-64"
+          />
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          >
+            <option value="">All statuses</option>
+            <option value="unfulfilled">Unfulfilled</option>
+            <option value="fulfilled">Fulfilled</option>
+          </select>
+          <select
+            value={filters.payoutStatus}
+            onChange={(e) => setFilters((f) => ({ ...f, payoutStatus: e.target.value, page: 1 }))}
+            className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+          >
+            <option value="">All payout statuses</option>
+            <option value="pending">Pending payout</option>
+            <option value="included_in_snapshot">In billing</option>
+            <option value="paid">Paid</option>
+          </select>
+        </PageToolbar>
+      }
+    >
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
         />
-        <select
-          value={filters.status}
-          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="">All statuses</option>
-          <option value="unfulfilled">Unfulfilled</option>
-          <option value="fulfilled">Fulfilled</option>
-        </select>
-        <select
-          value={filters.payoutStatus}
-          onChange={(e) => setFilters((f) => ({ ...f, payoutStatus: e.target.value, page: 1 }))}
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-        >
-          <option value="">All payout statuses</option>
-          <option value="pending">Pending payout</option>
-          <option value="included_in_snapshot">In billing</option>
-          <option value="paid">Paid</option>
-        </select>
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : (
-        <>
-          {data && data.total > 0 && (
-            <PaginationBar
-              page={filters.page}
-              pageSize={filters.pageSize}
-              total={data.total}
-              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
-            />
-          )}
-          <div className="border rounded-lg overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8" />
-                  <TableHead>Order</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Fulfillment</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                  <TableHead className="text-right">Payout (50%)</TableHead>
-                  <TableHead>Payout Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(data?.orders ?? []).map((order: MailOrderRow) => {
-                  const orgName =
-                    (order as MailOrderRow & { organizations?: { name: string } }).organizations
-                      ?.name ?? "—";
-                  const fulfillConfig =
-                    FULFILLMENT_CONFIG[order.fulfillment_status ?? "unfulfilled"] ??
-                    FULFILLMENT_CONFIG.unfulfilled;
-                  const payoutConfig =
-                    PAYOUT_STATUS_CONFIG[order.client_payout_status ?? "pending"] ??
-                    PAYOUT_STATUS_CONFIG.pending;
-                  const isExpanded = expandedId === order.id;
-
-                  return (
-                    <>
-                      <TableRow
-                        key={order.id}
-                        className="cursor-pointer"
-                        onClick={() => setExpandedId(isExpanded ? null : order.id)}
-                      >
-                        <TableCell className="w-8 text-muted-foreground">
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {order.order_number ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-sm font-medium">{orgName}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[160px] truncate">
-                          {order.customer_name ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">
-                            {order.source === "clandestine_shopify" ? "Shopify" : "Discogs"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(order.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={fulfillConfig.variant}>{fulfillConfig.label}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          ${Number(order.subtotal).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-medium">
-                          ${Number(order.client_payout_amount ?? 0).toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={payoutConfig.variant}>{payoutConfig.label}</Badge>
-                        </TableCell>
-                      </TableRow>
-                      {isExpanded && (
-                        <tr key={`${order.id}-detail`}>
-                          <td colSpan={10} className="p-0">
-                            <OrderDetail order={order} />
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  );
-                })}
-                {(data?.orders ?? []).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
-                      <Store className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      No mail-order orders found.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </>
       )}
+
+      <BlockList
+        className="mt-3"
+        items={data?.orders ?? []}
+        totalCount={data?.total}
+        itemKey={(order) => order.id}
+        loading={isLoading}
+        density="ops"
+        ariaLabel="Admin mail-order list"
+        expandedKeys={
+          expandedId
+            ? (new Set<string | number>([expandedId]) as Set<string | number>)
+            : (new Set<string | number>() as Set<string | number>)
+        }
+        onExpandedKeysChange={(keys) => {
+          const next = Array.from(keys)[0];
+          setExpandedId(next ? String(next) : null);
+        }}
+        renderHeader={({ row, expanded, toggleExpanded }) => {
+          const order = row as MailOrderRow;
+          const orgName =
+            (order as MailOrderRow & { organizations?: { name: string } }).organizations?.name ??
+            "—";
+          return (
+            <div className="min-w-0 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-mono text-sm">{order.order_number ?? "—"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {orgName} · {order.customer_name ?? "—"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpanded();
+                }}
+              >
+                {expanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          );
+        }}
+        renderExceptionZone={({ row }) => {
+          const order = row as MailOrderRow;
+          const fulfillConfig =
+            FULFILLMENT_CONFIG[order.fulfillment_status ?? "unfulfilled"] ??
+            FULFILLMENT_CONFIG.unfulfilled;
+          const payoutConfig =
+            PAYOUT_STATUS_CONFIG[order.client_payout_status ?? "pending"] ??
+            PAYOUT_STATUS_CONFIG.pending;
+          return (
+            <div className="flex items-center gap-2">
+              <Badge variant={fulfillConfig.variant}>{fulfillConfig.label}</Badge>
+              <Badge variant={payoutConfig.variant}>{payoutConfig.label}</Badge>
+            </div>
+          );
+        }}
+        renderBody={({ row }) => {
+          const order = row as MailOrderRow;
+          return (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <OrderMetric
+                label="Source"
+                value={order.source === "clandestine_shopify" ? "Shopify" : "Discogs"}
+              />
+              <OrderMetric label="Date" value={new Date(order.created_at).toLocaleDateString()} />
+              <OrderMetric label="Subtotal" value={`$${Number(order.subtotal).toFixed(2)}`} mono />
+              <OrderMetric
+                label="Payout (50%)"
+                value={`$${Number(order.client_payout_amount ?? 0).toFixed(2)}`}
+                mono
+              />
+            </div>
+          );
+        }}
+        renderExpanded={({ row }) => (
+          <div className="rounded-md border bg-muted/30 p-0">
+            <OrderDetail order={row as MailOrderRow} />
+          </div>
+        )}
+        emptyState={
+          <EmptyState
+            icon={Store}
+            title="No mail-order orders found"
+            description="Try broader filters."
+          />
+        }
+      />
 
       {data && data.total > 0 && (
         <PaginationBar
@@ -322,6 +308,23 @@ export default function AdminMailOrderPage() {
           onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
         />
       )}
+    </PageShell>
+  );
+}
+
+function OrderMetric({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={mono ? "font-mono text-sm" : "text-sm"}>{value}</p>
     </div>
   );
 }

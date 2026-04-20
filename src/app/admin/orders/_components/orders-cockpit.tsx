@@ -87,14 +87,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
@@ -657,96 +649,78 @@ export function OrdersCockpit() {
           />
         )}
 
-        {/* Table */}
+        {/* Block rows */}
         {isLoading ? (
           <div className="flex items-center gap-2 py-8 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading orders…
           </div>
         ) : (
-          <div className="border rounded-lg overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[36px]">
-                    <input
-                      type="checkbox"
-                      aria-label="Select all visible orders on this page"
-                      checked={orders.length > 0 && orders.every((o) => selectedIds.has(o.id))}
-                      onChange={(e) => {
-                        if (e.target.checked) selectVisible(orders.map((o) => o.id));
-                        else clearSelection();
-                      }}
-                    />
-                  </TableHead>
-                  <TableHead className="w-[160px]">Order #</TableHead>
-                  {state.columnPrefs.client && <TableHead>Client</TableHead>}
-                  {state.columnPrefs.customer && <TableHead>Customer</TableHead>}
-                  {state.columnPrefs.ship_to && <TableHead>Ship To</TableHead>}
-                  {state.columnPrefs.tags && <TableHead>Tags</TableHead>}
-                  {state.columnPrefs.items && <TableHead>Items</TableHead>}
-                  {state.columnPrefs.status && <TableHead>Status</TableHead>}
-                  {state.columnPrefs.amount && <TableHead className="text-right">Amount</TableHead>}
-                  {state.columnPrefs.order_date && <TableHead>Order Date</TableHead>}
-                  {state.columnPrefs.tracking && (
-                    <TableHead className="text-right">Tracking</TableHead>
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
-                      <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      No orders match these filters.
-                    </TableCell>
-                  </TableRow>
-                ) : grouped ? (
-                  grouped.map((group) => (
-                    <GroupRows
-                      key={group.name}
-                      group={group}
-                      expandedId={expandedId}
-                      setExpandedId={setExpandedId}
-                      tagDefById={tagDefById}
-                      columnPrefs={state.columnPrefs}
-                      onToggleTagFilter={(tagId) =>
-                        patchState({
-                          tagIds: state.tagIds.includes(tagId)
-                            ? state.tagIds
-                            : [...state.tagIds, tagId],
-                          page: 1,
-                        })
-                      }
-                      onRefetchOrders={refetch}
-                      selectedIds={selectedIds}
-                      onToggleSelect={toggleSelect}
-                    />
-                  ))
-                ) : (
-                  orders.map((o) => (
-                    <CockpitRow
-                      key={o.id}
-                      order={o}
-                      isExpanded={expandedId === o.id}
-                      onToggle={() => setExpandedId(expandedId === o.id ? null : o.id)}
-                      tagDefById={tagDefById}
-                      columnPrefs={state.columnPrefs}
-                      onToggleTagFilter={(tagId) =>
-                        patchState({
-                          tagIds: state.tagIds.includes(tagId)
-                            ? state.tagIds
-                            : [...state.tagIds, tagId],
-                          page: 1,
-                        })
-                      }
-                      onRefetchOrders={refetch}
-                      selectedIds={selectedIds}
-                      onToggleSelect={toggleSelect}
-                    />
-                  ))
-                )}
-              </TableBody>
-            </Table>
+          <div className="rounded-lg border p-3 space-y-3 mt-3">
+            <div className="flex items-center gap-2 pb-1">
+              <input
+                type="checkbox"
+                aria-label="Select all visible orders on this page"
+                checked={orders.length > 0 && orders.every((o) => selectedIds.has(o.id))}
+                onChange={(e) => {
+                  if (e.target.checked) selectVisible(orders.map((o) => o.id));
+                  else clearSelection();
+                }}
+              />
+              <span className="text-xs text-muted-foreground">
+                Select all visible ({orders.length.toLocaleString()})
+              </span>
+            </div>
+
+            {orders.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground">
+                <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                No orders match these filters.
+              </div>
+            ) : grouped ? (
+              grouped.map((group) => (
+                <GroupRows
+                  key={group.name}
+                  group={group}
+                  expandedId={expandedId}
+                  setExpandedId={setExpandedId}
+                  tagDefById={tagDefById}
+                  columnPrefs={state.columnPrefs}
+                  onToggleTagFilter={(tagId) =>
+                    patchState({
+                      tagIds: state.tagIds.includes(tagId)
+                        ? state.tagIds
+                        : [...state.tagIds, tagId],
+                      page: 1,
+                    })
+                  }
+                  onRefetchOrders={refetch}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                />
+              ))
+            ) : (
+              orders.map((o) => (
+                <CockpitRow
+                  key={o.id}
+                  order={o}
+                  isExpanded={expandedId === o.id}
+                  onToggle={() => setExpandedId(expandedId === o.id ? null : o.id)}
+                  tagDefById={tagDefById}
+                  columnPrefs={state.columnPrefs}
+                  onToggleTagFilter={(tagId) =>
+                    patchState({
+                      tagIds: state.tagIds.includes(tagId)
+                        ? state.tagIds
+                        : [...state.tagIds, tagId],
+                      page: 1,
+                    })
+                  }
+                  onRefetchOrders={refetch}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                />
+              ))
+            )}
           </div>
         )}
 
@@ -779,13 +753,11 @@ function GroupRows({
   ...rest
 }: { group: { name: string; rows: CockpitOrder[] } } & RowSharedProps) {
   return (
-    <>
-      <TableRow className="bg-muted/30 hover:bg-muted/30">
-        <TableCell colSpan={11} className="font-semibold text-sm py-2">
-          {group.name}{" "}
-          <span className="text-muted-foreground font-normal">({group.rows.length})</span>
-        </TableCell>
-      </TableRow>
+    <div className="space-y-2">
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-semibold">
+        {group.name}{" "}
+        <span className="text-muted-foreground font-normal">({group.rows.length})</span>
+      </div>
       {group.rows.map((o) => (
         <CockpitRow
           key={o.id}
@@ -800,7 +772,7 @@ function GroupRows({
           onToggleSelect={rest.onToggleSelect}
         />
       ))}
-    </>
+    </div>
   );
 }
 
@@ -825,184 +797,210 @@ function CockpitRow({
   const isSelected = selectedIds.has(order.id);
 
   return (
-    <>
-      <TableRow className="cursor-pointer" onClick={onToggle}>
-        <TableCell onClick={(e) => e.stopPropagation()} className="w-[36px]">
+    <div className="rounded-md border bg-card p-3 hover:bg-muted/20">
+      <div className="flex items-start gap-3">
+        <div>
           <input
             type="checkbox"
             aria-label={`Select order ${order.order_number}`}
             checked={isSelected}
             onChange={() => onToggleSelect(order.id)}
           />
-        </TableCell>
-        <TableCell className="font-mono text-sm">
-          <a
-            href={ssDeepLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {order.order_number}
-            <ExternalLink className="h-3 w-3" />
-          </a>
-          {order.preorder_state === "preorder" && (
-            <Badge
-              variant="outline"
-              className="ml-2 bg-amber-50 text-amber-800 border-amber-200"
-              title={
-                order.preorder_release_date ? `Releases ${order.preorder_release_date}` : undefined
-              }
-            >
-              preorder
-              {order.preorder_release_date && (
-                <span className="ml-1 font-mono text-[10px]">
-                  · {order.preorder_release_date.slice(5)}
-                </span>
-              )}
-            </Badge>
-          )}
-          {order.preorder_state === "ready" && (
-            <Badge
-              variant="outline"
-              className="ml-2 bg-emerald-50 text-emerald-800 border-emerald-200"
-              title={
-                order.preorder_release_date ? `Releases ${order.preorder_release_date}` : undefined
-              }
-            >
-              ready
-              {order.preorder_release_date && (
-                <span className="ml-1 font-mono text-[10px]">
-                  · {order.preorder_release_date.slice(5)}
-                </span>
-              )}
-            </Badge>
-          )}
-          {order.hold_until_date && (
-            <Badge
-              variant="outline"
-              className="ml-2 bg-gray-100 text-gray-700 border-gray-300"
-              title={`On hold until ${order.hold_until_date}`}
-            >
-              <Pause className="h-2.5 w-2.5 mr-0.5" />
-              hold
-            </Badge>
-          )}
-        </TableCell>
-        {columnPrefs.client && (
-          <TableCell className="text-sm">
-            {isUnassigned ? (
-              <span className="inline-flex items-center gap-1 text-amber-700">
-                <UserPlus className="h-3.5 w-3.5" /> Needs assignment
-              </span>
-            ) : (
-              (order.org_name ?? "—")
-            )}
-          </TableCell>
-        )}
-        {columnPrefs.customer && (
-          <TableCell className="text-sm">
-            <div>{order.customer_name ?? "—"}</div>
-            {order.customer_email && (
-              <div className="text-xs text-muted-foreground">{order.customer_email}</div>
-            )}
-          </TableCell>
-        )}
-        {columnPrefs.ship_to && (
-          <TableCell className="text-sm text-muted-foreground">
-            {formatShipTo(order.ship_to)}
-          </TableCell>
-        )}
-        {columnPrefs.tags && (
-          <TableCell>
-            <div className="flex flex-wrap gap-1">
-              {order.tag_ids.length === 0 ? (
-                <span className="text-muted-foreground text-xs">—</span>
-              ) : (
-                order.tag_ids.map((tagId) => {
-                  const def = tagDefById.get(tagId);
-                  return (
-                    <button
-                      key={tagId}
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleTagFilter(tagId);
-                      }}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border hover:bg-muted"
-                      title={`Filter by ${def?.name ?? `tag ${tagId}`}`}
-                    >
-                      {def?.color && (
-                        <span
-                          className="inline-block w-2 h-2 rounded-sm"
-                          style={{ backgroundColor: def.color }}
-                        />
-                      )}
-                      {def?.name ?? tagId}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </TableCell>
-        )}
-        {columnPrefs.items && <TableCell className="text-sm">{itemCount}</TableCell>}
-        {columnPrefs.status && (
-          <TableCell>
-            <span
-              className={`text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap ${
-                STATUS_COLORS[order.order_status] ?? "bg-gray-100 text-gray-700"
-              }`}
-            >
-              {order.order_status.replace(/_/g, " ")}
-            </span>
-          </TableCell>
-        )}
-        {columnPrefs.amount && (
-          <TableCell className="text-right font-mono text-sm">
-            {order.amount_paid != null ? `$${order.amount_paid.toFixed(2)}` : "—"}
-          </TableCell>
-        )}
-        {columnPrefs.order_date && (
-          <TableCell className="text-sm text-muted-foreground">
-            {order.order_date ? new Date(order.order_date).toLocaleDateString() : "—"}
-          </TableCell>
-        )}
-        {columnPrefs.tracking && (
-          <TableCell className="text-right text-sm">
-            <TrackingCell order={order} />
-          </TableCell>
-        )}
-      </TableRow>
+        </div>
 
-      {isExpanded && (
-        <TableRow>
-          {/* The cell itself extends to the table's full natural width
-              (colSpan=11). To prevent the drawer's content (Items panel,
-              Get Rates button, etc.) from being pushed past the visible
-              viewport when the table horizontally scrolls, the inner div
-              uses position:sticky + left:0 to pin to the visible left
-              edge, plus a max-width capped to the cockpit-main pane.
-              The 18.25rem reserve = 3.25rem admin sidebar (collapsed
-              default) + 15rem cockpit status sidebar. If the admin
-              sidebar is expanded (16rem) the drawer just gets a bit
-              narrower; horizontal scroll inside the drawer is acceptable
-              in that edge case. */}
-          <TableCell colSpan={11} className="bg-muted/20 p-0 align-top">
-            <div
-              className="sticky left-0 px-4 py-3 min-w-0"
-              style={{ maxWidth: "calc(100vw - 18.25rem)" }}
-            >
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <a
+                href={ssDeepLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-blue-600 hover:underline font-mono text-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {order.order_number}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {order.preorder_state === "preorder" && (
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-50 text-amber-800 border-amber-200"
+                    title={
+                      order.preorder_release_date
+                        ? `Releases ${order.preorder_release_date}`
+                        : undefined
+                    }
+                  >
+                    preorder
+                    {order.preorder_release_date && (
+                      <span className="ml-1 font-mono text-[10px]">
+                        · {order.preorder_release_date.slice(5)}
+                      </span>
+                    )}
+                  </Badge>
+                )}
+                {order.preorder_state === "ready" && (
+                  <Badge
+                    variant="outline"
+                    className="bg-emerald-50 text-emerald-800 border-emerald-200"
+                    title={
+                      order.preorder_release_date
+                        ? `Releases ${order.preorder_release_date}`
+                        : undefined
+                    }
+                  >
+                    ready
+                    {order.preorder_release_date && (
+                      <span className="ml-1 font-mono text-[10px]">
+                        · {order.preorder_release_date.slice(5)}
+                      </span>
+                    )}
+                  </Badge>
+                )}
+                {order.hold_until_date && (
+                  <Badge
+                    variant="outline"
+                    className="bg-gray-100 text-gray-700 border-gray-300"
+                    title={`On hold until ${order.hold_until_date}`}
+                  >
+                    <Pause className="h-2.5 w-2.5 mr-0.5" />
+                    hold
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {columnPrefs.tracking && <TrackingCell order={order} />}
+              <button
+                type="button"
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle();
+                }}
+              >
+                {isExpanded ? "Hide" : "Details"}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
+            {columnPrefs.client && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Client</p>
+                {isUnassigned ? (
+                  <span className="inline-flex items-center gap-1 text-amber-700">
+                    <UserPlus className="h-3.5 w-3.5" /> Needs assignment
+                  </span>
+                ) : (
+                  <p>{order.org_name ?? "—"}</p>
+                )}
+              </div>
+            )}
+            {columnPrefs.customer && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Customer
+                </p>
+                <p>{order.customer_name ?? "—"}</p>
+                {order.customer_email && (
+                  <p className="text-xs text-muted-foreground">{order.customer_email}</p>
+                )}
+              </div>
+            )}
+            {columnPrefs.ship_to && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Ship To</p>
+                <p className="text-muted-foreground">{formatShipTo(order.ship_to)}</p>
+              </div>
+            )}
+            {columnPrefs.items && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Items</p>
+                <p>{itemCount}</p>
+              </div>
+            )}
+            {columnPrefs.status && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</p>
+                <span
+                  className={`text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap ${
+                    STATUS_COLORS[order.order_status] ?? "bg-gray-100 text-gray-700"
+                  }`}
+                >
+                  {order.order_status.replace(/_/g, " ")}
+                </span>
+              </div>
+            )}
+            {columnPrefs.amount && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Amount</p>
+                <p className="font-mono text-sm">
+                  {order.amount_paid != null ? `$${order.amount_paid.toFixed(2)}` : "—"}
+                </p>
+              </div>
+            )}
+            {columnPrefs.order_date && (
+              <div className="rounded-md border bg-background/60 p-2">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Order Date
+                </p>
+                <p className="text-muted-foreground">
+                  {order.order_date ? new Date(order.order_date).toLocaleDateString() : "—"}
+                </p>
+              </div>
+            )}
+            {columnPrefs.tags && (
+              <div className="rounded-md border bg-background/60 p-2 md:col-span-2 xl:col-span-1">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+                  Tags
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {order.tag_ids.length === 0 ? (
+                    <span className="text-muted-foreground text-xs">—</span>
+                  ) : (
+                    order.tag_ids.map((tagId) => {
+                      const def = tagDefById.get(tagId);
+                      return (
+                        <button
+                          key={tagId}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleTagFilter(tagId);
+                          }}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border hover:bg-muted"
+                          title={`Filter by ${def?.name ?? `tag ${tagId}`}`}
+                        >
+                          {def?.color && (
+                            <span
+                              className="inline-block w-2 h-2 rounded-sm"
+                              style={{ backgroundColor: def.color }}
+                            />
+                          )}
+                          {def?.name ?? tagId}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {isExpanded && (
+            <div className="rounded-md border bg-muted/20 p-3">
               <CockpitDrawer
                 order={order}
                 tagDefById={tagDefById}
                 onRefetchOrders={onRefetchOrders}
               />
             </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1663,7 +1661,7 @@ function BandcampDrawerEnrichment({ order }: { order: CockpitOrder }) {
             {showTip && (
               <div className="col-span-2">
                 <span className="opacity-75">Fan tip:</span>{" "}
-                <span className="font-medium">+${e.additional_fan_contribution!.toFixed(2)}</span>
+                <span className="font-medium">+${e.additional_fan_contribution?.toFixed(2)}</span>
               </div>
             )}
           </div>

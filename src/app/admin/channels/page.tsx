@@ -6,17 +6,10 @@ import { useCallback } from "react";
 import { triggerTagCleanup } from "@/actions/admin-settings";
 import { getBandcampSyncStatus, triggerBandcampSync } from "@/actions/bandcamp";
 import { getShopifySyncStatus, triggerFullBackfill, triggerShopifySync } from "@/actions/shopify";
+import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -90,43 +83,38 @@ function SyncHistoryTable({
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Type</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Items</TableHead>
-          <TableHead>Started</TableHead>
-          <TableHead>Duration</TableHead>
-          <TableHead>Error</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {logs.map((log) => (
-          <TableRow key={log.id}>
-            <TableCell className="font-mono text-xs">
-              {showSyncType ? syncTypeLabel(log.sync_type) : (log.sync_type ?? "unknown")}
-            </TableCell>
-            <TableCell>
-              <Badge variant={statusBadgeVariant(log.status)}>{log.status}</Badge>
-            </TableCell>
-            <TableCell>
-              {log.items_processed}
-              {log.items_failed > 0 && (
-                <span className="text-destructive ml-1">({log.items_failed} failed)</span>
-              )}
-            </TableCell>
-            <TableCell className="text-xs">{formatRelativeTime(log.started_at)}</TableCell>
-            <TableCell className="text-xs">
-              {formatDuration(log.started_at, log.completed_at)}
-            </TableCell>
-            <TableCell className="max-w-48 truncate text-xs text-destructive">
-              {log.error_message ?? "—"}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <BlockList
+      className="mt-2"
+      items={logs}
+      itemKey={(log) => log.id}
+      density="ops"
+      virtualizeThreshold={200}
+      ariaLabel="Channel sync history"
+      renderHeader={({ row }) => (
+        <div className="min-w-0">
+          <p className="font-mono text-xs">
+            {showSyncType ? syncTypeLabel(row.sync_type) : (row.sync_type ?? "unknown")}
+          </p>
+          <p className="text-xs text-muted-foreground">{formatRelativeTime(row.started_at)}</p>
+        </div>
+      )}
+      renderExceptionZone={({ row }) => (
+        <div className="flex items-center gap-2">
+          <Badge variant={statusBadgeVariant(row.status)}>{row.status}</Badge>
+          {row.items_failed > 0 && (
+            <span className="text-destructive text-xs">{row.items_failed} failed</span>
+          )}
+        </div>
+      )}
+      renderBody={({ row }) => (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <SyncMetric label="Items" value={String(row.items_processed)} />
+          <SyncMetric label="Duration" value={formatDuration(row.started_at, row.completed_at)} />
+          <SyncMetric label="Started" value={formatRelativeTime(row.started_at)} />
+          <SyncMetric label="Error" value={row.error_message ?? "—"} error={!!row.error_message} />
+        </div>
+      )}
+    />
   );
 }
 
@@ -374,6 +362,23 @@ export default function ChannelsPage() {
           <TagCleanupButton />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function SyncMetric({
+  label,
+  value,
+  error = false,
+}: {
+  label: string;
+  value: string;
+  error?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={error ? "text-sm text-destructive truncate" : "text-sm truncate"}>{value}</p>
     </div>
   );
 }

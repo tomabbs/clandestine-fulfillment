@@ -3,17 +3,12 @@
 import { ChevronDown, ChevronRight, DollarSign, MapPin } from "lucide-react";
 import { useState } from "react";
 import { getClientMailOrders, getMailOrderPayoutSummary } from "@/actions/mail-orders";
+import { BlockList } from "@/components/shared/block-list";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageShell } from "@/components/shared/page-shell";
+import { PageToolbar } from "@/components/shared/page-toolbar";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -161,14 +156,11 @@ export default function PortalMailOrderPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Mail-Order</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Your consignment orders sold through Clandestine. You receive 50% of your items' subtotal.
-        </p>
-      </div>
-
+    <PageShell
+      title="Mail-Order"
+      description="Your consignment orders sold through Clandestine. You receive 50% of your items' subtotal."
+      maxWidth="full"
+    >
       {/* Payout summary */}
       {summary && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -199,7 +191,7 @@ export default function PortalMailOrderPage() {
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
+      <PageToolbar>
         <select
           value={filters.status}
           onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
@@ -219,123 +211,7 @@ export default function PortalMailOrderPage() {
           <option value="included_in_snapshot">In billing</option>
           <option value="paid">Paid</option>
         </select>
-      </div>
-
-      {/* Table */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : (
-        <>
-          {data && data.total > 0 && (
-            <PaginationBar
-              page={filters.page}
-              pageSize={filters.pageSize}
-              total={data.total}
-              onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-              onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
-            />
-          )}
-          <div className="border rounded-lg overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8" />
-                  <TableHead>Order</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                  <TableHead className="text-right">Your Payout</TableHead>
-                  <TableHead>Payout Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(data?.orders ?? []).map((order: MailOrderRow) => {
-                  const isExpanded = expandedId === order.id;
-                  return (
-                    <>
-                      <TableRow
-                        key={order.id}
-                        className="cursor-pointer"
-                        onClick={() => setExpandedId(isExpanded ? null : order.id)}
-                      >
-                        <TableCell className="w-8 text-muted-foreground">
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {order.order_number ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[140px] truncate">
-                          {order.customer_name ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">
-                            {order.source === "clandestine_shopify" ? "Shopify" : "Discogs"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(order.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              order.fulfillment_status === "fulfilled" ? "default" : "outline"
-                            }
-                          >
-                            {order.fulfillment_status === "fulfilled" ? "Fulfilled" : "Unfulfilled"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          ${Number(order.subtotal).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono font-medium text-green-700">
-                          +${Number(order.client_payout_amount ?? 0).toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              order.client_payout_status === "paid"
-                                ? "default"
-                                : order.client_payout_status === "included_in_snapshot"
-                                  ? "secondary"
-                                  : "outline"
-                            }
-                          >
-                            {PAYOUT_LABELS[order.client_payout_status ?? "pending"] ?? "Pending"}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                      {isExpanded && (
-                        <tr key={`${order.id}-detail`}>
-                          <td colSpan={9} className="p-0">
-                            <OrderDetail order={order} />
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  );
-                })}
-                {(data?.orders ?? []).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
-                      No mail-order sales yet.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </>
-      )}
+      </PageToolbar>
 
       {data && data.total > 0 && (
         <PaginationBar
@@ -346,6 +222,131 @@ export default function PortalMailOrderPage() {
           onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
         />
       )}
+
+      <BlockList
+        className="mt-3"
+        items={data?.orders ?? []}
+        totalCount={data?.total}
+        itemKey={(order) => order.id}
+        loading={isLoading}
+        density="ops"
+        ariaLabel="Portal mail-order list"
+        expandedKeys={
+          expandedId
+            ? (new Set<string | number>([expandedId]) as Set<string | number>)
+            : (new Set<string | number>() as Set<string | number>)
+        }
+        onExpandedKeysChange={(keys) => {
+          const next = Array.from(keys)[0];
+          setExpandedId(next ? String(next) : null);
+        }}
+        renderHeader={({ row, expanded, toggleExpanded }) => {
+          const order = row as MailOrderRow;
+          return (
+            <div className="min-w-0 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-mono text-sm">{order.order_number ?? "—"}</p>
+                <p className="text-xs text-muted-foreground">{order.customer_name ?? "—"}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpanded();
+                }}
+              >
+                {expanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          );
+        }}
+        renderExceptionZone={({ row }) => {
+          const order = row as MailOrderRow;
+          return (
+            <div className="flex items-center gap-2">
+              <Badge variant={order.fulfillment_status === "fulfilled" ? "default" : "outline"}>
+                {order.fulfillment_status === "fulfilled" ? "Fulfilled" : "Unfulfilled"}
+              </Badge>
+              <Badge
+                variant={
+                  order.client_payout_status === "paid"
+                    ? "default"
+                    : order.client_payout_status === "included_in_snapshot"
+                      ? "secondary"
+                      : "outline"
+                }
+              >
+                {PAYOUT_LABELS[order.client_payout_status ?? "pending"] ?? "Pending"}
+              </Badge>
+            </div>
+          );
+        }}
+        renderBody={({ row }) => {
+          const order = row as MailOrderRow;
+          return (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <PayoutMetric
+                label="Source"
+                value={order.source === "clandestine_shopify" ? "Shopify" : "Discogs"}
+              />
+              <PayoutMetric label="Date" value={new Date(order.created_at).toLocaleDateString()} />
+              <PayoutMetric label="Subtotal" value={`$${Number(order.subtotal).toFixed(2)}`} mono />
+              <PayoutMetric
+                label="Your payout"
+                value={`+$${Number(order.client_payout_amount ?? 0).toFixed(2)}`}
+                mono
+                success
+              />
+            </div>
+          );
+        }}
+        renderExpanded={({ row }) => (
+          <div className="rounded-md border bg-muted/30 p-0">
+            <OrderDetail order={row as MailOrderRow} />
+          </div>
+        )}
+        emptyState={<EmptyState title="No mail-order sales yet" />}
+      />
+
+      {data && data.total > 0 && (
+        <PaginationBar
+          page={filters.page}
+          pageSize={filters.pageSize}
+          total={data.total}
+          onPageChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+          onPageSizeChange={(s) => setFilters((f) => ({ ...f, pageSize: s, page: 1 }))}
+        />
+      )}
+    </PageShell>
+  );
+}
+
+function PayoutMetric({
+  label,
+  value,
+  mono = false,
+  success = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  success?: boolean;
+}) {
+  return (
+    <div className="rounded-md border bg-background/60 p-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p
+        className={
+          mono ? (success ? "font-mono text-sm text-green-700" : "font-mono text-sm") : "text-sm"
+        }
+      >
+        {value}
+      </p>
     </div>
   );
 }

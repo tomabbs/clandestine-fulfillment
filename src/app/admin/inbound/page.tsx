@@ -8,6 +8,7 @@ import {
   type InboundFilters,
   type InboundShipmentWithOrg,
 } from "@/actions/inbound";
+import { BlockList } from "@/components/shared/block-list";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import { PageToolbar } from "@/components/shared/page-toolbar";
@@ -16,12 +17,9 @@ import {
   type PageSize,
   PaginationBar,
 } from "@/components/shared/pagination-bar";
-import {
-  ResponsiveTable,
-  type ResponsiveTableColumn,
-} from "@/components/shared/responsive-table";
 import { ScrollableTabs, ScrollableTabsList } from "@/components/shared/scrollable-tabs";
 import { StatusBadge, type StatusIntent } from "@/components/shared/status-badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TabsTrigger } from "@/components/ui/tabs";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
@@ -76,62 +74,9 @@ export default function AdminInboundPage() {
   const allShipments = data?.data ?? [];
   // Local org-name filter (server query handles status/dates/page).
   const shipments = orgFilter
-    ? allShipments.filter((s) =>
-        s.org_name?.toLowerCase().includes(orgFilter.toLowerCase()),
-      )
+    ? allShipments.filter((s) => s.org_name?.toLowerCase().includes(orgFilter.toLowerCase()))
     : allShipments;
   const totalCount = data?.count ?? 0;
-
-  const columns: Array<ResponsiveTableColumn<InboundShipmentWithOrg>> = [
-    {
-      key: "tracking_number",
-      label: "Tracking Number",
-      primary: true,
-      mono: true,
-      render: (row) => row.tracking_number || "—",
-    },
-    {
-      key: "carrier",
-      label: "Carrier",
-      render: (row) => row.carrier || "—",
-    },
-    {
-      key: "org_name",
-      label: "Organization",
-      render: (row) => row.org_name || "—",
-    },
-    {
-      key: "expected_date",
-      label: "Expected Date",
-      hideBelow: "md",
-      render: (row) =>
-        row.expected_date
-          ? new Date(`${row.expected_date}T12:00:00`).toLocaleDateString()
-          : "—",
-    },
-    {
-      key: "status",
-      label: "Status",
-      render: (row) => (
-        <StatusBadge intent={STATUS_INTENT[row.status] ?? "neutral"}>
-          {STATUS_LABELS[row.status] ?? row.status}
-        </StatusBadge>
-      ),
-    },
-    {
-      key: "item_count",
-      label: "Items",
-      align: "right",
-      hideBelow: "md",
-      render: (row) => row.item_count,
-    },
-    {
-      key: "submitter_name",
-      label: "Submitted By",
-      hideBelow: "lg",
-      render: (row) => row.submitter_name || "—",
-    },
-  ];
 
   return (
     <PageShell
@@ -210,23 +155,63 @@ export default function AdminInboundPage() {
         }}
       />
 
-      <ResponsiveTable
-        rows={shipments}
-        columns={columns}
-        getRowId={(row) => row.id}
-        rowExpand={(row) => (
-          <button
-            type="button"
-            className="text-sm text-primary hover:underline"
-            onClick={() => router.push(`/admin/inbound/${row.id}`)}
-          >
-            Open shipment details →
-          </button>
-        )}
+      <BlockList
+        className="mt-3"
+        items={shipments}
+        totalCount={totalCount}
+        itemKey={(row) => row.id}
         loading={isLoading}
-        loadingRowCount={5}
         density="ops"
         ariaLabel="Inbound shipments"
+        renderHeader={({ row }) => (
+          <div className="min-w-0">
+            <p className="font-mono text-sm">{row.tracking_number || "—"}</p>
+            <p className="text-xs text-muted-foreground">
+              {row.carrier || "Unknown carrier"} · {row.org_name || "Unassigned org"}
+            </p>
+          </div>
+        )}
+        renderExceptionZone={({ row }) => (
+          <div className="flex items-center gap-2">
+            <StatusBadge intent={STATUS_INTENT[row.status] ?? "neutral"}>
+              {STATUS_LABELS[row.status] ?? row.status}
+            </StatusBadge>
+            <StatusBadge intent="info">{row.item_count} items</StatusBadge>
+          </div>
+        )}
+        renderBody={({ row }) => (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="rounded-md border bg-background/60 p-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Expected</p>
+              <p>
+                {row.expected_date
+                  ? new Date(`${row.expected_date}T12:00:00`).toLocaleDateString()
+                  : "—"}
+              </p>
+            </div>
+            <div className="rounded-md border bg-background/60 p-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Submitted by
+              </p>
+              <p>{row.submitter_name || "—"}</p>
+            </div>
+            <div className="rounded-md border bg-background/60 p-2">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Shipment ID
+              </p>
+              <p className="font-mono text-xs">{row.id}</p>
+            </div>
+          </div>
+        )}
+        renderActions={({ row }) => (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => router.push(`/admin/inbound/${row.id}`)}
+          >
+            Open
+          </Button>
+        )}
         emptyState={
           <EmptyState
             icon={Package}
