@@ -9,6 +9,7 @@ import {
 import { buildBandcampAlbumUrl } from "@/lib/clients/bandcamp-scraper";
 import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { STAFF_ROLES } from "@/lib/shared/constants";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { classifyProduct } from "@/lib/shared/product-categories";
 import type { BandcampConnection, BandcampProductMapping } from "@/lib/shared/types";
@@ -1310,4 +1311,163 @@ export async function getBandcampTrending(
 
   trendingCache.set(cacheKey, { data: response, fetchedAt: Date.now() });
   return response;
+}
+
+// ─── Phase 5 (HRD-11.1): Bandcamp polarity flip ──────────────────────────────
+//
+// Flips a workspace from legacy SS-primary BC writeback to direct-primary,
+// after enforcing the two safety preconditions documented in the plan:
+//   (a) `workspaces.shipstation_sync_paused = true` — operator has already
+//       parked SS for this workspace, so nothing else is competing on the
+//       writeback path.
+//   (b) No SS connector activity for 48 h on this workspace's BC shipments —
+//       i.e. zero `warehouse_shipments` rows where `bandcamp_payment_id IS NOT
+//       NULL` were marked `shipstation_marked_shipped_at` in the last 48 h.
+//       (If SS has been pushing in the last 48 h, flipping polarity would
+//       create a race between SS and our direct push; both could land on the
+//       same payment in BC.)
+//
+// Both checks are advisory bypassable with `force: true` for emergency
+// rollouts, but the bypass is logged via sensor + review queue so audit is
+// preserved.
+
+const flipPolaritySchema = z.object({
+  workspaceId: z.string().uuid(),
+  direction: z.enum(["enable_direct_primary", "disable_direct_primary"]),
+  force: z.boolean().optional(),
+  reason: z.string().min(1).max(500),
+});
+
+const SS_QUIET_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+export interface PolarityFlipResult {
+  ok: boolean;
+  workspaceId: string;
+  newValue: boolean;
+  preconditionsPassed: boolean;
+  blockedBy: string[];
+  bypassed: boolean;
+}
+
+export async function flipBandcampPrimaryToDirect(
+  rawInput: z.input<typeof flipPolaritySchema>,
+): Promise<PolarityFlipResult> {
+  const { userRecord } = await requireAuth();
+  if (!(STAFF_ROLES as readonly string[]).includes(userRecord.role)) {
+    throw new Error("Staff access required to flip Bandcamp polarity");
+  }
+  const input = flipPolaritySchema.parse(rawInput);
+  const supabase = createServiceRoleClient();
+
+  const newValue = input.direction === "enable_direct_primary";
+  const blockedBy: string[] = [];
+
+  // Disable is always allowed — this is the rollback direction. We still log it.
+  if (newValue) {
+    // Precondition (a): shipstation_sync_paused must be TRUE.
+    const { data: wsRow, error: wsErr } = await supabase
+      .from("workspaces")
+      .select("id, shipstation_sync_paused, bc_verify_direct_primary")
+      .eq("id", input.workspaceId)
+      .maybeSingle();
+    if (wsErr || !wsRow) {
+      throw new Error(`Workspace not found: ${input.workspaceId}`);
+    }
+    if (wsRow.bc_verify_direct_primary === true) {
+      return {
+        ok: true,
+        workspaceId: input.workspaceId,
+        newValue: true,
+        preconditionsPassed: true,
+        blockedBy: [],
+        bypassed: false,
+      };
+    }
+    if (wsRow.shipstation_sync_paused !== true) {
+      blockedBy.push("shipstation_sync_paused must be TRUE before enabling direct-primary");
+    }
+
+    // Precondition (b): zero SS connector activity in the last 48 h on BC shipments.
+    const cutoffIso = new Date(Date.now() - SS_QUIET_WINDOW_MS).toISOString();
+    const { count: ssActiveCount, error: ssErr } = await supabase
+      .from("warehouse_shipments")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", input.workspaceId)
+      .not("bandcamp_payment_id", "is", null)
+      .gte("shipstation_marked_shipped_at", cutoffIso);
+    if (ssErr) {
+      throw new Error(`SS quiet check failed: ${ssErr.message}`);
+    }
+    if ((ssActiveCount ?? 0) > 0) {
+      blockedBy.push(
+        `${ssActiveCount} SS connector writes on BC shipments in the last 48h — drain or wait before flipping`,
+      );
+    }
+  }
+
+  if (blockedBy.length > 0 && !input.force) {
+    return {
+      ok: false,
+      workspaceId: input.workspaceId,
+      newValue,
+      preconditionsPassed: false,
+      blockedBy,
+      bypassed: false,
+    };
+  }
+
+  const { error: updErr } = await supabase
+    .from("workspaces")
+    .update({ bc_verify_direct_primary: newValue })
+    .eq("id", input.workspaceId);
+  if (updErr) {
+    throw new Error(`Failed to flip polarity: ${updErr.message}`);
+  }
+
+  await supabase.from("sensor_readings").insert({
+    workspace_id: input.workspaceId,
+    sensor_name: "bandcamp.polarity_flip",
+    status: blockedBy.length > 0 ? "warning" : "healthy",
+    message:
+      `bc_verify_direct_primary=${newValue} (operator=${userRecord.id}, reason=${input.reason})` +
+      (blockedBy.length > 0 ? ` BYPASSED preconditions: ${blockedBy.join("; ")}` : ""),
+    value: {
+      direction: input.direction,
+      operator_id: userRecord.id,
+      operator_email: userRecord.email,
+      reason: input.reason,
+      bypassed: blockedBy.length > 0,
+      blocked_by: blockedBy,
+    },
+  });
+
+  // If preconditions were bypassed, also surface a review queue item so the
+  // operator who flipped the switch is on the hook to monitor the workspace.
+  if (blockedBy.length > 0) {
+    await supabase.from("warehouse_review_queue").insert({
+      workspace_id: input.workspaceId,
+      org_id: null,
+      category: "bandcamp_polarity_force_flip",
+      severity: "high",
+      group_key: `bandcamp.polarity_force_flip:${input.workspaceId}:${Date.now()}`,
+      title: `Bandcamp polarity force-flipped to direct-primary=${newValue}`,
+      description: `Operator bypassed safety preconditions. Reason: ${input.reason}. Blocked by: ${blockedBy.join("; ")}`,
+      metadata: {
+        operator_id: userRecord.id,
+        operator_email: userRecord.email,
+        reason: input.reason,
+        blocked_by: blockedBy,
+        new_value: newValue,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    workspaceId: input.workspaceId,
+    newValue,
+    preconditionsPassed: blockedBy.length === 0,
+    blockedBy,
+    bypassed: blockedBy.length > 0 && input.force === true,
+  };
 }

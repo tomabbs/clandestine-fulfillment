@@ -1,31 +1,37 @@
-// Phase 6.5 — Bandcamp shipping verifier (replaces 15-min direct-push cron).
+// Phase 6.5 + Phase 5 (HRD-11) — Bandcamp shipping verifier (per-workspace polarity).
 //
-// Premise: ShipStation's Bandcamp store connector + Phase 4.3 writeback with
-// `notify_order_source: true` (v2) / `notifySalesChannel: true` (v1) is now
-// the PRIMARY path that pushes tracking back to BC. SS does the work 99% of
-// the time. We don't need to push from our side — we need to verify.
+// Two execution modes, gated per-workspace by `workspaces.bc_verify_direct_primary`:
 //
-// Cron: */30 * * * * — slower than the old 15-min direct-push cron because
-// the SS connector has its own latency and we want to give it a fair window
-// before assuming it failed.
+// LEGACY mode (`bc_verify_direct_primary = false`, the default):
+//   ShipStation's Bandcamp store connector + Phase 4.3 writeback with
+//   `notify_order_source: true` (v2) / `notifySalesChannel: true` (v1) is the
+//   PRIMARY path. We wait for SS to mark the shipment, then verify on the BC
+//   side. Selection requires `shipstation_marked_shipped_at IS NOT NULL` and
+//   that timestamp >= 30 min old. If BC shows the order shipped, we stamp
+//   success; if not, we fall back to direct push (treated as an alarm —
+//   `bandcamp.connector_fallback`).
 //
-// Selection criteria (per plan §6.5):
-//   - bandcamp_payment_id IS NOT NULL
-//   - tracking_number IS NOT NULL
-//   - shipstation_marked_shipped_at IS NOT NULL  (i.e. SS writeback succeeded)
-//   - bandcamp_synced_at IS NULL                 (we haven't confirmed BC has it)
-//   - shipstation_marked_shipped_at < now() - 30 minutes
+// DIRECT-PRIMARY mode (`bc_verify_direct_primary = true`, HRD-11):
+//   Direct push to Bandcamp is the PRIMARY path. We no longer wait on the
+//   SS connector. Selection drops the `shipstation_marked_shipped_at` filter;
+//   any shipment with `bandcamp_payment_id` + `tracking_number` whose
+//   `bandcamp_synced_at IS NULL` and whose `created_at` is at least 5 min old
+//   (small grace window so the inline post-label-purchase push has a chance
+//   to land first) is a candidate. We still BC-API-check first — if BC
+//   already shows shipped (because the SS connector beat us OR because the
+//   inline push landed in the same second), we stamp success without
+//   re-pushing. Otherwise we enqueue `bandcamp-mark-shipped` — and emit a
+//   `bandcamp.direct_primary_push` sensor reading (HEALTHY status, since
+//   this is the EXPECTED path under direct-primary).
 //
-// Per shipment:
-//   1. Look up BC band for the shipment's org via bandcamp_connections.
-//   2. Call getOrders for that band over a wide window covering the shipment.
-//      (Batched per band so N shipments under the same band = 1 BC API call.)
-//   3. Find the matching payment_id in the response. If `ship_date` is set →
-//      stamp `bandcamp_synced_at`; SS connector did the work. Emit a
-//      `bandcamp.connector_success` sensor reading.
-//   4. If `ship_date` is missing → fall back to direct push by triggering the
-//      `bandcamp-mark-shipped` task for that shipment. Emit a
-//      `bandcamp.connector_fallback` sensor reading (R21).
+// Cron: */30 * * * * — keeps the existing cadence; the BC API call is the
+// rate-limited side, not the cron.
+//
+// Per-workspace flip is operator-controlled via `flipBandcampPrimaryToDirect`
+// Server Action (HRD-11.1) which hard-checks (a) 48 h of SS quiet on that
+// workspace's open shipments AND (b) `shipstation_sync_paused = true`.
+// Per-workspace rollback: flip back to `false` to restore legacy behavior
+// for that workspace alone.
 
 import { logger, schedules, tasks } from "@trigger.dev/sdk";
 import type { BandcampOrderItem } from "@/lib/clients/bandcamp";
@@ -33,16 +39,40 @@ import { getOrders, refreshBandcampToken } from "@/lib/clients/bandcamp";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
-const PRIMARY_GRACE_MS = 30 * 60 * 1000; // 30 min — SS connector has up to this long before we assume it failed.
+const PRIMARY_GRACE_MS = 30 * 60 * 1000; // Legacy mode: SS connector has up to this long before we assume it failed.
+const DIRECT_PRIMARY_GRACE_MS = 5 * 60 * 1000; // Direct-primary mode: small grace so the inline push can land first.
 const GET_ORDERS_WINDOW_DAYS = 30; // Pull a 30d window of BC orders per band; covers most pending shipments.
 const MAX_SHIPMENTS_PER_RUN = 200;
 
 interface VerifyResult {
   scanned: number;
+  /** Legacy mode: SS connector pushed and BC has ship_date. */
   ss_connector_succeeded: number;
+  /** Legacy mode: SS connector did not push (alarm); we are pushing directly. */
   fell_back_to_direct_push: number;
+  /** Direct-primary mode: BC already showed shipped, no push needed. */
+  direct_primary_already_shipped: number;
+  /** Direct-primary mode: enqueued direct push (the expected path). */
+  direct_primary_pushed: number;
   errors: number;
+  /** Number of workspaces processed under direct-primary polarity. */
+  workspaces_direct_primary: number;
+  /** Number of workspaces processed under legacy SS-primary polarity. */
+  workspaces_legacy: number;
 }
+
+type ShipmentRow = {
+  id: unknown;
+  workspace_id: unknown;
+  org_id: unknown;
+  bandcamp_payment_id: unknown;
+  tracking_number: unknown;
+  carrier: unknown;
+  ship_date: unknown;
+  shipstation_marked_shipped_at: unknown;
+};
+
+type TaggedShipment = ShipmentRow & { _directPrimary: boolean };
 
 export const bandcampShippingVerifyTask = schedules.task({
   id: "bandcamp-shipping-verify",
@@ -58,9 +88,23 @@ export const bandcampShippingVerifyTask = schedules.task({
 export async function runBandcampShippingVerify(): Promise<VerifyResult> {
   const supabase = createServiceRoleClient();
 
-  // Pending = SS marked shipped at least 30 min ago, but BC isn't synced yet.
-  const cutoffIso = new Date(Date.now() - PRIMARY_GRACE_MS).toISOString();
-  const { data: pending, error: pendingErr } = await supabase
+  // Phase 5 (HRD-11): determine which workspaces have flipped polarity.
+  const { data: dpWorkspaces, error: dpErr } = await supabase
+    .from("workspaces")
+    .select("id")
+    .eq("bc_verify_direct_primary", true);
+  if (dpErr) {
+    logger.warn("[bandcamp-shipping-verify] direct-primary workspace lookup failed", {
+      error: dpErr.message,
+    });
+  }
+  const directPrimarySet = new Set<string>((dpWorkspaces ?? []).map((row) => row.id as string));
+  const directPrimaryIds = Array.from(directPrimarySet);
+
+  // Legacy selection: workspaces NOT in directPrimarySet, where SS connector
+  // marked the shipment at least 30 min ago and BC is still unsynced.
+  const ssCutoffIso = new Date(Date.now() - PRIMARY_GRACE_MS).toISOString();
+  let legacyQuery = supabase
     .from("warehouse_shipments")
     .select(
       "id, workspace_id, org_id, bandcamp_payment_id, tracking_number, carrier, ship_date, shipstation_marked_shipped_at",
@@ -69,39 +113,67 @@ export async function runBandcampShippingVerify(): Promise<VerifyResult> {
     .not("tracking_number", "is", null)
     .not("shipstation_marked_shipped_at", "is", null)
     .is("bandcamp_synced_at", null)
-    .lte("shipstation_marked_shipped_at", cutoffIso)
+    .lte("shipstation_marked_shipped_at", ssCutoffIso)
     .limit(MAX_SHIPMENTS_PER_RUN);
+  if (directPrimaryIds.length > 0) {
+    // PostgREST `not.in` syntax: surround the list in parentheses.
+    legacyQuery = legacyQuery.not("workspace_id", "in", `(${directPrimaryIds.join(",")})`);
+  }
+  const { data: legacyRows, error: legacyErr } = await legacyQuery;
 
-  if (pendingErr) {
-    logger.warn("[bandcamp-shipping-verify] pending query failed", { error: pendingErr.message });
-    return {
-      scanned: 0,
-      ss_connector_succeeded: 0,
-      fell_back_to_direct_push: 0,
-      errors: 1,
-    };
+  if (legacyErr) {
+    logger.warn("[bandcamp-shipping-verify] legacy query failed", { error: legacyErr.message });
+    return emptyResult(1);
   }
 
-  if (!pending || pending.length === 0) {
-    return {
-      scanned: 0,
-      ss_connector_succeeded: 0,
-      fell_back_to_direct_push: 0,
-      errors: 0,
-    };
+  // Direct-primary selection: workspaces IN directPrimarySet, drop the SS
+  // filter, only require a 5-min grace window since shipment creation so the
+  // inline post-label-purchase push has a fair chance to land first.
+  let directPrimaryRows: ShipmentRow[] = [];
+  if (directPrimaryIds.length > 0) {
+    const dpCutoffIso = new Date(Date.now() - DIRECT_PRIMARY_GRACE_MS).toISOString();
+    const { data: dpRows, error: dpRowsErr } = await supabase
+      .from("warehouse_shipments")
+      .select(
+        "id, workspace_id, org_id, bandcamp_payment_id, tracking_number, carrier, ship_date, shipstation_marked_shipped_at, created_at",
+      )
+      .not("bandcamp_payment_id", "is", null)
+      .not("tracking_number", "is", null)
+      .is("bandcamp_synced_at", null)
+      .lte("created_at", dpCutoffIso)
+      .in("workspace_id", directPrimaryIds)
+      .limit(MAX_SHIPMENTS_PER_RUN);
+    if (dpRowsErr) {
+      logger.warn("[bandcamp-shipping-verify] direct-primary query failed", {
+        error: dpRowsErr.message,
+      });
+      return emptyResult(1);
+    }
+    directPrimaryRows = (dpRows ?? []) as ShipmentRow[];
+  }
+
+  const tagged: TaggedShipment[] = [
+    ...((legacyRows ?? []) as ShipmentRow[]).map((r) => ({ ...r, _directPrimary: false })),
+    ...directPrimaryRows.map((r) => ({ ...r, _directPrimary: true })),
+  ];
+
+  if (tagged.length === 0) {
+    return emptyResult(0);
   }
 
   // Group shipments by (workspace_id, org_id) so we can batch BC API calls.
-  // Each (workspace, org) maps to at most one bandcamp_connection.
+  // Each (workspace, org) maps to at most one bandcamp_connection. Polarity
+  // is workspace-level so all shipments in a group share the same flag.
   const byConnectionKey = new Map<
     string,
     {
       workspaceId: string;
       orgId: string | null;
-      shipments: typeof pending;
+      directPrimary: boolean;
+      shipments: TaggedShipment[];
     }
   >();
-  for (const s of pending) {
+  for (const s of tagged) {
     const key = `${s.workspace_id}:${s.org_id ?? "_"}`;
     const existing = byConnectionKey.get(key);
     if (existing) {
@@ -110,19 +182,53 @@ export async function runBandcampShippingVerify(): Promise<VerifyResult> {
       byConnectionKey.set(key, {
         workspaceId: s.workspace_id as string,
         orgId: (s.org_id as string | null) ?? null,
+        directPrimary: s._directPrimary,
         shipments: [s],
       });
     }
   }
 
   const totals: VerifyResult = {
-    scanned: pending.length,
+    scanned: tagged.length,
     ss_connector_succeeded: 0,
     fell_back_to_direct_push: 0,
+    direct_primary_already_shipped: 0,
+    direct_primary_pushed: 0,
     errors: 0,
+    workspaces_direct_primary: 0,
+    workspaces_legacy: 0,
   };
 
+  // Per-workspace tallies for the per-workspace sensor reading below.
+  const byWorkspace = new Map<
+    string,
+    {
+      directPrimary: boolean;
+      scanned: number;
+      ssConnectorOk: number;
+      fellBack: number;
+      directAlreadyShipped: number;
+      directPushed: number;
+      errors: number;
+    }
+  >();
+
   for (const group of byConnectionKey.values()) {
+    const wsTally = byWorkspace.get(group.workspaceId) ?? {
+      directPrimary: group.directPrimary,
+      scanned: 0,
+      ssConnectorOk: 0,
+      fellBack: 0,
+      directAlreadyShipped: 0,
+      directPushed: 0,
+      errors: 0,
+    };
+    const beforeOk = totals.ss_connector_succeeded;
+    const beforeFb = totals.fell_back_to_direct_push;
+    const beforeDpOk = totals.direct_primary_already_shipped;
+    const beforeDpPush = totals.direct_primary_pushed;
+    const beforeErr = totals.errors;
+
     try {
       await processConnectionGroup(supabase, group, totals);
     } catch (err) {
@@ -130,35 +236,57 @@ export async function runBandcampShippingVerify(): Promise<VerifyResult> {
       logger.warn("[bandcamp-shipping-verify] group failed", {
         workspaceId: group.workspaceId,
         orgId: group.orgId,
+        directPrimary: group.directPrimary,
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    wsTally.scanned += group.shipments.length;
+    wsTally.ssConnectorOk += totals.ss_connector_succeeded - beforeOk;
+    wsTally.fellBack += totals.fell_back_to_direct_push - beforeFb;
+    wsTally.directAlreadyShipped += totals.direct_primary_already_shipped - beforeDpOk;
+    wsTally.directPushed += totals.direct_primary_pushed - beforeDpPush;
+    wsTally.errors += totals.errors - beforeErr;
+    byWorkspace.set(group.workspaceId, wsTally);
+
+    if (group.directPrimary) {
+      totals.workspaces_direct_primary++;
+    } else {
+      totals.workspaces_legacy++;
+    }
   }
 
-  // Per-workspace sensor reading so Phase 7.1 can alert on connector reliability.
-  // We aggregate workspace totals here in app code; sensor consumer aggregates
-  // across the rolling window.
-  const byWorkspace = new Map<string, { ok: number; fallback: number }>();
-  for (const group of byConnectionKey.values()) {
-    const cur = byWorkspace.get(group.workspaceId) ?? { ok: 0, fallback: 0 };
-    byWorkspace.set(group.workspaceId, cur);
-  }
-  // We don't have per-workspace tallies from processConnectionGroup yet, so
-  // emit one global reading for now keyed by the first workspace.
-  // Phase 7.1 implementation can refine this if it wants per-workspace breakdown.
-  const firstWs = Array.from(byConnectionKey.values())[0]?.workspaceId;
-  if (firstWs) {
-    await supabase.from("sensor_readings").insert({
-      workspace_id: firstWs,
-      sensor_name: "trigger:bandcamp-shipping-verify",
-      status: totals.errors > 0 ? "warning" : "healthy",
-      message: `Scanned ${totals.scanned}; SS connector OK ${totals.ss_connector_succeeded}; fell back ${totals.fell_back_to_direct_push}; errors ${totals.errors}.`,
-      value: totals,
-    });
+  // Per-workspace sensor reading so Phase 7.1 (channel health) can alert on
+  // either polarity slipping. Direct-primary workspaces should see push>0 +
+  // errors=0 as healthy steady state; legacy workspaces should see fellBack=0.
+  const sensorRows = Array.from(byWorkspace.entries()).map(([wsId, t]) => ({
+    workspace_id: wsId,
+    sensor_name: "trigger:bandcamp-shipping-verify",
+    status: t.errors > 0 ? "warning" : "healthy",
+    message: t.directPrimary
+      ? `direct-primary: scanned=${t.scanned}, BC-already-shipped=${t.directAlreadyShipped}, pushed=${t.directPushed}, errors=${t.errors}`
+      : `legacy: scanned=${t.scanned}, SS-ok=${t.ssConnectorOk}, fell-back=${t.fellBack}, errors=${t.errors}`,
+    value: { ...t },
+  }));
+  if (sensorRows.length > 0) {
+    await supabase.from("sensor_readings").insert(sensorRows);
   }
 
   logger.log("[bandcamp-shipping-verify] done", { ...totals });
   return totals;
+}
+
+function emptyResult(errors: number): VerifyResult {
+  return {
+    scanned: 0,
+    ss_connector_succeeded: 0,
+    fell_back_to_direct_push: 0,
+    direct_primary_already_shipped: 0,
+    direct_primary_pushed: 0,
+    errors,
+    workspaces_direct_primary: 0,
+    workspaces_legacy: 0,
+  };
 }
 
 async function processConnectionGroup(
@@ -166,16 +294,8 @@ async function processConnectionGroup(
   group: {
     workspaceId: string;
     orgId: string | null;
-    shipments: Array<{
-      id: unknown;
-      workspace_id: unknown;
-      org_id: unknown;
-      bandcamp_payment_id: unknown;
-      tracking_number: unknown;
-      carrier: unknown;
-      ship_date: unknown;
-      shipstation_marked_shipped_at: unknown;
-    }>;
+    directPrimary: boolean;
+    shipments: TaggedShipment[];
   },
   totals: VerifyResult,
 ): Promise<void> {
@@ -201,7 +321,14 @@ async function processConnectionGroup(
     // Fall through to direct push for these shipments — bandcamp-mark-shipped
     // handles the lookup itself.
     for (const s of group.shipments) {
-      await fallbackToDirectPush(supabase, String(s.id), totals, "no_bc_connection");
+      await enqueueDirectPush(
+        supabase,
+        group.workspaceId,
+        String(s.id),
+        totals,
+        group.directPrimary,
+        "no_bc_connection",
+      );
     }
     return;
   }
@@ -250,7 +377,11 @@ async function processConnectionGroup(
     }
     const bcShipDate = shipDateByPayment.get(paymentId);
     if (bcShipDate) {
-      // SS connector did the work. Stamp success.
+      // BC already shows shipped. Stamp synced and skip the push.
+      // - Legacy mode: SS connector did the work (the original Phase 6.5 happy path).
+      // - Direct-primary mode: either the inline post-label-purchase push beat
+      //   us, or the SS connector still happened to fire — either way, no need
+      //   to push again.
       const { error: stampErr } = await supabase
         .from("warehouse_shipments")
         .update({
@@ -262,46 +393,83 @@ async function processConnectionGroup(
         totals.errors++;
         logger.warn("[bandcamp-shipping-verify] success stamp failed", {
           shipmentId: s.id,
+          directPrimary: group.directPrimary,
           error: stampErr.message,
         });
         continue;
       }
-      totals.ss_connector_succeeded++;
-      await supabase.from("sensor_readings").insert({
-        workspace_id: group.workspaceId,
-        sensor_name: "bandcamp.connector_success",
-        status: "healthy",
-        message: `SS connector successfully pushed payment_id=${paymentId} to BC`,
-        value: { payment_id: paymentId, shipment_id: s.id },
-      });
+      if (group.directPrimary) {
+        totals.direct_primary_already_shipped++;
+        await supabase.from("sensor_readings").insert({
+          workspace_id: group.workspaceId,
+          sensor_name: "bandcamp.direct_primary_already_shipped",
+          status: "healthy",
+          message: `BC already shows shipped for payment_id=${paymentId} (direct-primary; nothing to push)`,
+          value: { payment_id: paymentId, shipment_id: s.id },
+        });
+      } else {
+        totals.ss_connector_succeeded++;
+        await supabase.from("sensor_readings").insert({
+          workspace_id: group.workspaceId,
+          sensor_name: "bandcamp.connector_success",
+          status: "healthy",
+          message: `SS connector successfully pushed payment_id=${paymentId} to BC`,
+          value: { payment_id: paymentId, shipment_id: s.id },
+        });
+      }
       continue;
     }
 
-    // BC has the order but no ship_date — SS connector hasn't fired (or fired
-    // but failed). Fall back to direct push.
-    await fallbackToDirectPush(supabase, String(s.id), totals, "ss_connector_did_not_push");
+    // BC has the order but no ship_date.
+    // - Legacy mode: SS connector hasn't fired (or fired but failed) → fall
+    //   back to direct push as an alarm.
+    // - Direct-primary mode: this is the EXPECTED path. Enqueue the direct
+    //   push and emit a healthy sensor reading.
+    await enqueueDirectPush(
+      supabase,
+      group.workspaceId,
+      String(s.id),
+      totals,
+      group.directPrimary,
+      group.directPrimary ? "direct_primary_push" : "ss_connector_did_not_push",
+    );
   }
 }
 
-async function fallbackToDirectPush(
+async function enqueueDirectPush(
   supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
   shipmentId: string,
   totals: VerifyResult,
+  directPrimary: boolean,
   reason: string,
 ): Promise<void> {
   try {
     await tasks.trigger("bandcamp-mark-shipped", { shipmentId });
-    totals.fell_back_to_direct_push++;
-    await supabase.from("sensor_readings").insert({
-      sensor_name: "bandcamp.connector_fallback",
-      status: "warning",
-      message: `Fell back to direct BC push for shipment ${shipmentId} (reason=${reason})`,
-      value: { shipment_id: shipmentId, reason },
-    });
+    if (directPrimary) {
+      totals.direct_primary_pushed++;
+      await supabase.from("sensor_readings").insert({
+        workspace_id: workspaceId,
+        sensor_name: "bandcamp.direct_primary_push",
+        status: "healthy",
+        message: `Enqueued direct BC push for shipment ${shipmentId} (direct-primary; reason=${reason})`,
+        value: { shipment_id: shipmentId, reason },
+      });
+    } else {
+      totals.fell_back_to_direct_push++;
+      await supabase.from("sensor_readings").insert({
+        workspace_id: workspaceId,
+        sensor_name: "bandcamp.connector_fallback",
+        status: "warning",
+        message: `Fell back to direct BC push for shipment ${shipmentId} (reason=${reason})`,
+        value: { shipment_id: shipmentId, reason },
+      });
+    }
   } catch (err) {
     totals.errors++;
-    logger.warn("[bandcamp-shipping-verify] fallback enqueue failed", {
+    logger.warn("[bandcamp-shipping-verify] direct push enqueue failed", {
       shipmentId,
+      directPrimary,
       error: err instanceof Error ? err.message : String(err),
     });
   }

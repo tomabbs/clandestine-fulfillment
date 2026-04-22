@@ -43,6 +43,7 @@ vi.mock("@trigger.dev/sdk", () => ({
 import {
   createBandcampConnection,
   deleteBandcampConnection,
+  flipBandcampPrimaryToDirect,
   getBandcampAccounts,
   getOrganizationsForWorkspace,
   triggerBandcampSync,
@@ -325,6 +326,223 @@ describe("bandcamp server actions", () => {
       vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
 
       await expect(getOrganizationsForWorkspace("ws-1")).resolves.toEqual([]);
+    });
+  });
+
+  describe("flipBandcampPrimaryToDirect (Phase 5 / HRD-11.1)", () => {
+    const wsUuid = "44444444-4444-4444-a444-444444444444";
+
+    function stubWorkspaceLookup(row: Record<string, unknown> | null) {
+      mockServiceFrom.mockImplementationOnce((table: string) => {
+        expect(table).toBe("workspaces");
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }),
+            }),
+          }),
+        };
+      });
+    }
+
+    function stubSsActivityCount(count: number) {
+      mockServiceFrom.mockImplementationOnce((table: string) => {
+        expect(table).toBe("warehouse_shipments");
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              not: vi.fn().mockReturnValue({
+                gte: vi.fn().mockResolvedValue({ count, error: null }),
+              }),
+            }),
+          }),
+        };
+      });
+    }
+
+    function stubWorkspaceUpdate() {
+      mockServiceFrom.mockImplementationOnce((table: string) => {
+        expect(table).toBe("workspaces");
+        return {
+          update: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ error: null }),
+          }),
+        };
+      });
+    }
+
+    function stubSensorInsert(captured: { row: unknown }) {
+      mockServiceFrom.mockImplementationOnce((table: string) => {
+        expect(table).toBe("sensor_readings");
+        return {
+          insert: vi.fn((row: unknown) => {
+            captured.row = row;
+            return Promise.resolve({ error: null });
+          }),
+        };
+      });
+    }
+
+    function stubReviewQueueInsert(captured: { row: unknown }) {
+      mockServiceFrom.mockImplementationOnce((table: string) => {
+        expect(table).toBe("warehouse_review_queue");
+        return {
+          insert: vi.fn((row: unknown) => {
+            captured.row = row;
+            return Promise.resolve({ error: null });
+          }),
+        };
+      });
+    }
+
+    it("requires staff role", async () => {
+      vi.mocked(requireAuth).mockResolvedValueOnce({
+        supabase: { from: mockFrom } as never,
+        authUserId: "auth-1",
+        userRecord: {
+          id: "client-1",
+          workspace_id: wsUuid,
+          org_id: "org-1",
+          role: "client",
+          email: "client@test.com",
+          name: "Client",
+        },
+        isStaff: false,
+      });
+      await expect(
+        flipBandcampPrimaryToDirect({
+          workspaceId: wsUuid,
+          direction: "enable_direct_primary",
+          reason: "rollout",
+        }),
+      ).rejects.toThrow("Staff access required");
+    });
+
+    it("blocks enable when shipstation_sync_paused=false", async () => {
+      stubWorkspaceLookup({
+        id: wsUuid,
+        shipstation_sync_paused: false,
+        bc_verify_direct_primary: false,
+      });
+      stubSsActivityCount(0);
+
+      const result = await flipBandcampPrimaryToDirect({
+        workspaceId: wsUuid,
+        direction: "enable_direct_primary",
+        reason: "rollout",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.preconditionsPassed).toBe(false);
+      expect(result.blockedBy.some((b) => b.includes("shipstation_sync_paused"))).toBe(true);
+    });
+
+    it("blocks enable when SS connector pushed BC shipments in last 48h", async () => {
+      stubWorkspaceLookup({
+        id: wsUuid,
+        shipstation_sync_paused: true,
+        bc_verify_direct_primary: false,
+      });
+      stubSsActivityCount(7);
+
+      const result = await flipBandcampPrimaryToDirect({
+        workspaceId: wsUuid,
+        direction: "enable_direct_primary",
+        reason: "rollout",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.blockedBy.some((b) => b.includes("48h"))).toBe(true);
+    });
+
+    it("flips polarity when both preconditions pass and emits a healthy sensor reading", async () => {
+      stubWorkspaceLookup({
+        id: wsUuid,
+        shipstation_sync_paused: true,
+        bc_verify_direct_primary: false,
+      });
+      stubSsActivityCount(0);
+      stubWorkspaceUpdate();
+      const sensorCap: { row: unknown } = { row: null };
+      stubSensorInsert(sensorCap);
+
+      const result = await flipBandcampPrimaryToDirect({
+        workspaceId: wsUuid,
+        direction: "enable_direct_primary",
+        reason: "northern-spy go-live",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.preconditionsPassed).toBe(true);
+      expect(result.newValue).toBe(true);
+      expect(result.bypassed).toBe(false);
+      const sensor = sensorCap.row as { sensor_name: string; status: string };
+      expect(sensor.sensor_name).toBe("bandcamp.polarity_flip");
+      expect(sensor.status).toBe("healthy");
+    });
+
+    it("force=true bypasses preconditions, sets warning sensor, and writes a review queue item", async () => {
+      stubWorkspaceLookup({
+        id: wsUuid,
+        shipstation_sync_paused: false,
+        bc_verify_direct_primary: false,
+      });
+      stubSsActivityCount(3);
+      stubWorkspaceUpdate();
+      const sensorCap: { row: unknown } = { row: null };
+      const queueCap: { row: unknown } = { row: null };
+      stubSensorInsert(sensorCap);
+      stubReviewQueueInsert(queueCap);
+
+      const result = await flipBandcampPrimaryToDirect({
+        workspaceId: wsUuid,
+        direction: "enable_direct_primary",
+        reason: "manual emergency override",
+        force: true,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.preconditionsPassed).toBe(false);
+      expect(result.bypassed).toBe(true);
+      expect((sensorCap.row as { status: string }).status).toBe("warning");
+      const q = queueCap.row as { category: string; severity: string; title: string };
+      expect(q.category).toBe("bandcamp_polarity_force_flip");
+      expect(q.severity).toBe("high");
+      expect(q.title).toContain("force-flipped");
+    });
+
+    it("disable direction is always allowed even when SS has been active (rollback path)", async () => {
+      stubWorkspaceUpdate();
+      const sensorCap: { row: unknown } = { row: null };
+      stubSensorInsert(sensorCap);
+
+      const result = await flipBandcampPrimaryToDirect({
+        workspaceId: wsUuid,
+        direction: "disable_direct_primary",
+        reason: "rolling back due to incident",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.newValue).toBe(false);
+      expect(result.preconditionsPassed).toBe(true);
+    });
+
+    it("idempotent: returns ok without changes when already enabled", async () => {
+      stubWorkspaceLookup({
+        id: wsUuid,
+        shipstation_sync_paused: true,
+        bc_verify_direct_primary: true,
+      });
+
+      const result = await flipBandcampPrimaryToDirect({
+        workspaceId: wsUuid,
+        direction: "enable_direct_primary",
+        reason: "double-tap",
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.newValue).toBe(true);
+      expect(result.preconditionsPassed).toBe(true);
     });
   });
 });
