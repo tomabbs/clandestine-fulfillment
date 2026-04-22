@@ -103,3 +103,127 @@ export const queryKeys = {
     list: () => ["client-releases", "list"] as const,
   },
 } as const;
+
+// =============================================================================
+// V2 — Scope-aware query key factories (Step 1 of cache rollout)
+// =============================================================================
+//
+// Why this exists:
+//   The legacy `queryKeys` factories above carry no tenant scope (workspace,
+//   org, viewer). When admin staff switch between client orgs, React Query can
+//   serve the previous org's cached data for a split second before the refetch
+//   lands. Server-side RLS makes this not a *security* bug, but the optimistic
+//   paint is still wrong. The v2 factories add explicit scope dimensions so
+//   that paint is guaranteed correct.
+//
+// Shape:
+//   ["<domain>-v2", "ws:<workspaceId>", "org:<orgId|*>", "as:<viewer>",
+//    <resource?>, ...<args>]
+//
+//   - Per-domain "-v2" suffix (not a global "v2" prefix) so we can roll back
+//     one domain at a time during transition. Resolves Open Question #1 in the
+//     scoped_query_key_hardening plan.
+//   - Inline scope tokens (not nested in an object) because React Query
+//     partial-prefix invalidation matches by deep equality on each array slot;
+//     inline tokens keep `queryKeysV2.<domain>.all(scope)` cheap to invalidate.
+//   - Sentinel "*" for null orgId (staff/global views) keeps the array shape
+//     stable and prevents two distinct caches drifting around null vs undefined.
+//   - Viewer dim ("staff" | "client") because the same logical resource often
+//     returns DIFFERENT shapes via different Server Actions (e.g.
+//     getBillingSnapshots vs getClientBillingSnapshots). Without this dim a
+//     viewer switch could serve the wrong shape briefly.
+//
+// Invalidation hierarchy per domain:
+//   <domain>.domain()           → ["<domain>-v2"] — nukes ALL scopes (use for
+//                                  cross-tenant mutations or v1↔v2 bridge).
+//   <domain>.all(scope)         → invalidates one full scope.
+//   <domain>.<resource>(scope)  → invalidates one resource within a scope.
+//
+// Bridge contract during partial rollout:
+//   Migrated mutations should invalidate BOTH legacy + v2 prefixes so that any
+//   page still on v1 keys stays fresh. Example:
+//     invalidateKeys: [queryKeys.billing.all, queryKeysV2.billing.domain()]
+// =============================================================================
+
+export type QueryViewer = "staff" | "client";
+
+export interface QueryScope {
+  workspaceId: string;
+  /** null for staff/global admin views that span all orgs in a workspace. */
+  orgId: string | null;
+  viewer: QueryViewer;
+}
+
+function scopePrefix(scope: QueryScope) {
+  return [`ws:${scope.workspaceId}`, `org:${scope.orgId ?? "*"}`, `as:${scope.viewer}`] as const;
+}
+
+export const queryKeysV2 = {
+  shipping: {
+    /** Domain-wide root — invalidates every shipping-v2 scope. */
+    domain: () => ["shipping-v2"] as const,
+    /** Scope-wide root — invalidates every shipping resource for one scope. */
+    all: (scope: QueryScope) => ["shipping-v2", ...scopePrefix(scope)] as const,
+    list: (scope: QueryScope, filters?: Record<string, unknown>) =>
+      ["shipping-v2", ...scopePrefix(scope), "list", filters] as const,
+    summary: (scope: QueryScope, filters?: Record<string, unknown>) =>
+      ["shipping-v2", ...scopePrefix(scope), "summary", filters] as const,
+    detail: (scope: QueryScope, id: string) =>
+      ["shipping-v2", ...scopePrefix(scope), "detail", id] as const,
+    items: (scope: QueryScope, shipmentId: string) =>
+      ["shipping-v2", ...scopePrefix(scope), "items", shipmentId] as const,
+  },
+  billing: {
+    domain: () => ["billing-v2"] as const,
+    all: (scope: QueryScope) => ["billing-v2", ...scopePrefix(scope)] as const,
+    snapshots: (scope: QueryScope, filters?: Record<string, unknown>) =>
+      ["billing-v2", ...scopePrefix(scope), "snapshots", filters] as const,
+    snapshotDetail: (scope: QueryScope, id: string) =>
+      ["billing-v2", ...scopePrefix(scope), "snapshot-detail", id] as const,
+    preview: (scope: QueryScope) => ["billing-v2", ...scopePrefix(scope), "preview"] as const,
+    rules: (scope: QueryScope) => ["billing-v2", ...scopePrefix(scope), "rules"] as const,
+    overrides: (scope: QueryScope) => ["billing-v2", ...scopePrefix(scope), "overrides"] as const,
+    formatCosts: (scope: QueryScope) =>
+      ["billing-v2", ...scopePrefix(scope), "format-costs"] as const,
+  },
+  orders: {
+    domain: () => ["orders-v2"] as const,
+    all: (scope: QueryScope) => ["orders-v2", ...scopePrefix(scope)] as const,
+    /**
+     * Cockpit table: ShipStation orders joined to local DB rows.
+     * `filters` is intentionally typed as `object` (not `Record<string,
+     * unknown>`) so callers can pass typed filter interfaces (e.g.
+     * `CockpitFilters`) without an index-signature cast. Deep equality is what
+     * React Query uses for cache lookups, so the structural shape is what
+     * matters at runtime.
+     */
+    cockpitList: (scope: QueryScope, filters?: object) =>
+      ["orders-v2", ...scopePrefix(scope), "cockpit-list", filters] as const,
+    featureFlags: (scope: QueryScope) =>
+      ["orders-v2", ...scopePrefix(scope), "feature-flags"] as const,
+    tagDefs: (scope: QueryScope) => ["orders-v2", ...scopePrefix(scope), "tag-defs"] as const,
+    /** Per-order Bandcamp reconcile lookup (for cockpit drawer). */
+    bandcampMatch: (scope: QueryScope, orderId: string) =>
+      ["orders-v2", ...scopePrefix(scope), "bandcamp-match", orderId] as const,
+    /** Per-order Bandcamp enrichment (note/gift/tip). */
+    bandcampEnrichment: (scope: QueryScope, orderId: string) =>
+      ["orders-v2", ...scopePrefix(scope), "bandcamp-enrichment", orderId] as const,
+    /** Workspace-wide list of orgs eligible for manual order assignment. */
+    assignableOrgs: (scope: QueryScope) =>
+      ["orders-v2", ...scopePrefix(scope), "assignable-orgs"] as const,
+    /** Workspace-wide list of staff users that can be assigned to orders. */
+    assignableStaff: (scope: QueryScope) =>
+      ["orders-v2", ...scopePrefix(scope), "assignable-staff"] as const,
+  },
+  /**
+   * Auth/bootstrap context — the data needed to build a QueryScope itself.
+   * Cannot carry workspaceId in the key because the query RETURNS workspaceId.
+   * Only viewer dimension applies (admin vs client portal).
+   */
+  authContext: {
+    domain: () => ["auth-context-v2"] as const,
+    user: (viewer?: QueryViewer) => ["auth-context-v2", "user", viewer ?? "any"] as const,
+    workspaceId: (viewer?: QueryViewer) =>
+      ["auth-context-v2", "workspace-id", viewer ?? "any"] as const,
+  },
+} as const;
