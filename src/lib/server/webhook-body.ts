@@ -1,6 +1,8 @@
 // Rule #58: This file is the ONE owner for webhook body parsing + HMAC verification.
 // Rule #36: ALWAYS use req.text() — never req.json() then JSON.stringify().
 
+import { createHash } from "node:crypto";
+
 /**
  * Read the raw body from a webhook request.
  * Must be called before any other body parsing — req.text() can only be read once.
@@ -275,4 +277,135 @@ export function sanitizeWebhookPayload(
 ): Record<string, unknown> | null | undefined {
   if (payload === null || payload === undefined) return payload;
   return sanitizeValue(payload, 0) as Record<string, unknown>;
+}
+
+/**
+ * F-3 (HIGH) — typed result for an attempted `webhook_events` insert.
+ *
+ * Background: pre-F-3, every webhook Route Handler swallowed dedup errors
+ * with `if (dedupError) return 200 'duplicate'`. That correctly handled the
+ * common case (SQLSTATE 23505 unique violation = the row was already
+ * inserted by a sibling delivery) but also masked TWO classes of latent
+ * bugs:
+ *
+ *   1. Transient PostgREST / pooler errors (08006 connection failure,
+ *      08001 connection refused, network timeouts). Pre-F-3 we returned
+ *      200 OK and the platform stopped retrying — every subsequent
+ *      delivery for the same event-id then DID hit a real duplicate row,
+ *      but the FIRST one was lost. Fixed by returning `transient` →
+ *      caller responds 503 so the platform retries.
+ *
+ *   2. Schema/constraint regressions (NOT NULL violation, foreign-key
+ *      check, missing column after a rollback). Pre-F-3 we returned 200
+ *      OK and silently accumulated dropped events. Fixed by returning
+ *      `unknown` → caller responds 503 + emits a Sentry event so the
+ *      regression is surfaced operationally.
+ *
+ * The discriminator is the SQLSTATE prefix on the PostgrestError. We
+ * deliberately accept `unknown` for the input shape so this helper works
+ * with both the `{ data, error }` tuple from `.single()` and the bare
+ * `error` object from `.insert()` without a `.select()`.
+ */
+export type DedupResult =
+  | { kind: "fresh"; rowId: string }
+  | { kind: "duplicate"; sqlState?: string }
+  | { kind: "transient"; reason: string; sqlState?: string }
+  | { kind: "unknown"; reason: string; sqlState?: string };
+
+const TRANSIENT_SQL_STATES = new Set<string>([
+  "08000", // connection_exception (umbrella)
+  "08001", // sqlclient_unable_to_establish_sqlconnection
+  "08003", // connection_does_not_exist
+  "08004", // sqlserver_rejected_establishment_of_sqlconnection
+  "08006", // connection_failure
+  "08007", // transaction_resolution_unknown
+  "57P01", // admin_shutdown — pooler bouncing connections
+  "57P02", // crash_shutdown
+  "57P03", // cannot_connect_now — server starting up
+  "53300", // too_many_connections — supavisor saturated
+]);
+
+function isLikelyNetworkError(message: string): boolean {
+  // PostgREST / fetch wrapper surfaces these as plain Error.message strings
+  // rather than SQLSTATE codes. Keep the list narrow to avoid masking real
+  // application errors as transient.
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes("fetch failed") ||
+    lowered.includes("econnrefused") ||
+    lowered.includes("econnreset") ||
+    lowered.includes("etimedout") ||
+    lowered.includes("network request failed") ||
+    lowered.includes("network error") ||
+    lowered.includes("socket hang up")
+  );
+}
+
+/**
+ * Interpret the result of a `webhook_events` insert.
+ *
+ * @param insertedRow - The row returned by `.select("id").single()` on
+ *   success (typed loosely so this helper is agnostic to the exact column
+ *   selection). Pass `null` if the call failed before producing a row.
+ * @param error - The PostgrestError-shaped object (or any thrown Error)
+ *   from the insert. Pass `null` for clean-success paths.
+ *
+ * Caller contract:
+ *   - `kind: "fresh"`     → continue with downstream enqueue
+ *   - `kind: "duplicate"` → respond 200 OK with status="duplicate"
+ *   - `kind: "transient"` → respond 503 (platform will retry)
+ *   - `kind: "unknown"`   → respond 503 + emit a Sentry event upstream
+ */
+export function interpretDedupError(
+  insertedRow: { id?: string | null } | null | undefined,
+  error: unknown,
+): DedupResult {
+  if (!error) {
+    if (insertedRow?.id) return { kind: "fresh", rowId: String(insertedRow.id) };
+    // No error AND no row is the "missing return select" footgun — surface
+    // it as unknown so callers respond 503 instead of silently dropping.
+    return { kind: "unknown", reason: "insert_returned_no_row" };
+  }
+
+  const e = error as { code?: string | null; message?: string | null };
+  const sqlState = typeof e.code === "string" ? e.code : undefined;
+  const reason = typeof e.message === "string" && e.message ? e.message : "unknown_error";
+
+  if (sqlState === "23505") return { kind: "duplicate", sqlState };
+  if (sqlState && TRANSIENT_SQL_STATES.has(sqlState)) {
+    return { kind: "transient", reason, sqlState };
+  }
+  if (isLikelyNetworkError(reason)) {
+    return { kind: "transient", reason, sqlState };
+  }
+  return { kind: "unknown", reason, sqlState };
+}
+
+/**
+ * F-4 (HIGH) — derive a stable, non-time-based dedup key from the raw body.
+ *
+ * Pre-F-4 the Squarespace fallback used `${connectionId}:${Date.now()}`,
+ * which made dedup INERT on retry — every retry got a different
+ * `Date.now()` and was treated as a fresh event. The fix is to hash the
+ * canonical request body so two identical retries produce the same key.
+ *
+ * The `platform || 'unknown'` prefix prevents collision across two
+ * different platforms that happen to send byte-identical bodies (extremely
+ * rare in practice but cheap insurance).
+ *
+ * NOTE: callers should ONLY use this helper when no platform-supplied
+ * event-id header is available. Header-based ids are still preferred
+ * because they survive payload re-serialization across retries (some
+ * platforms add/remove whitespace between attempts).
+ */
+export function canonicalBodyDedupKey(
+  platform: string | null | undefined,
+  rawBody: string,
+): string {
+  // F-2 already pins every webhook route to the Node.js runtime, so a
+  // top-level `node:crypto` import is safe. The hex digest is stable
+  // across Node versions and matches Postgres `encode(digest, 'hex')` if
+  // operators ever want to recompute the key in SQL for forensics.
+  const hash = createHash("sha256").update(rawBody).digest("hex");
+  return `${(platform ?? "unknown").toLowerCase()}:${hash}`;
 }

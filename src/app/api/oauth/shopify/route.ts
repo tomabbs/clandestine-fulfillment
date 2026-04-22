@@ -20,6 +20,7 @@
 
 import crypto from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
+import { verifyShopDomain } from "@/lib/server/shopify-shop-verify";
 import {
   persistWebhookRegistrationMetadata,
   registerWebhookSubscriptions,
@@ -298,10 +299,65 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
+    // F-5 / HRD-10 — shop-domain verification. Issue a one-shot
+    // `shop { myshopifyDomain }` GraphQL probe with the freshly-issued
+    // access token; abort the install if the canonical domain Shopify
+    // returns disagrees with the callback `?shop=` param.
+    //
+    // We run this BEFORE upserting the access token so a failed
+    // verification leaves the existing row (if any) untouched. Mismatches
+    // create a `warehouse_review_queue` row so repeat occurrences surface
+    // as a clear attack signal — group_key is per-org+per-shop so the
+    // dedup pattern groups attempts against the same victim.
+    const verification = await verifyShopDomain({
+      shopParam: shop,
+      accessToken,
+      apiVersion: env().SHOPIFY_API_VERSION,
+    });
+    if (verification.kind !== "ok") {
+      // Persist a security review queue item — even benign mismatches
+      // (operator pasted wrong creds) deserve operator visibility, and
+      // repeat occurrences indicate an attacker probing the install flow.
+      try {
+        await supabase.from("warehouse_review_queue").insert({
+          workspace_id: org.workspace_id,
+          org_id: stateData.orgId,
+          category: "security",
+          severity: "high",
+          group_key: `shop_token_mismatch:${stateData.orgId}:${shop}`,
+          summary: `Shopify install rejected: shop-domain verification failed (${verification.kind})`,
+          details: {
+            kind: verification.kind,
+            shop_param: shop,
+            connection_id: stateData.connectionId ?? null,
+            ...("expected" in verification && "actual" in verification
+              ? { expected: verification.expected, actual: verification.actual }
+              : {}),
+            ...("status" in verification ? { graphql_status: verification.status } : {}),
+          },
+        });
+      } catch {
+        // Review-queue insert failure is non-fatal — the rejection itself
+        // is the primary security action. Operators can still find the
+        // attempt in Vercel logs.
+      }
+      return NextResponse.json(
+        {
+          error: "shop_verification_failed",
+          reason: verification.kind,
+        },
+        { status: 401 },
+      );
+    }
+
     // Phase 0.8 dormancy default — every freshly-installed Shopify connection
     // lands with do_not_fanout=true so an accidental install can never push
     // inventory before staff verify SKU mappings + select a default location
     // + opt back into fanout via reactivateClientStoreConnection.
+    //
+    // F-5: persist `shopify_verified_domain` from the verification response
+    // (canonical Shopify-issued form, not whatever shape arrived on the
+    // callback URL) so future deliveries can be cross-checked.
     //
     // `.select("id").single()` is required so we can pass the connection id
     // into the webhook callback URL below (HRD-35 gap #3 auto-register).
@@ -312,7 +368,8 @@ export async function GET(request: NextRequest) {
           workspace_id: org.workspace_id,
           org_id: stateData.orgId,
           platform: "shopify",
-          store_url: `https://${shop}`,
+          store_url: `https://${verification.canonicalDomain}`,
+          shopify_verified_domain: verification.canonicalDomain,
           api_key: accessToken,
           connection_status: "active",
           do_not_fanout: true,
@@ -341,8 +398,11 @@ export async function GET(request: NextRequest) {
     let registerFailureCount = 0;
     try {
       const callbackUrl = `${env().NEXT_PUBLIC_APP_URL}/api/webhooks/client-store?connection_id=${connectionId}&platform=shopify`;
+      // F-5: use the verified canonical domain everywhere downstream so a
+      // case-mismatch or trailing-slash in the original install URL doesn't
+      // poison the webhook subscription's myshopifyDomain reference.
       const result = await registerWebhookSubscriptions(
-        { storeUrl: `https://${shop}`, accessToken },
+        { storeUrl: `https://${verification.canonicalDomain}`, accessToken },
         callbackUrl,
       );
       registerFailureCount = result.failed.length;

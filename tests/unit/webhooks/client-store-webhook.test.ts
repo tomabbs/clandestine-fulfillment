@@ -24,8 +24,9 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 vi.mock("@/lib/server/webhook-body", async () => {
-  // Use the real `checkWebhookFreshness` so HRD-24 route-level tests
-  // exercise the real ceiling logic without a parallel mock implementation.
+  // Use the real `checkWebhookFreshness` + dedup helpers so HRD-24 / F-3 /
+  // F-4 route-level tests exercise the real logic without parallel mock
+  // implementations that would silently drift from production behavior.
   const real = await vi.importActual<typeof import("@/lib/server/webhook-body")>(
     "@/lib/server/webhook-body",
   );
@@ -34,6 +35,8 @@ vi.mock("@/lib/server/webhook-body", async () => {
     verifyHmacSignature: vi.fn(async () => true),
     checkWebhookFreshness: real.checkWebhookFreshness,
     sanitizeWebhookPayload: real.sanitizeWebhookPayload,
+    interpretDedupError: real.interpretDedupError,
+    canonicalBodyDedupKey: real.canonicalBodyDedupKey,
   };
 });
 
@@ -98,10 +101,28 @@ interface ConnectionRow {
 
 function setupSupabaseMock(opts: {
   connection?: ConnectionRow | null;
-  insertResult?: "ok" | "duplicate";
+  insertResult?: "ok" | "duplicate" | "transient" | "unknown";
 }) {
   const updateCalls: Array<{ table: string; payload: Record<string, unknown> }> = [];
   const insertCalls: Array<{ table: string; payload: Record<string, unknown> }> = [];
+
+  // F-3: error shapes for the typed dedup helper. `transient` exercises a
+  // pooler outage (08006); `unknown` exercises a NULL/constraint regression.
+  const insertResponseFor = (kind: typeof opts.insertResult) => {
+    switch (kind) {
+      case "duplicate":
+        return { data: null, error: { code: "23505", message: "duplicate" } };
+      case "transient":
+        return { data: null, error: { code: "08006", message: "connection_failure" } };
+      case "unknown":
+        return {
+          data: null,
+          error: { code: "23502", message: "null value in column violates not-null constraint" },
+        };
+      default:
+        return { data: { id: "evt-1" }, error: null };
+    }
+  };
 
   mockFrom.mockImplementation((table: string) => {
     if (table === "client_store_connections") {
@@ -122,13 +143,7 @@ function setupSupabaseMock(opts: {
           insertCalls.push({ table, payload });
           return {
             select: vi.fn().mockReturnValue({
-              single: vi
-                .fn()
-                .mockResolvedValue(
-                  opts.insertResult === "duplicate"
-                    ? { data: null, error: { code: "23505", message: "duplicate" } }
-                    : { data: { id: "evt-1" }, error: null },
-                ),
+              single: vi.fn().mockResolvedValue(insertResponseFor(opts.insertResult)),
             }),
           };
         }),
@@ -494,5 +509,152 @@ describe("POST /api/webhooks/client-store", () => {
     expect(persistedPayload.customer).toBe("[REDACTED]");
     expect(persistedPayload.billing_address).toBe("[REDACTED]");
     expect(persistedPayload.line_items).toEqual([{ id: 1, sku: "SKU-A", quantity: 2 }]);
+  });
+
+  // --- F-3: typed dedup outcomes ---
+
+  it("F-3: SQLSTATE 08006 (connection_failure) → 503 transient (NOT silently swallowed as duplicate)", async () => {
+    setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "shopify",
+        webhook_secret: null,
+      },
+      insertResult: "transient",
+    });
+
+    const req = makeRequest({ id: 1 });
+    const res = await POST(req);
+
+    // Pre-F-3 this returned 200 "duplicate" and the platform stopped
+    // retrying — losing the event. Post-F-3 we return 503 so Shopify
+    // retries, and the structured log captures error_code=08006 for
+    // operator triage.
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.status).toBe("transient_dedup_failure");
+    expect(json.will_retry).toBe(true);
+    expect(mockTrigger).not.toHaveBeenCalled();
+  });
+
+  it("F-3: SQLSTATE 23502 (NOT NULL violation) → 503 unknown (so platform retries + ops sees the bug)", async () => {
+    setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "shopify",
+        webhook_secret: null,
+      },
+      insertResult: "unknown",
+    });
+
+    const req = makeRequest({ id: 1 });
+    const res = await POST(req);
+
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.status).toBe("unknown_dedup_failure");
+    expect(mockTrigger).not.toHaveBeenCalled();
+  });
+
+  it("F-3: emits structured `webhook_dedup` log line with sqlState + dedup_kind on every non-fresh outcome", async () => {
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      setupSupabaseMock({
+        connection: {
+          id: CONNECTION_ID,
+          workspace_id: WORKSPACE_ID,
+          platform: "shopify",
+          webhook_secret: null,
+        },
+        insertResult: "transient",
+      });
+      await POST(makeRequest({ id: 1 }));
+
+      const dedupLogs = consoleSpy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((s) => s.includes('"tag":"webhook_dedup"'));
+      expect(dedupLogs.length).toBeGreaterThanOrEqual(1);
+      const parsed = JSON.parse(dedupLogs[0] ?? "{}");
+      expect(parsed).toMatchObject({
+        tag: "webhook_dedup",
+        connection_id: CONNECTION_ID,
+        platform: "shopify",
+        dedup_kind: "transient",
+        error_code: "08006",
+      });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
+  // --- F-4: canonical-body sha256 dedup fallback ---
+
+  it("F-4: when no header webhook id is present, dedup_key is `{platform}:{sha256(body)}` and is stable across retries", async () => {
+    const { insertCalls } = setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "squarespace",
+        webhook_secret: null,
+      },
+      insertResult: "ok",
+    });
+
+    const body = { order: { id: 9876 } };
+    // Drop every Shopify/WC header so we hit the F-4 hash fallback.
+    const reqA = makeRequest(body, {
+      platform: "squarespace",
+      headers: {
+        "X-Shopify-Hmac-SHA256": "",
+        "X-Shopify-Topic": "",
+        "X-Shopify-Webhook-Id": "",
+      },
+    });
+    const reqB = makeRequest(body, {
+      platform: "squarespace",
+      headers: {
+        "X-Shopify-Hmac-SHA256": "",
+        "X-Shopify-Topic": "",
+        "X-Shopify-Webhook-Id": "",
+      },
+    });
+    await POST(reqA);
+    await POST(reqB);
+
+    expect(insertCalls).toHaveLength(2);
+    const a = insertCalls[0]?.payload as Record<string, unknown>;
+    const b = insertCalls[1]?.payload as Record<string, unknown>;
+    expect(a.dedup_key).toEqual(b.dedup_key); // stable across retries (was Date.now()-broken pre-F-4)
+    expect(typeof a.dedup_key).toBe("string");
+    expect((a.dedup_key as string).startsWith("squarespace:")).toBe(true);
+    // 64-char hex hash suffix
+    const [, hash] = (a.dedup_key as string).split(":");
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    // external_webhook_id mirrors the dedup key when no header was supplied,
+    // preserving the existing UNIQUE constraint semantics.
+    expect(a.external_webhook_id).toBe(a.dedup_key);
+  });
+
+  it("F-4: when X-Shopify-Event-Id IS present, dedup_key = `{connection_id}:{event_id}` (per-connection scope)", async () => {
+    const { insertCalls } = setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "shopify",
+        webhook_secret: null,
+      },
+      insertResult: "ok",
+    });
+
+    await POST(
+      makeRequest({ id: 1 }, { headers: { "X-Shopify-Event-Id": "evt-stable-business-id" } }),
+    );
+
+    expect(insertCalls).toHaveLength(1);
+    const inserted = insertCalls[0]?.payload as Record<string, unknown>;
+    expect(inserted.dedup_key).toBe(`${CONNECTION_ID}:evt-stable-business-id`);
+    expect(inserted.external_webhook_id).toBe("evt-stable-business-id");
   });
 });

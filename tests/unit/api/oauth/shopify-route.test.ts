@@ -40,6 +40,7 @@ vi.mock("@/lib/shared/env", () => ({
   env: () => ({
     SHOPIFY_CLIENT_ID: ENV_CLIENT_ID,
     SHOPIFY_CLIENT_SECRET: ENV_CLIENT_SECRET,
+    SHOPIFY_API_VERSION: "2026-01",
     NEXT_PUBLIC_APP_URL,
   }),
 }));
@@ -73,6 +74,9 @@ interface DbState {
   client_store_connections: ConnectionRow[];
   organizations: Array<{ id: string; workspace_id: string }>;
   upserts: Array<Record<string, unknown>>;
+  // F-5: capture security review queue inserts so the mismatch tests can
+  // assert the security audit row landed.
+  review_queue: Array<Record<string, unknown>>;
 }
 
 let db: DbState;
@@ -166,6 +170,14 @@ function makeMockSupabase() {
           },
         };
       }
+      if (table === "warehouse_review_queue") {
+        return {
+          insert: async (row: Record<string, unknown>) => {
+            db.review_queue.push(row);
+            return { error: null };
+          },
+        };
+      }
       throw new Error(`Unexpected table in mock: ${table}`);
     },
   };
@@ -181,24 +193,42 @@ beforeEach(async () => {
     client_store_connections: [],
     organizations: [{ id: ORG_ID, workspace_id: WORKSPACE_ID }],
     upserts: [],
+    review_queue: [],
   };
   mockRegister.mockReset();
   mockPersist.mockReset();
 
-  // Default fetch mock for token exchange. Tests that need a different shape
-  // override per-case. We return a plain object that satisfies the subset of
-  // the Response interface the route reads (`ok`, `json()`, `text()`) — using
-  // a real `new Response()` doesn't work because `ok` is a read-only getter.
+  // Default fetch mock — handles BOTH outbound HTTPS calls the OAuth route
+  // makes during a callback:
+  //   1. POST <shop>/admin/oauth/access_token  → token exchange
+  //   2. POST <shop>/admin/api/<v>/graphql.json → F-5 myshopifyDomain probe
+  // F-5 happy-path tests rely on the GraphQL probe returning the SAME
+  // canonical shop the callback ?shop= param pointed to. Tests that want to
+  // exercise mismatch / error / casing cases override the fetch implementation
+  // per-case via `vi.stubGlobal('fetch', ...)`.
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        access_token: "shpat_test_token",
-        scope: "read_inventory,write_inventory,read_orders",
-      }),
-      text: async () => "",
-    })),
+    vi.fn(async (url: unknown): Promise<unknown> => {
+      const u = String(url);
+      if (u.includes("/admin/oauth/access_token")) {
+        return {
+          ok: true,
+          json: async () => ({
+            access_token: "shpat_test_token",
+            scope: "read_inventory,write_inventory,read_orders",
+          }),
+          text: async () => "",
+        };
+      }
+      if (u.includes("/admin/api/") && u.includes("/graphql.json")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ data: { shop: { myshopifyDomain: SHOP } } }),
+        };
+      }
+      throw new Error(`Unmocked fetch call: ${u}`);
+    }),
   );
 
   // Re-import the route module after the mocks are in place. Use dynamic
@@ -546,5 +576,168 @@ describe("/api/oauth/shopify callback — happy path (HRD-35 gap #3 + #2)", () =
 
     expect(res.status).toBe(307);
     expect(res.headers.get("Location") ?? "").toContain("webhook_register=partial");
+  });
+});
+
+// ─── F-5 / HRD-10 — myshopifyDomain verification ─────────────────────────────
+
+describe("/api/oauth/shopify callback — F-5 myshopifyDomain verification", () => {
+  function seedNonce() {
+    db.oauth_states.push({
+      id: "row-1",
+      oauth_token: "callback-nonce-1",
+      org_id: ORG_ID,
+      platform: "shopify",
+      nonce_purpose: "shopify_install",
+      connection_id: null,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    mockRegister.mockResolvedValue({ registered: [], failed: [] });
+    mockPersist.mockResolvedValue({
+      apiVersionPinned: "2026-01",
+      apiVersionDrift: false,
+      registeredAt: "2026-04-22T00:00:00.000Z",
+    });
+  }
+
+  function stubFetchWith(myshopifyDomain: string | null) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown): Promise<unknown> => {
+        const u = String(url);
+        if (u.includes("/admin/oauth/access_token")) {
+          return {
+            ok: true,
+            json: async () => ({
+              access_token: "shpat_test_token",
+              scope: "read_inventory",
+            }),
+            text: async () => "",
+          };
+        }
+        if (u.includes("/admin/api/") && u.includes("/graphql.json")) {
+          return {
+            ok: true,
+            status: 200,
+            text: async () =>
+              JSON.stringify(
+                myshopifyDomain === null
+                  ? { data: { shop: {} } }
+                  : { data: { shop: { myshopifyDomain } } },
+              ),
+          };
+        }
+        throw new Error(`Unmocked fetch: ${u}`);
+      }),
+    );
+  }
+
+  it("happy path: shop param exactly matches myshopifyDomain → upsert persists shopify_verified_domain (canonical form)", async () => {
+    seedNonce();
+    stubFetchWith(SHOP);
+
+    const { request } = freshCallbackPair();
+    const res = await GET(request as never);
+
+    expect(res.status).toBe(307);
+    expect(db.upserts).toHaveLength(1);
+    expect(db.upserts[0]).toMatchObject({
+      shopify_verified_domain: SHOP,
+      store_url: `https://${SHOP}`,
+    });
+    // Security review queue stays empty on a happy install.
+    expect(db.review_queue).toHaveLength(0);
+  });
+
+  it("mismatch (token-reuse attempt): rejects 401, NEVER upserts the access token, files security review row", async () => {
+    seedNonce();
+    stubFetchWith("attacker.myshopify.com");
+
+    const { request } = freshCallbackPair();
+    const res = await GET(request as never);
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      error: "shop_verification_failed",
+      reason: "mismatch",
+    });
+    // The compromised access_token NEVER reaches the connection row.
+    expect(db.upserts).toHaveLength(0);
+    // Security review queue row landed with the canonical group_key + both
+    // expected/actual sides for forensics.
+    expect(db.review_queue).toHaveLength(1);
+    expect(db.review_queue[0]).toMatchObject({
+      org_id: ORG_ID,
+      category: "security",
+      severity: "high",
+      group_key: `shop_token_mismatch:${ORG_ID}:${SHOP}`,
+    });
+    const details = db.review_queue[0]?.details as Record<string, unknown>;
+    expect(details).toMatchObject({
+      kind: "mismatch",
+      expected: SHOP,
+      actual: "attacker.myshopify.com",
+    });
+    // Auto-register MUST NOT have fired — install was aborted before it.
+    expect(mockRegister).not.toHaveBeenCalled();
+  });
+
+  it("case-insensitive match: `TestStore.myshopify.com` ?shop= + `teststore.MYSHOPIFY.COM` GraphQL → ok (canonical lowercase persisted)", async () => {
+    seedNonce();
+    // Mismatched case + mixed-case GraphQL response — both must normalize
+    // through normalizeShopDomain into the canonical lowercase form. The
+    // freshCallbackPair helper hard-codes shop=SHOP so we override the
+    // request manually here.
+    stubFetchWith("teststore.MYSHOPIFY.COM");
+    const state = buildState(ORG_ID, "callback-nonce-1");
+    const params = new URLSearchParams({
+      code: "good-code",
+      shop: "TestStore.myshopify.com",
+      state,
+    });
+    const hmac = signCallbackParams(params, ENV_CLIENT_SECRET);
+    const request = callbackRequest({
+      code: "good-code",
+      shop: "TestStore.myshopify.com",
+      state,
+      hmac,
+    });
+
+    const res = await GET(request as never);
+    expect(res.status).toBe(307);
+    expect(db.upserts).toHaveLength(1);
+    // Persisted form is the lowercased canonical, NOT the mixed-case input.
+    expect(db.upserts[0]).toMatchObject({
+      shopify_verified_domain: "teststore.myshopify.com",
+      store_url: "https://teststore.myshopify.com",
+    });
+    expect(db.review_queue).toHaveLength(0);
+  });
+
+  it("no-suffix shop param normalizes to .myshopify.com and matches the suffixed GraphQL response", async () => {
+    seedNonce();
+    stubFetchWith("test-shop.myshopify.com");
+    // Use a no-suffix shop param. We rebuild the request manually so the HMAC
+    // signs the exact bytes the route will see.
+    const state = buildState(ORG_ID, "callback-nonce-1");
+    const params = new URLSearchParams({
+      code: "good-code",
+      shop: "test-shop",
+      state,
+    });
+    const hmac = signCallbackParams(params, ENV_CLIENT_SECRET);
+    const request = callbackRequest({
+      code: "good-code",
+      shop: "test-shop",
+      state,
+      hmac,
+    });
+
+    const res = await GET(request as never);
+    expect(res.status).toBe(307);
+    expect(db.upserts).toHaveLength(1);
+    expect(db.upserts[0]).toMatchObject({
+      shopify_verified_domain: "test-shop.myshopify.com",
+    });
   });
 });

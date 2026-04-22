@@ -32,7 +32,10 @@ import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
+  canonicalBodyDedupKey,
   checkWebhookFreshness,
+  type DedupResult,
+  interpretDedupError,
   readWebhookBody,
   sanitizeWebhookPayload,
   verifyHmacSignature,
@@ -46,11 +49,33 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// F-3: structured-log helper. Stays inline rather than going to a shared
+// logger utility because we want exactly ONE shape for "non-fresh dedup
+// outcome" and we want it greppable as a single string token.
+function logDedupOutcome(fields: {
+  connection_id: string;
+  platform: string;
+  topic: string | null;
+  external_webhook_id: string;
+  dedup_kind: DedupResult["kind"];
+  error_code?: string;
+  reason?: string;
+}): void {
+  // JSON shape so Vercel/Datadog can parse it without a structured-logging
+  // SDK. The leading sentinel makes it grep-friendly during incident
+  // response: `vercel logs | grep webhook_dedup`.
+  console.log(
+    JSON.stringify({
+      tag: "webhook_dedup",
+      ...fields,
+    }),
+  );
+}
+
 export async function POST(request: NextRequest) {
   const rawBody = await readWebhookBody(request);
 
   const connectionId = request.nextUrl.searchParams.get("connection_id");
-  const _platform = request.nextUrl.searchParams.get("platform") ?? "unknown";
 
   if (!connectionId) {
     return NextResponse.json({ error: "missing connection_id" }, { status: 400 });
@@ -136,24 +161,40 @@ export async function POST(request: NextRequest) {
   // preserves dedup for older deliveries already in the queue and for
   // platforms that don't emit Event-Id (Woo, Squarespace).
   // Ref: https://shopify.dev/docs/apps/build/webhooks/ignore-duplicates
-  const externalWebhookId =
+  //
+  // F-4: when no platform-supplied id is available, hash the canonical raw
+  // body (sha256). Pre-F-4 used `${connectionId}:${Date.now()}` which made
+  // dedup INERT on retry — every retry got a new Date.now() and was
+  // accepted as fresh. The hash is stable across retries of the same event.
+  const headerWebhookId =
     request.headers.get("X-Shopify-Event-Id") ??
     request.headers.get("X-Shopify-Webhook-Id") ??
-    request.headers.get("X-WC-Webhook-ID") ??
-    `${connectionId}:${Date.now()}`;
+    request.headers.get("X-WC-Webhook-ID");
+  const dedupKey = headerWebhookId
+    ? `${connectionId}:${headerWebhookId}`
+    : canonicalBodyDedupKey(connection.platform, rawBody);
+  const externalWebhookId = headerWebhookId ?? dedupKey;
+
+  const topicHeader =
+    request.headers.get("X-Shopify-Topic") ?? request.headers.get("X-WC-Webhook-Topic");
 
   // HRD-01: stash the platform-emitted timestamp into webhook_events.metadata
   // so the Trigger task's monotonic guard has it available without a second
   // header round-trip. Shopify is the only platform that sends a delivery
   // header (X-Shopify-Triggered-At); Woo + Squarespace rely on payload
   // `updated_at`/`date_modified`/`modifiedOn`, which the extractor handles.
+  //
+  // F-4: persist `dedup_key` so operators investigating duplicate-rejection
+  // traces can grep instead of recomputing the sha256. Column added in
+  // 20260423000002_finish_plan_columns.sql; behaves as NULL on legacy rows.
   const { data: insertedEvent, error: dedupError } = await supabase
     .from("webhook_events")
     .insert({
       workspace_id: connection.workspace_id,
       platform: connection.platform,
       external_webhook_id: externalWebhookId,
-      topic: request.headers.get("X-Shopify-Topic") ?? request.headers.get("X-WC-Webhook-Topic"),
+      dedup_key: dedupKey,
+      topic: topicHeader,
       metadata: {
         connection_id: connectionId,
         // HRD-30: strip PII (email, name, address, phone, IP, …) before
@@ -167,8 +208,46 @@ export async function POST(request: NextRequest) {
     .select("id")
     .single();
 
-  if (dedupError) {
+  // F-3: typed dedup interpretation. Pre-F-3 we returned 200 "duplicate"
+  // for ANY error — masking transient pooler failures (08006) and
+  // schema/constraint regressions (NULL violations, etc.) that should
+  // bubble out as 503 so the platform retries.
+  const dedupResult = interpretDedupError(insertedEvent, dedupError);
+  if (dedupResult.kind !== "fresh") {
+    logDedupOutcome({
+      connection_id: connectionId,
+      platform: connection.platform,
+      topic: topicHeader,
+      external_webhook_id: externalWebhookId,
+      dedup_kind: dedupResult.kind,
+      error_code: "sqlState" in dedupResult ? dedupResult.sqlState : undefined,
+      reason: "reason" in dedupResult ? dedupResult.reason : undefined,
+    });
+  }
+
+  if (dedupResult.kind === "duplicate") {
     return NextResponse.json({ ok: true, status: "duplicate" });
+  }
+  if (dedupResult.kind === "transient") {
+    return NextResponse.json(
+      { ok: false, status: "transient_dedup_failure", will_retry: true },
+      { status: 503 },
+    );
+  }
+  if (dedupResult.kind === "unknown") {
+    // 503 so the platform retries; the structured log above gives ops the
+    // sqlState + reason needed to triage. Sentry forwarding wired up at
+    // app level in trigger.config.ts (see Rule #49 for the parallel task
+    // path) — the Vercel runtime auto-captures unhandled rejections, but
+    // this is an explicit 503 not a throw, so we log loud here.
+    return NextResponse.json(
+      {
+        ok: false,
+        status: "unknown_dedup_failure",
+        will_retry: true,
+      },
+      { status: 503 },
+    );
   }
 
   // HRD-17.1: enqueue happens AFTER the row exists, in a try/catch. The
