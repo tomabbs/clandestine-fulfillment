@@ -100,6 +100,20 @@ else
   fi
 fi
 
+# ─── Org-constraint gate (P9 — merge_organizations_txn coverage) ─────────────
+# Requires DATABASE_URL + psql (same shape as the schema gate above). Catches
+# org_id-bearing tables that aren't registered in merge_organizations_txn's
+# v_tables array — would trip merge_delete_failed at cutover.
+if [[ -z "${DATABASE_URL:-}" ]] || ! command -v psql >/dev/null 2>&1; then
+  emit_skip "org-constraints" "DATABASE_URL or psql unavailable — merge_organizations_txn coverage NOT verified"
+else
+  if bash scripts/check-org-constraints.sh >/dev/null 2>&1; then
+    emit_pass "org-constraints" "every org_id table registered in merge_organizations_txn.v_tables"
+  else
+    emit_fail "org-constraints" "scripts/check-org-constraints.sh failed — re-run for the missing-table list"
+  fi
+fi
+
 # ─── Env-flag gates ──────────────────────────────────────────────────────────
 if [[ "${SHOPIFY_API_VERSION:-}" == "2026-01" ]]; then
   emit_pass "env-shopify-version" "SHOPIFY_API_VERSION=2026-01"
