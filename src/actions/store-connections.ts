@@ -1181,9 +1181,11 @@ export async function registerShopifyWebhookSubscriptions(input: {
   // (channel-sync logging, do_not_fanout flag rollouts, etc.) may write to
   // unrelated metadata keys. JSON-merge is structural so a stale array or
   // unrelated key never gets clobbered.
-  const existingMeta = (conn.metadata && typeof conn.metadata === "object"
-    ? (conn.metadata as Record<string, unknown>)
-    : {}) as Record<string, unknown>;
+  const existingMeta = (
+    conn.metadata && typeof conn.metadata === "object"
+      ? (conn.metadata as Record<string, unknown>)
+      : {}
+  ) as Record<string, unknown>;
   const nextMeta = {
     ...existingMeta,
     webhook_callback_url: callbackUrl,
