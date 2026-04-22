@@ -134,6 +134,41 @@ export const processClientStoreWebhookTask = task({
       await writeLastSeenAt(supabase, payload.webhookEventId, eventContext.eventTimestamp);
     }
 
+    // B-3 / HRD-14 — Channels webhook health card. Stamp `last_webhook_at`
+    // and bump the per-topic counter inside `webhook_topic_health` whenever
+    // we successfully complete a delivery (processed OR echo_cancelled).
+    // Both columns were added in `20260423000002_finish_plan_columns.sql`.
+    // Failures intentionally do NOT stamp the freshness clock — a connection
+    // that's only emitting handler errors is unhealthy by definition.
+    if (connectionId && (result.processed === true || result.reason === "echo_cancelled")) {
+      try {
+        const nowIso = new Date().toISOString();
+        // Read-modify-write of the JSONB topic counter. Race acceptable here:
+        // worst case we lose a counter increment under concurrency, but
+        // `last_webhook_at` is the authoritative freshness clock for the UI
+        // badge — counters are diagnostic only.
+        const { data: row } = await supabase
+          .from("client_store_connections")
+          .select("webhook_topic_health")
+          .eq("id", connectionId)
+          .maybeSingle();
+
+        const existing = (row?.webhook_topic_health ?? {}) as Record<
+          string,
+          { last_at: string; count: number }
+        >;
+        const prior = existing[topic] ?? { last_at: nowIso, count: 0 };
+        existing[topic] = { last_at: nowIso, count: prior.count + 1 };
+
+        await supabase
+          .from("client_store_connections")
+          .update({ last_webhook_at: nowIso, webhook_topic_health: existing })
+          .eq("id", connectionId);
+      } catch {
+        // Health-card telemetry is best-effort; never fail the webhook for it.
+      }
+    }
+
     return result;
   },
 });

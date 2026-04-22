@@ -8,9 +8,14 @@ import {
   iterateAllVariants,
 } from "@/lib/server/shopify-connection-graphql";
 import {
+  diffWebhookSubscriptions,
+  listWebhookSubscriptions,
   persistWebhookRegistrationMetadata,
   type RegisterWebhookSubscriptionsResult,
   registerWebhookSubscriptions,
+  SHOPIFY_REQUIRED_WEBHOOK_TOPICS,
+  topicEnumToRest,
+  type WebhookSubscriptionRecord,
 } from "@/lib/server/shopify-webhook-subscriptions";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
@@ -1190,6 +1195,129 @@ export async function registerShopifyWebhookSubscriptions(input: {
     registeredAt,
   };
 }
+
+// ============================================================================
+// B-3 / HRD-14 — Channels webhook health card
+//
+// Read-only Server Action invoked by the Channels page health card. Returns
+// (a) freshness clock from `client_store_connections.last_webhook_at`,
+// (b) per-required-topic counts from `webhook_topic_health`,
+// (c) `lastError` and `lastErrorAt` for the badge, and
+// (d) for Shopify connections only, a live diff between Shopify's current
+//    webhook subscriptions and the canonical 4-topic × callbackUrl set —
+//    used by the "Re-register webhooks" button to surface what would change
+//    BEFORE the operator confirms.
+//
+// State machine (driven entirely by `last_webhook_at` minus now):
+//   - healthy:  < 1h
+//   - delayed:  1h – 6h
+//   - stale:    > 6h (Rule #17 — auto-create review queue item is the
+//                     sensor's job, not this action's; we only display state)
+//   - unknown:  null `last_webhook_at` (never received a webhook)
+// ============================================================================
+
+export type WebhookHealthState = "healthy" | "delayed" | "stale" | "unknown";
+
+export type ChannelWebhookHealthReport = {
+  connectionId: string;
+  platform: StorePlatform;
+  storeUrl: string;
+  state: WebhookHealthState;
+  lastWebhookAt: string | null;
+  ageSeconds: number | null;
+  lastErrorAt: string | null;
+  lastError: string | null;
+  topicCounters: Record<string, { last_at: string; count: number }>;
+  /** Shopify only — non-null when we successfully listed remote subscriptions. */
+  diff: {
+    desiredCallbackUrl: string;
+    toCreate: string[];
+    toRecreate: WebhookSubscriptionRecord[];
+    toDelete: WebhookSubscriptionRecord[];
+    inSync: WebhookSubscriptionRecord[];
+  } | null;
+  /** Shopify only — error string if listing subscriptions failed (we still return the rest of the report). */
+  diffError: string | null;
+};
+
+const getChannelWebhookHealthSchema = z.object({
+  connectionId: z.string().uuid(),
+});
+
+function classifyHealthState(lastWebhookAt: string | null): {
+  state: WebhookHealthState;
+  ageSeconds: number | null;
+} {
+  if (!lastWebhookAt) return { state: "unknown", ageSeconds: null };
+  const ageMs = Date.now() - new Date(lastWebhookAt).getTime();
+  const ageSeconds = Math.max(0, Math.floor(ageMs / 1000));
+  if (ageMs < 60 * 60 * 1000) return { state: "healthy", ageSeconds };
+  if (ageMs < 6 * 60 * 60 * 1000) return { state: "delayed", ageSeconds };
+  return { state: "stale", ageSeconds };
+}
+
+export async function getChannelWebhookHealth(input: {
+  connectionId: string;
+}): Promise<ChannelWebhookHealthReport> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = getChannelWebhookHealthSchema.parse(input);
+
+  const serviceClient = createServiceRoleClient();
+  const { data: conn, error: connErr } = await serviceClient
+    .from("client_store_connections")
+    .select(
+      "id, platform, store_url, api_key, last_webhook_at, last_error_at, last_error, webhook_topic_health",
+    )
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (connErr) throw new Error(`Connection lookup failed: ${connErr.message}`);
+  if (!conn) throw new Error("Connection not found");
+
+  const { state, ageSeconds } = classifyHealthState(
+    (conn.last_webhook_at as string | null) ?? null,
+  );
+
+  const topicCounters =
+    (conn.webhook_topic_health as Record<string, { last_at: string; count: number }> | null) ?? {};
+
+  let diff: ChannelWebhookHealthReport["diff"] = null;
+  let diffError: string | null = null;
+
+  if (conn.platform === "shopify" && conn.api_key) {
+    const desiredCallbackUrl = `${env().NEXT_PUBLIC_APP_URL}/api/webhooks/client-store?connection_id=${conn.id}&platform=shopify`;
+    try {
+      const current = await listWebhookSubscriptions({
+        storeUrl: conn.store_url,
+        accessToken: conn.api_key,
+      });
+      const computed = diffWebhookSubscriptions({ current, desiredCallbackUrl });
+      diff = { desiredCallbackUrl, ...computed };
+    } catch (err) {
+      diffError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  return {
+    connectionId: conn.id,
+    platform: conn.platform as StorePlatform,
+    storeUrl: conn.store_url as string,
+    state,
+    lastWebhookAt: (conn.last_webhook_at as string | null) ?? null,
+    ageSeconds,
+    lastErrorAt: (conn.last_error_at as string | null) ?? null,
+    lastError: (conn.last_error as string | null) ?? null,
+    topicCounters,
+    diff,
+    diffError,
+  };
+}
+
+// Re-export so the Channels page can render badges that include the canonical
+// list of required topics (the diff helper already knows about them, but the
+// UI's "missing topic" badge needs the list directly).
+export const SHOPIFY_REQUIRED_WEBHOOK_TOPICS_REST: readonly string[] =
+  SHOPIFY_REQUIRED_WEBHOOK_TOPICS.map(topicEnumToRest);
 
 // ============================================================================
 // HRD-04 + HRD-18 — runDirectShopifyDryRun

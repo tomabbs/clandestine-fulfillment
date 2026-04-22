@@ -6,6 +6,7 @@ import { useCallback } from "react";
 import { triggerTagCleanup } from "@/actions/admin-settings";
 import { getBandcampSyncStatus, triggerBandcampSync } from "@/actions/bandcamp";
 import { getShopifySyncStatus, triggerFullBackfill, triggerShopifySync } from "@/actions/shopify";
+import { ClientStoreWebhookHealthCard } from "@/components/admin/client-store-webhook-health-card";
 import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -351,6 +352,9 @@ export default function ChannelsPage() {
           <SyncHistoryTable logs={bandcampLogs} showSyncType />
         </CardContent>
       </Card>
+
+      {/* B-3 / HRD-14 — Client Store Webhook Health */}
+      <ClientStoreWebhookHealthCard />
 
       {/* Admin Tools */}
       <Card>

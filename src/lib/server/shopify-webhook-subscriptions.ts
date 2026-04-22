@@ -246,6 +246,71 @@ export async function registerWebhookSubscriptions(
   return { registered, failed };
 }
 
+// ─── B-3 / HRD-14 — Idempotent diff helper ────────────────────────────────────
+
+export interface WebhookSubscriptionDiff {
+  /** Topics in the required set that have NO matching subscription on Shopify. */
+  toCreate: string[];
+  /** Existing subscriptions whose callbackUrl drifted from the canonical one. */
+  toRecreate: WebhookSubscriptionRecord[];
+  /** Existing subscriptions on Shopify that are NOT in the required set (stale). */
+  toDelete: WebhookSubscriptionRecord[];
+  /** Existing subscriptions that already match desired state. */
+  inSync: WebhookSubscriptionRecord[];
+}
+
+/**
+ * B-3 / HRD-14 — pure diff between Shopify's current webhook subscriptions
+ * and the canonical (4 required topics × 1 callbackUrl) target state.
+ *
+ * Used by the "Re-register webhooks" button on the Channels page health card
+ * to surface what would change BEFORE the operator confirms. The plan
+ * mandates "idempotent diff, not blind recreate":
+ *
+ *   - Topics in the required set with no matching subscription → toCreate
+ *   - Subscriptions for required topics whose callbackUrl drifted → toRecreate
+ *     (caller deletes the old one + creates fresh; updateMutation does NOT
+ *     exist in the WebhookSubscription Shopify API)
+ *   - Subscriptions for non-required topics → toDelete (operator-confirmed)
+ *   - Everything else is in sync (no churn)
+ *
+ * Pure function so it stays unit-testable without HTTP mocks.
+ */
+export function diffWebhookSubscriptions(args: {
+  current: WebhookSubscriptionRecord[];
+  desiredCallbackUrl: string;
+}): WebhookSubscriptionDiff {
+  const required = new Set<string>(SHOPIFY_REQUIRED_WEBHOOK_TOPICS.map(topicEnumToRest));
+  const haveByTopic = new Map<string, WebhookSubscriptionRecord>();
+  for (const sub of args.current) {
+    if (!haveByTopic.has(sub.topic)) haveByTopic.set(sub.topic, sub);
+  }
+
+  const toCreate: string[] = [];
+  const toRecreate: WebhookSubscriptionRecord[] = [];
+  const toDelete: WebhookSubscriptionRecord[] = [];
+  const inSync: WebhookSubscriptionRecord[] = [];
+
+  for (const topic of required) {
+    const have = haveByTopic.get(topic);
+    if (!have) {
+      toCreate.push(topic);
+      continue;
+    }
+    if (have.callbackUrl !== args.desiredCallbackUrl) {
+      toRecreate.push(have);
+    } else {
+      inSync.push(have);
+    }
+  }
+
+  for (const sub of args.current) {
+    if (!required.has(sub.topic)) toDelete.push(sub);
+  }
+
+  return { toCreate, toRecreate, toDelete, inSync };
+}
+
 /**
  * Convert Shopify's GraphQL topic enum back to the dotted REST form. Shopify
  * sometimes returns the topic with the dotted form already (when read back

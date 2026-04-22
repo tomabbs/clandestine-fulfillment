@@ -18,6 +18,7 @@ vi.mock("@/lib/server/shopify-connection-graphql", () => ({
 
 import { connectionShopifyGraphQL } from "@/lib/server/shopify-connection-graphql";
 import {
+  diffWebhookSubscriptions,
   graphqlTopicToRest,
   listWebhookSubscriptions,
   persistWebhookRegistrationMetadata,
@@ -25,6 +26,7 @@ import {
   registerWebhookSubscriptions,
   SHOPIFY_REQUIRED_WEBHOOK_TOPICS,
   topicEnumToRest,
+  type WebhookSubscriptionRecord,
 } from "@/lib/server/shopify-webhook-subscriptions";
 
 const mockedGraphQL = vi.mocked(connectionShopifyGraphQL);
@@ -478,6 +480,85 @@ describe("persistWebhookRegistrationMetadata", () => {
     expect(meta.shopify_scopes).toEqual(["read_inventory", "write_inventory"]);
     expect(meta.app_distribution).toBe("custom");
     expect(typeof meta.installed_at).toBe("string");
+  });
+
+  it("B-3 / HRD-14 — diffWebhookSubscriptions classifies create / recreate / delete / in-sync", () => {
+    const desired = "https://app.example.com/api/webhooks/shopify/orders";
+    const stale = "https://old.example.com/hooks/orders";
+    const current: WebhookSubscriptionRecord[] = [
+      // exact match → in-sync
+      {
+        id: "gid://1",
+        topic: "orders/create",
+        apiVersion: "2026-01",
+        callbackUrl: desired,
+        reused: true,
+      },
+      // required topic, callback drift → recreate
+      {
+        id: "gid://2",
+        topic: "orders/cancelled",
+        apiVersion: "2026-01",
+        callbackUrl: stale,
+        reused: true,
+      },
+      // not in required set → delete
+      {
+        id: "gid://3",
+        topic: "products/update",
+        apiVersion: "2026-01",
+        callbackUrl: desired,
+        reused: true,
+      },
+      // also matches → in-sync
+      {
+        id: "gid://4",
+        topic: "refunds/create",
+        apiVersion: "2026-01",
+        callbackUrl: desired,
+        reused: true,
+      },
+      // inventory_levels/update is missing entirely → toCreate
+    ];
+
+    const diff = diffWebhookSubscriptions({ current, desiredCallbackUrl: desired });
+
+    expect(diff.toCreate).toEqual(["inventory_levels/update"]);
+    expect(diff.toRecreate.map((r) => r.id)).toEqual(["gid://2"]);
+    expect(diff.toDelete.map((r) => r.id)).toEqual(["gid://3"]);
+    expect(diff.inSync.map((r) => r.id).sort()).toEqual(["gid://1", "gid://4"]);
+  });
+
+  it("B-3 — diffWebhookSubscriptions on empty current list creates all 4 required topics", () => {
+    const desired = "https://app.example.com/api/webhooks/shopify/orders";
+    const diff = diffWebhookSubscriptions({ current: [], desiredCallbackUrl: desired });
+
+    expect(diff.toCreate).toHaveLength(4);
+    expect(diff.toCreate).toContain("inventory_levels/update");
+    expect(diff.toCreate).toContain("orders/create");
+    expect(diff.toCreate).toContain("orders/cancelled");
+    expect(diff.toCreate).toContain("refunds/create");
+    expect(diff.toRecreate).toEqual([]);
+    expect(diff.toDelete).toEqual([]);
+    expect(diff.inSync).toEqual([]);
+  });
+
+  it("B-3 — diffWebhookSubscriptions on perfectly-aligned set produces zero churn", () => {
+    const desired = "https://app.example.com/api/webhooks/shopify/orders";
+    const current: WebhookSubscriptionRecord[] = SHOPIFY_REQUIRED_WEBHOOK_TOPICS.map((t, i) => ({
+      id: `gid://${i}`,
+      topic: topicEnumToRest(t),
+      apiVersion: "2026-01",
+      callbackUrl: desired,
+      reused: true,
+    }));
+
+    const diff = diffWebhookSubscriptions({ current, desiredCallbackUrl: desired });
+
+    expect(diff.toCreate).toEqual([]);
+    expect(diff.toRecreate).toEqual([]);
+    expect(diff.toDelete).toEqual([]);
+    expect(diff.inSync).toHaveLength(4);
   });
 
   it("includes webhook_register_failures when failed[] non-empty", async () => {
