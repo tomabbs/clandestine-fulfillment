@@ -1,3 +1,7 @@
+// Post-audit baseline (plan: direct-shopify-cutover-finish, 2026-04-22).
+// Any change here must update docs/system_map/API_CATALOG.md and re-run
+// tests/unit/lib/server/shopify-webhook-subscriptions.test.ts.
+
 /**
  * HRD-09.2 — per-connection Shopify webhook subscription auto-register helper.
  *
@@ -25,6 +29,7 @@
  * level failure (auth/scope) bubbles up via the underlying transport.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   type ConnectionShopifyContext,
   connectionShopifyGraphQL,
@@ -252,4 +257,96 @@ export function graphqlTopicToRest(topic: string): string {
   const lower = topic.toLowerCase();
   const idx = lower.lastIndexOf("_");
   return idx === -1 ? lower : `${lower.slice(0, idx)}/${lower.slice(idx + 1)}`;
+}
+
+export interface PersistWebhookRegistrationExtras {
+  /** Comma-separated scope list returned by Shopify's token-exchange `scope` field. */
+  shopifyScopes?: string[];
+  /** "custom" for HRD-35 per-client Custom-distribution apps; "public" for the legacy single app. */
+  appDistribution?: "custom" | "public";
+  /** Override for `metadata.installed_at`; defaults to now. Useful for re-registration runs that should NOT overwrite the original install timestamp. */
+  installedAt?: string | null;
+}
+
+export interface PersistWebhookRegistrationResult {
+  apiVersionPinned: string | null;
+  apiVersionDrift: boolean;
+  registeredAt: string;
+}
+
+/**
+ * Merge webhook-registration output into `client_store_connections.metadata`.
+ *
+ * Shared by:
+ *   - `registerShopifyWebhookSubscriptions` Server Action (staff-manual button)
+ *   - `/api/oauth/shopify` callback (auto-register after token capture, HRD-35 gap #3)
+ *
+ * Always merges (never replaces) the metadata row so unrelated keys
+ * (`channel_sync_*`, do-not-fanout audit trail) survive intact. Loads the
+ * current `metadata` first because PostgREST has no JSON-merge primitive that
+ * is safe across drivers.
+ */
+export async function persistWebhookRegistrationMetadata(
+  supabase: SupabaseClient,
+  connectionId: string,
+  result: RegisterWebhookSubscriptionsResult,
+  callbackUrl: string,
+  extras: PersistWebhookRegistrationExtras = {},
+): Promise<PersistWebhookRegistrationResult> {
+  const apiVersions = new Set(result.registered.map((r) => r.apiVersion));
+  const apiVersionPinned = result.registered[0]?.apiVersion ?? null;
+  const apiVersionDrift = apiVersions.size > 1;
+  const registeredAt = new Date().toISOString();
+
+  const { data: connRow, error: connErr } = await supabase
+    .from("client_store_connections")
+    .select("metadata")
+    .eq("id", connectionId)
+    .maybeSingle();
+  if (connErr) {
+    throw new Error(`Failed to load connection metadata for merge: ${connErr.message}`);
+  }
+
+  const existingMeta =
+    connRow?.metadata && typeof connRow.metadata === "object"
+      ? (connRow.metadata as Record<string, unknown>)
+      : {};
+  const nextMeta: Record<string, unknown> = {
+    ...existingMeta,
+    webhook_callback_url: callbackUrl,
+    webhook_subscriptions: result.registered.map((r) => ({
+      id: r.id,
+      topic: r.topic,
+      apiVersion: r.apiVersion,
+      callbackUrl: r.callbackUrl,
+      reused: r.reused,
+      registeredAt,
+    })),
+    webhook_register_failures: result.failed.length > 0 ? result.failed : undefined,
+    webhook_register_last_run_at: registeredAt,
+  };
+
+  if (extras.shopifyScopes !== undefined) {
+    nextMeta.shopify_scopes = extras.shopifyScopes;
+  }
+  if (extras.appDistribution !== undefined) {
+    nextMeta.app_distribution = extras.appDistribution;
+  }
+  if (extras.installedAt !== undefined) {
+    if (extras.installedAt === null) {
+      nextMeta.installed_at = registeredAt;
+    } else {
+      nextMeta.installed_at = extras.installedAt;
+    }
+  }
+
+  const { error: updateErr } = await supabase
+    .from("client_store_connections")
+    .update({ metadata: nextMeta, updated_at: registeredAt })
+    .eq("id", connectionId);
+  if (updateErr) {
+    throw new Error(`Failed to persist webhook subscription metadata: ${updateErr.message}`);
+  }
+
+  return { apiVersionPinned, apiVersionDrift, registeredAt };
 }

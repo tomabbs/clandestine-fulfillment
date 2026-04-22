@@ -20,6 +20,10 @@
 
 import crypto from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
+import {
+  persistWebhookRegistrationMetadata,
+  registerWebhookSubscriptions,
+} from "@/lib/server/shopify-webhook-subscriptions";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
@@ -270,7 +274,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: `Token exchange failed: ${body}` }, { status: 500 });
     }
 
-    const { access_token } = (await tokenRes.json()) as { access_token: string };
+    // Shopify token-exchange response per
+    // https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/access-token-types#online-access-tokens
+    // (`scope` is comma-separated and reflects the ACTUALLY granted scopes —
+    // may be narrower than what we requested if the merchant declined some).
+    const tokenJson = (await tokenRes.json()) as {
+      access_token: string;
+      scope?: string;
+    };
+    const accessToken = tokenJson.access_token;
+    const grantedScopes = (tokenJson.scope ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     const { data: org } = await supabase
       .from("organizations")
@@ -286,23 +302,93 @@ export async function GET(request: NextRequest) {
     // lands with do_not_fanout=true so an accidental install can never push
     // inventory before staff verify SKU mappings + select a default location
     // + opt back into fanout via reactivateClientStoreConnection.
-    await supabase.from("client_store_connections").upsert(
-      {
-        workspace_id: org.workspace_id,
-        org_id: stateData.orgId,
-        platform: "shopify",
-        store_url: `https://${shop}`,
-        api_key: access_token,
-        connection_status: "active",
-        do_not_fanout: true,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "org_id,platform,store_url" },
-    );
+    //
+    // `.select("id").single()` is required so we can pass the connection id
+    // into the webhook callback URL below (HRD-35 gap #3 auto-register).
+    const { data: connRow, error: upsertErr } = await supabase
+      .from("client_store_connections")
+      .upsert(
+        {
+          workspace_id: org.workspace_id,
+          org_id: stateData.orgId,
+          platform: "shopify",
+          store_url: `https://${shop}`,
+          api_key: accessToken,
+          connection_status: "active",
+          do_not_fanout: true,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "org_id,platform,store_url" },
+      )
+      .select("id")
+      .single();
 
-    return NextResponse.redirect(
-      `${env().NEXT_PUBLIC_APP_URL}/admin/settings/store-connections?connected=shopify`,
-    );
+    if (upsertErr || !connRow) {
+      return NextResponse.json(
+        { error: `Failed to persist connection: ${upsertErr?.message ?? "no row returned"}` },
+        { status: 500 },
+      );
+    }
+
+    const connectionId = connRow.id as string;
+
+    // ── HRD-35 gap #3 + HRD-09.2 — auto-register the four required webhook
+    // topics RIGHT NOW so the connection is fully wired before the staff
+    // operator hits the admin UI. Failures here do NOT abort the install (the
+    // token is captured + persisted; staff can re-run via the manual button)
+    // — they land on metadata.webhook_register_failures + the success-redirect
+    // query string surfaces the partial state.
+    let registerFailureCount = 0;
+    try {
+      const callbackUrl = `${env().NEXT_PUBLIC_APP_URL}/api/webhooks/client-store?connection_id=${connectionId}&platform=shopify`;
+      const result = await registerWebhookSubscriptions(
+        { storeUrl: `https://${shop}`, accessToken },
+        callbackUrl,
+      );
+      registerFailureCount = result.failed.length;
+
+      // Persist scopes + app distribution + installed_at alongside the webhook
+      // subscription IDs. Uses the same shared helper the staff-manual button
+      // (`registerShopifyWebhookSubscriptions`) calls, so the metadata shape
+      // stays in lockstep across the two entry points.
+      await persistWebhookRegistrationMetadata(supabase, connectionId, result, callbackUrl, {
+        shopifyScopes: grantedScopes,
+        // Per-connection app credentials present → HRD-35 Custom-distribution.
+        // Otherwise the env-fallback path (Clandestine-internal app or the
+        // legacy single public app) is in play.
+        appDistribution: stateData.connectionId ? "custom" : "public",
+        installedAt: null,
+      });
+    } catch (err) {
+      // Swallow but capture the error on metadata so staff can see it on the
+      // connections page (the failed-button path will retry idempotently).
+      const msg = err instanceof Error ? err.message : String(err);
+      await supabase
+        .from("client_store_connections")
+        .update({
+          metadata: {
+            webhook_register_failed_at: new Date().toISOString(),
+            webhook_register_error: msg.slice(0, 500),
+            shopify_scopes: grantedScopes,
+            app_distribution: stateData.connectionId ? "custom" : "public",
+            installed_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", connectionId);
+      registerFailureCount = -1;
+    }
+
+    const successUrl = new URL(`${env().NEXT_PUBLIC_APP_URL}/admin/settings/store-connections`);
+    successUrl.searchParams.set("connected", "shopify");
+    successUrl.searchParams.set("connection_id", connectionId);
+    if (registerFailureCount !== 0) {
+      successUrl.searchParams.set(
+        "webhook_register",
+        registerFailureCount === -1 ? "error" : "partial",
+      );
+    }
+    return NextResponse.redirect(successUrl.toString());
   }
 
   return NextResponse.json({ error: "Invalid request" }, { status: 400 });

@@ -20,7 +20,9 @@ import { connectionShopifyGraphQL } from "@/lib/server/shopify-connection-graphq
 import {
   graphqlTopicToRest,
   listWebhookSubscriptions,
+  persistWebhookRegistrationMetadata,
   registerWebhookSubscriptions,
+  type RegisterWebhookSubscriptionsResult,
   SHOPIFY_REQUIRED_WEBHOOK_TOPICS,
   topicEnumToRest,
 } from "@/lib/server/shopify-webhook-subscriptions";
@@ -344,5 +346,158 @@ describe("registerWebhookSubscriptions", () => {
     expect(result.registered).toHaveLength(4);
     expect(result.registered.every((r) => r.reused === false)).toBe(true);
     expect(result.failed).toHaveLength(0);
+  });
+});
+
+// ─── persistWebhookRegistrationMetadata ──────────────────────────────────────
+//
+// Verifies the shared metadata-merge helper used by both the staff-manual
+// "Register webhooks" Server Action and the /api/oauth/shopify auto-register
+// hook. The two entry points MUST persist identical shapes.
+
+describe("persistWebhookRegistrationMetadata", () => {
+  type Captured = { table: string; values: Record<string, unknown>; eqArgs: [string, unknown] };
+
+  function makeMockSupabase(initialMetadata: unknown) {
+    const captured: { update?: Captured } = {};
+    const supabase = {
+      from(table: string) {
+        return {
+          select() {
+            return {
+              eq() {
+                return {
+                  maybeSingle: async () => ({
+                    data: { metadata: initialMetadata },
+                    error: null,
+                  }),
+                };
+              },
+            };
+          },
+          update(values: Record<string, unknown>) {
+            return {
+              eq(col: string, value: unknown) {
+                captured.update = { table, values, eqArgs: [col, value] };
+                return Promise.resolve({ error: null });
+              },
+            };
+          },
+        };
+      },
+    };
+    return { supabase: supabase as never, captured };
+  }
+
+  function buildResult(): RegisterWebhookSubscriptionsResult {
+    return {
+      registered: [
+        {
+          id: "gid://shopify/WebhookSubscription/1",
+          topic: "orders/create",
+          apiVersion: "2026-01",
+          callbackUrl: CALLBACK,
+          reused: false,
+        },
+        {
+          id: "gid://shopify/WebhookSubscription/2",
+          topic: "orders/cancelled",
+          apiVersion: "2026-01",
+          callbackUrl: CALLBACK,
+          reused: true,
+        },
+      ],
+      failed: [],
+    };
+  }
+
+  it("merges into existing metadata without clobbering unrelated keys", async () => {
+    const { supabase, captured } = makeMockSupabase({
+      channel_sync_state: { last_run: "2026-04-19T00:00:00.000Z" },
+      do_not_fanout_audit: ["staff_user_1"],
+    });
+
+    const out = await persistWebhookRegistrationMetadata(
+      supabase,
+      "conn-1",
+      buildResult(),
+      CALLBACK,
+    );
+
+    expect(out.apiVersionPinned).toBe("2026-01");
+    expect(out.apiVersionDrift).toBe(false);
+    expect(captured.update).toBeDefined();
+    expect(captured.update?.table).toBe("client_store_connections");
+    expect(captured.update?.eqArgs).toEqual(["id", "conn-1"]);
+    const meta = captured.update?.values.metadata as Record<string, unknown>;
+    expect(meta.channel_sync_state).toEqual({ last_run: "2026-04-19T00:00:00.000Z" });
+    expect(meta.do_not_fanout_audit).toEqual(["staff_user_1"]);
+    expect(meta.webhook_callback_url).toBe(CALLBACK);
+    expect(Array.isArray(meta.webhook_subscriptions)).toBe(true);
+    expect(meta.webhook_register_failures).toBeUndefined();
+  });
+
+  it("flags apiVersionDrift when subscriptions disagree on apiVersion", async () => {
+    const { supabase } = makeMockSupabase(null);
+    const result: RegisterWebhookSubscriptionsResult = {
+      registered: [
+        {
+          id: "1",
+          topic: "orders/create",
+          apiVersion: "2026-01",
+          callbackUrl: CALLBACK,
+          reused: false,
+        },
+        {
+          id: "2",
+          topic: "orders/cancelled",
+          apiVersion: "2025-10",
+          callbackUrl: CALLBACK,
+          reused: false,
+        },
+      ],
+      failed: [],
+    };
+
+    const out = await persistWebhookRegistrationMetadata(supabase, "conn-1", result, CALLBACK);
+
+    expect(out.apiVersionDrift).toBe(true);
+    expect(out.apiVersionPinned).toBe("2026-01");
+  });
+
+  it("persists shopifyScopes + appDistribution + installedAt extras", async () => {
+    const { supabase, captured } = makeMockSupabase(null);
+
+    await persistWebhookRegistrationMetadata(supabase, "conn-1", buildResult(), CALLBACK, {
+      shopifyScopes: ["read_inventory", "write_inventory"],
+      appDistribution: "custom",
+      installedAt: null,
+    });
+
+    const meta = captured.update?.values.metadata as Record<string, unknown>;
+    expect(meta.shopify_scopes).toEqual(["read_inventory", "write_inventory"]);
+    expect(meta.app_distribution).toBe("custom");
+    expect(typeof meta.installed_at).toBe("string");
+  });
+
+  it("includes webhook_register_failures when failed[] non-empty", async () => {
+    const { supabase, captured } = makeMockSupabase(null);
+    const result: RegisterWebhookSubscriptionsResult = {
+      registered: buildResult().registered,
+      failed: [
+        {
+          topic: "refunds/create",
+          callbackUrl: CALLBACK,
+          error: "URL invalid for this topic",
+        },
+      ],
+    };
+
+    await persistWebhookRegistrationMetadata(supabase, "conn-1", result, CALLBACK);
+
+    const meta = captured.update?.values.metadata as Record<string, unknown>;
+    expect(meta.webhook_register_failures).toEqual([
+      { topic: "refunds/create", callbackUrl: CALLBACK, error: "URL invalid for this topic" },
+    ]);
   });
 });

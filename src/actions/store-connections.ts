@@ -8,6 +8,7 @@ import {
   iterateAllVariants,
 } from "@/lib/server/shopify-connection-graphql";
 import {
+  persistWebhookRegistrationMetadata,
   type RegisterWebhookSubscriptionsResult,
   registerWebhookSubscriptions,
 } from "@/lib/server/shopify-webhook-subscriptions";
@@ -1176,42 +1177,10 @@ export async function registerShopifyWebhookSubscriptions(input: {
     callbackUrl,
   );
 
-  const apiVersions = new Set(result.registered.map((r) => r.apiVersion));
-  const apiVersionPinned = result.registered[0]?.apiVersion ?? null;
-  const apiVersionDrift = apiVersions.size > 1;
-  const registeredAt = new Date().toISOString();
-
-  // Merge into existing metadata rather than replacing — other code paths
-  // (channel-sync logging, do_not_fanout flag rollouts, etc.) may write to
-  // unrelated metadata keys. JSON-merge is structural so a stale array or
-  // unrelated key never gets clobbered.
-  const existingMeta = (
-    conn.metadata && typeof conn.metadata === "object"
-      ? (conn.metadata as Record<string, unknown>)
-      : {}
-  ) as Record<string, unknown>;
-  const nextMeta = {
-    ...existingMeta,
-    webhook_callback_url: callbackUrl,
-    webhook_subscriptions: result.registered.map((r) => ({
-      id: r.id,
-      topic: r.topic,
-      apiVersion: r.apiVersion,
-      callbackUrl: r.callbackUrl,
-      reused: r.reused,
-      registeredAt,
-    })),
-    webhook_register_failures: result.failed.length > 0 ? result.failed : undefined,
-    webhook_register_last_run_at: registeredAt,
-  };
-
-  const { error: updateErr } = await serviceClient
-    .from("client_store_connections")
-    .update({ metadata: nextMeta, updated_at: registeredAt })
-    .eq("id", data.connectionId);
-  if (updateErr) {
-    throw new Error(`Failed to persist webhook subscription metadata: ${updateErr.message}`);
-  }
+  // Shared metadata-merge helper — same path used by the OAuth callback's
+  // auto-register hook (HRD-35 gap #3) so the persisted shape is identical.
+  const { apiVersionPinned, apiVersionDrift, registeredAt } =
+    await persistWebhookRegistrationMetadata(serviceClient, data.connectionId, result, callbackUrl);
 
   return {
     ...result,
