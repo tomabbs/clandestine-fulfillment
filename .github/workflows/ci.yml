@@ -112,6 +112,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Deploy to Trigger.dev
-        run: npx trigger.dev@latest deploy
+        # CLI version MUST match the SDK pin in pnpm-lock.yaml — Trigger.dev
+        # refuses to deploy on any drift ("Version mismatch detected while
+        # running in CI. This won't end well. Aborting."). Bump this in lockstep
+        # whenever @trigger.dev/sdk and @trigger.dev/build change in
+        # package.json. The CLI takes auth from TRIGGER_ACCESS_TOKEN — a
+        # Personal Access Token from https://cloud.trigger.dev/account/tokens,
+        # NOT the SDK runtime secret (TRIGGER_SECRET_KEY).
+        run: npx trigger.dev@4.4.3 deploy --skip-update-check
         env:
-          TRIGGER_SECRET_KEY: ${{ secrets.TRIGGER_SECRET_KEY }}
+          TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
