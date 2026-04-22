@@ -8,7 +8,7 @@ This gate complements:
 - `scripts/sql/prod_parity_checks.sql`
 - `scripts/sql/webhook_health_snapshot.sql`
 
-> **Last full automated sweep:** 2026-04-13 (Megaplan Finish-Line v4 closeout). All Section A automated checks PASS (`pnpm typecheck` / `pnpm test` 1143/1143 — 1121 pre-Phase-6 + 22 new Phase 6 tests for `setFanoutRolloutPercentInternal` and `evaluateRampHaltCriteria` / `pnpm build` / `pnpm exec biome check` 0 errors / inventory + webhook-dedup + fanout-gate + v2 batch + source-union-sync CI guards). Section B (focused reliability tests via `pnpm release:gate`) PASS. Phase 7 ramp deferred today (workspace lacks `shipstation_v2_inventory_warehouse_id` / `_location_id`; `inventory_sync_paused = true`). Rollout infrastructure (helper + sensor + audit) SHIPPED and tested end-to-end via unit suites — see `reports/finish-line/finish_line_status.json` for the per-phase outcome breakdown and `reports/finish-line/rollback_proof.md` for the verified 3-layer rollback contract.
+> **Last full automated sweep:** 2026-04-22 (Direct-Shopify cutover finish-line P0–P7). All Section A checks PASS (`pnpm typecheck` / `pnpm test` / `pnpm build` / `pnpm exec biome check` 0 errors / `scripts/check-webhook-runtime.sh` + `scripts/check-fulfilled-quantity-writers.sh` CI guards green). New finish-line surface area covered: F-1 partial-cancel recredit + telemetry, F-2 Node runtime pin on every webhook route, F-3/F-4 typed dedup + canonical-form sha256 fallback, F-5 Shopify `myshopifyDomain` install verification, B-1 `bandcamp-order-sync` 15-min cadence + global idempotency, B-2 `fulfillmentCreate` GraphQL migration, B-3 Channels webhook health card + idempotent `diffWebhookSubscriptions`, B-4 megaplan 5-source classifier with Shopify-direct probe. **Section C** ("Direct Shopify cutover preconditions") below lists the 4 hard gates that must additionally pass before flipping `do_not_fanout=false` in production. Megaplan Finish-Line v4 (2026-04-13) baselines remain in force; this entry adds to (does not replace) the prior gate set.
 
 ---
 
@@ -94,6 +94,44 @@ Pass criteria:
 - no unexplained error spikes in `webhook_events`
 - client store connections do not show persistent stale/failing state
 - for first-party Shopify webhook traffic, `ignored_shipstation_authoritative` is expected for inventory/order topics while ShipStation remains authoritative for order/inventory movement
+
+---
+
+### C.1 Direct Shopify cutover preconditions (Section C — added 2026-04-22)
+
+Hard gates required **in addition to A–E** before any production cutover that
+flips `client_store_connections.do_not_fanout = false` for the direct-Shopify
+ingestion path. All four are CI-enforceable via
+`bash scripts/check-release-gates.sh`; that script must exit 0 on `main`
+before tagging a cutover build.
+
+| ID | Gate | How verified |
+|---|---|---|
+| HRD-08.1 | Partial-cancel recredit honors `warehouse_order_items.fulfilled_quantity` (DB is canonical when it disagrees with `orders/cancelled` payload `fulfillment_status`). | `pnpm vitest run tests/unit/trigger/process-client-store-webhook.test.ts` MUST pass; the F-1 triad (none / partial / all fulfilled) MUST appear in the suite. |
+| HRD-23 | Every `src/app/api/webhooks/**/route.ts` exports both `runtime = "nodejs"` and `dynamic = "force-dynamic"`. | `bash scripts/check-webhook-runtime.sh` exits 0; `bash scripts/check-fulfilled-quantity-writers.sh` exits 0. |
+| HRD-10 | `/api/oauth/shopify` rejects installs whose `shop.myshopifyDomain` does not match the normalized `shop` query param; persists the verified domain into `client_store_connections.shopify_verified_domain` on success. | Schema probe asserts column present; `tests/unit/api/oauth/shopify-route.test.ts` MUST pass; staff Channels page surfaces the verified domain on every Shopify connection row. |
+| HRD-35 gap #3 | `registerShopifyWebhookSubscriptions` runs as a hook on every successful OAuth install; manual "Re-register webhooks" on Channels uses the same code path and is idempotent (`diffWebhookSubscriptions` no-op on aligned state). | `pnpm vitest run tests/unit/lib/server/shopify-webhook-subscriptions.test.ts` (≥17 tests) MUST pass; `client_store_connections` schema includes `webhook_topic_health` + `webhook_subscriptions_audit_at` + `last_webhook_at`. |
+
+Operator note: `scripts/check-release-gates.sh` is referenced by the Section D
+cutover runbook (`docs/prompt-packs/BUILD.md` + the finish-line plan T-2
+preflight). It performs four steps:
+
+1. Asserts that the four migrations are applied (`select 1 from
+   information_schema.columns where ...`) for `fulfilled_quantity`,
+   `shopify_verified_domain`, `webhook_topic_health`,
+   `webhook_subscriptions_audit_at`, `last_webhook_at`, `dedup_key`,
+   `shopify_direct_available`.
+2. Runs the two CI grep guards (`check-webhook-runtime.sh`,
+   `check-fulfilled-quantity-writers.sh`).
+3. Runs the four test files referenced in the table above and fails on any
+   non-zero exit.
+4. Asserts that `process.env.SHOPIFY_API_VERSION === '2026-01'` (cutover-pinned
+   version) and `process.env.WEBHOOK_ECHO_SHOPIFY_DIRECT` is **set** (its
+   value can be `off` pre-cutover; the gate only checks it is not undefined,
+   so the operator has explicitly thought about it).
+
+If any gate fails, the cutover is blocked and the failing gate ID must be
+listed on the rollback ticket.
 
 ---
 

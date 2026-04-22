@@ -93,6 +93,46 @@
   due_date: 2026-07-13
   severity: low
   context: "Phase 3 (finish-line plan v4, 2026-04-13) shipped `src/trigger/tasks/bulk-update-available.ts` as a Trigger-task variant of `submitManualInventoryCounts` for very large batches (Rule #41 hardening). The Trigger task currently re-implements the per-row contract (pre-fetch, validate, recordInventoryChange) rather than sharing a helper because the Server Action already had its own well-tested path and we did not want the refactor risk in a one-day closeout. Future work: factor the per-row write loop into `src/lib/server/bulk-inventory-engine.ts`, have both callers delegate, and add a contract test that asserts both paths produce identical correlation_ids and ledger rows for the same payload. Keeps the Trigger split safe while collapsing duplicate logic."
+- slug: hrd-23-runtime-guard
+  title: "HRD-23 — promote scripts/check-webhook-runtime.sh to a hard CI gate"
+  due_date: 2026-05-15
+  severity: high
+  context: "Direct-Shopify cutover finish-line F-2 shipped `export const runtime = 'nodejs'` + `export const dynamic = 'force-dynamic'` on every webhook Route Handler, plus `scripts/check-webhook-runtime.sh` to enforce the invariant going forward. The script is wired into `scripts/cloud-agent-verify.sh` (run by `pnpm verify:cloud`) but is NOT yet a required GitHub Actions check on `.github/workflows/ci.yml`. Action: add a dedicated CI step that runs ONLY this script and fails the PR if any new webhook route lands without the two exports. Belt-and-suspenders to prevent a future Vercel build from accidentally inlining `req.text()` into a static cache or moving a webhook to the Edge runtime (HMAC verification depends on Node crypto)."
+- slug: hrd-32-auto-delete-notification
+  title: "HRD-32 — auto-delete notification when registerWebhookSubscriptions stops returning a topic"
+  due_date: 2026-06-01
+  severity: medium
+  context: "When a Shopify webhook subscription is auto-deleted by Shopify (5+ consecutive 5xx responses, per Shopify docs), our re-register diff (B-3 / `diffWebhookSubscriptions`) will surface it as `toCreate`, but only when an operator opens the Channels page. Action: extend the deferred `shopify-webhook-health-check` Trigger task (placeholder mentioned in `client_store_connections.webhook_subscriptions_audit_at` comment) to compare current Shopify state against the `webhook_topic_health` snapshot and create a high-severity `warehouse_review_queue` row for any topic that disappeared. Prevents a silent webhook-loss outage during weekends/holidays."
+- slug: hrd-09-health-check-task
+  title: "HRD-09 — implement the shopify-webhook-health-check Trigger task"
+  due_date: 2026-06-01
+  severity: medium
+  context: "The finish-line plan added the `webhook_subscriptions_audit_at` + `webhook_topic_health` columns and the manual `Re-register webhooks` button on Channels (B-3), but the recurring health-check task itself is deferred. Action: scaffold `src/trigger/tasks/shopify-webhook-health-check.ts` as a `schedules.task` (cron `0 */4 * * *`, pinned to a new `shopify-health` queue with `concurrencyLimit: 1`) that iterates all active Shopify `client_store_connections`, calls `listWebhookSubscriptions`, runs `diffWebhookSubscriptions`, persists the snapshot via the same code path as B-3, and stamps `webhook_subscriptions_audit_at`. Surface diff drift on the Channels page health card (new `audit_age` field). Pair with hrd-32-auto-delete-notification — both share infrastructure."
+- slug: hrd-10-verify-rollout
+  title: "HRD-10 — verify normalize+verifyShopDomain remains the only credential-write path post-cutover"
+  due_date: 2026-05-15
+  severity: high
+  context: "F-5 (HRD-10) added Shopify `myshopifyDomain` verification in `/api/oauth/shopify/route.ts` and persists `client_store_connections.shopify_verified_domain` on every successful install. Action 7 days post-cutover: (1) query `select count(*) from client_store_connections where platform='shopify' and shopify_verified_domain is null and created_at > '<cutover-date>'` — must be 0; any row indicates a credential-write path that bypassed the OAuth callback. (2) Confirm no new file other than `src/app/api/oauth/shopify/route.ts` writes the `api_key` column. Add a CI grep-guard if drift detected. (3) Spot-check 3 `warehouse_review_queue` rows with `category='security' and group_key like 'shop_token_mismatch:%'` — verify zero rows means a calm install rollout, not silent guard failure."
+- slug: hrd-28-followup-smoke
+  title: "HRD-28 — fulfillmentCreate GraphQL migration follow-up smoke test"
+  due_date: 2026-05-22
+  severity: high
+  context: "B-2 migrated `markShopifyFulfilled` from REST to the GraphQL `fulfillmentCreate` mutation (commit `61f4eea`). The new path covers (a) `OPEN` + `IN_PROGRESS` fulfillment-order selection, (b) SKU-coverage-driven tie-breaking with `oldest GID` fallback, and (c) raw `errors[]` + `userErrors[]` capture into `warehouse_review_queue.metadata`. Action 14 days post-cutover: query `select count(*), category from warehouse_review_queue where category in ('shopify_fulfillment_userErrors', 'shopify_fulfillment_no_actionable_fo') and created_at > '<cutover-date>' group by category` — investigate any unexpected `no_actionable_fo` clusters (likely indicates a Shopify FO state we don't handle, e.g. `CANCELLED` or `ON_HOLD`). Cross-reference against the `sensor_readings` row count for `mark-platform-fulfilled.ambiguous_fulfillment_order` to gauge tie-breaker noise. If tie-breaker fires >5% of fulfillments, add deterministic ordering by `lineItems[].sku` set hash."
+- slug: credentials-encryption
+  title: "Audit credential-encryption posture across client_store_connections + shopify_app_*_encrypted columns"
+  due_date: 2026-05-30
+  severity: high
+  context: "Open question Q3 from the finish-line plan: the `shopify_app_client_secret_encrypted` (and adjacent `*_encrypted`) columns on `client_store_connections` carry the `_encrypted` suffix but it is NOT verified that pgsodium / pgcrypto round-trips are actually wired up in this repo. Action: (1) probe a row in staging with `select length(shopify_app_client_secret_encrypted) from client_store_connections where shopify_app_client_secret_encrypted is not null limit 5` — pgsodium-encrypted bytea will be larger than the plaintext secret length; if values look like 32-char hex they're plaintext-disguised-as-encrypted. (2) Document findings in TRUTH_LAYER.md `Security Posture` section (create if missing). (3) If plaintext: design a real encryption migration (pgsodium aead_encrypt with a per-column nonce + key rotation plan) — NOT a one-time rewrite without a key-management story. (4) Until fixed, gate the `shopify_app_client_secret_encrypted` write path behind a `STAFF_CREDS_PLAINTEXT_ACK` env flag that staff must explicitly set to acknowledge the posture."
+- slug: biome-warning-sweep
+  title: "Sweep the 49 biome warnings + 7 infos that have accumulated in the repo"
+  due_date: 2026-05-30
+  severity: low
+  context: "F-12 (finish-line audit). `pnpm check` on a clean tree currently reports 49 warnings + 7 infos (all pre-existing — no errors). Most are `lint/style/noNonNullAssertion` in test fixtures and a small cluster of `lint/correctness/noUnusedVariables`. Do NOT reopen HRD-33 (formatter rules). Action: (1) `pnpm check --max-diagnostics=200` to see the full set, (2) categorize: test-only (apply with `--unsafe` carefully) vs production code (manual review), (3) ship one PR per category to keep the diff reviewable, (4) once warnings are <10, gate `pnpm check` to fail on new warnings via `--error-on-warnings` in CI."
+- slug: northern-spy-scratch-removal
+  title: "Permanently remove scripts/audit/2026-04-22/_*northern-spy*.ts scratch helpers"
+  due_date: 2026-05-15
+  severity: low
+  context: "F-8 (finish-line audit). The `northern-spy` scratch scripts were one-off helpers used during the 2026-04-22 expanded audit pass. They have been moved out of `scripts/` into `scripts/audit/2026-04-22/` so they no longer pollute the top-level scripts folder; they remain under git for forensic value. Action: by `due_date`, either (a) delete the directory if no operator has needed to re-run them, or (b) refactor any script that has proven repeatedly useful into a properly-tested helper under `scripts/` with documentation. Default action: delete."
 ---
 
 # Deferred follow-ups registry

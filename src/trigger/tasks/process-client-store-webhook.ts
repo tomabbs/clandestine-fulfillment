@@ -439,7 +439,9 @@ async function handleOrderCreated(
     // Decrement warehouse inventory for each line item.
     // This loop is NOT atomic — partial failures are recorded in warehouse_review_queue.
     // floor_violation (medium) = expected stock-short; system_fault (high) = needs investigation.
-    const platform = event.platform as string;
+    // (F-11: `platform` is already in scope from the outer order-create block; the
+    // duplicate `const platform = event.platform as string;` shadow at this point
+    // was removed in the audit cleanup pass.)
     const bundleCache = new Map<string, boolean>();
     const decrementResults: {
       sku: string;

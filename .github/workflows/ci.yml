@@ -54,6 +54,41 @@ jobs:
       - name: Webhook dedup guard
         run: bash scripts/ci-webhook-dedup-guard.sh
 
+  release-gate-check:
+    # F-7 — Direct-Shopify cutover hard gates (Section C.1 of
+    # docs/RELEASE_GATE_CRITERIA.md). Runs only on `main` since these gates
+    # gate cutover-tagging, not every PR. Schema gates auto-skip when
+    # DATABASE_URL is absent (the test-file gates still run).
+    name: Release gate (Section C.1) — main only
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: audit-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run finish-line release gate script
+        env:
+          # Cutover-pinned API version. The gate fails if this drifts.
+          SHOPIFY_API_VERSION: 2026-01
+          # Echo flag must be EXPLICITLY set; "off" is fine pre-cutover.
+          # Operators flip this to "on" once direct traffic is verified.
+          WEBHOOK_ECHO_SHOPIFY_DIRECT: off
+        run: bash scripts/check-release-gates.sh
+
   deploy-trigger:
     name: Deploy Trigger.dev tasks
     needs: audit-gate
