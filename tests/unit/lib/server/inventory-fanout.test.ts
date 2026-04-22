@@ -54,39 +54,52 @@ describe("inventory-fanout — pause guard logic", () => {
 // already reflects ShipStation v2 state. Pre-fix this gap was tracked as
 // FR-1 in docs/plans/shipstation-source-of-truth-plan.md §12.
 //
+// Second-pass audit (2026-04-13): the operator activated **ShipStation
+// Inventory Sync** for every connected Shopify / Squarespace / WooCommerce
+// store AND ShipStation has native Bandcamp store integrations registered
+// in `warehouse_shipstation_stores`. SS Inventory Sync subscribes directly
+// to each storefront's order webhooks and decrements v2 natively at import
+// time — completely independent of our app's webhook processing. The set
+// below was extended to include those storefront sources to prevent the
+// double-decrement loop described in Rule #65.
+//
 // Echo sources that MUST skip:
 //   - 'shipstation'  → SHIP_NOTIFY processor; v2 already decremented locally
 //   - 'reconcile'    → drift sensor pulled our DB into alignment with v2
+//   - 'shopify'      → SS Inventory Sync decremented v2 from the Shopify order
+//   - 'squarespace'  → SS Inventory Sync decremented v2 from the Squarespace order
+//   - 'woocommerce'  → SS Inventory Sync decremented v2 from the Woo order
+//   - 'bandcamp'     → SS imports the Bandcamp order natively + decrements v2
 //
-// Sales (`bandcamp`, `shopify`, `squarespace`, `woocommerce`) and write-only
-// sources (`manual`, `manual_inventory_count`, `cycle_count`, `inbound`,
-// `preorder`, `backfill`) MUST fanout. Sibling enqueues that share the same
-// correlation_id (e.g. `bandcamp-sale-poll` enqueuing `shipstation-v2-decrement`
-// for the same Bandcamp sale, or `submitManualInventoryCounts` direct-calling
-// `shipstation-v2-adjust-on-sku`) are deduplicated downstream by the
-// `external_sync_events` UNIQUE on (system, correlation_id, sku, action).
+// Warehouse-side write sources (`manual`, `manual_inventory_count`,
+// `cycle_count`, `inbound`, `preorder`, `backfill`) MUST fanout — these
+// originate in our app and v2 has not yet seen them.
+//
+// If both layers ever drift out of sync (e.g. the storefront list above is
+// reduced WITHOUT also re-enabling explicit v2 enqueues in the corresponding
+// task — see the `bandcamp-sale-poll` comment block) the Phase 5 reconcile
+// sensor (`shipstation-bandcamp-reconcile-{hot,warm,cold}`) catches the drift.
 
 describe("inventory-fanout — ShipStation v2 echo-skip logic", () => {
-  it("skips v2 fanout for SHIP_NOTIFY-originated writes", () => {
-    expect(shouldEchoSkipShipstationV2("shipstation")).toBe(true);
-  });
-
-  it("skips v2 fanout for reconcile-originated writes", () => {
-    expect(shouldEchoSkipShipstationV2("reconcile")).toBe(true);
+  it.each([
+    ["shipstation"],
+    ["reconcile"],
+    ["shopify"],
+    ["squarespace"],
+    ["woocommerce"],
+    ["bandcamp"],
+  ] as const)("skips v2 fanout for source=%s (already mirrored by v2 / SS Inventory Sync)", (source) => {
+    expect(shouldEchoSkipShipstationV2(source)).toBe(true);
   });
 
   it.each([
-    ["shopify"],
-    ["bandcamp"],
-    ["squarespace"],
-    ["woocommerce"],
     ["manual"],
     ["inbound"],
     ["preorder"],
     ["backfill"],
     ["manual_inventory_count"],
     ["cycle_count"],
-  ] as const)("does NOT skip v2 fanout for source=%s", (source) => {
+  ] as const)("does NOT skip v2 fanout for warehouse-originated source=%s (v2 has not seen it)", (source) => {
     expect(shouldEchoSkipShipstationV2(source)).toBe(false);
   });
 

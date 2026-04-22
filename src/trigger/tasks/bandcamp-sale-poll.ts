@@ -87,32 +87,32 @@ export const bandcampSalePollTask = schedules.task({
                 });
 
                 // Trigger immediate push to all channels after a sale —
-                // don't wait for the next cron cycle (push tasks are idempotent)
+                // don't wait for the next cron cycle (push tasks are idempotent).
+                //
+                // ShipStation v2 is INTENTIONALLY OMITTED here (2026-04-13
+                // second-pass audit). With ShipStation Inventory Sync active
+                // for every connected storefront — including Bandcamp via
+                // `warehouse_shipstation_stores` — SS imports the Bandcamp
+                // order and decrements v2 natively before this poll fires.
+                // Enqueuing `shipstation-v2-decrement` here would double
+                // decrement v2, which SS would then push back to Bandcamp,
+                // re-emitting the deduction (Rule #65 echo loop).
+                //
+                // The v2 leg is also echo-skipped inside `fanoutInventoryChange`
+                // for `source === 'bandcamp'` — both layers agree. If the
+                // operator ever needs the explicit decrement back (e.g. SS
+                // Inventory Sync is disabled per-workspace), re-enable here
+                // AND remove `'bandcamp'` from `SHIPSTATION_V2_ECHO_SOURCES`
+                // in `src/lib/server/inventory-fanout.ts` together —
+                // never one without the other.
+                //
+                // The Phase 5 reconcile sensor remains the safety net: it
+                // catches v2 ↔ DB drift if SS Inventory Sync ever misses an
+                // import.
                 if (result.success && !result.alreadyProcessed) {
-                  // Phase 4 — bidirectional bridge: enqueue per-SKU
-                  // ShipStation v2 decrement gated through external_sync_events
-                  // ledger keyed `sale:{band_id}:{package_id}:{newSold}:{sku}`.
-                  // Pinned to shipstationQueue so v2 60 req/min budget stays
-                  // serialized; fanout-guard applies the `shipstation` kill
-                  // switch + workspace rollout bucket.
-                  const ssV2CorrelationId = `sale:${connection.band_id}:${item.package_id}:${newSold}:${variant.sku}`;
                   await Promise.allSettled([
                     tasks.trigger("bandcamp-inventory-push", {}),
                     tasks.trigger("multi-store-inventory-push", {}),
-                    tasks.trigger("shipstation-v2-decrement", {
-                      workspaceId,
-                      sku: variant.sku,
-                      quantity: Math.abs(delta),
-                      correlationId: ssV2CorrelationId,
-                      reason: "bandcamp_sale",
-                      metadata: {
-                        band_id: connection.band_id,
-                        bandcamp_item_id: item.package_id,
-                        previous_quantity_sold: lastSold,
-                        new_quantity_sold: newSold,
-                        sale_poll_run_id: ctx.run.id,
-                      },
-                    }),
                   ]).catch(() => {
                     /* non-critical — cron covers it */
                   });

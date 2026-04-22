@@ -16,12 +16,39 @@
  * The updated quantities are pushed when sync resumes.
  *
  * Echo-cancellation (audit fix F1, Rule #65): when the originating event
- * already represents an external system's state — `source === 'shipstation'`
- * (SHIP_NOTIFY processor) or `source === 'reconcile'` (drift sensor pulling
- * our DB into alignment with v2) — we MUST NOT push back to ShipStation v2.
- * Doing so would either double-decrement Clandestine shipments or oscillate
- * the value across reconcile cycles. Bandcamp/Shopify fanout still fires
- * because their state is independent of the originating event.
+ * already represents ShipStation v2 state — either because v2 itself wrote
+ * it (`source === 'shipstation'` SHIP_NOTIFY, `source === 'reconcile'` drift
+ * sensor) OR because **ShipStation Inventory Sync** has already mirrored a
+ * storefront sale into v2 natively (`source IN ('shopify','squarespace',
+ * 'woocommerce','bandcamp')`) — we MUST NOT push back to ShipStation v2.
+ * Doing so would double-decrement v2, since SS would then push the doubled
+ * value back to the storefront, which would re-emit a webhook, etc. (the
+ * classic Rule #65 echo loop).
+ *
+ * Storefront echo-skip context (2026-04-13 audit, second pass):
+ * - The operator activated **ShipStation Inventory Sync** for every connected
+ *   Shopify / Squarespace / WooCommerce account AND ShipStation has native
+ *   Bandcamp store integrations registered in `warehouse_shipstation_stores`.
+ * - SS Inventory Sync subscribes directly to each storefront's order/inventory
+ *   webhooks and decrements v2 the moment SS imports the order — completely
+ *   independent of our app's webhook processing.
+ * - Therefore EVERY sale-driven `recordInventoryChange()` we make in response
+ *   to a storefront webhook (`shopify`, `squarespace`, `woocommerce`,
+ *   `bandcamp`) is an event v2 has already absorbed. Pushing back is the bug.
+ * - The skip applies ONLY to the v2 leg — Clandestine Shopify, Bandcamp focus
+ *   pushes, and client-store fanout still fire (their state is independent of
+ *   the originating storefront).
+ *
+ * Sources that DO fanout to v2 (warehouse-side writes v2 has not yet seen):
+ *   `manual`, `manual_inventory_count`, `cycle_count`, `inbound`, `preorder`,
+ *   `backfill`. These represent staff actions / inbound check-ins / count
+ *   sessions originating in our app — v2 must be told.
+ *
+ * Safety nets when echo-skip is "wrong" (e.g. an operator disables SS
+ * Inventory Sync for one store): Phase 5 reconcile sensor (`shipstation-
+ * bandcamp-reconcile-{hot,warm,cold}`) detects v2 ↔ DB drift and auto-fixes
+ * via `recordInventoryChange({ source:'reconcile' })` — which itself echo-
+ * skips, breaking the cycle.
  */
 
 import * as Sentry from "@sentry/nextjs";
@@ -38,10 +65,30 @@ const SHOPIFY_LOCATION_ID = "gid://shopify/Location/104066613563";
  * Sources whose originating event already reflects ShipStation v2 state.
  * Pushing back would create an echo loop. See Rule #65 + audit F1 rationale
  * in the file-level docstring above.
+ *
+ * Membership criteria: a `source` belongs here iff every event tagged with
+ * that source has ALREADY been absorbed by ShipStation v2 by the time it
+ * reaches `fanoutInventoryChange()`. Two distinct categories qualify:
+ *
+ *   1. Direct v2 writes — `shipstation` (SHIP_NOTIFY processor decremented
+ *      v2 inline) and `reconcile` (Phase 5 sensor pulled DB into v2's value;
+ *      pushing back oscillates).
+ *   2. ShipStation-Inventory-Sync-mirrored events — `shopify`, `squarespace`,
+ *      `woocommerce`, `bandcamp` (SS subscribes to each storefront's order
+ *      webhooks and decrements v2 natively at import time, independent of
+ *      our app's webhook processing).
+ *
+ * Adding a new sales channel? It belongs here ONLY if SS Inventory Sync
+ * supports it AND the operator has activated it. Otherwise add to the
+ * "DOES fanout" comment block in the file-level docstring instead.
  */
 const SHIPSTATION_V2_ECHO_SOURCES: ReadonlySet<InventorySource> = new Set<InventorySource>([
   "shipstation",
   "reconcile",
+  "shopify",
+  "squarespace",
+  "woocommerce",
+  "bandcamp",
 ]);
 
 export function shouldEchoSkipShipstationV2(source: InventorySource | undefined): boolean {
@@ -210,8 +257,12 @@ export async function fanoutInventoryChange(
       // the originating event.
       //
       // Skip cascade:
-      //   1. Source is an echo of v2 itself (`shipstation` SHIP_NOTIFY,
-      //      `reconcile` drift sensor) — see Rule #65 echo cancellation.
+      //   1. Source already reflects v2 state (Rule #65 echo cancellation):
+      //        a. v2 itself wrote it — `shipstation` (SHIP_NOTIFY processor),
+      //           `reconcile` (Phase 5 drift sensor).
+      //        b. ShipStation Inventory Sync already mirrored a storefront
+      //           sale into v2 — `shopify`, `squarespace`, `woocommerce`,
+      //           `bandcamp` (added 2026-04-13 second-pass audit fix).
       //   2. No variant resolved (variant block at top of function).
       //   3. delta missing or zero — nothing to push.
       //   4. fanout-guard `shipstation` integration kill switch denies.
