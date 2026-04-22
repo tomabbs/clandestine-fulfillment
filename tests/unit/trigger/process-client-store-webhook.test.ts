@@ -77,7 +77,14 @@ vi.mock("@/lib/server/webhook-monotonic-guard", () => ({
   writeLastSeenAt: mockWriteLastSeenAt,
 }));
 
-import { processClientStoreWebhookTask } from "@/trigger/tasks/process-client-store-webhook";
+import { processClientStoreWebhookTask as _processClientStoreWebhookTask } from "@/trigger/tasks/process-client-store-webhook";
+
+// Trigger.dev v4 Task<…> doesn't expose .run on its public type; cast through
+// unknown to call the underlying definition directly (same pattern used in
+// tests/unit/trigger/tasks/bulk-update-available.test.ts).
+const processClientStoreWebhookTask = _processClientStoreWebhookTask as unknown as {
+  run: (payload: { webhookEventId: string }) => Promise<Record<string, unknown>>;
+};
 
 // In-memory state captured per test for assertions.
 interface MockState {
