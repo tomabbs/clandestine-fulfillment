@@ -71,7 +71,7 @@ const ALIASES: Record<string, string> = {
   ESP: "ES",
   SPAIN: "ES",
   ESPANA: "ES",
-  "ESPAÑA": "ES",
+  ESPAÑA: "ES",
 
   // Netherlands
   NL: "NL",
@@ -119,7 +119,7 @@ const ALIASES: Record<string, string> = {
   MX: "MX",
   MEX: "MX",
   MEXICO: "MX",
-  "MÉXICO": "MX",
+  MÉXICO: "MX",
 
   // Brazil
   BR: "BR",

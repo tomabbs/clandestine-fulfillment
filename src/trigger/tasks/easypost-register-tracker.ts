@@ -48,9 +48,8 @@ export const easypostRegisterTrackerTask = task({
     }
 
     const labelData = (shipment.label_data ?? {}) as Record<string, unknown>;
-    const existingTrackerId = typeof labelData.easypost_tracker_id === "string"
-      ? labelData.easypost_tracker_id
-      : null;
+    const existingTrackerId =
+      typeof labelData.easypost_tracker_id === "string" ? labelData.easypost_tracker_id : null;
     if (existingTrackerId) {
       // Idempotent short-circuit. Already registered.
       return { registered: true, trackerId: existingTrackerId, reason: "already_registered" };

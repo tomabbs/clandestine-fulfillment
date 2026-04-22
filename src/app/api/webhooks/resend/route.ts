@@ -91,8 +91,7 @@ export async function POST(req: NextRequest) {
         break;
       case "email.bounced":
         outcome = "bounced";
-        detail =
-          payload.data?.bounce?.message ?? payload.data?.bounce?.type ?? "bounced";
+        detail = payload.data?.bounce?.message ?? payload.data?.bounce?.type ?? "bounced";
         break;
       case "email.complained":
         outcome = "complained";
@@ -136,14 +135,11 @@ export async function POST(req: NextRequest) {
 
       // Complaints are an immediate deliverability concern — Sentry alert.
       if (outcome === "complained") {
-        Sentry.captureMessage(
-          `[resend-webhook] complaint received for message ${messageId}`,
-          {
-            level: "warning",
-            tags: { platform: "resend", failure: "complaint" },
-            extra: { recipients, detail },
-          },
-        );
+        Sentry.captureMessage(`[resend-webhook] complaint received for message ${messageId}`, {
+          level: "warning",
+          tags: { platform: "resend", failure: "complaint" },
+          extra: { recipients, detail },
+        });
       }
     }
 

@@ -15,9 +15,7 @@ describe("buildCarrierTrackingUrl (Phase 4.5)", () => {
   });
 
   it("USPS / stamps_com → tools.usps.com", () => {
-    expect(buildCarrierTrackingUrl("USPS", "9405511899560000000000")).toContain(
-      "tools.usps.com",
-    );
+    expect(buildCarrierTrackingUrl("USPS", "9405511899560000000000")).toContain("tools.usps.com");
     expect(buildCarrierTrackingUrl("stamps_com", "9405511899560000000000")).toContain(
       "tools.usps.com",
     );

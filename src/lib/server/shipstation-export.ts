@@ -148,9 +148,10 @@ function customsDescriptionForFormat(format: string | null, productType: string 
 }
 
 function pickUpc(bandcampUpc: string | null, barcode: string | null): string {
-  const isCode = (s: string | null) => !!s && /^\d{12,14}$/.test(s.trim());
-  if (isCode(bandcampUpc)) return bandcampUpc!.trim();
-  if (isCode(barcode)) return barcode!.trim();
+  const trimmedUpc = bandcampUpc?.trim() ?? "";
+  if (/^\d{12,14}$/.test(trimmedUpc)) return trimmedUpc;
+  const trimmedBarcode = barcode?.trim() ?? "";
+  if (/^\d{12,14}$/.test(trimmedBarcode)) return trimmedBarcode;
   return "";
 }
 
@@ -491,7 +492,7 @@ export async function buildShipstationExport(
   for (const r of rows) {
     csvLines.push(csvLine(SHIPSTATION_COLUMNS.map((c) => r[c] ?? "")));
   }
-  const csv = csvLines.join("\n") + "\n";
+  const csv = `${csvLines.join("\n")}\n`;
 
   const wb = XLSX.utils.book_new();
   const sheet = XLSX.utils.json_to_sheet(rows, { header: [...SHIPSTATION_COLUMNS] });

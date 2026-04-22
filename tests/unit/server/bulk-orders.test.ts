@@ -59,7 +59,7 @@ function makeMockClient() {
         select: () => builder,
         single: async () => {
           if (table === "print_batch_jobs" && _ins) {
-            const row = { id: "batch_1", ..._ins as object };
+            const row = { id: "batch_1", ...(_ins as object) };
             return { data: row, error: null };
           }
           return { data: null, error: null };
@@ -170,9 +170,9 @@ describe("assignOrders (Phase 9.3)", () => {
 describe("bulkAddOrdersTag / bulkRemoveOrdersTag (Phase 9.5)", () => {
   it("throws when v1_features_enabled is false", async () => {
     flagsState.v1_features_enabled = false;
-    await expect(
-      bulkAddOrdersTag({ shipstationOrderUuids: ["o1"], tagId: 1 }),
-    ).rejects.toThrow(/v1_features_enabled/);
+    await expect(bulkAddOrdersTag({ shipstationOrderUuids: ["o1"], tagId: 1 })).rejects.toThrow(
+      /v1_features_enabled/,
+    );
   });
 
   it("calls SS once per order needing the tag and updates local tag_ids", async () => {
@@ -209,9 +209,9 @@ describe("bulkAddOrdersTag / bulkRemoveOrdersTag (Phase 9.5)", () => {
 
   it("hard-caps oversize batches", async () => {
     const ids = Array.from({ length: 101 }, (_, i) => `o${i}`);
-    await expect(
-      bulkAddOrdersTag({ shipstationOrderUuids: ids, tagId: 1 }),
-    ).rejects.toThrow(/exceeds hard cap of 100/);
+    await expect(bulkAddOrdersTag({ shipstationOrderUuids: ids, tagId: 1 })).rejects.toThrow(
+      /exceeds hard cap of 100/,
+    );
   });
 });
 

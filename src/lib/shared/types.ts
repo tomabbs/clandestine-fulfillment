@@ -34,8 +34,8 @@ export type InventorySource =
   // Direct-Shopify cutover (2026-04-22, HRD-26): emitted with `delta = 0`
   // when our fanout layer lazily activates a Shopify inventory item at the
   // staff-selected default location via `inventoryActivate`. Recorded as an
-  // audit row (no quantity change) so admin can grep "this SKU was activated
-  // at this timestamp" without joining external_sync_events. CHECK constraint
+  // audit row (no quantity change) so admin can grep when an SKU was activated
+  // at a given timestamp without joining external_sync_events. CHECK constraint
   // extended in supabase/migrations/20260422000001_direct_shopify_metadata.sql.
   | "inventory_activate";
 

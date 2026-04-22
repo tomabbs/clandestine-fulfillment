@@ -171,26 +171,24 @@ export async function logUnmappedServiceUsedFamilyFallback(
   if (args.easypostService) {
     const groupKey = `unmapped_service:${args.workspaceId}:${args.easypostCarrier}:${args.easypostService}`;
     try {
-      await supabase
-        .from("warehouse_review_queue")
-        .upsert(
-          {
-            workspace_id: args.workspaceId,
-            category: "carrier_mapping",
-            severity: "low",
-            title: `New EP service "${args.easypostService}" used family wildcard`,
-            description: `Carrier ${args.easypostCarrier}, service "${args.easypostService}" routed to ${args.fallbackShipstationCarrierCode} via the family wildcard. Add a specific row in shipstation_carrier_map if this service needs a different SS code.`,
-            metadata: {
-              easypost_carrier: args.easypostCarrier,
-              easypost_service: args.easypostService,
-              ss_carrier_code: args.fallbackShipstationCarrierCode,
-            },
-            status: "open",
-            group_key: groupKey,
-            occurrence_count: 1,
+      await supabase.from("warehouse_review_queue").upsert(
+        {
+          workspace_id: args.workspaceId,
+          category: "carrier_mapping",
+          severity: "low",
+          title: `New EP service "${args.easypostService}" used family wildcard`,
+          description: `Carrier ${args.easypostCarrier}, service "${args.easypostService}" routed to ${args.fallbackShipstationCarrierCode} via the family wildcard. Add a specific row in shipstation_carrier_map if this service needs a different SS code.`,
+          metadata: {
+            easypost_carrier: args.easypostCarrier,
+            easypost_service: args.easypostService,
+            ss_carrier_code: args.fallbackShipstationCarrierCode,
           },
-          { onConflict: "group_key", ignoreDuplicates: true },
-        );
+          status: "open",
+          group_key: groupKey,
+          occurrence_count: 1,
+        },
+        { onConflict: "group_key", ignoreDuplicates: true },
+      );
     } catch {
       // best-effort.
     }

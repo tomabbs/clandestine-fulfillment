@@ -1,10 +1,7 @@
 // Phase 12 — Public tracking token generator tests.
 
 import { describe, expect, it } from "vitest";
-import {
-  buildPublicTrackUrl,
-  generatePublicTrackToken,
-} from "@/lib/shared/public-track-token";
+import { buildPublicTrackUrl, generatePublicTrackToken } from "@/lib/shared/public-track-token";
 
 describe("generatePublicTrackToken (Phase 12)", () => {
   it("produces 22-char URL-safe base64 strings", () => {

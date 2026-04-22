@@ -104,9 +104,14 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
       advanced_options: {},
       organizations: { name: "Test Org" },
     });
-    tables.shipstation_order_items.push(
-      { shipstation_order_id: "ord_1", sku: "LP-001", name: "Album X", quantity: 1, unit_price: 25, item_index: 0 },
-    );
+    tables.shipstation_order_items.push({
+      shipstation_order_id: "ord_1",
+      sku: "LP-001",
+      name: "Album X",
+      quantity: 1,
+      unit_price: 25,
+      item_index: 0,
+    });
 
     const data = await fetchPackingSlipData(
       makeMockClient() as unknown as Parameters<typeof fetchPackingSlipData>[0],
@@ -135,8 +140,22 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
       organizations: null,
     });
     tables.shipstation_order_items.push(
-      { shipstation_order_id: "ord_2", sku: "LP-001", name: "Album X", quantity: 1, unit_price: 25, item_index: 0 },
-      { shipstation_order_id: "ord_2", sku: "LP-002", name: "Album Y", quantity: 2, unit_price: 30, item_index: 1 },
+      {
+        shipstation_order_id: "ord_2",
+        sku: "LP-001",
+        name: "Album X",
+        quantity: 1,
+        unit_price: 25,
+        item_index: 0,
+      },
+      {
+        shipstation_order_id: "ord_2",
+        sku: "LP-002",
+        name: "Album Y",
+        quantity: 2,
+        unit_price: 30,
+        item_index: 1,
+      },
     );
     tables.bandcamp_sales.push(
       {
@@ -217,9 +236,14 @@ describe("fetchPackingSlipData (Phase 11.1)", () => {
       advanced_options: {},
       organizations: null,
     });
-    tables.shipstation_order_items.push(
-      { shipstation_order_id: "ord_4", sku: "LP-001", name: "Album", quantity: 1, unit_price: 25, item_index: 0 },
-    );
+    tables.shipstation_order_items.push({
+      shipstation_order_id: "ord_4",
+      sku: "LP-001",
+      name: "Album",
+      quantity: 1,
+      unit_price: 25,
+      item_index: 0,
+    });
     tables.warehouse_shipments.push({
       id: "wsh_1",
       workspace_id: "ws_1",

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { EasyPostRate } from "@/lib/clients/easypost-client";
 import {
   assertRateDelta,
   classifyEasyPostError,
   RATE_DELTA_DEFAULTS,
   resolveSelectedRate,
 } from "@/trigger/tasks/create-shipping-label";
-import type { EasyPostRate } from "@/lib/clients/easypost-client";
 
 const rate = (overrides: Partial<EasyPostRate>): EasyPostRate => ({
   id: "rate_default",

@@ -25,7 +25,11 @@ interface AttemptRow {
   attempt_finished_at: string | null;
 }
 
-function makeMockSupabase(): { supabase: SupabaseClient; rows: AttemptRow[]; counters: { insertAttempts: number; selectAttempts: number; updateAttempts: number } } {
+function makeMockSupabase(): {
+  supabase: SupabaseClient;
+  rows: AttemptRow[];
+  counters: { insertAttempts: number; selectAttempts: number; updateAttempts: number };
+} {
   const rows: AttemptRow[] = [];
   let idSeq = 1;
 
@@ -39,7 +43,7 @@ function makeMockSupabase(): { supabase: SupabaseClient; rows: AttemptRow[]; cou
   const supabase = {
     from(_table: string) {
       let _select: string | null = null;
-      let _eqs: Array<[string, unknown]> = [];
+      const _eqs: Array<[string, unknown]> = [];
       let _insertPayload: Partial<AttemptRow> | null = null;
       let _updatePayload: Partial<AttemptRow> | null = null;
 
@@ -215,9 +219,9 @@ describe("purchaseLabelIdempotent (Phase 0.3 outbox)", () => {
 
     // Second attempt sees the failed row and refuses to re-call EP automatically.
     const secondBuy = vi.fn();
-    await expect(
-      purchaseLabelIdempotent(supabase, baseArgs, secondBuy),
-    ).rejects.toThrow(IdempotencyPriorFailureError);
+    await expect(purchaseLabelIdempotent(supabase, baseArgs, secondBuy)).rejects.toThrow(
+      IdempotencyPriorFailureError,
+    );
     expect(secondBuy).not.toHaveBeenCalled();
   });
 

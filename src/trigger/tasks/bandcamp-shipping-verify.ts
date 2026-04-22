@@ -214,10 +214,7 @@ async function processConnectionGroup(
       .toISOString()
       .replace("T", " ")
       .slice(0, 19);
-    bcOrders = await getOrders(
-      { bandId: connection.band_id as number, startTime },
-      accessToken,
-    );
+    bcOrders = await getOrders({ bandId: connection.band_id as number, startTime }, accessToken);
   } catch (err) {
     logger.warn("[bandcamp-shipping-verify] BC getOrders failed for group", {
       workspaceId: group.workspaceId,

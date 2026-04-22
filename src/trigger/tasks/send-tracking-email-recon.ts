@@ -49,9 +49,7 @@ export async function runReconciliation(): Promise<RunResult> {
   // doesn't trigger a customer email.
   const { data: shipments, error } = await supabase
     .from("warehouse_shipments")
-    .select(
-      "id, status, suppress_emails, shipstation_marked_shipped_at, delivery_date, updated_at",
-    )
+    .select("id, status, suppress_emails, shipstation_marked_shipped_at, delivery_date, updated_at")
     .gte("updated_at", sinceIso)
     .not("public_track_token", "is", null)
     .not("tracking_number", "is", null)

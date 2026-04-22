@@ -27,7 +27,6 @@ import {
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { normalizeAddress } from "@/lib/shared/address-normalize";
-import { generatePublicTrackToken } from "@/lib/shared/public-track-token";
 import {
   aggregateParcelDimensions,
   buildCustomsItems,
@@ -35,6 +34,7 @@ import {
   type VariantCustomsData,
   type VariantDimensions,
 } from "@/lib/shared/customs-builder";
+import { generatePublicTrackToken } from "@/lib/shared/public-track-token";
 
 /**
  * Stable rate selection key. Phase 0.2 introduced the carrier+service+rate
@@ -296,9 +296,7 @@ export const createShippingLabelTask = task({
     // Phase 3.2: line_items shape varies by source — fulfillment uses {sku,title,price};
     // shipstation uses {sku,name,unit_price}. Normalize both.
     const lineItems = order.line_items;
-    const skus = lineItems
-      .map((li) => li.sku)
-      .filter((s): s is string => !!s && s !== "UNKNOWN");
+    const skus = lineItems.map((li) => li.sku).filter((s): s is string => !!s && s !== "UNKNOWN");
 
     let mediaMailEligible = false;
     const variantCustomsBySku = new Map<string, VariantCustomsData>();
@@ -310,9 +308,7 @@ export const createShippingLabelTask = task({
         .select("sku, media_mail_eligible, hs_tariff_code, length_in, width_in, height_in")
         .in("sku", skus);
 
-      const mediaMap = new Map(
-        (variants ?? []).map((v) => [v.sku, v.media_mail_eligible ?? true]),
-      );
+      const mediaMap = new Map((variants ?? []).map((v) => [v.sku, v.media_mail_eligible ?? true]));
 
       // Eligible only if ALL found variants are eligible (and at least one was found)
       const foundSkus = skus.filter((sku) => mediaMap.has(sku));
@@ -409,12 +405,8 @@ export const createShippingLabelTask = task({
       //   2. Legacy rate-ID lookup — back-compat for callers not yet upgraded.
       //   3. selectBestRate fallback (logs sensor event easypost.rate_fallback_used).
       let chosenRate: EasyPostRate | null = null;
-      let resolutionVia:
-        | "exact"
-        | "exact_loose"
-        | "carrier_service"
-        | "legacy_id"
-        | "best_rate" = "best_rate";
+      let resolutionVia: "exact" | "exact_loose" | "carrier_service" | "legacy_id" | "best_rate" =
+        "best_rate";
 
       const stable = resolveSelectedRate(shipment.rates, selectedRate);
       if (stable.rate && stable.via !== "none") {
@@ -660,9 +652,7 @@ export const createShippingLabelTask = task({
             })),
           );
         } else {
-          logger.warn(
-            `EasyPost label created for SS order ${order.id} but order has 0 line items`,
-          );
+          logger.warn(`EasyPost label created for SS order ${order.id} but order has 0 line items`);
         }
       }
 

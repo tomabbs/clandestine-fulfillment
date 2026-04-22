@@ -10,19 +10,34 @@
 
 const TEMPLATES: Array<{ match: RegExp; url: (n: string) => string }> = [
   // USPS variants
-  { match: /^(usps|stamps_com)$/i, url: (n) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}` },
+  {
+    match: /^(usps|stamps_com)$/i,
+    url: (n) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${n}`,
+  },
   // UPS
   { match: /^ups/i, url: (n) => `https://www.ups.com/track?tracknum=${n}` },
   // FedEx
   { match: /^fedex/i, url: (n) => `https://www.fedex.com/fedextrack/?trknbr=${n}` },
   // DHL Express
-  { match: /^dhl_?express/i, url: (n) => `https://www.dhl.com/us-en/home/tracking/tracking-express.html?tracking-id=${n}` },
+  {
+    match: /^dhl_?express/i,
+    url: (n) => `https://www.dhl.com/us-en/home/tracking/tracking-express.html?tracking-id=${n}`,
+  },
   // DHL eCommerce
-  { match: /^dhl_?ecommerce|^dhl_?global_?mail/i, url: (n) => `https://webtrack.dhlglobalmail.com/?trackingnumber=${n}` },
+  {
+    match: /^dhl_?ecommerce|^dhl_?global_?mail/i,
+    url: (n) => `https://webtrack.dhlglobalmail.com/?trackingnumber=${n}`,
+  },
   // Asendia / GlobalPost
-  { match: /^(asendia|globalpost)/i, url: (n) => `https://tracking.asendiausa.com/Tracking?Tracking=${n}` },
+  {
+    match: /^(asendia|globalpost)/i,
+    url: (n) => `https://tracking.asendiausa.com/Tracking?Tracking=${n}`,
+  },
   // Canada Post
-  { match: /^canadapost/i, url: (n) => `https://www.canadapost-postescanada.ca/track-reperage/en#/details/${n}` },
+  {
+    match: /^canadapost/i,
+    url: (n) => `https://www.canadapost-postescanada.ca/track-reperage/en#/details/${n}`,
+  },
 ];
 
 /**

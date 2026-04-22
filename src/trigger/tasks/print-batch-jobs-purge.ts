@@ -29,10 +29,7 @@ export const printBatchJobsPurgeTask = schedules.task({
       return { deleted: 0 };
     }
 
-    const { error } = await supabase
-      .from("print_batch_jobs")
-      .delete()
-      .in("id", candidateIds);
+    const { error } = await supabase.from("print_batch_jobs").delete().in("id", candidateIds);
 
     if (error) {
       logger.error("[print-batch-jobs-purge] delete failed", { error: error.message });

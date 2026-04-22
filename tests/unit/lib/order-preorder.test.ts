@@ -22,7 +22,11 @@ const variantsToMap = (rows: PreorderVariantRecord[]): Map<string, PreorderVaria
 
 describe("deriveOrderPreorderState (Phase 5.1)", () => {
   it("returns 'none' when items array is empty", () => {
-    const r = deriveOrderPreorderState({ items: [], variantLookup: new Map(), today: "2026-04-19" });
+    const r = deriveOrderPreorderState({
+      items: [],
+      variantLookup: new Map(),
+      today: "2026-04-19",
+    });
     expect(r.preorder_state).toBe("none");
     expect(r.preorder_release_date).toBeNull();
   });
@@ -109,9 +113,7 @@ describe("deriveOrderPreorderState (Phase 5.1)", () => {
   });
 
   it("missing variant for a SKU → treats as not-preorder; does NOT block label printing", () => {
-    const variants = variantsToMap([
-      { sku: "LP-A", is_preorder: true, street_date: "2026-08-01" },
-    ]);
+    const variants = variantsToMap([{ sku: "LP-A", is_preorder: true, street_date: "2026-08-01" }]);
     const r = deriveOrderPreorderState({
       items: [{ sku: "MYSTERY-X" }, { sku: "LP-A" }],
       variantLookup: variants,
@@ -137,9 +139,7 @@ describe("deriveOrderPreorderState (Phase 5.1)", () => {
   });
 
   it("transition: today=2026-04-19 → 'preorder' (release on 2026-04-27, > today+7)", () => {
-    const variants = variantsToMap([
-      { sku: "LP-A", is_preorder: true, street_date: "2026-04-27" },
-    ]);
+    const variants = variantsToMap([{ sku: "LP-A", is_preorder: true, street_date: "2026-04-27" }]);
     const r = deriveOrderPreorderState({
       items: [{ sku: "LP-A" }],
       variantLookup: variants,
@@ -149,9 +149,7 @@ describe("deriveOrderPreorderState (Phase 5.1)", () => {
   });
 
   it("transition: today=2026-04-20 (one day later) → 'ready' (release on 2026-04-27, <= today+7)", () => {
-    const variants = variantsToMap([
-      { sku: "LP-A", is_preorder: true, street_date: "2026-04-27" },
-    ]);
+    const variants = variantsToMap([{ sku: "LP-A", is_preorder: true, street_date: "2026-04-27" }]);
     const r = deriveOrderPreorderState({
       items: [{ sku: "LP-A" }],
       variantLookup: variants,
@@ -161,9 +159,7 @@ describe("deriveOrderPreorderState (Phase 5.1)", () => {
   });
 
   it("transition: today=2026-04-28 (release passed) → 'none' (item released, ships normally)", () => {
-    const variants = variantsToMap([
-      { sku: "LP-A", is_preorder: true, street_date: "2026-04-27" },
-    ]);
+    const variants = variantsToMap([{ sku: "LP-A", is_preorder: true, street_date: "2026-04-27" }]);
     const r = deriveOrderPreorderState({
       items: [{ sku: "LP-A" }],
       variantLookup: variants,
@@ -186,9 +182,7 @@ describe("deriveOrderPreorderState (Phase 5.1)", () => {
   });
 
   it("ignores variant with street_date null even when is_preorder=true", () => {
-    const variants = variantsToMap([
-      { sku: "LP-A", is_preorder: true, street_date: null },
-    ]);
+    const variants = variantsToMap([{ sku: "LP-A", is_preorder: true, street_date: null }]);
     const r = deriveOrderPreorderState({
       items: [{ sku: "LP-A" }],
       variantLookup: variants,

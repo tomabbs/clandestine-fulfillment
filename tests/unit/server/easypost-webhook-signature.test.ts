@@ -12,10 +12,7 @@
 
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import {
-  parseV2Header,
-  verifyEasypostSignature,
-} from "@/lib/server/easypost-webhook-signature";
+import { parseV2Header, verifyEasypostSignature } from "@/lib/server/easypost-webhook-signature";
 
 const SECRET = "test-ep-secret";
 

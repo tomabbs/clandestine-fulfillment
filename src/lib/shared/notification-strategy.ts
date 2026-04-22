@@ -50,11 +50,7 @@ export type NotificationChannel =
  *   - 'unified_resend' is the production target.
  *   - 'ss_for_all' is the legacy / emergency-reverse mode.
  */
-export type EmailSendStrategy =
-  | "off"
-  | "shadow"
-  | "unified_resend"
-  | "ss_for_all";
+export type EmailSendStrategy = "off" | "shadow" | "unified_resend" | "ss_for_all";
 
 export interface NotificationStrategy {
   /** SS markasshipped notifyCustomer (v1) / fulfillments notify_customer (v2). */
@@ -108,9 +104,7 @@ function isAsendiaCarrier(carrier: string | null): boolean {
  * empty (SS native order entry) and "unknown" when unfamiliar marketplace.
  * Pure + tested — no DB access.
  */
-export function inferChannelFromSSMarketplace(
-  marketplaceName: string | null,
-): NotificationChannel {
+export function inferChannelFromSSMarketplace(marketplaceName: string | null): NotificationChannel {
   if (!marketplaceName || marketplaceName.trim() === "") return "manual_ss";
   const m = marketplaceName.toLowerCase();
   if (m.includes("bandcamp")) return "bandcamp";
@@ -152,11 +146,16 @@ export function deriveNotificationStrategy(ctx: NotificationContext): Notificati
       // matrix; we don't fire the unified pipeline.
       return offModeStrategy(ctx, reasons);
     case "shadow":
-      reasons.push("workspace strategy=shadow → unified pipeline runs to ops allowlist; SS continues emailing customers");
+      reasons.push(
+        "workspace strategy=shadow → unified pipeline runs to ops allowlist; SS continues emailing customers",
+      );
       return {
         callShipstationNotifyCustomer: shouldSsKeepEmailingForChannel(ctx),
         callShipstationNotifyOrderSource: shouldSsKeepNotifyOrderSource(ctx),
-        expectMarketplaceNotify: ctx.channel === "bandcamp" || ctx.channel === "shopify_main" || ctx.channel === "shopify_client",
+        expectMarketplaceNotify:
+          ctx.channel === "bandcamp" ||
+          ctx.channel === "shopify_main" ||
+          ctx.channel === "shopify_client",
         sendUnifiedResendEmails: true,
         shadowMode: true,
         suppressShopifyEmail: false,
@@ -164,8 +163,11 @@ export function deriveNotificationStrategy(ctx: NotificationContext): Notificati
         rationale: reasons.join("; "),
       };
     case "unified_resend":
-      reasons.push("workspace strategy=unified_resend → WE own all customer shipping emails via Resend");
-      if (isAsendia) reasons.push("carrier is Asendia (no auto-cadence elsewhere; we cover it natively)");
+      reasons.push(
+        "workspace strategy=unified_resend → WE own all customer shipping emails via Resend",
+      );
+      if (isAsendia)
+        reasons.push("carrier is Asendia (no auto-cadence elsewhere; we cover it natively)");
       return {
         // SS stops emailing customers in unified mode. Period.
         callShipstationNotifyCustomer: false,
@@ -174,7 +176,10 @@ export function deriveNotificationStrategy(ctx: NotificationContext): Notificati
         // the accepted "one redundant store-platform email"). Same for
         // Shopify-via-SS workflows.
         callShipstationNotifyOrderSource: true,
-        expectMarketplaceNotify: ctx.channel === "bandcamp" || ctx.channel === "shopify_main" || ctx.channel === "shopify_client",
+        expectMarketplaceNotify:
+          ctx.channel === "bandcamp" ||
+          ctx.channel === "shopify_main" ||
+          ctx.channel === "shopify_client",
         sendUnifiedResendEmails: true,
         shadowMode: false,
         // mark-platform-fulfilled (Shopify) keeps notify_customer=true so
@@ -229,7 +234,9 @@ function offModeStrategy(ctx: NotificationContext, reasons: string[]): Notificat
       expectMarketplaceNotify = true;
       const skipSs = ctx.workspaceFlags.bandcamp_skip_ss_email !== false;
       callSsNotifyCustomer = !skipSs;
-      reasons.push(skipSs ? "skipping SS confirmation for BC" : "SS confirmation enabled (flag override)");
+      reasons.push(
+        skipSs ? "skipping SS confirmation for BC" : "SS confirmation enabled (flag override)",
+      );
       break;
     }
     case "shopify_main":

@@ -39,7 +39,7 @@ const tables: Record<string, Row[]> = {
 };
 
 function makeChain(tableName: string) {
-  let _eqs: Array<[string, unknown]> = [];
+  const _eqs: Array<[string, unknown]> = [];
   let _select: string | null = null;
   let _limit = 1000;
   let _insertPayload: Row | Row[] | null = null;
@@ -48,9 +48,7 @@ function makeChain(tableName: string) {
   let _conflict: string | null = null;
   let _isDelete = false;
   const matchByEqs = () =>
-    tables[tableName].filter((r) =>
-      _eqs.every(([col, val]) => r[col] === val),
-    );
+    tables[tableName].filter((r) => _eqs.every(([col, val]) => r[col] === val));
   const chain: Record<string, unknown> = {
     select(s: string) {
       _select = s;

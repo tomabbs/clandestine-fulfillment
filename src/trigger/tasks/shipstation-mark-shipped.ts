@@ -18,8 +18,8 @@
 // See plan §4.3 + Appendix J.1 / J.1a for exact request/response shapes.
 
 import { logger, task } from "@trigger.dev/sdk";
-import { createFulfillments } from "@/lib/clients/shipstation-inventory-v2";
 import { markOrderShipped } from "@/lib/clients/shipstation";
+import { createFulfillments } from "@/lib/clients/shipstation-inventory-v2";
 import {
   logUnmappedServiceUsedFamilyFallback,
   resolveCarrierMapping,

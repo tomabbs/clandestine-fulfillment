@@ -97,7 +97,10 @@ export const bulkBuyLabelsTask = task({
           succeeded++;
         } else {
           const taskErrMsg =
-            !result.ok && result.error && typeof result.error === "object" && "message" in result.error
+            !result.ok &&
+            result.error &&
+            typeof result.error === "object" &&
+            "message" in result.error
               ? String((result.error as { message?: unknown }).message ?? "unknown")
               : "unknown";
           const err = result.ok

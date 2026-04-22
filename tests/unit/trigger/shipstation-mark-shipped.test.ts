@@ -45,7 +45,7 @@ vi.mock("@/lib/server/supabase-server", () => ({
 function makeMockSupabase() {
   return {
     from(table: string) {
-      let _eqs: Array<[string, unknown]> = [];
+      const _eqs: Array<[string, unknown]> = [];
       let _isNull = false;
       let _updates: Record<string, unknown> | null = null;
       let _insert: Record<string, unknown> | null = null;
@@ -115,7 +115,13 @@ import { shipstationMarkShippedTask } from "@/trigger/tasks/shipstation-mark-shi
 
 const run = (
   shipstationMarkShippedTask as unknown as {
-    run: (p: { warehouse_shipment_id: string }) => Promise<{ ok: boolean; path?: string; alreadyShipped?: boolean; error?: string; trackingUrl?: string | null }>;
+    run: (p: { warehouse_shipment_id: string }) => Promise<{
+      ok: boolean;
+      path?: string;
+      alreadyShipped?: boolean;
+      error?: string;
+      trackingUrl?: string | null;
+    }>;
   }
 ).run;
 

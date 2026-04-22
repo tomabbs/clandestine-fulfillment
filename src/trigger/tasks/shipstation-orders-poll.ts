@@ -15,10 +15,7 @@
 import { logger, schedules, task } from "@trigger.dev/sdk";
 import { fetchOrders, type ShipStationOrder } from "@/lib/clients/shipstation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-import {
-  deriveOrderPreorderState,
-  type PreorderVariantRecord,
-} from "@/lib/shared/order-preorder";
+import { deriveOrderPreorderState, type PreorderVariantRecord } from "@/lib/shared/order-preorder";
 import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
 import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
 
@@ -270,10 +267,11 @@ export async function applyPreorderState(
   workspaceId: string,
   shipstationOrderUuid: string,
   items: Array<{ sku?: string | null }>,
-): Promise<{ preorder_state: "none" | "preorder" | "ready"; preorder_release_date: string | null }> {
-  const skus = items
-    .map((i) => i.sku)
-    .filter((s): s is string => !!s && s !== "UNKNOWN");
+): Promise<{
+  preorder_state: "none" | "preorder" | "ready";
+  preorder_release_date: string | null;
+}> {
+  const skus = items.map((i) => i.sku).filter((s): s is string => !!s && s !== "UNKNOWN");
 
   let variantRows: PreorderVariantRecord[] = [];
   if (skus.length > 0) {
@@ -284,9 +282,7 @@ export async function applyPreorderState(
       .in("sku", skus);
     variantRows = (data ?? []) as PreorderVariantRecord[];
   }
-  const variantLookup = new Map<string, PreorderVariantRecord>(
-    variantRows.map((v) => [v.sku, v]),
-  );
+  const variantLookup = new Map<string, PreorderVariantRecord>(variantRows.map((v) => [v.sku, v]));
 
   const derived = deriveOrderPreorderState({
     items: items.map((i) => ({ sku: i.sku ?? null })),

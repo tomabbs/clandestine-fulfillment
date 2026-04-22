@@ -128,7 +128,8 @@ export const unifiedShippingSensorsTask = schedules.task({
           .eq("workspace_id", workspaceId)
           .gte("sent_at", since24hIso)
           .in("status", ["sent", "failed", "shadow"]);
-        const sent = counts?.filter((r) => r.status === "sent" || r.status === "shadow").length ?? 0;
+        const sent =
+          counts?.filter((r) => r.status === "sent" || r.status === "shadow").length ?? 0;
         const failed = counts?.filter((r) => r.status === "failed").length ?? 0;
         const total = sent + failed;
         const rate = total === 0 ? 0 : failed / total;
@@ -196,8 +197,7 @@ export const unifiedShippingSensorsTask = schedules.task({
         readings.push({
           workspace_id: workspaceId,
           sensor_name: "resend.bounce_rate_24h",
-          status:
-            total === 0 ? "healthy" : rate > 0.05 ? "warning" : "healthy",
+          status: total === 0 ? "healthy" : rate > 0.05 ? "warning" : "healthy",
           message: `${bounced}/${total} bounced in last 24h (${(rate * 100).toFixed(2)}%)`,
           value: { sent, bounced, total, rate },
         });
@@ -224,12 +224,7 @@ export const unifiedShippingSensorsTask = schedules.task({
           sensor_name: "resend.complaint_rate_24h",
           // Spam complaint thresholds are STRICT — anything above 0.1% is
           // a deliverability emergency.
-          status:
-            total === 0
-              ? "healthy"
-              : rate > 0.001
-                ? "critical"
-                : "healthy",
+          status: total === 0 ? "healthy" : rate > 0.001 ? "critical" : "healthy",
           message: `${complained}/${total} complained in last 24h (${(rate * 100).toFixed(3)}%)`,
           value: { sent, complained, total, rate },
         });
@@ -270,9 +265,7 @@ export const unifiedShippingSensorsTask = schedules.task({
 
       // Persist all readings for this workspace in one batch.
       if (readings.length > 0) {
-        const { error: insErr } = await supabase
-          .from("sensor_readings")
-          .insert(readings);
+        const { error: insErr } = await supabase.from("sensor_readings").insert(readings);
         if (insErr) {
           logger.warn("[shipping-sensors] insert failed", {
             workspaceId,

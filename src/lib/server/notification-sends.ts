@@ -15,11 +15,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type NotificationTriggerStatus =
-  | "shipped"
-  | "out_for_delivery"
-  | "delivered"
-  | "exception";
+export type NotificationTriggerStatus = "shipped" | "out_for_delivery" | "delivered" | "exception";
 
 export type NotificationSendStatus =
   | "sent"
@@ -110,10 +106,7 @@ export async function recordSend(
   if (error) {
     // Postgres unique violation = 23505. Either the partial unique index
     // for 'sent' or for 'shadow' tripped. Fetch the winner.
-    if (
-      error.code === "23505" &&
-      (input.status === "sent" || input.status === "shadow")
-    ) {
+    if (error.code === "23505" && (input.status === "sent" || input.status === "shadow")) {
       const winner = await findPriorSuccessfulSend(supabase, {
         shipmentId: input.shipmentId,
         triggerStatus: input.triggerStatus,
@@ -189,15 +182,13 @@ export async function suppressRecipient(
     sourceMessageId?: string | null;
   },
 ): Promise<void> {
-  const { error } = await supabase
-    .from("resend_suppressions")
-    .insert({
-      workspace_id: input.workspaceId,
-      recipient: input.recipient,
-      suppression_type: input.suppressionType,
-      reason: input.reason ?? null,
-      source_message_id: input.sourceMessageId ?? null,
-    });
+  const { error } = await supabase.from("resend_suppressions").insert({
+    workspace_id: input.workspaceId,
+    recipient: input.recipient,
+    suppression_type: input.suppressionType,
+    reason: input.reason ?? null,
+    source_message_id: input.sourceMessageId ?? null,
+  });
   if (error && error.code !== "23505") {
     // 23505 = duplicate key (already suppressed) — idempotent success
     throw new Error(`suppressRecipient failed: ${error.message}`);

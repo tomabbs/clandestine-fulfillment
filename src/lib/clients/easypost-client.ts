@@ -167,8 +167,7 @@ let _asendiaCarrierAccountId: string | null = null;
 export function getAsendiaCarrierAccountId(): string {
   if (_asendiaCarrierAccountId == null) {
     try {
-      _asendiaCarrierAccountId =
-        env().EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID || ASENDIA_DEFAULT;
+      _asendiaCarrierAccountId = env().EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID || ASENDIA_DEFAULT;
     } catch {
       // env() may throw if other required vars aren't set (e.g., test envs).
       // Fall back to the historical hardcoded value so the module stays usable.

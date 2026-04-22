@@ -99,7 +99,10 @@ export async function deleteView(input: { id: string }): Promise<{ ok: true }> {
   return { ok: true };
 }
 
-export async function setDefaultView(input: { id: string; surface: string }): Promise<{ ok: true }> {
+export async function setDefaultView(input: {
+  id: string;
+  surface: string;
+}): Promise<{ ok: true }> {
   const { userId } = await requireStaff();
   const surface = surfaceSchema.parse(input.surface);
   const supabase = createServiceRoleClient();

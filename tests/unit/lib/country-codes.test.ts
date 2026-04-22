@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  normalizeCountryCode,
-  normalizeCountryCodeWithDefault,
-} from "@/lib/shared/country-codes";
+import { normalizeCountryCode, normalizeCountryCodeWithDefault } from "@/lib/shared/country-codes";
 
 describe("normalizeCountryCode (Phase 0.5.7)", () => {
   it("returns null for null/undefined/empty", () => {

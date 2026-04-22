@@ -14,11 +14,8 @@
 
 import { z } from "zod";
 import { listCarriers } from "@/lib/clients/shipstation";
-import {
-  type CarrierMapRow,
-  seedCarrierMapFromShipStation,
-} from "@/lib/server/carrier-map";
 import { requireStaff } from "@/lib/server/auth-context";
+import { type CarrierMapRow, seedCarrierMapFromShipStation } from "@/lib/server/carrier-map";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 export interface CarrierMapAdminRow extends CarrierMapRow {

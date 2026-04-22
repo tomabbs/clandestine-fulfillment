@@ -59,10 +59,7 @@ export function verifyEasypostSignature({
     if (Math.abs(now - parsed.timestamp) > toleranceMs) {
       return { valid: false, reason: "timestamp_outside_tolerance", timestamp: parsed.timestamp };
     }
-    const signedPayload = Buffer.concat([
-      Buffer.from(`${parsed.timestamp}.`, "utf8"),
-      rawBody,
-    ]);
+    const signedPayload = Buffer.concat([Buffer.from(`${parsed.timestamp}.`, "utf8"), rawBody]);
     const expected = createHmac("sha256", secret).update(signedPayload).digest("hex");
     return constantTimeOk(expected, parsed.signatureHex)
       ? { valid: true, timestamp: parsed.timestamp }
@@ -80,9 +77,7 @@ export function verifyEasypostSignature({
 }
 
 /** Parse `t=<ms>,s=<hex>` (whitespace tolerant). Exposed for unit tests. */
-export function parseV2Header(
-  header: string,
-): { timestamp: number; signatureHex: string } | null {
+export function parseV2Header(header: string): { timestamp: number; signatureHex: string } | null {
   const parts = header.split(",").map((p) => p.trim());
   let t: number | null = null;
   let s: string | null = null;

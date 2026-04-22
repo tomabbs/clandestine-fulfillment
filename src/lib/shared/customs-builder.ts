@@ -97,7 +97,8 @@ export function buildCustomsItems(args: BuildCustomsItemsArgs): BuiltCustomsItem
     const hs = resolveHsCode(variant);
     const description =
       (li.customsDescriptionOverride?.trim() || li.title?.trim()) ?? "Merchandise";
-    const lineWeight = totalUnits > 0 ? (safeTotalWeight * li.quantity) / totalUnits : safeTotalWeight;
+    const lineWeight =
+      totalUnits > 0 ? (safeTotalWeight * li.quantity) / totalUnits : safeTotalWeight;
     const lineValue = roundTo2(li.quantity * (li.unitPrice ?? 0));
     return {
       description,

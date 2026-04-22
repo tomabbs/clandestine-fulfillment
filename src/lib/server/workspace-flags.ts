@@ -41,9 +41,7 @@ export const workspaceFlagsSchema = z
     easypost_buy_enabled: z.boolean().optional(),
     staff_diagnostics: z.boolean().optional(),
     v1_features_enabled: z.boolean().optional(),
-    email_send_strategy: z
-      .enum(["off", "shadow", "unified_resend", "ss_for_all"])
-      .optional(),
+    email_send_strategy: z.enum(["off", "shadow", "unified_resend", "ss_for_all"]).optional(),
     shadow_recipients: z.array(z.string().email()).optional(),
     bandcamp_skip_ss_email: z.boolean().optional(),
   })

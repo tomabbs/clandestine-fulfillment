@@ -43,8 +43,7 @@ export function computeRateSignature(input: RateSignatureInput): string {
   // Normalize to a deterministic JSON string. Lowercase carrier so "USPS" and
   // "usps" hash identically. Round rate to 2 decimal places so penny drift
   // doesn't change the key.
-  const rateNum =
-    typeof input.rate === "string" ? Number.parseFloat(input.rate) : input.rate;
+  const rateNum = typeof input.rate === "string" ? Number.parseFloat(input.rate) : input.rate;
   const canonical = {
     c: input.carrier.toLowerCase(),
     s: input.service,

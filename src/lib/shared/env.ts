@@ -48,9 +48,7 @@ const serverEnvSchema = z.object({
   // pass this carrier_account_id explicitly. Different ID per environment
   // (prod vs sandbox). Default keeps the legacy hardcoded prod value so existing
   // deploys without the env var set don't break (Phase 0.5.3).
-  EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID: z
-    .string()
-    .default("ca_0f7e073887204bd491a6230936baf754"),
+  EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID: z.string().default("ca_0f7e073887204bd491a6230936baf754"),
   // Phase 10.2 — EasyPost Webhook signing secret (for tracker.* events at
   // /api/webhooks/easypost). REQUIRED in production; the route returns 500
   // when unset, by design (mirrors the SHIPSTATION_WEBHOOK_SECRET pattern).

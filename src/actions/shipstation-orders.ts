@@ -1,6 +1,7 @@
 "use server";
 
 import { tasks } from "@trigger.dev/sdk";
+import { verifyAddress } from "@/lib/clients/easypost-client";
 import {
   addOrderTag,
   fetchOrders,
@@ -11,7 +12,6 @@ import {
   type ShipStationOrder,
   type ShipStationTag,
 } from "@/lib/clients/shipstation";
-import { verifyAddress } from "@/lib/clients/easypost-client";
 import { requireStaff } from "@/lib/server/auth-context";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
 import { parsePaymentIdFromCustomField } from "@/lib/shared/bandcamp-reconcile-helpers";
@@ -243,9 +243,11 @@ export async function getShipStationOrdersDb(
         `order_number.ilike.%${term}%,customer_email.ilike.%${term}%,customer_name.ilike.%${term}%`,
       );
     const orderHits = applyBaseFilter(orderHitsBuilder as unknown as Filterable);
-    const { data: orderHitsRows } = await (orderHits as unknown as {
-      limit: (n: number) => Promise<{ data: Array<{ id: string }> | null }>;
-    }).limit(2000);
+    const { data: orderHitsRows } = await (
+      orderHits as unknown as {
+        limit: (n: number) => Promise<{ data: Array<{ id: string }> | null }>;
+      }
+    ).limit(2000);
     const orderLevelIds = new Set((orderHitsRows ?? []).map((r) => r.id));
     const merged = new Set([...itemOrderIds, ...orderLevelIds]);
     searchOrderIds = merged.size > 0 ? Array.from(merged) : ["__no_match__"];
@@ -261,7 +263,9 @@ export async function getShipStationOrdersDb(
     ),
   );
   const baseAll = applyBaseFilter(
-    supabase.from("shipstation_orders").select("id", { count: "exact", head: true }) as unknown as Filterable,
+    supabase
+      .from("shipstation_orders")
+      .select("id", { count: "exact", head: true }) as unknown as Filterable,
   );
   const basePre = applyBaseFilter(
     supabase
@@ -295,10 +299,8 @@ export async function getShipStationOrdersDb(
   ]);
 
   // ── 4. The row query — joined to organizations(name) + items.
-  const rowBuilder = supabase
-    .from("shipstation_orders")
-    .select(
-      `
+  const rowBuilder = supabase.from("shipstation_orders").select(
+    `
       id, shipstation_order_id, order_number, order_status, order_date,
       customer_email, customer_name, ship_to, store_id, amount_paid,
       shipping_paid, last_modified, preorder_state, preorder_release_date,
@@ -309,13 +311,18 @@ export async function getShipStationOrdersDb(
       organizations ( name ),
       shipstation_order_items ( sku, name, quantity, unit_price, item_index )
       `,
-    );
+  );
 
   type Sortable = Filterable & {
     order: (col: string, opts?: { ascending?: boolean; nullsFirst?: boolean }) => Sortable;
-    range: (from: number, to: number) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
+    range: (
+      from: number,
+      to: number,
+    ) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
   };
-  let rowQuery = applyTabFilter(applyBaseFilter(rowBuilder as unknown as Filterable)) as unknown as Sortable;
+  let rowQuery = applyTabFilter(
+    applyBaseFilter(rowBuilder as unknown as Filterable),
+  ) as unknown as Sortable;
 
   if (sort === "client_then_date") {
     rowQuery = rowQuery
@@ -334,10 +341,7 @@ export async function getShipStationOrdersDb(
     rowQuery = rowQuery.order("order_number", { ascending: true });
   }
 
-  const { data: rows, error } = await rowQuery.range(
-    (page - 1) * pageSize,
-    page * pageSize - 1,
-  );
+  const { data: rows, error } = await rowQuery.range((page - 1) * pageSize, page * pageSize - 1);
   if (error) throw new Error(`getShipStationOrdersDb: ${error.message}`);
 
   type RawRow = {
@@ -398,9 +402,10 @@ export async function getShipStationOrdersDb(
       // Only set the FIRST (most recent) per order.
       if (shipmentByOrder.has(orderKey)) continue;
       const labelData = (s.label_data ?? {}) as Record<string, unknown>;
-      const trackingUrl = typeof labelData.shipstation_tracking_url === "string"
-        ? (labelData.shipstation_tracking_url as string)
-        : null;
+      const trackingUrl =
+        typeof labelData.shipstation_tracking_url === "string"
+          ? (labelData.shipstation_tracking_url as string)
+          : null;
       shipmentByOrder.set(orderKey, {
         id: s.id,
         tracking_number: s.tracking_number,
@@ -465,9 +470,9 @@ export async function getShipStationOrdersDb(
  * Enqueues the windowed poll task (defaults 30 min) so cockpit updates within
  * seconds without burning SS rate-limit budget on a full cron run.
  */
-export async function refreshShipStationOrdersFromSS(payload: {
-  windowMinutes?: number;
-} = {}): Promise<{ ok: true; runId: string }> {
+export async function refreshShipStationOrdersFromSS(
+  payload: { windowMinutes?: number } = {},
+): Promise<{ ok: true; runId: string }> {
   await requireStaff();
   const run = await tasks.trigger("shipstation-orders-poll-window", {
     windowMinutes: payload.windowMinutes ?? 30,
@@ -499,10 +504,9 @@ export async function assignOrgToShipStationOrder(input: {
  * Phase 8.1 — counts per order_status for the cockpit's left sidebar.
  * Optionally scoped to an org or store. Returns 0 for missing buckets.
  */
-export async function getStatusBucketCounts(filters: {
-  orgId?: string;
-  storeId?: number;
-} = {}): Promise<StatusBucketCounts> {
+export async function getStatusBucketCounts(
+  filters: { orgId?: string; storeId?: number } = {},
+): Promise<StatusBucketCounts> {
   await requireStaff();
   const supabase = createServiceRoleClient();
 
@@ -931,7 +935,8 @@ export async function getBandcampMatchForShipStationOrder(input: {
     const match = (candidates ?? []).find((c) => {
       const addr = (c.shipping_address ?? {}) as Record<string, unknown>;
       const city = typeof addr.city === "string" ? addr.city.trim().toLowerCase() : null;
-      const name = typeof c.customer_name === "string" ? c.customer_name.trim().toLowerCase() : null;
+      const name =
+        typeof c.customer_name === "string" ? c.customer_name.trim().toLowerCase() : null;
       return city === shipCity && name?.includes(shipName.split(" ")[0] ?? "");
     });
     if (match) {
@@ -1052,11 +1057,9 @@ export async function getBandcampEnrichmentForCockpit(input: {
   return {
     buyer_note: (first("buyer_note") as string | null) ?? null,
     ship_notes: (first("ship_notes") as string | null) ?? null,
-    additional_fan_contribution:
-      (first("additional_fan_contribution") as number | null) ?? null,
+    additional_fan_contribution: (first("additional_fan_contribution") as number | null) ?? null,
     payment_state: (first("payment_state") as string | null) ?? null,
-    paypal_transaction_id:
-      (first("paypal_transaction_id") as string | null) ?? null,
+    paypal_transaction_id: (first("paypal_transaction_id") as string | null) ?? null,
     primary_artist: primaryArtist,
     has_data: true,
   };

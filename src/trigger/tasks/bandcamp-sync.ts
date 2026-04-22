@@ -33,7 +33,6 @@ import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { matchTagToTaxonomy } from "@/lib/shared/genre-taxonomy";
 import { deriveStreetDateAndPreorder, isFutureReleaseDate } from "@/lib/shared/preorder-dates";
-import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 import {
   CATEGORY_DEFAULT_WEIGHTS,
   CATEGORY_EXPECTED_FIELDS,
@@ -41,6 +40,7 @@ import {
   isAlbumLinkedBundle,
   type ProductCategory,
 } from "@/lib/shared/product-categories";
+import { normalizeShopifyProductId } from "@/lib/shared/shopify-id";
 import {
   detectMultiVariantOptions,
   inferOptionName,
@@ -1841,44 +1841,46 @@ export const bandcampSyncTask = task({
             // Shopify CREATE — multi-variant productSet payload.
             let shopifyProductIdMV: string | null = null;
             try {
-              shopifyProductIdMV = normalizeShopifyProductId(await productSetCreate({
-                title,
-                status: "DRAFT",
-                vendor: band?.name ?? connection.band_name,
-                productType: merchItem.item_type ?? "Merch",
-                tags,
-                ...(collectionId ? { collections: [collectionId] } : {}),
-                productOptions: [
-                  {
-                    name: optionName,
-                    values: orderedVariants.map((v, idx) => ({
-                      name: optionDisplayValue(v.option, idx),
-                    })),
-                  },
-                ],
-                variants: orderedVariants.map((v, idx) =>
-                  buildShopifyVariantInput({
-                    sku: v.sku,
-                    optionName,
-                    optionValue: optionDisplayValue(v.option, idx),
-                    price: bcPrice,
-                    cost: bcCost,
-                    currency: bcCurrency,
-                    barcode: bcBarcode,
-                    category: productCategory,
-                  }),
-                ),
-                ...(bandcampImageUrl(merchItem.image_url)
-                  ? {
-                      files: [
-                        {
-                          originalSource: bandcampImageUrl(merchItem.image_url),
-                          alt: title,
-                        },
-                      ],
-                    }
-                  : {}),
-              }));
+              shopifyProductIdMV = normalizeShopifyProductId(
+                await productSetCreate({
+                  title,
+                  status: "DRAFT",
+                  vendor: band?.name ?? connection.band_name,
+                  productType: merchItem.item_type ?? "Merch",
+                  tags,
+                  ...(collectionId ? { collections: [collectionId] } : {}),
+                  productOptions: [
+                    {
+                      name: optionName,
+                      values: orderedVariants.map((v, idx) => ({
+                        name: optionDisplayValue(v.option, idx),
+                      })),
+                    },
+                  ],
+                  variants: orderedVariants.map((v, idx) =>
+                    buildShopifyVariantInput({
+                      sku: v.sku,
+                      optionName,
+                      optionValue: optionDisplayValue(v.option, idx),
+                      price: bcPrice,
+                      cost: bcCost,
+                      currency: bcCurrency,
+                      barcode: bcBarcode,
+                      category: productCategory,
+                    }),
+                  ),
+                  ...(bandcampImageUrl(merchItem.image_url)
+                    ? {
+                        files: [
+                          {
+                            originalSource: bandcampImageUrl(merchItem.image_url),
+                            alt: title,
+                          },
+                        ],
+                      }
+                    : {}),
+                }),
+              );
 
               logger.info("Created Shopify DRAFT product (multi-variant)", {
                 package_id: merchItem.package_id,
@@ -2350,38 +2352,40 @@ export const bandcampSyncTask = task({
             }
 
             try {
-              shopifyProductId = normalizeShopifyProductId(await productSetCreate({
-                title,
-                status: "DRAFT",
-                vendor: band?.name ?? connection.band_name,
-                productType: merchItem.item_type ?? "Merch",
-                tags,
-                ...(collectionId ? { collections: [collectionId] } : {}),
-                productOptions: [{ name: "Title", values: [{ name: "Default Title" }] }],
-                variants: [
-                  buildShopifyVariantInput({
-                    sku: effectiveSku,
-                    price: bcPrice,
-                    cost: bcCost,
-                    currency: bcCurrency,
-                    barcode: bcBarcode,
-                    category: productCategory,
-                  }),
-                ],
-                // Shopify ProductSetInput uses `files: [FileSetInput!]` (2024-10+).
-                // `media` is not a valid field on ProductSetInput and is silently ignored —
-                // passing it caused all Bandcamp-synced products to be created without images.
-                ...(bandcampImageUrl(merchItem.image_url)
-                  ? {
-                      files: [
-                        {
-                          originalSource: bandcampImageUrl(merchItem.image_url),
-                          alt: title,
-                        },
-                      ],
-                    }
-                  : {}),
-              }));
+              shopifyProductId = normalizeShopifyProductId(
+                await productSetCreate({
+                  title,
+                  status: "DRAFT",
+                  vendor: band?.name ?? connection.band_name,
+                  productType: merchItem.item_type ?? "Merch",
+                  tags,
+                  ...(collectionId ? { collections: [collectionId] } : {}),
+                  productOptions: [{ name: "Title", values: [{ name: "Default Title" }] }],
+                  variants: [
+                    buildShopifyVariantInput({
+                      sku: effectiveSku,
+                      price: bcPrice,
+                      cost: bcCost,
+                      currency: bcCurrency,
+                      barcode: bcBarcode,
+                      category: productCategory,
+                    }),
+                  ],
+                  // Shopify ProductSetInput uses `files: [FileSetInput!]` (2024-10+).
+                  // `media` is not a valid field on ProductSetInput and is silently ignored —
+                  // passing it caused all Bandcamp-synced products to be created without images.
+                  ...(bandcampImageUrl(merchItem.image_url)
+                    ? {
+                        files: [
+                          {
+                            originalSource: bandcampImageUrl(merchItem.image_url),
+                            alt: title,
+                          },
+                        ],
+                      }
+                    : {}),
+                }),
+              );
               logger.info("Created Shopify DRAFT product", { sku: effectiveSku, shopifyProductId });
 
               await supabase

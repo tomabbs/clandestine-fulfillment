@@ -183,9 +183,7 @@ export const sendTrackingEmailTask = task({
     // Shadow-mode redirect target.
     const shadowRecipients = (flags.shadow_recipients ?? []) as string[];
     const isShadow = strategy.shadowMode === true;
-    const sendTo = isShadow
-      ? (shadowRecipients[0] ?? null)
-      : realRecipient;
+    const sendTo = isShadow ? (shadowRecipients[0] ?? null) : realRecipient;
     if (isShadow && !sendTo) {
       const skipped = await recordSend(supabase, {
         workspaceId: shipment.workspace_id as string,
@@ -206,10 +204,12 @@ export const sendTrackingEmailTask = task({
     }
 
     // ── 4. Suppression check ─────────────────────────────────────────────
-    if (await isRecipientSuppressed(supabase, {
-      workspaceId: shipment.workspace_id as string,
-      recipient: sendTo!,
-    })) {
+    if (
+      await isRecipientSuppressed(supabase, {
+        workspaceId: shipment.workspace_id as string,
+        recipient: sendTo!,
+      })
+    ) {
       const suppressed = await recordSend(supabase, {
         workspaceId: shipment.workspace_id as string,
         shipmentId: shipment_id,
@@ -340,9 +340,7 @@ async function resolveChannel(
       .eq("id", shipstationOrderId)
       .maybeSingle();
     return {
-      channel: inferChannelFromSSMarketplace(
-        (data?.marketplace_name as string | null) ?? null,
-      ),
+      channel: inferChannelFromSSMarketplace((data?.marketplace_name as string | null) ?? null),
     };
   }
   if (shipment.mailorder_id) return { channel: "shopify_main" };
@@ -381,8 +379,7 @@ async function loadOrgBranding(
   return {
     org_name: (data?.name as string | null) ?? "Clandestine Distribution",
     brand_color: (data?.brand_color as string | null) ?? null,
-    support_email:
-      (data?.support_email as string | null) ?? "support@clandestinedistro.com",
+    support_email: (data?.support_email as string | null) ?? "support@clandestinedistro.com",
     logo_url: (data?.logo_url as string | null) ?? null,
   };
 }

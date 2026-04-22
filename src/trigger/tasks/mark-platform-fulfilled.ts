@@ -90,7 +90,13 @@ export const markPlatformFulfilledTask = task({
     try {
       switch (order.source) {
         case "shopify":
-          await markShopifyFulfilled(connection, platformOrderId, tracking_number, carrier, notifyCustomer);
+          await markShopifyFulfilled(
+            connection,
+            platformOrderId,
+            tracking_number,
+            carrier,
+            notifyCustomer,
+          );
           break;
         case "woocommerce":
           await markWooCommerceFulfilled(connection, platformOrderId, tracking_number, carrier);

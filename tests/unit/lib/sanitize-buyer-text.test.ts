@@ -14,10 +14,7 @@
 //   - Emoji + multi-byte unicode preserved.
 
 import { describe, expect, it } from "vitest";
-import {
-  MAX_BUYER_TEXT_LEN,
-  sanitizeBuyerText,
-} from "@/lib/shared/sanitize-buyer-text";
+import { MAX_BUYER_TEXT_LEN, sanitizeBuyerText } from "@/lib/shared/sanitize-buyer-text";
 
 describe("sanitizeBuyerText (Phase 11.1)", () => {
   it("returns '' for null / undefined / empty", () => {
@@ -27,9 +24,7 @@ describe("sanitizeBuyerText (Phase 11.1)", () => {
   });
 
   it("preserves HTML tags as literal text (React escaping does the rest)", () => {
-    expect(sanitizeBuyerText("<script>alert(1)</script>")).toBe(
-      "<script>alert(1)</script>",
-    );
+    expect(sanitizeBuyerText("<script>alert(1)</script>")).toBe("<script>alert(1)</script>");
   });
 
   it("strips bidi-override chars (RLO U+202E + LRE/RLE/PDF)", () => {

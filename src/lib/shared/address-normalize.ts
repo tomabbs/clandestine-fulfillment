@@ -60,9 +60,7 @@ export function normalizeAddress(
       city: bc.ship_to_city ?? "",
       state: bc.ship_to_state ?? "",
       zip: bc.ship_to_zip ?? "",
-      country: normalizeCountryCodeWithDefault(
-        bc.ship_to_country_code ?? bc.ship_to_country,
-      ),
+      country: normalizeCountryCodeWithDefault(bc.ship_to_country_code ?? bc.ship_to_country),
     };
   }
 

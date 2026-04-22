@@ -8,16 +8,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import {
-  carrierMapKey,
-  resolveCarrierMapping,
-  type CarrierMapRow,
-} from "@/lib/server/carrier-map";
+import { type CarrierMapRow, carrierMapKey, resolveCarrierMapping } from "@/lib/server/carrier-map";
 
 function makeMockClient(rows: CarrierMapRow[]): SupabaseClient {
   return {
     from(_table: string) {
-      let _eqs: Array<[string, unknown]> = [];
+      const _eqs: Array<[string, unknown]> = [];
       let _isNull = false;
       const builder: Record<string, unknown> = {
         select: () => builder,
@@ -33,9 +29,7 @@ function makeMockClient(rows: CarrierMapRow[]): SupabaseClient {
           const matches = rows.filter((r) =>
             _eqs.every(([col, val]) => (r as unknown as Record<string, unknown>)[col] === val),
           );
-          const filtered = _isNull
-            ? matches.filter((r) => r.easypost_service === null)
-            : matches;
+          const filtered = _isNull ? matches.filter((r) => r.easypost_service === null) : matches;
           return { data: filtered[0] ?? null, error: null };
         },
       };
@@ -171,7 +165,11 @@ describe("resolveCarrierMapping (Phase 4.2)", () => {
 
   it("treats the family wildcard correctly when easypostService is null/undefined on input", async () => {
     const sb = makeMockClient([
-      baseRow({ easypost_service: null, mapping_confidence: "verified", block_auto_writeback: false }),
+      baseRow({
+        easypost_service: null,
+        mapping_confidence: "verified",
+        block_auto_writeback: false,
+      }),
     ]);
     const r = await resolveCarrierMapping(sb, {
       workspaceId: "ws_1",

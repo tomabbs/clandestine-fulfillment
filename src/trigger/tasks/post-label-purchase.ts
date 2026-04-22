@@ -115,10 +115,13 @@ export const postLabelPurchaseTask = task({
         });
         triggered.push("shipstation-mark-shipped");
       } catch (err) {
-        logger.warn("[post-label-purchase] shipstation-mark-shipped enqueue failed (Phase 4.3 not yet shipped?)", {
-          warehouse_shipment_id,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        logger.warn(
+          "[post-label-purchase] shipstation-mark-shipped enqueue failed (Phase 4.3 not yet shipped?)",
+          {
+            warehouse_shipment_id,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        );
       }
     }
 

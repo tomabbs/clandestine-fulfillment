@@ -115,17 +115,14 @@ export async function POST(req: NextRequest) {
       v2Header: v2,
     });
     if (!verify.valid) {
-      Sentry.captureMessage(
-        `[easypost-webhook] signature verify failed: ${verify.reason}`,
-        {
-          level: "warning",
-          tags: { platform: "easypost", failure: verify.reason ?? "unknown" },
-          extra: {
-            timestamp: verify.timestamp ?? null,
-            sigVersion: v2 ? "v2" : v1 ? "v1" : "missing",
-          },
+      Sentry.captureMessage(`[easypost-webhook] signature verify failed: ${verify.reason}`, {
+        level: "warning",
+        tags: { platform: "easypost", failure: verify.reason ?? "unknown" },
+        extra: {
+          timestamp: verify.timestamp ?? null,
+          sigVersion: v2 ? "v2" : v1 ? "v1" : "missing",
         },
-      );
+      });
       return NextResponse.json({ error: "invalid signature" }, { status: 401 });
     }
   }
@@ -186,9 +183,7 @@ export async function POST(req: NextRequest) {
         .select("event_time, status")
         .eq("shipment_id", shipment.id)
         .limit(500);
-      const seen = new Set(
-        (existing ?? []).map((r) => `${r.event_time ?? ""}::${r.status ?? ""}`),
-      );
+      const seen = new Set((existing ?? []).map((r) => `${r.event_time ?? ""}::${r.status ?? ""}`));
 
       const inserts: Array<Record<string, unknown>> = [];
       for (const d of details) {
@@ -270,13 +265,15 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
-function buildLocation(loc?: EasyPostTrackerEvent["result"] extends infer R
-  ? R extends { tracking_details?: Array<infer D> }
-    ? D extends { tracking_location?: infer L }
-      ? L
+function buildLocation(
+  loc?: EasyPostTrackerEvent["result"] extends infer R
+    ? R extends { tracking_details?: Array<infer D> }
+      ? D extends { tracking_location?: infer L }
+        ? L
+        : never
       : never
-    : never
-  : never): string | null {
+    : never,
+): string | null {
   if (!loc || typeof loc !== "object") return null;
   const l = loc as { city?: string; state?: string; country?: string };
   const parts = [l.city, l.state, l.country].filter(Boolean);

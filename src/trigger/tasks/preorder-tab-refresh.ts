@@ -49,11 +49,11 @@ export const preorderTabRefreshTask = schedules.task({
  * Phase 5.3 — exported for unit testing AND for ad-hoc invocation (e.g.
  * cockpit "Recompute preorder state for all rows" admin button).
  */
-export async function runPreorderTabRefresh(args: { workspaceId?: string } = {}): Promise<RefreshResult> {
+export async function runPreorderTabRefresh(
+  args: { workspaceId?: string } = {},
+): Promise<RefreshResult> {
   const supabase = createServiceRoleClient();
-  const workspaceIds = args.workspaceId
-    ? [args.workspaceId]
-    : await getAllWorkspaceIds(supabase);
+  const workspaceIds = args.workspaceId ? [args.workspaceId] : await getAllWorkspaceIds(supabase);
 
   const totals: RefreshResult = {
     workspaces: workspaceIds.length,
@@ -80,9 +80,7 @@ export async function runPreorderTabRefresh(args: { workspaceId?: string } = {})
       .from("shipstation_orders")
       .select("id, preorder_state")
       .eq("workspace_id", workspaceId)
-      .or(
-        "preorder_state.eq.preorder,preorder_state.eq.ready,order_status.eq.awaiting_shipment",
-      )
+      .or("preorder_state.eq.preorder,preorder_state.eq.ready,order_status.eq.awaiting_shipment")
       .limit(MAX_ROWS_PER_RUN);
 
     if (error) {
@@ -106,12 +104,7 @@ export async function runPreorderTabRefresh(args: { workspaceId?: string } = {})
         .eq("shipstation_order_id", row.id);
 
       try {
-        const result = await applyPreorderState(
-          supabase,
-          workspaceId,
-          row.id,
-          items ?? [],
-        );
+        const result = await applyPreorderState(supabase, workspaceId, row.id, items ?? []);
 
         if (result.preorder_state === previousState) {
           totals.unchanged++;

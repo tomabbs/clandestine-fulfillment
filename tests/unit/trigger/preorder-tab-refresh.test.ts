@@ -28,7 +28,7 @@ vi.mock("@/lib/server/supabase-server", () => ({
 function makeMockClient() {
   return {
     from(table: string) {
-      let _eqs: Array<[string, unknown]> = [];
+      const _eqs: Array<[string, unknown]> = [];
       let _or: string | null = null;
       let _limit = 10000;
       let _updates: Record<string, unknown> | null = null;
@@ -41,9 +41,7 @@ function makeMockClient() {
         if (!_or) return rows;
         // Tiny .or() parser — handles "preorder_state.eq.preorder,preorder_state.eq.ready".
         const clauses = _or.split(",").map((c) => c.split("."));
-        return rows.filter((r) =>
-          clauses.some(([col, _op, val]) => r[col!] === val),
-        );
+        return rows.filter((r) => clauses.some(([col, _op, val]) => r[col!] === val));
       };
 
       const builder: Record<string, unknown> = {

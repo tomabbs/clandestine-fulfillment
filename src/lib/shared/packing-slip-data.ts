@@ -127,8 +127,7 @@ export async function fetchPackingSlipData(
   // Resolve the BC payment_id from SS customField1 (operator-configurable
   // string; we extract the first run of >=4 digits via the shared parser).
   const adv = (order.advanced_options ?? {}) as Record<string, unknown>;
-  const customField1 =
-    typeof adv.customField1 === "string" ? adv.customField1 : null;
+  const customField1 = typeof adv.customField1 === "string" ? adv.customField1 : null;
   const paymentId = parsePaymentIdFromCustomField(customField1);
 
   const enrichment = paymentId
@@ -280,11 +279,9 @@ async function loadBandcampEnrichment(
   return {
     buyer_note: (first("buyer_note") as string | null) ?? null,
     ship_notes: (first("ship_notes") as string | null) ?? null,
-    additional_fan_contribution:
-      (first("additional_fan_contribution") as number | null) ?? null,
+    additional_fan_contribution: (first("additional_fan_contribution") as number | null) ?? null,
     payment_state: (first("payment_state") as string | null) ?? null,
-    paypal_transaction_id:
-      (first("paypal_transaction_id") as string | null) ?? null,
+    paypal_transaction_id: (first("paypal_transaction_id") as string | null) ?? null,
     primaryArtist,
     itemBySku,
   };

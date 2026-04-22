@@ -35,10 +35,10 @@ vi.mock("@/lib/server/supabase-server", () => ({
 function makeMockClient() {
   return {
     from(table: string) {
-      let _eqs: Array<[string, unknown]> = [];
-      let _isNotNull: string[] = [];
-      let _isNull: string[] = [];
-      let _lte: Array<[string, unknown]> = [];
+      const _eqs: Array<[string, unknown]> = [];
+      const _isNotNull: string[] = [];
+      const _isNull: string[] = [];
+      const _lte: Array<[string, unknown]> = [];
       let _limit = 10000;
       let _updates: Record<string, unknown> | null = null;
       let _insertPayload: Record<string, unknown> | null = null;

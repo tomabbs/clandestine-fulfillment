@@ -65,11 +65,7 @@ function escapeAttr(value: string): string {
 }
 
 /** Common chrome wrapping every template body. */
-function shell(opts: {
-  org: OrgBranding;
-  preheader: string;
-  bodyHtml: string;
-}): string {
+function shell(opts: { org: OrgBranding; preheader: string; bodyHtml: string }): string {
   const brand = opts.org.brand_color ?? BRAND_COLOR_FALLBACK;
   const support = opts.org.support_email ?? "";
   const supportLine = support
@@ -112,11 +108,7 @@ function shell(opts: {
 }
 
 /** Plain-text mirror — same content, no markup. */
-function textBlock(opts: {
-  org: OrgBranding;
-  bodyText: string;
-  trackingUrl: string;
-}): string {
+function textBlock(opts: { org: OrgBranding; bodyText: string; trackingUrl: string }): string {
   const support = opts.org.support_email
     ? `Questions? Reply to ${opts.org.support_email}.`
     : "Questions? Just reply to this email.";
@@ -165,7 +157,9 @@ export function renderShipmentConfirmation(ctx: TemplateContext): RenderedEmail 
     org: ctx.org,
     bodyText: [
       `${ctx.customer_name?.split(" ")[0] ?? "Hi"},`,
-      ctx.item_summary ? `Your order — ${ctx.item_summary} — is on its way.` : "Your order is on its way.",
+      ctx.item_summary
+        ? `Your order — ${ctx.item_summary} — is on its way.`
+        : "Your order is on its way.",
       ctx.carrier && ctx.tracking_number
         ? `Shipped via ${ctx.carrier} · tracking ${ctx.tracking_number}`
         : "",

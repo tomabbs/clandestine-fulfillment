@@ -19,11 +19,7 @@
 //   defense-in-depth.
 
 import { tasks } from "@trigger.dev/sdk";
-import {
-  addOrderTag,
-  holdOrderUntil,
-  removeOrderTag,
-} from "@/lib/clients/shipstation";
+import { addOrderTag, holdOrderUntil, removeOrderTag } from "@/lib/clients/shipstation";
 import { requireStaff } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
@@ -274,10 +270,7 @@ export async function bulkAddOrdersTag(input: {
       const newTagIds = Array.from(
         new Set([...((row.tag_ids as number[] | null) ?? []), input.tagId]),
       );
-      await supabase
-        .from("shipstation_orders")
-        .update({ tag_ids: newTagIds })
-        .eq("id", row.id);
+      await supabase.from("shipstation_orders").update({ tag_ids: newTagIds }).eq("id", row.id);
       succeeded++;
     } catch (err) {
       failed.push({
@@ -312,13 +305,8 @@ export async function bulkRemoveOrdersTag(input: {
     }
     try {
       await removeOrderTag(row.shipstation_order_id as number, input.tagId);
-      const newTagIds = ((row.tag_ids as number[] | null) ?? []).filter(
-        (t) => t !== input.tagId,
-      );
-      await supabase
-        .from("shipstation_orders")
-        .update({ tag_ids: newTagIds })
-        .eq("id", row.id);
+      const newTagIds = ((row.tag_ids as number[] | null) ?? []).filter((t) => t !== input.tagId);
+      await supabase.from("shipstation_orders").update({ tag_ids: newTagIds }).eq("id", row.id);
       succeeded++;
     } catch (err) {
       failed.push({
