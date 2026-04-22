@@ -21,6 +21,7 @@ import {
   getStoreConnections,
   testStoreConnection,
 } from "@/actions/store-connections";
+import { ConfigureShopifyAppDialog } from "@/components/admin/configure-shopify-app-dialog";
 import { BlockList } from "@/components/shared/block-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,7 @@ export default function StoreConnectionsPage() {
   const [statusFilter, setStatusFilter] = useState<ConnectionStatus | "">("");
   const [testingId, setTestingId] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [configureShopifyId, setConfigureShopifyId] = useState<string | null>(null);
   const [newConn, setNewConn] = useState({
     orgId: "",
     platform: "" as StorePlatform | "",
@@ -225,6 +227,16 @@ export default function StoreConnectionsPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <ConnectionStatusBadge status={conn.connection_status} />
                   <Badge variant="outline">{conn.sku_mapping_count} SKU mappings</Badge>
+                  {conn.do_not_fanout && (
+                    <Badge variant="outline" className="gap-1">
+                      <ShieldAlert className="h-3 w-3" /> Dormant
+                    </Badge>
+                  )}
+                  {conn.platform === "shopify" && conn.default_location_id && (
+                    <Badge variant="secondary" className="font-mono text-[10px]">
+                      loc {conn.default_location_id}
+                    </Badge>
+                  )}
                 </div>
               )}
               renderBody={({ row: conn }) => (
@@ -252,6 +264,15 @@ export default function StoreConnectionsPage() {
               )}
               renderActions={({ row: conn }) => (
                 <div className="flex gap-1">
+                  {conn.platform === "shopify" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setConfigureShopifyId(conn.id)}
+                    >
+                      Configure App
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -279,6 +300,32 @@ export default function StoreConnectionsPage() {
           </div>
         ))
       )}
+
+      {/* Per-Shopify-connection HRD-35 onboarding dialog */}
+      {configureShopifyId &&
+        (() => {
+          const conn = filtered.find((c) => c.id === configureShopifyId);
+          if (!conn) return null;
+          return (
+            <ConfigureShopifyAppDialog
+              open
+              onOpenChange={(open) => {
+                if (!open) setConfigureShopifyId(null);
+              }}
+              connection={{
+                id: conn.id,
+                org_id: conn.org_id,
+                org_name: conn.org_name,
+                store_url: conn.store_url,
+                api_key: conn.api_key,
+                shopify_app_client_id: conn.shopify_app_client_id,
+                shopify_app_client_secret_encrypted: conn.shopify_app_client_secret_encrypted,
+                default_location_id: conn.default_location_id,
+                do_not_fanout: conn.do_not_fanout,
+              }}
+            />
+          );
+        })()}
 
       {/* Add Connection Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>

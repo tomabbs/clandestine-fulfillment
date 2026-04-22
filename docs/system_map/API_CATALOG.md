@@ -7,12 +7,23 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - Next.js API route handlers in `src/app/api/**/route.ts`
 - Server action boundaries in `src/actions/**/*.ts`
 
+## Cache and Freshness Contract
+
+- All durable UI reads must use `useAppQuery` tiering and `query-keys.ts` factories.
+- New read paths must be classified as `hot operational`, `warm collaborative`, or `cold config/reference` per `docs/system_map/CACHE_ARCHITECTURE.md`.
+- Scope-sensitive reads must have scope-safe key dimensions (workspace/org/authz variant where response shape differs).
+- Mutations that change read models must invalidate affected key families; TTL is fallback, not primary correctness.
+- Any new API/action that changes freshness behavior must update:
+  - this catalog (boundary notes),
+  - `docs/system_map/CACHE_ARCHITECTURE.md`,
+  - `docs/RELEASE_GATE_CRITERIA.md` (if release checks change).
+
 ## API Routes (App Router)
 
 | Method | Route | File | Purpose |
 |---|---|---|---|
 | `GET` | `/api/health` | `src/app/api/health/route.ts` | Runtime health endpoint |
-| `POST` | `/api/webhooks/shopify` | `src/app/api/webhooks/shopify/route.ts` | Shopify webhook ingest (inventory, orders) |
+| `POST` | `/api/webhooks/shopify` | `src/app/api/webhooks/shopify/route.ts` | First-party Shopify webhook ingest (observe-only for `inventory_levels/update`/order topics; records resolver trace + status, no inventory/order side effects) |
 | `POST` | `/api/webhooks/shipstation` | `src/app/api/webhooks/shipstation/route.ts` | ShipStation `SHIP_NOTIFY` ingest (Phase 2). Verifies `x-ss-signature` HMAC against `SHIPSTATION_WEBHOOK_SECRET`, dedupes via `webhook_events` (`platform='shipstation'`, `external_webhook_id='shipstation:ship_notify:{resource_url}'`), enqueues `process-shipstation-shipment` task. Returns 200 in <500ms. |
 | `POST` | `/api/webhooks/shopify/gdpr` | `src/app/api/webhooks/shopify/gdpr/route.ts` | Combined Shopify GDPR compliance handler (HMAC verified) |
 | `POST` | `/api/webhooks/shopify/gdpr/customers-data-request` | `src/app/api/webhooks/shopify/gdpr/customers-data-request/route.ts` | Shopify GDPR customers data request (HMAC verified, idempotent) |
@@ -22,7 +33,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
 | `POST` | `/api/webhooks/stripe` | `src/app/api/webhooks/stripe/route.ts` | Stripe billing webhooks |
 | `POST` | `/api/webhooks/resend-inbound` | `src/app/api/webhooks/resend-inbound/route.ts` | Resend inbound email hooks |
 | `POST` | `/api/webhooks/client-store` | `src/app/api/webhooks/client-store/route.ts` | Generic client store webhook ingress |
-| `GET` | `/api/oauth/shopify` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth initiation + callback (redirect_uri points here) |
+| `GET` | `/api/oauth/shopify` | `src/app/api/oauth/shopify/route.ts` | Shopify OAuth initiation + callback (HRD-35: per-connection Custom-distribution app credentials resolved from `client_store_connections` when `connection_id` in state; HRD-35.1: state nonce stored in `oauth_states` (`nonce_purpose='shopify_install'`, 15min TTL, single-use); HRD-25 scope set; new connections insert with `do_not_fanout=true`) |
 | `POST` | `/api/oauth/woocommerce` | `src/app/api/oauth/woocommerce/route.ts` | WooCommerce OAuth key delivery (receives credentials from portal-stores action) |
 | `POST` | `/api/oauth/woocommerce/callback` | `src/app/api/oauth/woocommerce/callback/route.ts` | WooCommerce OAuth 1.0a key delivery |
 | `GET` | `/api/oauth/squarespace` | `src/app/api/oauth/squarespace/route.ts` | Squarespace OAuth initiation |
@@ -230,6 +241,7 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - Sales Report API: `salesReport`, `generateSalesReport`, `fetchSalesReport` (v4, all-time transaction history with catalog_number/upc/isrc); async generate/fetch deprecated in favor of sync sales_report
   - SKU management: `updateSku` (push SKUs to Bandcamp, behind feature flag)
   - store connections and mappings: connection CRUD/test + mapping and reprocess ops; **`reactivateClientStoreConnection({ connectionId })`** (Phase 0.8) — staff-only Server Action that flips `do_not_fanout = false`, sets `connection_status = 'active'`, clears `last_error`/`last_error_at`, and writes a `channel_sync_log` audit row tagged with the actor. The dormancy gate at `src/lib/server/client-store-fanout-gate.ts` (`shouldFanoutToConnection()`) is the single chokepoint consulted by `multi-store-inventory-push`, `client-store-order-detect`, `process-client-store-webhook`, and `createStoreSyncClient` — never bypass it. Admin UI: `/admin/settings/client-store-reconnect`.
+  - **HRD-35 per-client Shopify Custom-distribution app onboarding (2026-04-22, staff-only):** `setShopifyAppCredentials({ connectionId, shopifyAppClientId, shopifyAppClientSecret })` writes per-connection app credentials to `client_store_connections.shopify_app_client_id` / `_secret_encrypted`. `generateShopifyInstallUrl({ connectionId, shopDomain })` returns the install URL with `connection_id` encoded in state (the OAuth route's Phase A persists the nonce server-side via `oauth_states` per HRD-35.1; this Server Action does NOT write the nonce). `listShopifyLocations({ connectionId })` reads `/admin/api/2026-01/locations.json` with the per-connection token (`read_locations` scope required — installs predating HRD-25 get a clear "re-install" error). `setShopifyDefaultLocation({ connectionId, locationId })` re-verifies the locationId is in the live Shopify list AND active before persisting to `client_store_connections.default_location_id`. The companion UI is the per-connection "Configure App" dialog at `/admin/settings/store-connections` (`src/components/admin/configure-shopify-app-dialog.tsx`).
   - pirate ship imports: `initiateImport`, `getImportHistory`, `getImportDetail`
   - preorder tools: `getPreorderProducts`, `manualRelease` (triggers `preorder-release-variant` for single-variant release — NOT the full fulfillment job), `getPreorderAllocationPreview`
   - Shopify client additions: `inventoryItemUpdate`, `collectionCreate`, `collectionAddProducts`, `findOrCreateCollection`, `publishToSafeChannels`, `getPublicationIds` (all in `src/lib/clients/shopify-client.ts`). Variant input helper: `buildShopifyVariantInput` in `src/lib/clients/shopify-variant-input.ts`.

@@ -3,12 +3,19 @@
 import { z } from "zod/v4";
 import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { env } from "@/lib/shared/env";
 import type {
   ClientStoreConnection,
   ClientStoreSkuMapping,
   ConnectionStatus,
   StorePlatform,
 } from "@/lib/shared/types";
+
+// HRD-09.2: pin a single API version for client-store Shopify reads invoked
+// from Server Actions. The OAuth callback also uses this version implicitly
+// (Shopify pins the version per-app, not per-request — we just have to use the
+// same version here that the app config declares).
+const SHOPIFY_API_VERSION = "2026-01";
 
 // === Zod schemas (Rule #5) ===
 
@@ -530,4 +537,268 @@ export async function autoDiscoverSkus(
   }
 
   return { matched, unmatched };
+}
+
+// ============================================================================
+// HRD-35 — Per-client Custom-distribution app onboarding (staff-side)
+//
+// The staff workflow for a brand-new Shopify connection is:
+//   1) Create a Custom-distribution app inside the client's Shopify Partner
+//      organization (manual, in Shopify's Partner Dashboard).
+//   2) Paste the Client ID + Client Secret into the Clandestine admin UI.
+//      → setShopifyAppCredentials
+//   3) Click an install link generated against the per-connection app + the
+//      client's myshopify domain.
+//      → generateShopifyInstallUrl
+//   4) Complete the OAuth consent flow in Shopify; the callback at
+//      /api/oauth/shopify upserts the access token onto the connection row
+//      with do_not_fanout=true (Phase 0.8 default).
+//   5) Pick a default Shopify location for inventory ops.
+//      → listShopifyLocations + setShopifyDefaultLocation
+//   6) Run autoDiscoverSkus + dry-run reconciliation (HRD-04 — separate slug),
+//      then call reactivateClientStoreConnection to flip do_not_fanout=false.
+//
+// All actions in this section are STAFF-ONLY (require requireAuth + isStaff).
+// They never call Shopify with the env-singleton credentials — the per-
+// connection token is always used.
+// ============================================================================
+
+const setShopifyAppCredentialsSchema = z.object({
+  connectionId: z.string().uuid(),
+  shopifyAppClientId: z.string().min(1, "Client ID is required"),
+  shopifyAppClientSecret: z.string().min(1, "Client Secret is required"),
+});
+
+/**
+ * HRD-35 step 2 — store the per-connection Shopify Custom-distribution app
+ * credentials. The secret column is named `*_encrypted` so the deferred
+ * encryption-at-rest work (slug `client-store-credentials-at-rest-encryption`)
+ * is a behavior change, not a column rename. Today the column carries
+ * plaintext.
+ */
+export async function setShopifyAppCredentials(input: {
+  connectionId: string;
+  shopifyAppClientId: string;
+  shopifyAppClientSecret: string;
+}): Promise<{ success: true }> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = setShopifyAppCredentialsSchema.parse(input);
+
+  const serviceClient = createServiceRoleClient();
+  const { data: existing, error: fetchErr } = await serviceClient
+    .from("client_store_connections")
+    .select("id, platform")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (fetchErr) throw new Error(`Connection lookup failed: ${fetchErr.message}`);
+  if (!existing) throw new Error("Connection not found");
+  if (existing.platform !== "shopify") {
+    throw new Error("setShopifyAppCredentials only applies to Shopify connections");
+  }
+
+  const { error } = await serviceClient
+    .from("client_store_connections")
+    .update({
+      shopify_app_client_id: data.shopifyAppClientId,
+      shopify_app_client_secret_encrypted: data.shopifyAppClientSecret,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", data.connectionId);
+  if (error) throw new Error(`Failed to set Shopify app credentials: ${error.message}`);
+
+  return { success: true };
+}
+
+/**
+ * HRD-35 step 3 — generate the install URL for a per-connection Shopify
+ * Custom-distribution app. Encodes the connection_id into the OAuth state so
+ * the callback knows which app credentials to use for HMAC verification and
+ * token exchange. The state nonce itself is stored server-side by the OAuth
+ * route's Phase A (HRD-35.1) — not by this action — so we don't have to
+ * coordinate writes across two Server Actions.
+ *
+ * Returns the URL the operator clicks to start the install. We deliberately do
+ * NOT redirect from this Server Action — the operator wants a URL they can
+ * inspect, share over Slack, or paste into a different browser session if
+ * Shopify forces a re-auth.
+ */
+const generateShopifyInstallUrlSchema = z.object({
+  connectionId: z.string().uuid(),
+  shopDomain: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9-]+\.myshopify\.com$/i, "shopDomain must be the bare myshopify.com hostname"),
+});
+
+export async function generateShopifyInstallUrl(input: {
+  connectionId: string;
+  shopDomain: string;
+}): Promise<{ installUrl: string; usesPerConnectionApp: boolean }> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = generateShopifyInstallUrlSchema.parse(input);
+
+  const serviceClient = createServiceRoleClient();
+  const { data: connection, error } = await serviceClient
+    .from("client_store_connections")
+    .select("id, org_id, platform, shopify_app_client_id, shopify_app_client_secret_encrypted")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (error) throw new Error(`Connection lookup failed: ${error.message}`);
+  if (!connection) throw new Error("Connection not found");
+  if (connection.platform !== "shopify") {
+    throw new Error("generateShopifyInstallUrl only applies to Shopify connections");
+  }
+
+  const usesPerConnectionApp = Boolean(
+    connection.shopify_app_client_id && connection.shopify_app_client_secret_encrypted,
+  );
+  if (!usesPerConnectionApp) {
+    // Per HRD-35, every new client should use a per-connection Custom-
+    // distribution app. Surface this gap loudly rather than silently falling
+    // back to env credentials.
+    throw new Error(
+      "Per-connection Shopify app credentials are not configured. Run setShopifyAppCredentials first.",
+    );
+  }
+
+  const params = new URLSearchParams({
+    shop: data.shopDomain,
+    org_id: connection.org_id,
+    connection_id: connection.id,
+  });
+
+  return {
+    installUrl: `${env().NEXT_PUBLIC_APP_URL}/api/oauth/shopify?${params.toString()}`,
+    usesPerConnectionApp: true,
+  };
+}
+
+/**
+ * HRD-35 step 5a — list Shopify locations for the connection so staff can pick
+ * a default location for inventory ops. Uses the per-connection token; never
+ * calls Clandestine's own Shopify env-singleton.
+ *
+ * Northern Spy probe finding (2026-04-21): single-location stores are common.
+ * The UI should auto-select the only location in this case.
+ */
+const listShopifyLocationsSchema = z.object({
+  connectionId: z.string().uuid(),
+});
+
+export type ShopifyLocationSummary = {
+  id: string; // numeric REST id (NOT the GraphQL gid)
+  name: string;
+  active: boolean;
+  city: string | null;
+  countryCode: string | null;
+};
+
+export async function listShopifyLocations(input: {
+  connectionId: string;
+}): Promise<ShopifyLocationSummary[]> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = listShopifyLocationsSchema.parse(input);
+
+  const serviceClient = createServiceRoleClient();
+  const { data: conn, error } = await serviceClient
+    .from("client_store_connections")
+    .select("api_key, store_url, platform")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (error) throw new Error(`Connection lookup failed: ${error.message}`);
+  if (!conn) throw new Error("Connection not found");
+  if (conn.platform !== "shopify") {
+    throw new Error("listShopifyLocations only applies to Shopify connections");
+  }
+  if (!conn.api_key) {
+    throw new Error("Connection has no Shopify access token — complete the OAuth install first");
+  }
+
+  const url = `${conn.store_url.replace(/\/$/, "")}/admin/api/${SHOPIFY_API_VERSION}/locations.json`;
+  const res = await fetch(url, {
+    headers: {
+      "X-Shopify-Access-Token": conn.api_key,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (res.status === 403 || res.status === 401) {
+    throw new Error(
+      `Shopify rejected the locations call (${res.status}). The connection's offline token most likely lacks the read_locations scope — re-install the Shopify app to grant updated scopes.`,
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Shopify locations fetch failed: HTTP ${res.status} | ${body.slice(0, 300)}`);
+  }
+
+  const json = (await res.json()) as {
+    locations: Array<{
+      id: number;
+      name: string;
+      active: boolean;
+      city?: string | null;
+      country_code?: string | null;
+    }>;
+  };
+
+  return json.locations.map((l) => ({
+    id: String(l.id),
+    name: l.name,
+    active: l.active,
+    city: l.city ?? null,
+    countryCode: l.country_code ?? null,
+  }));
+}
+
+/**
+ * HRD-35 step 5b — persist the staff-selected default location on the
+ * connection row. HRD-05 enforcement (incoming inventory webhooks with
+ * `location_id != default_location_id` are persisted as `wrong_location` and
+ * not applied) lives in `process-client-store-webhook` and is wired up in a
+ * separate session.
+ */
+const setShopifyDefaultLocationSchema = z.object({
+  connectionId: z.string().uuid(),
+  locationId: z.string().min(1),
+});
+
+export async function setShopifyDefaultLocation(input: {
+  connectionId: string;
+  locationId: string;
+}): Promise<{ success: true }> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = setShopifyDefaultLocationSchema.parse(input);
+
+  // Defense-in-depth: confirm the supplied locationId is in the live Shopify
+  // location list. Catches typos and stale UI state. Reuses the listing
+  // helper so the same scope/token resolution applies.
+  const locations = await listShopifyLocations({ connectionId: data.connectionId });
+  const match = locations.find((l) => l.id === data.locationId);
+  if (!match) {
+    throw new Error(
+      `Location ${data.locationId} is not in the Shopify locations list for this connection.`,
+    );
+  }
+  if (!match.active) {
+    throw new Error(
+      `Location ${data.locationId} (${match.name}) is INACTIVE in Shopify. Pick an active location.`,
+    );
+  }
+
+  const serviceClient = createServiceRoleClient();
+  const { error } = await serviceClient
+    .from("client_store_connections")
+    .update({
+      default_location_id: data.locationId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", data.connectionId);
+  if (error) throw new Error(`Failed to set default location: ${error.message}`);
+
+  return { success: true };
 }

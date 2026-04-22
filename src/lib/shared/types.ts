@@ -30,7 +30,14 @@ export type InventorySource =
   // produced when completeCountSession() reconciles a location's counted
   // inventory back to warehouse_inventory_levels. Same migration as
   // manual_inventory_count.
-  | "cycle_count";
+  | "cycle_count"
+  // Direct-Shopify cutover (2026-04-22, HRD-26): emitted with `delta = 0`
+  // when our fanout layer lazily activates a Shopify inventory item at the
+  // staff-selected default location via `inventoryActivate`. Recorded as an
+  // audit row (no quantity change) so admin can grep "this SKU was activated
+  // at this timestamp" without joining external_sync_events. CHECK constraint
+  // extended in supabase/migrations/20260422000001_direct_shopify_metadata.sql.
+  | "inventory_activate";
 
 export type ReviewSeverity = "low" | "medium" | "high" | "critical";
 
@@ -608,6 +615,16 @@ export interface ClientStoreConnection {
   last_error_at: string | null;
   last_error: string | null;
   do_not_fanout: boolean;
+  // HRD-05 — staff-selected default Shopify location for inventory ops.
+  // Inventory webhooks with location_id !== this value are persisted as
+  // status='wrong_location' and not applied. Migration 20260422000001.
+  default_location_id: string | null;
+  // HRD-35 — per-connection Shopify Custom-distribution app credentials.
+  // NULL when the connection still uses the legacy single-app env fallback.
+  shopify_app_client_id: string | null;
+  // Plaintext today; column name is forward-compatible with the deferred
+  // encryption-at-rest work (slug `client-store-credentials-at-rest-encryption`).
+  shopify_app_client_secret_encrypted: string | null;
   created_at: string;
   updated_at: string;
 }
