@@ -25,7 +25,10 @@ import { verifyEasypostSignature } from "@/lib/server/easypost-webhook-signature
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
+// F-2: see client-store/route.ts for rationale; enforced by
+// scripts/check-webhook-runtime.sh.
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // One-shot Sentry warning per cold start when secret is unset. Prevents
 // flooding Sentry on every webhook call while still surfacing the choice

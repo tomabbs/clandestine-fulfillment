@@ -90,6 +90,8 @@ const processClientStoreWebhookTask = _processClientStoreWebhookTask as unknown 
 interface MockState {
   webhookEvents: Map<string, Record<string, unknown>>;
   webhookEventStatusUpdates: Array<{ id: string; status: string | undefined }>;
+  // F-1: telemetry inserts for cancel_after_fulfillment_partial.
+  webhookEventsInserts: Array<Record<string, unknown>>;
   connections: Map<string, Record<string, unknown>>;
   skuMappings: Array<Record<string, unknown>>;
   inventoryLevels: Array<Record<string, unknown>>;
@@ -103,6 +105,7 @@ function newState(): MockState {
   return {
     webhookEvents: new Map(),
     webhookEventStatusUpdates: [],
+    webhookEventsInserts: [],
     connections: new Map(),
     skuMappings: [],
     inventoryLevels: [],
@@ -132,6 +135,12 @@ function installFromMock() {
             return { data: null, error: null };
           },
         }),
+        // F-1: cancel_after_fulfillment_partial telemetry uses .insert(...)
+        // directly (no chained .select). Capture into state for assertions.
+        insert: async (payload: Record<string, unknown>) => {
+          state.webhookEventsInserts.push(payload);
+          return { data: null, error: null };
+        },
       };
     }
     if (table === "client_store_connections") {
@@ -880,6 +889,305 @@ describe("handleOrderCancelled — Shopify orders/cancelled", () => {
     });
 
     expect(result).toMatchObject({ processed: false, reason: "missing_order_id" });
+  });
+
+  // ─── F-1 / HRD-08.1 — partial-cancel recredit triad ─────────────────────
+  //
+  // Three scenarios, all driven from warehouse_order_items.fulfilled_quantity
+  // (DB source-of-truth) and cross-checked against the cancel webhook
+  // payload's line_items[].fulfillment_status (telemetry hint only).
+  //
+  //   none-fulfilled  → recredit FULL quantity, 0 telemetry rows
+  //   3-of-5 partial  → recredit (5 - 3) = 2 only, 1 telemetry row
+  //   all-fulfilled   → recredit 0,            1 telemetry row per item
+  //
+  // The triad is the regression fence for the original bug where the cancel
+  // handler always recredited the full original quantity and double-credited
+  // inventory for items that had already shipped.
+
+  function seedFiveUnitOrder(args: {
+    fulfilledOnDb: number;
+    webhookFulfillmentStatus?: "fulfilled" | "partial" | null;
+  }) {
+    state.warehouseOrders.push({
+      id: "wh-order-cancel",
+      workspace_id: WORKSPACE_ID,
+      external_order_id: "shopify-order-cancel",
+      org_id: ORG_ID,
+      fulfillment_status: null,
+    });
+    state.warehouseOrderItems.push({
+      id: "wh-oi-5pack",
+      order_id: "wh-order-cancel",
+      workspace_id: WORKSPACE_ID,
+      sku: "TPR-LP-5PACK",
+      quantity: 5,
+      fulfilled_quantity: args.fulfilledOnDb,
+      shopify_line_item_id: "shopify-li-5pack",
+    });
+
+    const eventId = "evt-cancel-triad";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/cancelled",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-cancel",
+          cancelled_at: "2026-04-22T12:00:00Z",
+          line_items: [
+            {
+              id: "shopify-li-5pack",
+              quantity: 5,
+              ...(args.webhookFulfillmentStatus !== undefined
+                ? { fulfillment_status: args.webhookFulfillmentStatus }
+                : {}),
+            },
+          ],
+        },
+      },
+    });
+    return eventId;
+  }
+
+  it("F-1 none-fulfilled (0 of 5): recredits full quantity, NO telemetry rows", async () => {
+    seedConnection();
+    const eventId = seedFiveUnitOrder({
+      fulfilledOnDb: 0,
+      webhookFulfillmentStatus: null,
+    });
+
+    const result = (await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    })) as { recredits: Array<{ sku: string; quantity: number; status: string }> };
+
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(1);
+    expect(mockRecordInventoryChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sku: "TPR-LP-5PACK",
+        delta: 5,
+        metadata: expect.objectContaining({
+          original_quantity: 5,
+          fulfilled_quantity: 0,
+          remaining_quantity: 5,
+        }),
+      }),
+    );
+    expect(result.recredits).toEqual([{ sku: "TPR-LP-5PACK", quantity: 5, status: "ok" }]);
+    // Critical: zero `cancel_after_fulfillment_partial` telemetry rows when
+    // nothing was fulfilled.
+    expect(
+      state.webhookEventsInserts.filter((r) => r.status === "cancel_after_fulfillment_partial"),
+    ).toHaveLength(0);
+  });
+
+  it("F-1 partial (3 of 5 shipped): recredits remaining 2, emits 1 telemetry row", async () => {
+    seedConnection();
+    const eventId = seedFiveUnitOrder({
+      fulfilledOnDb: 3,
+      webhookFulfillmentStatus: "partial",
+    });
+
+    const result = (await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    })) as { recredits: Array<{ sku: string; quantity: number; status: string }> };
+
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(1);
+    expect(mockRecordInventoryChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sku: "TPR-LP-5PACK",
+        delta: 2, // 5 - 3 = 2 remaining
+        correlationId: `cancel:${eventId}:TPR-LP-5PACK:shopify-li-5pack`,
+        metadata: expect.objectContaining({
+          original_quantity: 5,
+          fulfilled_quantity: 3,
+          remaining_quantity: 2,
+        }),
+      }),
+    );
+    expect(result.recredits).toEqual([{ sku: "TPR-LP-5PACK", quantity: 2, status: "ok" }]);
+
+    const telemetry = state.webhookEventsInserts.filter(
+      (r) => r.status === "cancel_after_fulfillment_partial",
+    );
+    expect(telemetry).toHaveLength(1);
+    expect(telemetry[0]).toMatchObject({
+      external_webhook_id: `cancel-fulfilled:${eventId}:wh-oi-5pack`,
+      topic: "orders/cancelled.cancel_after_fulfillment_partial",
+      metadata: expect.objectContaining({
+        parent_webhook_event_id: eventId,
+        order_id: "wh-order-cancel",
+        warehouse_order_item_id: "wh-oi-5pack",
+        sku: "TPR-LP-5PACK",
+        original_quantity: 5,
+        fulfilled_quantity: 3,
+        remaining_quantity: 2,
+        webhook_fulfillment_status: "partial",
+        // 3 fulfilled on DB vs `partial` status (= 0 hint) → disagreement.
+        db_webhook_disagree: true,
+      }),
+    });
+
+    // The warehouse_orders row still flips to cancelled even on a partial.
+    expect(state.warehouseOrdersUpdates).toContainEqual(
+      expect.objectContaining({
+        id: "wh-order-cancel",
+        payload: expect.objectContaining({ fulfillment_status: "cancelled" }),
+      }),
+    );
+  });
+
+  it("F-1 all-fulfilled (5 of 5 shipped): NO recredit, telemetry row, status='skipped_already_fulfilled'", async () => {
+    seedConnection();
+    const eventId = seedFiveUnitOrder({
+      fulfilledOnDb: 5,
+      webhookFulfillmentStatus: "fulfilled",
+    });
+
+    const result = (await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    })) as {
+      recredits: Array<{ sku: string; quantity: number; status: string; reason?: string }>;
+    };
+
+    // Inventory NEVER touched when everything was already shipped.
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(result.recredits).toEqual([
+      {
+        sku: "TPR-LP-5PACK",
+        quantity: 0,
+        status: "skipped_already_fulfilled",
+        reason: "fulfilled_quantity=5 of 5",
+      },
+    ]);
+
+    const telemetry = state.webhookEventsInserts.filter(
+      (r) => r.status === "cancel_after_fulfillment_partial",
+    );
+    expect(telemetry).toHaveLength(1);
+    expect(telemetry[0]).toMatchObject({
+      external_webhook_id: `cancel-fulfilled:${eventId}:wh-oi-5pack`,
+      metadata: expect.objectContaining({
+        original_quantity: 5,
+        fulfilled_quantity: 5,
+        remaining_quantity: 0,
+        webhook_fulfillment_status: "fulfilled",
+        db_webhook_disagree: false,
+      }),
+    });
+
+    // Order still moves to cancelled status (cancel succeeded; just no
+    // inventory side-effect needed).
+    expect(state.warehouseOrdersUpdates).toContainEqual(
+      expect.objectContaining({
+        id: "wh-order-cancel",
+        payload: expect.objectContaining({ fulfillment_status: "cancelled" }),
+      }),
+    );
+  });
+
+  it("F-1 handleOrderCreated populates fulfilled_quantity from line_items[].fulfillment_status", async () => {
+    seedConnection();
+    const eventId = "evt-orders-create-fulfilled";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-pre-fulfilled",
+          line_items: [
+            { id: "li-100", sku: "PREFULL-A", quantity: 3, fulfillment_status: "fulfilled" },
+            { id: "li-101", sku: "PREFULL-B", quantity: 2, fulfillment_status: null },
+            { id: "li-102", sku: "PREFULL-C", quantity: 1 },
+          ],
+        },
+      },
+    });
+    state.skuMappings.push(
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "PREFULL-A",
+        variant_id: "var-A",
+        warehouse_product_variants: { sku: "PREFULL-A" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "PREFULL-B",
+        variant_id: "var-B",
+        warehouse_product_variants: { sku: "PREFULL-B" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "PREFULL-C",
+        variant_id: "var-C",
+        warehouse_product_variants: { sku: "PREFULL-C" },
+      },
+    );
+
+    // Capture the warehouse_order_items.insert payload by patching the mock.
+    const insertedOrderItems: Array<Record<string, unknown>> = [];
+    const previousImpl = mockFrom.getMockImplementation();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "warehouse_orders") {
+        return {
+          select: () => ({
+            eq: (_col: string, _val: unknown) => ({
+              eq: () => ({
+                single: async () => ({ data: null, error: null }),
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+          }),
+          insert: (_payload: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => ({
+                data: { id: "wh-order-prefulfilled" },
+                error: null,
+              }),
+            }),
+          }),
+          update: (payload: Record<string, unknown>) => ({
+            eq: async (_col: string, id: string) => {
+              state.warehouseOrdersUpdates.push({ id, payload });
+              return { data: null, error: null };
+            },
+          }),
+        };
+      }
+      if (table === "warehouse_order_items") {
+        return {
+          insert: async (rows: Array<Record<string, unknown>>) => {
+            insertedOrderItems.push(...rows);
+            return { data: null, error: null };
+          },
+        };
+      }
+      return previousImpl ? previousImpl(table) : {};
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(insertedOrderItems).toHaveLength(3);
+    expect(insertedOrderItems[0]).toMatchObject({
+      sku: "PREFULL-A",
+      quantity: 3,
+      fulfilled_quantity: 3, // fulfillment_status === 'fulfilled' → full qty
+    });
+    expect(insertedOrderItems[1]).toMatchObject({
+      sku: "PREFULL-B",
+      quantity: 2,
+      fulfilled_quantity: 0, // null status → 0 (conservative)
+    });
+    expect(insertedOrderItems[2]).toMatchObject({
+      sku: "PREFULL-C",
+      quantity: 1,
+      fulfilled_quantity: 0, // missing status → 0 (conservative)
+    });
   });
 });
 

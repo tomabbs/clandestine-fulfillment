@@ -21,8 +21,8 @@ import {
   graphqlTopicToRest,
   listWebhookSubscriptions,
   persistWebhookRegistrationMetadata,
-  registerWebhookSubscriptions,
   type RegisterWebhookSubscriptionsResult,
+  registerWebhookSubscriptions,
   SHOPIFY_REQUIRED_WEBHOOK_TOPICS,
   topicEnumToRest,
 } from "@/lib/server/shopify-webhook-subscriptions";

@@ -33,7 +33,10 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { readWebhookBody } from "@/lib/server/webhook-body";
 import { env } from "@/lib/shared/env";
 
+// F-2: see client-store/route.ts for rationale; enforced by
+// scripts/check-webhook-runtime.sh.
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // One-shot Sentry warning per cold start when no signing secret available.
 // Prevents flooding Sentry on every webhook call while still surfacing the

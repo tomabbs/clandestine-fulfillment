@@ -6,6 +6,11 @@ import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
+// F-2: see client-store/route.ts for rationale; enforced by
+// scripts/check-webhook-runtime.sh.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const OPTIONAL_SUPPORT_CONVERSATION_COLUMNS = ["client_last_read_at"] as const;
 const OPTIONAL_SUPPORT_MESSAGE_COLUMNS = ["source", "delivered_via_email"] as const;
 

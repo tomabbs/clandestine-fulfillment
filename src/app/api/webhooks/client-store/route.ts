@@ -38,6 +38,14 @@ import {
   verifyHmacSignature,
 } from "@/lib/server/webhook-body";
 
+// F-2: Webhook routes MUST run on the Node.js runtime so node:crypto + the
+// Supabase service-role key are available; `dynamic = 'force-dynamic'`
+// disables Next's full-route caching (a cached webhook body would corrupt
+// HMAC verification + dedup). Both exports are enforced by
+// scripts/check-webhook-runtime.sh in CI.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   const rawBody = await readWebhookBody(request);
 

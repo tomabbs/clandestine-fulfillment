@@ -12,6 +12,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { readWebhookBody, verifyHmacSignature } from "@/lib/server/webhook-body";
 
+// F-2: see client-store/route.ts for rationale; enforced by
+// scripts/check-webhook-runtime.sh.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   const rawBody = await readWebhookBody(request);
 

@@ -375,15 +375,30 @@ async function handleOrderCreated(
     .single();
 
   if (newOrder && lineItems.length > 0) {
-    const items = lineItems.map((li) => ({
-      order_id: newOrder.id,
-      workspace_id: workspaceId,
-      sku: (li.sku as string) ?? "",
-      quantity: (li.quantity as number) ?? 1,
-      // Persist the platform line-item id so the refund + cancel handlers
-      // can resolve back to the right warehouse_order_items row.
-      shopify_line_item_id: li.id !== undefined && li.id !== null ? String(li.id) : null,
-    }));
+    const items = lineItems.map((li) => {
+      const qty = (li.quantity as number) ?? 1;
+      // F-1 / HRD-08.1: capture per-line fulfilled-at-create state so the
+      // cancel handler can compute remaining-unfulfilled units to recredit.
+      // Shopify shape: line_items[].fulfillment_status is `'fulfilled'`,
+      // `'partial'`, `null`, or absent. We only treat the explicit
+      // `'fulfilled'` value as "this whole line is shipped" — `'partial'` is
+      // rare on orders/create (Shopify rarely emits partial state at order-
+      // create time) and is treated conservatively as 0 fulfilled so the
+      // cancel handler recredits the full quantity. The corner case is
+      // observable in the cancel telemetry row's `db_webhook_disagree` flag
+      // and would surface in the megaplan spot-check artifact.
+      const isFulfilled = li.fulfillment_status === "fulfilled";
+      return {
+        order_id: newOrder.id,
+        workspace_id: workspaceId,
+        sku: (li.sku as string) ?? "",
+        quantity: qty,
+        fulfilled_quantity: isFulfilled ? qty : 0,
+        // Persist the platform line-item id so the refund + cancel handlers
+        // can resolve back to the right warehouse_order_items row.
+        shopify_line_item_id: li.id !== undefined && li.id !== null ? String(li.id) : null,
+      };
+    });
     await supabase.from("warehouse_order_items").insert(items);
 
     // Decrement warehouse inventory for each line item.
@@ -738,13 +753,25 @@ async function handleRefund(
  * Order-cancelled handler — Shopify `orders/cancelled`.
  *
  * Payload shape (per Shopify Admin API):
- *   { id, cancelled_at, cancel_reason, line_items: [...] }
+ *   { id, cancelled_at, cancel_reason, line_items: [{ id, fulfillment_status, ...}] }
  *
- * Re-credits the inventory the original `orders/create` decremented. Uses
- * the SAME line-item-id-keyed correlation-ID base as `handleOrderCreated`,
- * but with a `cancel:` prefix so the underlying `(sku, correlation_id)`
- * UNIQUE constraint dedups retries without colliding with the original
- * decrement.
+ * Re-credits the inventory the original `orders/create` decremented MINUS
+ * any units that were already fulfilled before the cancel arrived (HRD-08.1
+ * partial-cancel case). Uses the SAME line-item-id-keyed correlation-ID
+ * base as `handleOrderCreated`, but with a `cancel:` prefix so the
+ * underlying `(sku, correlation_id)` UNIQUE constraint dedups retries
+ * without colliding with the original decrement.
+ *
+ * F-1 / HRD-08.1 contract:
+ *   - DB is source of truth for fulfilled_quantity (set by handleOrderCreated
+ *     and — once HRD-28 ships GraphQL fulfillmentCreate — by mark-platform-
+ *     fulfilled). On disagreement with the cancel webhook payload, DB wins.
+ *   - For every line where fulfilled_quantity > 0, we emit a separate
+ *     `webhook_events` row with `status='cancel_after_fulfillment_partial'`
+ *     for forensics. Stable external_webhook_id makes that insert idempotent
+ *     across cancel retries.
+ *   - Lines with remaining = 0 (fully fulfilled) are recorded in the result
+ *     as `skipped_already_fulfilled` and contribute zero inventory delta.
  *
  * Idempotency strategy: the warehouse_orders row's fulfillment_status is
  * flipped to 'cancelled' once. Re-deliveries find the existing 'cancelled'
@@ -793,18 +820,84 @@ async function handleOrderCancelled(
   // don't collide.
   const { data: items } = await supabase
     .from("warehouse_order_items")
-    .select("id, sku, quantity, shopify_line_item_id")
+    .select("id, sku, quantity, fulfilled_quantity, shopify_line_item_id")
     .eq("order_id", order.id);
+
+  // F-1: build a lookup of webhook line_items by id so we can cross-check the
+  // DB-side fulfilled_quantity against the webhook's fulfillment_status. The
+  // DB always wins on conflict (most recent ground truth from our own
+  // fulfillment writes); the webhook's hint is used for telemetry only.
+  const webhookLineItemsById = new Map<string, Record<string, unknown>>();
+  for (const li of (data.line_items as Array<Record<string, unknown>> | undefined) ?? []) {
+    if (li.id !== undefined && li.id !== null) {
+      webhookLineItemsById.set(String(li.id), li);
+    }
+  }
 
   const recreditResults: {
     sku: string;
     quantity: number;
-    status: "ok" | "error";
+    status: "ok" | "error" | "skipped_already_fulfilled";
     reason?: string;
   }[] = [];
 
   for (const item of items ?? []) {
     if (!item.sku || !item.quantity || item.quantity <= 0) continue;
+
+    // F-1 / HRD-08.1 — DB is source of truth for fulfilled_quantity.
+    const dbFulfilled = (item.fulfilled_quantity as number | undefined) ?? 0;
+
+    const webhookLi = item.shopify_line_item_id
+      ? webhookLineItemsById.get(item.shopify_line_item_id)
+      : undefined;
+    const webhookFulfillmentStatus =
+      (webhookLi?.fulfillment_status as string | null | undefined) ?? null;
+    const webhookFulfilledHint =
+      webhookFulfillmentStatus === "fulfilled" ? (item.quantity as number) : 0;
+    const dbWebhookDisagree = dbFulfilled !== webhookFulfilledHint;
+
+    const remaining = Math.max(0, (item.quantity as number) - dbFulfilled);
+
+    // F-1: telemetry row for any line that was partially-or-fully fulfilled
+    // when the cancel arrived. Stable external_webhook_id makes the insert
+    // idempotent across retries; transient/duplicate failures are swallowed
+    // because the recredit decision below is the only mandatory write.
+    if (dbFulfilled > 0) {
+      try {
+        await supabase.from("webhook_events").insert({
+          workspace_id: workspaceId,
+          platform,
+          external_webhook_id: `cancel-fulfilled:${eventId}:${item.id}`,
+          topic: "orders/cancelled.cancel_after_fulfillment_partial",
+          status: "cancel_after_fulfillment_partial",
+          metadata: {
+            parent_webhook_event_id: eventId,
+            order_id: order.id,
+            warehouse_order_item_id: item.id,
+            sku: item.sku,
+            original_quantity: item.quantity,
+            fulfilled_quantity: dbFulfilled,
+            remaining_quantity: remaining,
+            webhook_fulfillment_status: webhookFulfillmentStatus,
+            db_webhook_disagree: dbWebhookDisagree,
+          },
+        });
+      } catch {
+        /* idempotent retry / transient — non-critical */
+      }
+    }
+
+    if (remaining <= 0) {
+      // Fully-fulfilled line — no recredit. Telemetry above captured the
+      // audit row. recreditResults entry is informational only.
+      recreditResults.push({
+        sku: item.sku,
+        quantity: 0,
+        status: "skipped_already_fulfilled",
+        reason: `fulfilled_quantity=${dbFulfilled} of ${item.quantity}`,
+      });
+      continue;
+    }
 
     const lineItemId = item.shopify_line_item_id ?? item.id;
     const correlationId = `cancel:${eventId}:${item.sku}:${lineItemId}`;
@@ -813,7 +906,7 @@ async function handleOrderCancelled(
       const result = await recordInventoryChange({
         workspaceId,
         sku: item.sku,
-        delta: item.quantity,
+        delta: remaining,
         source: platform === "woocommerce" ? "woocommerce" : "shopify",
         correlationId,
         metadata: {
@@ -823,17 +916,20 @@ async function handleOrderCancelled(
           order_id: order.id,
           remote_order_id: remoteOrderId,
           warehouse_order_item_id: item.id,
+          original_quantity: item.quantity,
+          fulfilled_quantity: dbFulfilled,
+          remaining_quantity: remaining,
         },
       });
       recreditResults.push({
         sku: item.sku,
-        quantity: item.quantity,
+        quantity: remaining,
         status: result.success || result.alreadyProcessed ? "ok" : "error",
       });
     } catch (err) {
       recreditResults.push({
         sku: item.sku,
-        quantity: item.quantity,
+        quantity: remaining,
         status: "error",
         reason: err instanceof Error ? err.message : String(err),
       });

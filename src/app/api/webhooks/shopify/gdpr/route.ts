@@ -17,6 +17,11 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { readWebhookBody, verifyHmacSignature } from "@/lib/server/webhook-body";
 import { env } from "@/lib/shared/env";
 
+// F-2: see client-store/route.ts for rationale; enforced by
+// scripts/check-webhook-runtime.sh.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   const rawBody = await readWebhookBody(req);
 

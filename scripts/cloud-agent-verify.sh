@@ -32,4 +32,10 @@ bash scripts/ci-inventory-guard.sh
 echo "==> CI guard: webhook dedup"
 bash scripts/ci-webhook-dedup-guard.sh
 
+echo "==> CI guard: webhook runtime (F-2)"
+bash scripts/check-webhook-runtime.sh
+
+echo "==> CI guard: fulfilled_quantity write-only (F-1)"
+bash scripts/check-fulfilled-quantity-writers.sh
+
 echo "cloud-agent-verify.sh: all steps passed."

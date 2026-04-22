@@ -236,11 +236,10 @@ function callbackRequest(args: {
   return new Request(url, { method: "GET" });
 }
 
-function freshCallbackPair(opts?: {
-  orgId?: string;
-  connectionId?: string;
-  secret?: string;
-}): { request: Request; nonce: string } {
+function freshCallbackPair(opts?: { orgId?: string; connectionId?: string; secret?: string }): {
+  request: Request;
+  nonce: string;
+} {
   const orgId = opts?.orgId ?? ORG_ID;
   const nonce = "callback-nonce-1";
   const state = buildState(orgId, nonce, opts?.connectionId);
