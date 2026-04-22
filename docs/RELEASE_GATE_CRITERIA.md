@@ -51,6 +51,26 @@ Pass criteria:
 
 ---
 
+### A1. Cache architecture conformance (mandatory)
+
+Run:
+
+```bash
+pnpm test tests/unit/lib/query-tiers.test.ts tests/unit/lib/query-keys.test.ts
+pnpm test:integration tests/integration/tenant-isolation.test.ts
+```
+
+Pass criteria:
+- query tier and key-contract unit tests pass
+- tenant-isolation integration test passes when integration env vars are configured
+- if integration env vars are not configured, skip must be explicitly noted in release notes with owner + follow-up date
+- any cache-policy changes must include doc updates in:
+  - `docs/system_map/CACHE_ARCHITECTURE.md`
+  - `docs/system_map/API_CATALOG.md` (if action/read boundaries changed)
+  - `TRUTH_LAYER.md`
+
+---
+
 ### B. Migration and RLS parity checks
 
 Run in production SQL editor:
@@ -73,6 +93,7 @@ Pass criteria:
 - expected integrations show recent webhook activity (or documented maintenance window)
 - no unexplained error spikes in `webhook_events`
 - client store connections do not show persistent stale/failing state
+- for first-party Shopify webhook traffic, `ignored_shipstation_authoritative` is expected for inventory/order topics while ShipStation remains authoritative for order/inventory movement
 
 ---
 

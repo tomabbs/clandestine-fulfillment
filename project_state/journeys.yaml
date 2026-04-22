@@ -1,6 +1,8 @@
 version: 1
 updated_at: 2026-04-20  # Org-id backfill on warehouse_products (1,533 NULL → 0) and inventory master XLSX export workbook for the upcoming physical inventory pass; both operator-only scripts, no UI.
 
+prior_update: 2026-04-20  # Shopify webhook workspace-first stabilization + operating-model alignment: first-party `/api/webhooks/shopify` now resolves tenant via `X-Shopify-Shop-Domain` against `SHOPIFY_STORE_URL`, records resolver trace in `webhook_events.metadata`, and runs observe-only for inventory/order topics (`ignored_shipstation_authoritative`) because ShipStation is authoritative for order/inventory movement. `process-shopify-webhook` remains available for controlled replay/future re-enable with explicit in-workspace statuses.
+
 prior_update: 2026-04-20  # Inventory-master backfill (operator scripts, no new UI): 115 stale-sheet `no_match` SKUs imported via scripts/import-missing-skus.ts (--apply --create-orgs) → 73 warehouse_products + 100 variants + 73 Shopify drafts tagged `import:inventory-master:2026-04-20`; 281 NULL format_name resolved to zero via scripts/backfill-format-name.ts (priority: format SKU prefix → title keyword → bandcamp_type_name → category SKU prefix → XLSX cross-ref → Shopify product_type). Both scripts dry-run by default with CSV plans in reports/finish-line/{import-plans,format-backfill}/. Inventory page format column now fully populated.
 
 prior_update: 2026-04-18  # Saturday Workstream 3 (2026-04-18): added inventory_count_session + warehouse_locations_source_of_truth journeys (per-SKU count sessions with fanout suppression + cycle_count delta on completion; one-way mirror of warehouse_locations to ShipStation v2 via inline create + bulk-create-locations Trigger task; inline locator typeahead inside the existing /admin/inventory expanded-row detail). Saturday Workstream 2 (2026-04-18): added manual_inventory_count_entry journey (bulk table editor at /admin/inventory/manual-count, ShipStation v2 sibling task, hard-block + review queue on negative counts). Saturday Workstream 1 (Phase 6 closeout): added megaplan_verification journey.
@@ -116,6 +118,7 @@ journeys:
       - webhook ingress mapped to trigger tasks
       - retries and idempotency paths documented
       - troubleshooting requires trigger touchpoint review
+      - first-party Shopify inventory/order webhook topics are observe-only; no order/inventory mutation side effects
 
   - id: shopify_product_completeness
     area: integrations_async
@@ -314,6 +317,31 @@ journeys:
       - run history written to channel_sync_log (channel='shipstation_v2', sync_type='seed_inventory') for the admin "Recent runs" panel
       - shipstation-store-refresh task is currently a STUB returning status:'deferred' with reason 'endpoint_tbd_using_24h_auto_import_fallback' until Open Question #2 (public refresh endpoint) is resolved; logs the request to channel_sync_log so operators can see refresh attempts
 
+  - id: shipstation_product_import_export
+    area: integrations
+    description: Operator-driven generation of the ShipStation product-import file (CSV + XLSX), with run history and incremental "new since last export" mode (2026-04-20)
+    paths:
+      - src/lib/server/shipstation-export.ts
+      - src/trigger/tasks/shipstation-export.ts
+      - src/actions/shipstation-export.ts
+      - src/app/admin/settings/shipstation-export/page.tsx
+      - scripts/export-shipstation-import.ts
+      - supabase/migrations/20260420000006_shipstation_export_runs.sql
+      - tests/unit/actions/shipstation-export.test.ts
+    status: green
+    checks:
+      - single source of truth for the 30-column ShipStation header lives in `src/lib/server/shipstation-export.ts::buildShipstationExport({ supabase, sinceTs? })` — the CLI, the Trigger task, and the admin button all consume it (Rule #58 one-truth-per-concern)
+      - boolean columns Use Product Name / Active / Is Returnable / Track inventory emit literal "true"/"false" — ShipStation parses anything else (e.g. Yes/No) as the default false and prints a per-row WARNING during import preview
+      - SKU normalization strips U+FEFF / U+200B-D / U+2060 zero-width characters via alternation (the noMisleadingCharacterClass biome rule rejects ZWJ inside a character class because it composes emoji); collisions are flagged in `shipstation_export_runs.duplicate_skus` jsonb and the per-run summary.json
+      - Trigger task `shipstation-export` runs in Trigger.dev infra (Rule #54) so the 6-7s CSV+XLSX build can scale far past Vercel's 60s — Server Actions only enqueue (Rule #41) and never call the builder directly
+      - Storage bucket `shipstation-exports` is private; `getShipstationExportDownloadUrls` issues 1h signed URLs scoped to the caller's workspace (cross-workspace download rejected) and only completed runs are downloadable
+      - incremental mode chains via `since_ts = previous completed run.data_max_ts` (max(created_at) of variants included). First incremental run with no prior history degrades to full export. The `data_max_ts` is computed in the builder, NOT at task-end-of-run, so retries with the same payload land the same cutoff
+      - admin UI polls `listShipstationExportRuns` every 3s while any pending/running row exists — stops polling automatically once the run completes or fails
+      - CLI `scripts/export-shipstation-import.ts` accepts `--since=ISO_TS` for ad-hoc incremental runs from a developer terminal — same builder, no Storage upload (writes to `reports/shipstation-import/`)
+      - Server Action gates: requireAuth + isStaff for all three verbs; cross-workspace download is explicitly rejected even though RLS is staff-only (defense in depth)
+      - first-run output (2026-04-20T15:22): 3,048 variants loaded → 3,047 rows written → 100% coverage on SKU/Name/Description/Category/Tags 1-3/Customs Description+Value+Tariff, 99.7% Weight, ~50% Thumbnail, 27% UPC, 21.6% Fulfillment Barcode, 0% Warehouse Location + Dimensions (no warehouse_variant_locations rows yet; staff fills in pre-upload). One BOM-corrupted SKU `LP-zum-025` collision flagged for cleanup
+      - failure mode: if the Trigger task throws, the run row is updated with `status='failed'` + `error` text, and the admin UI surfaces the message inline in the Recent runs table
+
   - id: bandcamp_warehouse_seed_origin_truth
     area: integrations
     description: bandcamp-sync warehouse_inventory_levels seed reflects controlled stock (origin sum), not customer-facing TOP (Phase 1 follow-up #2, 2026-04-13)
@@ -359,21 +387,29 @@ journeys:
 
   - id: phase4_sale_to_shipstation_v2_decrement
     area: inventory
-    description: Bandcamp sale → ShipStation v2 decrement focused push (Phase 4 forward leg, 2026-04-13)
+    description: Bandcamp sale → ShipStation v2 decrement focused push (Phase 4 forward leg, 2026-04-13; explicit enqueue DECOMMISSIONED 2026-04-13 second-pass audit — ShipStation Inventory Sync now mirrors the Bandcamp sale into v2 natively)
     paths:
       - src/trigger/tasks/bandcamp-sale-poll.ts
       - src/trigger/tasks/shipstation-v2-decrement.ts
       - src/trigger/tasks/index.ts
       - src/lib/server/external-sync-events.ts
       - src/lib/server/fanout-guard.ts
+      - src/lib/server/inventory-fanout.ts
       - src/lib/clients/shipstation-inventory-v2.ts
       - supabase/migrations/20260413000020_phase4_v2_warehouse_defaults.sql
       - tests/unit/trigger/shipstation-v2-decrement.test.ts
+      - tests/unit/trigger/bandcamp-sale-poll-no-v2-enqueue.test.ts
+      - tests/unit/lib/server/inventory-fanout.test.ts
     status: green
     checks:
-      - bandcamp-sale-poll.ts enqueues shipstation-v2-decrement after each successful recordInventoryChange() — never short-circuits the cron path
-      - new shipstation-v2-decrement task is pinned to shipstationQueue (concurrencyLimit 1, shared with seed + SHIP_NOTIFY processing) so v2 rate budget is honored
-      - correlation_id shape sale:{band_id}:{package_id}:{newSold}:{sku} — same shape across the sale-poll trigger and the v2 ledger row, so a replayed sale-poll run cannot double-decrement
+      - bandcamp-sale-poll.ts does NOT enqueue shipstation-v2-decrement — ShipStation Inventory Sync (active for the native Bandcamp store integration registered in warehouse_shipstation_stores) imports the Bandcamp order and decrements v2 itself before this poll fires; explicit enqueue would double-decrement (Rule #65 echo loop)
+      - bandcamp-sale-poll.ts still enqueues bandcamp-inventory-push, multi-store-inventory-push, and triggerBundleFanout after each successful recordInventoryChange() — only the v2 leg was decommissioned
+      - SHIPSTATION_V2_ECHO_SOURCES in src/lib/server/inventory-fanout.ts includes 'bandcamp' (alongside 'shipstation', 'reconcile', 'shopify', 'squarespace', 'woocommerce') so the v2 leg of fanoutInventoryChange ALSO skips for sale-poll-originated writes — defense-in-depth against any future caller of recordInventoryChange({source:'bandcamp'})
+      - regression guard tests/unit/trigger/bandcamp-sale-poll-no-v2-enqueue.test.ts asserts the source file does not contain a tasks.trigger("shipstation-v2-decrement", …) call
+      - fanout-skip parity test in tests/unit/lib/server/inventory-fanout.test.ts asserts shouldEchoSkipShipstationV2('bandcamp') === true alongside the other storefront sources
+      - shipstation-v2-decrement task code is preserved as a manual rollback path; if SS Inventory Sync is ever disabled per-workspace, BOTH the explicit enqueue in bandcamp-sale-poll AND the 'bandcamp' membership in SHIPSTATION_V2_ECHO_SOURCES must be reverted together (cross-referenced comments live in both files)
+      - shipstation-v2-decrement task remains pinned to shipstationQueue (concurrencyLimit 1, shared with seed + SHIP_NOTIFY processing) so v2 rate budget is honored if reactivated
+      - correlation_id shape sale:{band_id}:{package_id}:{newSold}:{sku} preserved in the task definition — same shape across (future) sale-poll trigger and the v2 ledger row, so a replayed sale-poll run cannot double-decrement
       - fanout-guard.evaluate('shipstation', correlationId) consulted first; pause flag or rollout bucket exclusion → status:'skipped_guard' (no ledger row, no API call)
       - workspaces.shipstation_v2_inventory_warehouse_id / _location_id NULL → status:'skipped_no_v2_defaults' (operator hasn't wired v2 for this workspace yet)
       - bundle parent SKU (warehouse_product_variants.id appears in bundle_components.bundle_variant_id) → status:'skipped_bundle_parent' (Phase 2.5(a) excludes bundles from v2 by design)
@@ -381,6 +417,7 @@ journeys:
       - adjustInventoryV2 called with transaction_type:'decrement' exclusively — NEVER modify (Phase 0 Patch D2 contract); client-side validator would reject the wrong shape anyway
       - non-positive quantity payload rejected up-front (defensive — the wired call site never sends negatives)
       - on API error, markExternalSyncError records the failure on the ledger row before re-throwing so the Trigger run lands in retry/error visibility AND the next replay observes the failed row (does NOT short-circuit on prior error)
+      - safety net for any drift introduced by echo-skip: Phase 5 reconcile sensor (shipstation-bandcamp-reconcile-{hot,warm,cold}) detects v2 ↔ DB drift and auto-fixes via recordInventoryChange({source:'reconcile'}) which itself echo-skips
       - phase 4 ramp posture: every workspace starts at fanout_rollout_percent = 0; operator promotes 0 → 10 → 50 → 100 per integration after canary observation
 
   - id: phase4_ship_notify_to_bandcamp_push

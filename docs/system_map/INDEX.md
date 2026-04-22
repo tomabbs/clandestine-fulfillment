@@ -9,8 +9,9 @@ Use this index as the first-stop map before planning/building/auditing.
 3. `project_state/journeys.yaml`
 4. `docs/system_map/API_CATALOG.md`
 5. `docs/system_map/TRIGGER_TASK_CATALOG.md`
-6. `docs/RELEASE_GATE_CRITERIA.md`
-7. `docs/RUNBOOK.md`
+6. `docs/system_map/CACHE_ARCHITECTURE.md`
+7. `docs/RELEASE_GATE_CRITERIA.md`
+8. `docs/RUNBOOK.md`
 
 ## Full Indexed Code Review View
 
@@ -37,6 +38,7 @@ Use this index as the first-stop map before planning/building/auditing.
 - Auth context: `src/lib/server/auth-context.ts`
 - Query wrappers: `src/lib/hooks/use-app-query.ts`
 - Query tiers/keys: `src/lib/shared/query-tiers.ts`, `src/lib/shared/query-keys.ts`
+- Cache/freshness policy: `docs/system_map/CACHE_ARCHITECTURE.md`
 
 ### Persistence and Policies
 
