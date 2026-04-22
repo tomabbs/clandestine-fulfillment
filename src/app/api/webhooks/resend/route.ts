@@ -54,11 +54,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "secret not configured" }, { status: 500 });
   }
 
+  const svixId = req.headers.get("svix-id");
   if (RESEND_WEBHOOK_SECRET) {
     const verify = verifyResendWebhook({
       rawBody,
       secret: RESEND_WEBHOOK_SECRET,
-      svixId: req.headers.get("svix-id"),
+      svixId,
       svixTimestamp: req.headers.get("svix-timestamp"),
       svixSignature: req.headers.get("svix-signature"),
     });
@@ -83,6 +84,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, status: "no_email_id" });
   }
   const supabase = createServiceRoleClient();
+
+  // Rule #62: dedup via webhook_events INSERT ON CONFLICT. Resend fires
+  // multiple events per email (sent / delivered / bounced / complained / …)
+  // so the dedup key must include the event TYPE in addition to the
+  // delivery id. Prefer svix-id (per-delivery unique, set by Svix on every
+  // attempted delivery — survives Resend retries cleanly); fall back to
+  // `${type}:${email_id}` when the header is absent (e.g. dev replays).
+  const externalId = svixId
+    ? `resend:${svixId}`
+    : `resend:${payload.type ?? "unknown"}:${messageId}`;
+  const { error: dedupError } = await supabase.from("webhook_events").insert({
+    platform: "resend",
+    external_webhook_id: externalId,
+    payload: { type: payload.type, email_id: messageId },
+  });
+  if (dedupError) {
+    if (dedupError.code === "23505") {
+      return NextResponse.json({ ok: true, status: "duplicate" });
+    }
+    Sentry.captureException(dedupError, {
+      tags: { platform: "resend", failure: "dedup_insert_failed" },
+    });
+    // Fail-open: continue processing; idempotent updates downstream.
+  }
 
   try {
     let outcome: NotificationSendStatus | null = null;
