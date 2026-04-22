@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { getUserContext } from "@/actions/auth";
 import {
   getClientBillingSnapshotDetail,
@@ -10,8 +10,16 @@ import {
 import { BlockList } from "@/components/shared/block-list";
 import { Button } from "@/components/ui/button";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
-import { queryKeys } from "@/lib/shared/query-keys";
+import { type QueryScope, queryKeysV2 } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+
+// Portal billing: viewer="client" + workspaceId + orgId. The viewer dim
+// matters here because getClientBillingSnapshotDetail returns a DIFFERENT
+// shape than the admin getBillingSnapshotDetail used in /admin/billing —
+// without the viewer slot, switching auth contexts could serve the wrong shape.
+function makePortalScope(workspaceId: string, orgId: string): QueryScope {
+  return { workspaceId, orgId, viewer: "client" };
+}
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -54,25 +62,34 @@ export default function BillingPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data: ctx } = useAppQuery({
-    queryKey: ["user-context"],
+    queryKey: queryKeysV2.authContext.user("client"),
     queryFn: () => getUserContext(),
     tier: CACHE_TIERS.STABLE,
   });
   const workspaceId = ctx?.workspaceId ?? "";
   const orgId = ctx?.orgId ?? "";
+  const scopeReady = !!workspaceId && !!orgId;
+  // Always build a stable scope object — when scopeReady is false the enabled
+  // gate prevents the query from running, so the placeholder workspaceId/orgId
+  // values never reach the server. Keeping the scope shape stable avoids two
+  // distinct cache buckets churning on hydration.
+  const scope: QueryScope = useMemo(
+    () => makePortalScope(workspaceId || "_", orgId || "_"),
+    [workspaceId, orgId],
+  );
 
   const { data, isLoading, error } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.billing.snapshots({ orgId }),
+    queryKey: queryKeysV2.billing.snapshots(scope),
     queryFn: () => getClientBillingSnapshots({ pageSize: 50 }),
-    enabled: !!workspaceId && !!orgId,
+    enabled: scopeReady,
   });
 
   const { data: preview } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: ["billing-preview", orgId],
+    queryKey: queryKeysV2.billing.preview(scope),
     queryFn: () => getClientCurrentMonthPreview(),
-    enabled: !!workspaceId && !!orgId,
+    enabled: scopeReady,
   });
 
   if (error) {
@@ -87,7 +104,14 @@ export default function BillingPage() {
   }
 
   if (selectedId) {
-    return <SnapshotDetail id={selectedId} onBack={() => setSelectedId(null)} />;
+    return (
+      <SnapshotDetail
+        id={selectedId}
+        scope={scope}
+        scopeReady={scopeReady}
+        onBack={() => setSelectedId(null)}
+      />
+    );
   }
 
   return (
@@ -178,11 +202,22 @@ export default function BillingPage() {
 
 // === Read-only Snapshot Detail ===
 
-function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
+function SnapshotDetail({
+  id,
+  scope,
+  scopeReady,
+  onBack,
+}: {
+  id: string;
+  scope: QueryScope;
+  scopeReady: boolean;
+  onBack: () => void;
+}) {
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: ["billing", "snapshot-detail", id],
+    queryKey: queryKeysV2.billing.snapshotDetail(scope, id),
     queryFn: () => getClientBillingSnapshotDetail(id),
+    enabled: scopeReady,
   });
 
   if (isLoading) {

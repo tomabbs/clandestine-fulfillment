@@ -94,6 +94,7 @@ import {
   buildCarrierTrackingUrl,
   buildShipStationOrderPageUrl,
 } from "@/lib/shared/carrier-tracking-urls";
+import { type QueryScope, queryKeysV2 } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import { BulkBuyLabelsModal } from "./bulk-buy-labels-modal";
 import { CockpitEditTagsModal } from "./cockpit-edit-tags-modal";
@@ -244,7 +245,14 @@ function formatShipTo(shipTo: Record<string, unknown> | null): string {
   return parts.join(", ") || "—";
 }
 
-export function OrdersCockpit() {
+export function OrdersCockpit({ workspaceId }: { workspaceId: string }) {
+  // Cockpit always operates as staff scope across all orgs in the workspace.
+  // orgId stays null (sentinel "*") because the table aggregates orders for
+  // every client in the workspace.
+  const scope: QueryScope = useMemo(
+    () => ({ workspaceId, orgId: null, viewer: "staff" }),
+    [workspaceId],
+  );
   const searchParams = useSearchParams();
   const [state, setState] = useState<CockpitState>(DEFAULT_STATE);
   useListPaginationPreference("admin/orders", state, setState);
@@ -285,7 +293,7 @@ export function OrdersCockpit() {
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkHoldOpen, setBulkHoldOpen] = useState(false);
   const featureFlagsQuery = useAppQuery({
-    queryKey: ["cockpit-feature-flags"],
+    queryKey: queryKeysV2.orders.featureFlags(scope),
     queryFn: () => getCockpitFeatureFlags(),
     tier: CACHE_TIERS.SESSION,
   });
@@ -326,7 +334,7 @@ export function OrdersCockpit() {
   );
 
   const { data, isLoading, refetch } = useAppQuery({
-    queryKey: ["shipstation-orders-db", filters],
+    queryKey: queryKeysV2.orders.cockpitList(scope, filters),
     queryFn: () => getShipStationOrdersDb(filters),
     tier: CACHE_TIERS.SESSION,
   });
@@ -338,7 +346,7 @@ export function OrdersCockpit() {
 
   // ── Phase 8.5 — tag definitions (for chips + filter chip rendering) ──────
   const tagsDefQuery = useAppQuery({
-    queryKey: ["ss-tag-defs"],
+    queryKey: queryKeysV2.orders.tagDefs(scope),
     queryFn: () => listShipStationTagDefinitions(),
     tier: CACHE_TIERS.SESSION,
   });
@@ -623,6 +631,7 @@ export function OrdersCockpit() {
               setAssignOpen(false);
               void refetch();
             }}
+            scope={scope}
           />
         )}
         {bulkTagOpen && (
@@ -696,6 +705,7 @@ export function OrdersCockpit() {
                   onRefetchOrders={refetch}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  scope={scope}
                 />
               ))
             ) : (
@@ -718,6 +728,7 @@ export function OrdersCockpit() {
                   onRefetchOrders={refetch}
                   selectedIds={selectedIds}
                   onToggleSelect={toggleSelect}
+                  scope={scope}
                 />
               ))
             )}
@@ -746,6 +757,10 @@ interface RowSharedProps {
   // Phase 9.1 — multi-select.
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
+  // v2 cache scope passed down so drawer subcomponents (NeedsAssignmentDropdown,
+  // BandcampReconcileBadge, BandcampDrawerEnrichment) can build scope-aware
+  // query keys without re-fetching auth context.
+  scope: QueryScope;
 }
 
 function GroupRows({
@@ -770,6 +785,7 @@ function GroupRows({
           onRefetchOrders={rest.onRefetchOrders}
           selectedIds={rest.selectedIds}
           onToggleSelect={rest.onToggleSelect}
+          scope={rest.scope}
         />
       ))}
     </div>
@@ -786,6 +802,7 @@ function CockpitRow({
   onRefetchOrders,
   selectedIds,
   onToggleSelect,
+  scope,
 }: {
   order: CockpitOrder;
   isExpanded: boolean;
@@ -995,6 +1012,7 @@ function CockpitRow({
                 order={order}
                 tagDefById={tagDefById}
                 onRefetchOrders={onRefetchOrders}
+                scope={scope}
               />
             </div>
           )}
@@ -1010,19 +1028,21 @@ function CockpitDrawer({
   order,
   tagDefById,
   onRefetchOrders,
+  scope,
 }: {
   order: CockpitOrder;
   tagDefById: Map<number, { name: string; color: string | null }>;
   onRefetchOrders: () => void;
+  scope: QueryScope;
 }) {
   const [showEditTags, setShowEditTags] = useState(false);
 
   return (
     <div className="space-y-4">
       {/* ── Phase 6.2 — Bandcamp reconciliation badge ────────────────────── */}
-      <BandcampReconcileBadge order={order} />
+      <BandcampReconcileBadge order={order} scope={scope} />
       {/* ── Phase 11.2 — Bandcamp enrichment (note, gift, payment) ──────── */}
-      <BandcampDrawerEnrichment order={order} />
+      <BandcampDrawerEnrichment order={order} scope={scope} />
 
       {/* ── Writeback error banner (Phase 4.5 + 8 retry button) ──────────── */}
       {order.shipment?.shipstation_writeback_error && (
@@ -1088,7 +1108,9 @@ function CockpitDrawer({
       <HoldUntilPanel order={order} onRefetch={onRefetchOrders} />
 
       {/* ── Manual org assignment (polish) — only when org_id IS NULL ────── */}
-      {!order.org_id && <NeedsAssignmentDropdown order={order} onRefetch={onRefetchOrders} />}
+      {!order.org_id && (
+        <NeedsAssignmentDropdown order={order} onRefetch={onRefetchOrders} scope={scope} />
+      )}
 
       {/* ── Bottom toolbar: Print Slip + Scan-to-Verify + Buy Label panel ── */}
       <DrawerBottomToolbar order={order} onRefetchOrders={onRefetchOrders} />
@@ -1415,12 +1437,14 @@ function HoldUntilPanel({ order, onRefetch }: { order: CockpitOrder; onRefetch: 
 function NeedsAssignmentDropdown({
   order,
   onRefetch,
+  scope,
 }: {
   order: CockpitOrder;
   onRefetch: () => void;
+  scope: QueryScope;
 }) {
   const orgsQuery = useAppQuery({
-    queryKey: ["orgs-for-assignment"],
+    queryKey: queryKeysV2.orders.assignableOrgs(scope),
     queryFn: () => listOrgsForAssignment(),
     tier: CACHE_TIERS.SESSION,
   });
@@ -1568,9 +1592,9 @@ const RECONCILE_BADGE_STYLE: Record<string, string> = {
   none: "bg-gray-50 text-gray-700 border-gray-200",
 };
 
-function BandcampReconcileBadge({ order }: { order: CockpitOrder }) {
+function BandcampReconcileBadge({ order, scope }: { order: CockpitOrder; scope: QueryScope }) {
   const matchQuery = useAppQuery({
-    queryKey: ["bc-reconcile", order.id],
+    queryKey: queryKeysV2.orders.bandcampMatch(scope, order.id),
     queryFn: () => getBandcampMatchForShipStationOrder({ shipstationOrderUuid: order.id }),
     tier: CACHE_TIERS.SESSION,
   });
@@ -1597,9 +1621,9 @@ function BandcampReconcileBadge({ order }: { order: CockpitOrder }) {
 
 // ─── Phase 11.2 — Bandcamp drawer enrichment (note, gift, payment) ─────────
 
-function BandcampDrawerEnrichment({ order }: { order: CockpitOrder }) {
+function BandcampDrawerEnrichment({ order, scope }: { order: CockpitOrder; scope: QueryScope }) {
   const enrichmentQuery = useAppQuery({
-    queryKey: ["bc-enrichment", order.id],
+    queryKey: queryKeysV2.orders.bandcampEnrichment(scope, order.id),
     queryFn: () => getBandcampEnrichmentForCockpit({ shipstationOrderUuid: order.id }),
     tier: CACHE_TIERS.SESSION,
   });
@@ -1793,13 +1817,15 @@ function AssignToModal({
   selectedIds,
   onClose,
   onCompleted,
+  scope,
 }: {
   selectedIds: string[];
   onClose: () => void;
   onCompleted: () => void;
+  scope: QueryScope;
 }) {
   const staffQuery = useAppQuery({
-    queryKey: ["assignable-staff"],
+    queryKey: queryKeysV2.orders.assignableStaff(scope),
     queryFn: () => listAssignableStaff(),
     tier: CACHE_TIERS.SESSION,
   });

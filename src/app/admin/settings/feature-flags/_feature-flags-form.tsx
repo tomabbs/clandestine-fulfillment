@@ -309,7 +309,8 @@ function RateDeltaField({
       <p className="mt-1 text-xs text-muted-foreground">
         Phase 0.5.2 — warn / halt limits in USD for the EP price-delta circuit breaker. When the
         actual rate at buy time exceeds the staff-selected rate by more than{" "}
-        <code className="text-xs">halt</code>, the purchase is refused. Defaults: warn=0.5, halt=2.0.
+        <code className="text-xs">halt</code>, the purchase is refused. Defaults: warn=0.5,
+        halt=2.0.
       </p>
       <div className="mt-3 grid grid-cols-2 gap-3">
         <div>
@@ -338,7 +339,12 @@ function RateDeltaField({
         </div>
       </div>
       <div className="mt-2">
-        <Button size="sm" variant="outline" onClick={() => onChange({ warn, halt })} disabled={disabled}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onChange({ warn, halt })}
+          disabled={disabled}
+        >
           Save
         </Button>
       </div>

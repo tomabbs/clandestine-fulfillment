@@ -7,16 +7,7 @@
 //      "Unassigned" pseudo-bucket bubbles to top (org_id IS NULL).
 "use client";
 
-import {
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  Pause,
-  Truck,
-  User,
-  UserPlus,
-  X,
-} from "lucide-react";
+import { AlertCircle, CheckCircle, Clock, Pause, Truck, User, UserPlus, X } from "lucide-react";
 import {
   type CockpitFilters,
   getOrgBucketsForCockpit,
@@ -89,9 +80,7 @@ export function CockpitStatusSidebar({ filters, onPatchFilters }: CockpitStatusS
             <User className="h-3.5 w-3.5 opacity-70" />
             Assigned to me
           </span>
-          {assignedToMe && (
-            <X className="h-3 w-3 opacity-60" />
-          )}
+          {assignedToMe && <X className="h-3 w-3 opacity-60" />}
         </button>
       </div>
       <div className="p-3 space-y-1 border-b">

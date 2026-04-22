@@ -182,9 +182,7 @@ test.afterAll(async () => {
               `- (${r.role}) \`${r.path}\` @ ${r.viewport} (${r.width}px): scrollWidth=${r.scrollWidth} clientWidth=${r.clientWidth} (overflow=${r.overflowPx}px). Offenders: ${
                 r.offenders.length === 0
                   ? "none captured"
-                  : r.offenders
-                      .map((o) => `${o.selector} (${o.width}px)`)
-                      .join(", ")
+                  : r.offenders.map((o) => `${o.selector} (${o.width}px)`).join(", ")
               }`,
           )
           .join("\n"),
@@ -203,7 +201,9 @@ test.afterAll(async () => {
   );
   await fs.writeFile(path.join(reportDir, `overflow-audit-${stamp}.md`), md);
 
-  console.log(`\n[overflow-audit] ${passed.length}/${allResults.length} pass, ${failed.length} fail, ${errored.length} errored`);
+  console.log(
+    `\n[overflow-audit] ${passed.length}/${allResults.length} pass, ${failed.length} fail, ${errored.length} errored`,
+  );
   console.log(`[overflow-audit] report: ${path.join(reportDir, `overflow-audit-${stamp}.md`)}`);
 });
 

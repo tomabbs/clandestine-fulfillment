@@ -1,7 +1,8 @@
 "use client";
 
 import { Package } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { getUserContext } from "@/actions/auth";
 import { getClientShipments, getShipmentItems, getTrackingEvents } from "@/actions/orders";
 import { BlockList } from "@/components/shared/block-list";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -14,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
-import { queryKeys } from "@/lib/shared/query-keys";
+import { type QueryScope, queryKeysV2 } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
 type ShipmentRow = Awaited<ReturnType<typeof getClientShipments>>["shipments"][number];
@@ -30,17 +31,36 @@ export default function PortalShippingPage() {
   useListPaginationPreference("portal/shipping", filters, setFilters);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Portal viewer is org-bound: scope key by workspaceId AND orgId so cached
+  // shipping data never bleeds across orgs in the (unlikely) case a portal
+  // user gets re-bound to a different org during a session.
+  const { data: ctx } = useAppQuery({
+    queryKey: queryKeysV2.authContext.user("client"),
+    queryFn: () => getUserContext(),
+    tier: CACHE_TIERS.STABLE,
+  });
+  const scope: QueryScope = useMemo(
+    () => ({
+      workspaceId: ctx?.workspaceId ?? "",
+      orgId: ctx?.orgId ?? null,
+      viewer: "client",
+    }),
+    [ctx?.workspaceId, ctx?.orgId],
+  );
+  const scopeReady = !!ctx?.workspaceId && !!ctx?.orgId;
+
   const { data, isLoading, error } = useAppQuery({
-    queryKey: queryKeys.shipments.list({ ...filters, portal: true }),
+    queryKey: queryKeysV2.shipping.list(scope, filters),
     queryFn: () => getClientShipments(filters),
     tier: CACHE_TIERS.SESSION,
+    enabled: scopeReady,
   });
 
   const { data: expandedItems, isLoading: itemsLoading } = useAppQuery({
-    queryKey: ["shipment-items", expandedId],
+    queryKey: queryKeysV2.shipping.items(scope, expandedId ?? ""),
     queryFn: () => getShipmentItems(expandedId ?? ""),
     tier: CACHE_TIERS.SESSION,
-    enabled: !!expandedId,
+    enabled: !!expandedId && scopeReady,
   });
 
   if (error) {

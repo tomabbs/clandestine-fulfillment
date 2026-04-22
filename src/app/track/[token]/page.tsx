@@ -112,8 +112,7 @@ function buildCarrierUrl(carrier: string | null, tracking: string | null): strin
   if (c.includes("fedex")) return `https://www.fedex.com/fedextrack/?trknbr=${tracking}`;
   if (c.includes("dhl"))
     return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${tracking}`;
-  if (c.includes("asendia"))
-    return `https://tracking.asendiausa.com/tracking/${tracking}`;
+  if (c.includes("asendia")) return `https://tracking.asendiausa.com/tracking/${tracking}`;
   return null;
 }
 
@@ -165,8 +164,7 @@ export default async function PublicTrackPage({ params }: PageProps) {
         name: (org.name as string | null) ?? branding.name,
         brand_color: (org.brand_color as string | null) ?? branding.brand_color,
         logo_url: (org.logo_url as string | null) ?? null,
-        support_email:
-          (org.support_email as string | null) ?? branding.support_email,
+        support_email: (org.support_email as string | null) ?? branding.support_email,
       };
     }
   }
@@ -300,9 +298,7 @@ export default async function PublicTrackPage({ params }: PageProps) {
                   </div>
                 )}
                 {shipment.delivery_date && shipment.status === "delivered" && (
-                  <div className="status-sub">
-                    Delivered {formatDate(shipment.delivery_date)}
-                  </div>
+                  <div className="status-sub">Delivered {formatDate(shipment.delivery_date)}</div>
                 )}
               </div>
             </div>

@@ -74,8 +74,8 @@ export default async function PrintBatchPage({ params }: PageProps) {
       </div>
 
       <div className="rounded-md border bg-muted/20 p-3 text-sm">
-        <strong>{total}</strong> total · <strong>{succeeded}</strong> ok ·{" "}
-        <strong>{failed}</strong> failed
+        <strong>{total}</strong> total · <strong>{succeeded}</strong> ok · <strong>{failed}</strong>{" "}
+        failed
       </div>
 
       {failedRows.length > 0 && (
@@ -114,8 +114,7 @@ export default async function PrintBatchPage({ params }: PageProps) {
             )}
             {(shipments ?? []).map((s) => {
               const labelData = (s.label_data ?? {}) as Record<string, unknown>;
-              const labelUrl =
-                typeof labelData.label_url === "string" ? labelData.label_url : null;
+              const labelUrl = typeof labelData.label_url === "string" ? labelData.label_url : null;
               return (
                 <tr key={s.id as string} className="border-t">
                   <td className="px-3 py-2 font-mono text-xs">

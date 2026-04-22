@@ -23,11 +23,7 @@ export interface TableSkeletonProps {
   columnWidths?: Array<string | undefined>;
 }
 
-export function TableSkeleton({
-  rowCount = 8,
-  columnCount,
-  columnWidths,
-}: TableSkeletonProps) {
+export function TableSkeleton({ rowCount = 8, columnCount, columnWidths }: TableSkeletonProps) {
   return (
     <>
       {Array.from({ length: rowCount }).map((_, rowIdx) => (
@@ -41,12 +37,7 @@ export function TableSkeleton({
               key={`skel-${rowIdx}-${colIdx}`}
               className="py-3"
             >
-              <div
-                className={cn(
-                  "skeleton-shimmer h-4",
-                  columnWidths?.[colIdx] ?? "w-3/4",
-                )}
-              />
+              <div className={cn("skeleton-shimmer h-4", columnWidths?.[colIdx] ?? "w-3/4")} />
             </TableCell>
           ))}
         </TableRow>

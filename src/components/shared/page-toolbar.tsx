@@ -29,14 +29,7 @@ export interface PageToolbarProps {
 
 export function PageToolbar({ children, className }: PageToolbarProps) {
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-3 min-w-0",
-        className,
-      )}
-    >
-      {children}
-    </div>
+    <div className={cn("flex flex-wrap items-center gap-3 min-w-0", className)}>{children}</div>
   );
 }
 
@@ -47,14 +40,7 @@ export interface PageToolbarActionsProps {
 
 function PageToolbarActions({ children, className }: PageToolbarActionsProps) {
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-2 ml-auto",
-        className,
-      )}
-    >
-      {children}
-    </div>
+    <div className={cn("flex flex-wrap items-center gap-2 ml-auto", className)}>{children}</div>
   );
 }
 

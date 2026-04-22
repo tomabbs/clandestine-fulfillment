@@ -19,9 +19,9 @@ import { Loader2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { bulkBuyLabels, getPrintBatchProgress } from "@/actions/bulk-orders";
-import type { CockpitOrder } from "@/actions/shipstation-orders";
 import type { RateOption } from "@/actions/shipping";
 import { getShippingRates } from "@/actions/shipping";
+import type { CockpitOrder } from "@/actions/shipstation-orders";
 import { Button } from "@/components/ui/button";
 
 const RATES_FETCH_CONCURRENCY = 4;
@@ -75,9 +75,8 @@ export function BulkBuyLabelsModal({
             try {
               const r = await getShippingRates(id, "shipstation");
               if (cancelled) return;
-              const cheapest = r.rates.length > 0
-                ? r.rates.reduce((a, b) => (a.rate <= b.rate ? a : b))
-                : null;
+              const cheapest =
+                r.rates.length > 0 ? r.rates.reduce((a, b) => (a.rate <= b.rate ? a : b)) : null;
               setRateState((s) => ({
                 ...s,
                 [id]: {
@@ -144,10 +143,7 @@ export function BulkBuyLabelsModal({
     };
   }, [batchId, router, onCompleted]);
 
-  const orderById = useMemo(
-    () => new Map(visibleOrders.map((o) => [o.id, o])),
-    [visibleOrders],
-  );
+  const orderById = useMemo(() => new Map(visibleOrders.map((o) => [o.id, o])), [visibleOrders]);
 
   const ready = selectedIds.filter((id) => rateState[id]?.selectedId);
   const hasErrors = selectedIds.filter((id) => rateState[id]?.error).length > 0;
@@ -206,7 +202,8 @@ export function BulkBuyLabelsModal({
                 : `Suggested rate per order is the cheapest. Override in the dropdown if needed.`}
               {selectedIds.length > 50 && (
                 <span className="block mt-1 text-amber-700">
-                  Heads up — batches over 50 orders take ≥90 seconds wall-clock at the SS rate limit.
+                  Heads up — batches over 50 orders take ≥90 seconds wall-clock at the SS rate
+                  limit.
                 </span>
               )}
             </div>
@@ -232,13 +229,9 @@ export function BulkBuyLabelsModal({
                           loading rates…
                         </span>
                       ) : st?.error ? (
-                        <span className="text-xs text-red-700">
-                          {st.error.slice(0, 80)}
-                        </span>
+                        <span className="text-xs text-red-700">{st.error.slice(0, 80)}</span>
                       ) : st?.options.length === 0 ? (
-                        <span className="text-xs text-amber-700">
-                          No rates returned
-                        </span>
+                        <span className="text-xs text-amber-700">No rates returned</span>
                       ) : (
                         <select
                           className="w-full rounded border px-2 py-1 text-xs"
@@ -271,10 +264,7 @@ export function BulkBuyLabelsModal({
               <Button variant="ghost" onClick={onClose} disabled={submitting}>
                 Cancel
               </Button>
-              <Button
-                onClick={() => void buyAll()}
-                disabled={submitting || ready.length === 0}
-              >
+              <Button onClick={() => void buyAll()} disabled={submitting || ready.length === 0}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-3 w-3 animate-spin mr-1" />
@@ -318,10 +308,7 @@ function BatchProgress({
         )}
       </div>
       <div className="h-2 w-full overflow-hidden rounded bg-muted">
-        <div
-          className="h-full bg-blue-500 transition-all"
-          style={{ width: `${pct}%` }}
-        />
+        <div className="h-full bg-blue-500 transition-all" style={{ width: `${pct}%` }} />
       </div>
       <div className="text-xs text-muted-foreground">
         Redirecting to the print page when the batch completes.

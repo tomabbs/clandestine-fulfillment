@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { setBandcampPaymentId, triggerBandcampMarkShipped } from "@/actions/bandcamp-shipping";
+import { getAuthWorkspaceId } from "@/actions/billing";
 import type { GetShipmentsFilters } from "@/actions/shipping";
 import {
   exportShipmentsCsv,
@@ -32,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
-import { queryKeys } from "@/lib/shared/query-keys";
+import { type QueryScope, queryKeys, queryKeysV2 } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import { maxShippingFromOrderLineItems } from "@/lib/utils";
 
@@ -116,23 +117,38 @@ export default function ShippingPage() {
     [filters.orgId, filters.dateFrom, filters.dateTo],
   );
 
+  // v2: workspace-scoped cache keys. Admin shipping spans all client orgs in
+  // the workspace, so orgId is null (sentinel "*" in the key).
+  const { data: workspaceId } = useAppQuery({
+    tier: CACHE_TIERS.SESSION,
+    queryKey: queryKeysV2.authContext.workspaceId("staff"),
+    queryFn: () => getAuthWorkspaceId(),
+  });
+  const scope: QueryScope = useMemo(
+    () => ({ workspaceId: workspaceId ?? "", orgId: null, viewer: "staff" }),
+    [workspaceId],
+  );
+  const scopeReady = !!workspaceId;
+
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.shipments.list(filters),
+    queryKey: queryKeysV2.shipping.list(scope, filters),
     queryFn: () => getShipments(filters),
+    enabled: scopeReady,
   });
 
   const { data: summary } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.shipments.summary(summaryFilters),
+    queryKey: queryKeysV2.shipping.summary(scope, summaryFilters),
     queryFn: () => getShipmentsSummary(summaryFilters),
+    enabled: scopeReady,
   });
 
   const { data: detail, isLoading: detailLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.shipments.detail(expandedId ?? ""),
+    queryKey: queryKeysV2.shipping.detail(scope, expandedId ?? ""),
     queryFn: () => getShipmentDetail(expandedId ?? ""),
-    enabled: !!expandedId,
+    enabled: !!expandedId && scopeReady,
   });
 
   const handleSearch = useCallback(() => {
@@ -282,6 +298,7 @@ export default function ShippingPage() {
             onToggle={() => setExpandedId((prev) => (prev === shipment.id ? null : shipment.id))}
             detail={expandedId === shipment.id ? detail : undefined}
             detailLoading={expandedId === shipment.id && detailLoading}
+            scope={scope}
           />
         ))}
         {data && data.shipments.length === 0 && <EmptyState title="No shipments found" compact />}
@@ -308,17 +325,22 @@ function ShipmentTableRow({
   onToggle,
   detail,
   detailLoading,
+  scope,
 }: {
   shipment: ShipmentRow;
   isExpanded: boolean;
   onToggle: () => void;
   detail: ShipmentDetail | undefined;
   detailLoading: boolean;
+  scope: QueryScope;
 }) {
   const queryClient = useQueryClient();
   const handleDetailRefresh = useCallback(() => {
+    // Bridge: invalidate both v1 and v2 detail keys during transition so
+    // any non-migrated reader (legacy admin/orders-legacy etc.) also refreshes.
     queryClient.invalidateQueries({ queryKey: queryKeys.shipments.detail(shipment.id) });
-  }, [queryClient, shipment.id]);
+    queryClient.invalidateQueries({ queryKey: queryKeysV2.shipping.detail(scope, shipment.id) });
+  }, [queryClient, shipment.id, scope]);
 
   const recipient = extractRecipient(shipment.label_data);
 
@@ -508,7 +530,11 @@ function ShipmentTableRow({
               <Skeleton className="h-4 w-40" />
             </div>
           ) : detail ? (
-            <ShipmentExpandedDetail detail={detail} onDetailRefresh={handleDetailRefresh} />
+            <ShipmentExpandedDetail
+              detail={detail}
+              onDetailRefresh={handleDetailRefresh}
+              scope={scope}
+            />
           ) : null}
         </div>
       )}
@@ -521,9 +547,11 @@ function ShipmentTableRow({
 function ShipmentExpandedDetail({
   detail,
   onDetailRefresh,
+  scope,
 }: {
   detail: ShipmentDetail;
   onDetailRefresh: () => void;
+  scope: QueryScope;
 }) {
   const { shipment, recipient, costBreakdown, items, trackingEvents, availableFormats } = detail;
   const formatOptions =
@@ -535,15 +563,23 @@ function ShipmentExpandedDetail({
     setBcPaymentInput(String(bandcampPaymentId ?? ""));
   }, [bandcampPaymentId]);
 
+  // Bridge invalidation: hit both legacy (queryKeys.shipments.all → ["shipments"])
+  // and v2 scope-wide root so non-migrated readers (e.g. orders-legacy) still
+  // refresh, while v2 callsites for this scope refresh too. queryKeysV2.shipping.domain()
+  // is intentionally NOT used here — keep the blast radius bounded to this scope.
+  const shipmentsInvalidation = useMemo(
+    () => [queryKeys.shipments.all, queryKeysV2.shipping.all(scope)],
+    [scope],
+  );
   const setPaymentMut = useAppMutation({
     mutationFn: (paymentId: number | null) =>
       setBandcampPaymentId({ shipmentId: shipment.id, bandcampPaymentId: paymentId }),
-    invalidateKeys: [queryKeys.shipments.all],
+    invalidateKeys: shipmentsInvalidation,
   });
 
   const syncMut = useAppMutation({
     mutationFn: () => triggerBandcampMarkShipped({ shipmentId: shipment.id }),
-    invalidateKeys: [queryKeys.shipments.all],
+    invalidateKeys: shipmentsInvalidation,
   });
 
   const bandcampSyncedAt = (shipment as { bandcamp_synced_at?: string | null }).bandcamp_synced_at;

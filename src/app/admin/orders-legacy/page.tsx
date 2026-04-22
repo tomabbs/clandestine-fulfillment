@@ -25,7 +25,6 @@ export default async function AdminOrdersLegacyPage() {
     redirect("/login");
   }
   const flags = await getWorkspaceFlags(workspaceId);
-  const canPrintLegacyLabels =
-    !flags.shipstation_unified_shipping || !!flags.staff_diagnostics;
+  const canPrintLegacyLabels = !flags.shipstation_unified_shipping || !!flags.staff_diagnostics;
   return <LegacyOrdersView canPrintLegacyLabels={canPrintLegacyLabels} />;
 }

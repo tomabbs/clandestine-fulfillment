@@ -33,8 +33,7 @@ export default async function PackingSlipPage({ params }: RouteParams) {
 
   // Phase 11.1 — international = country present and not "US". Drives whether
   // we render customs_description lines under each item.
-  const isInternational =
-    !!data.ship_to.country && data.ship_to.country.toUpperCase() !== "US";
+  const isInternational = !!data.ship_to.country && data.ship_to.country.toUpperCase() !== "US";
 
   return (
     <html lang="en">
@@ -96,19 +95,13 @@ export default async function PackingSlipPage({ params }: RouteParams) {
               {data.org_name ?? "Clandestine Distribution"}
             </p>
             {/* Phase 11.1 — primary artist callout when BC enrichment landed. */}
-            {data.artist && (
-              <p className="artist-line">
-                {data.artist}
-              </p>
-            )}
+            {data.artist && <p className="artist-line">{data.artist}</p>}
           </div>
           <div className="meta">
             <div>
               <strong>{data.order_number}</strong>
             </div>
-            {data.order_date && (
-              <div>{new Date(data.order_date).toLocaleDateString()}</div>
-            )}
+            {data.order_date && <div>{new Date(data.order_date).toLocaleDateString()}</div>}
             {isInternational && (
               <div style={{ marginTop: "4px", color: "#b91c1c", fontWeight: 600 }}>
                 INTERNATIONAL — {data.ship_to.country}
@@ -209,9 +202,7 @@ export default async function PackingSlipPage({ params }: RouteParams) {
                   {/* Phase 11.1 — customs description on international slips
                       so pickers + customs see the same line item. */}
                   {isInternational && it.customs_description && (
-                    <div className="customs-line">
-                      Customs: {it.customs_description}
-                    </div>
+                    <div className="customs-line">Customs: {it.customs_description}</div>
                   )}
                 </td>
                 <td className="qty">×{it.quantity}</td>
@@ -229,21 +220,19 @@ export default async function PackingSlipPage({ params }: RouteParams) {
               <td className="price">${itemTotal.toFixed(2)}</td>
             </tr>
             {/* Phase 11.1 — fan-tip footer line when buyer added an extra. */}
-            {data.additional_fan_contribution != null &&
-              data.additional_fan_contribution > 0 && (
-                <tr>
-                  <td colSpan={5} className="tip-line" style={{ textAlign: "center" }}>
-                    Thanks for tipping an extra ${" "}
-                    {data.additional_fan_contribution.toFixed(2)}.
-                  </td>
-                </tr>
-              )}
+            {data.additional_fan_contribution != null && data.additional_fan_contribution > 0 && (
+              <tr>
+                <td colSpan={5} className="tip-line" style={{ textAlign: "center" }}>
+                  Thanks for tipping an extra $ {data.additional_fan_contribution.toFixed(2)}.
+                </td>
+              </tr>
+            )}
           </tfoot>
         </table>
 
         <div className="footer">
-          Thanks for the support — your order ships from Cincinnati, Ohio. Questions?
-          Reply to your order confirmation email and we'll take care of it.
+          Thanks for the support — your order ships from Cincinnati, Ohio. Questions? Reply to your
+          order confirmation email and we'll take care of it.
         </div>
 
         <PrintTrigger />

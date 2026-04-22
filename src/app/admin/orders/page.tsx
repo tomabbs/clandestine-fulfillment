@@ -11,15 +11,17 @@
 
 import { requireStaff } from "@/lib/server/auth-context";
 import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
-import { OrdersCockpit } from "./_components/orders-cockpit";
 import { LegacyOrdersView } from "../orders-legacy/_legacy-orders-view";
+import { OrdersCockpit } from "./_components/orders-cockpit";
 
 export default async function AdminOrdersPage() {
   const { workspaceId } = await requireStaff();
   const flags = await getWorkspaceFlags(workspaceId);
 
   if (flags.shipstation_unified_shipping) {
-    return <OrdersCockpit />;
+    // workspaceId is passed as a prop so OrdersCockpit can build scope-aware
+    // v2 query keys without an extra round-trip to fetch auth context client-side.
+    return <OrdersCockpit workspaceId={workspaceId} />;
   }
   // Phase 6.3 — pre-cutover (cockpit flag OFF): legacy view IS the active label
   // printing surface, so labels are always allowed there. After cutover the

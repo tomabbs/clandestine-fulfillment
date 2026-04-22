@@ -69,13 +69,9 @@ export function PageShell({
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground">
             {title}
           </h1>
-          {description && (
-            <p className="text-sm text-muted-foreground">{description}</p>
-          )}
+          {description && <p className="text-sm text-muted-foreground">{description}</p>}
         </div>
-        {actions && (
-          <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>
-        )}
+        {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </header>
 
       {toolbar && <div className="min-w-0">{toolbar}</div>}

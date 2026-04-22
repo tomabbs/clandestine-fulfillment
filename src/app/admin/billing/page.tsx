@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Pencil } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createBillingAdjustment,
   createBillingRule,
@@ -30,9 +30,25 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreferenceSplit } from "@/lib/hooks/use-list-pagination-preference";
-import { queryKeys } from "@/lib/shared/query-keys";
+import { type QueryScope, queryKeys, queryKeysV2 } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 import type { WarehouseBillingRule, WarehouseFormatCost } from "@/lib/shared/types";
+
+// Admin billing spans all client orgs in the workspace, so QueryScope.orgId
+// is null (sentinel "*" in the cache key). Helper centralizes scope construction
+// to keep the pattern uniform across tabs and avoid drift.
+function makeAdminScope(workspaceId: string): QueryScope {
+  return { workspaceId, orgId: null, viewer: "staff" };
+}
+
+// Bridge invalidation set: hit both legacy ["billing"] root and the v2 root for
+// THIS workspace scope. Keeps non-migrated v1 readers fresh during transition
+// while the v2 cache stays correct. queryKeysV2.billing.domain() (cross-scope)
+// is intentionally avoided — admin always operates inside one workspace scope.
+function billingInvalidationKeys(workspaceId: string) {
+  const scope = makeAdminScope(workspaceId);
+  return [queryKeys.billing.all, queryKeysV2.billing.all(scope)] as const;
+}
 
 type Tab = "snapshots" | "default-rates" | "client-overrides" | "formats" | "adjustments";
 
@@ -51,7 +67,7 @@ export default function BillingPage() {
     isLoading: wsLoading,
     error: wsError,
   } = useAppQuery({
-    queryKey: ["auth", "workspace-id"],
+    queryKey: queryKeysV2.authContext.workspaceId("staff"),
     queryFn: () => getAuthWorkspaceId(),
     tier: CACHE_TIERS.SESSION,
   });
@@ -179,15 +195,22 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
   const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
   useListPaginationPreferenceSplit("admin/billing/snapshots", page, pageSize, setPage, setPageSize);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const scope = useMemo(() => makeAdminScope(workspaceId), [workspaceId]);
 
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.billing.snapshots({ page, pageSize }),
+    queryKey: queryKeysV2.billing.snapshots(scope, { page, pageSize }),
     queryFn: () => getBillingSnapshots({ workspaceId, page, pageSize }),
   });
 
   if (selectedId) {
-    return <SnapshotDetail id={selectedId} onBack={() => setSelectedId(null)} />;
+    return (
+      <SnapshotDetail
+        id={selectedId}
+        workspaceId={workspaceId}
+        onBack={() => setSelectedId(null)}
+      />
+    );
   }
 
   return (
@@ -252,10 +275,19 @@ function SnapshotsTab({ workspaceId }: { workspaceId: string }) {
 
 // === Snapshot Detail (Rule #16 — included/excluded shipments with reasons) ===
 
-function SnapshotDetail({ id, onBack }: { id: string; onBack: () => void }) {
+function SnapshotDetail({
+  id,
+  workspaceId,
+  onBack,
+}: {
+  id: string;
+  workspaceId: string;
+  onBack: () => void;
+}) {
+  const scope = useMemo(() => makeAdminScope(workspaceId), [workspaceId]);
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: ["billing", "snapshot-detail", id],
+    queryKey: queryKeysV2.billing.snapshotDetail(scope, id),
     queryFn: () => getBillingSnapshotDetail(id),
   });
 
@@ -446,6 +478,7 @@ function DefaultRatesTab({ workspaceId }: { workspaceId: string }) {
     effective_from: new Date().toISOString().split("T")[0],
   });
 
+  const invalidationKeys = useMemo(() => billingInvalidationKeys(workspaceId), [workspaceId]);
   const { data, isLoading } = useAppQuery({
     tier: CACHE_TIERS.STABLE,
     queryKey: queryKeys.billing.rules(),
@@ -455,12 +488,12 @@ function DefaultRatesTab({ workspaceId }: { workspaceId: string }) {
   const updateMutation = useAppMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<WarehouseBillingRule> }) =>
       updateBillingRule(id, data),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   const createMutation = useAppMutation({
     mutationFn: (data: Omit<WarehouseBillingRule, "id" | "created_at">) => createBillingRule(data),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   const handleSave = useCallback(
@@ -636,6 +669,7 @@ function ClientOverridesTab({ workspaceId }: { workspaceId: string }) {
     effective_from: new Date().toISOString().split("T")[0],
   });
 
+  const invalidationKeys = useMemo(() => billingInvalidationKeys(workspaceId), [workspaceId]);
   const { data: overrides, isLoading } = useAppQuery({
     tier: CACHE_TIERS.STABLE,
     queryKey: queryKeys.billing.overrides(),
@@ -657,12 +691,12 @@ function ClientOverridesTab({ workspaceId }: { workspaceId: string }) {
 
   const createMutation = useAppMutation({
     mutationFn: (data: Parameters<typeof createClientOverride>[0]) => createClientOverride(data),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   const deleteMutation = useAppMutation({
     mutationFn: (id: string) => deleteClientOverride(id),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   return (
@@ -797,22 +831,24 @@ function FormatCostsTab({ workspaceId }: { workspaceId: string }) {
     sort_order: 0,
   });
 
+  const scope = useMemo(() => makeAdminScope(workspaceId), [workspaceId]);
+  const invalidationKeys = useMemo(() => billingInvalidationKeys(workspaceId), [workspaceId]);
   const { data: formatCosts, isLoading } = useAppQuery({
     tier: CACHE_TIERS.STABLE,
-    queryKey: ["billing", "format-costs"],
+    queryKey: queryKeysV2.billing.formatCosts(scope),
     queryFn: () => getFormatCosts(workspaceId),
   });
 
   const updateMutation = useAppMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<WarehouseFormatCost> }) =>
       updateFormatCost(id, data),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   const createMutation = useAppMutation({
     mutationFn: (data: Omit<WarehouseFormatCost, "id" | "created_at" | "updated_at">) =>
       createFormatCost(data),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   if (isLoading) {
@@ -1003,16 +1039,18 @@ function AdjustmentsTab({ workspaceId }: { workspaceId: string }) {
     reason: "",
   });
 
+  const scope = useMemo(() => makeAdminScope(workspaceId), [workspaceId]);
+  const invalidationKeys = useMemo(() => billingInvalidationKeys(workspaceId), [workspaceId]);
   const { isLoading } = useAppQuery({
     tier: CACHE_TIERS.SESSION,
-    queryKey: queryKeys.billing.snapshots({ adjustments: true }),
+    queryKey: queryKeysV2.billing.snapshots(scope, { adjustments: true }),
     queryFn: () => getBillingSnapshots({ workspaceId: workspaceId, pageSize: 100 }),
   });
 
   const createMutation = useAppMutation({
     mutationFn: (data: Parameters<typeof createBillingAdjustment>[0]) =>
       createBillingAdjustment(data),
-    invalidateKeys: [queryKeys.billing.all],
+    invalidateKeys: invalidationKeys,
   });
 
   return (

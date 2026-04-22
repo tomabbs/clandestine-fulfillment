@@ -47,30 +47,15 @@ export function EmptyState({
       )}
     >
       {Icon && (
-        <div
-          className={cn(
-            "rounded-full bg-muted/60 p-3",
-            compact && "p-2",
-          )}
-        >
-          <Icon
-            className={cn(
-              "text-muted-foreground",
-              compact ? "h-5 w-5" : "h-6 w-6",
-            )}
-          />
+        <div className={cn("rounded-full bg-muted/60 p-3", compact && "p-2")}>
+          <Icon className={cn("text-muted-foreground", compact ? "h-5 w-5" : "h-6 w-6")} />
         </div>
       )}
       <h3 className={cn("font-semibold text-foreground", compact ? "text-sm" : "text-base")}>
         {title}
       </h3>
       {description && (
-        <p
-          className={cn(
-            "text-muted-foreground max-w-md",
-            compact ? "text-xs" : "text-sm",
-          )}
-        >
+        <p className={cn("text-muted-foreground max-w-md", compact ? "text-xs" : "text-sm")}>
           {description}
         </p>
       )}

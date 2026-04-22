@@ -32,16 +32,11 @@ export interface StatusBadgeProps {
 const INTENT_CLASSES: Record<StatusIntent, string> = {
   // Each intent uses bg at 15% opacity, border at 30%, text at full
   // saturation. Reads as a colored chip without overpowering the row.
-  success:
-    "bg-status-success/15 text-status-success border-status-success/30",
-  warning:
-    "bg-status-warning/15 text-status-warning border-status-warning/30",
-  danger:
-    "bg-status-danger/15 text-status-danger border-status-danger/30",
-  info:
-    "bg-status-info/15 text-status-info border-status-info/30",
-  neutral:
-    "bg-status-neutral/15 text-status-neutral border-status-neutral/30",
+  success: "bg-status-success/15 text-status-success border-status-success/30",
+  warning: "bg-status-warning/15 text-status-warning border-status-warning/30",
+  danger: "bg-status-danger/15 text-status-danger border-status-danger/30",
+  info: "bg-status-info/15 text-status-info border-status-info/30",
+  neutral: "bg-status-neutral/15 text-status-neutral border-status-neutral/30",
 };
 
 const INTENT_DOT_CLASSES: Record<StatusIntent, string> = {
@@ -52,12 +47,7 @@ const INTENT_DOT_CLASSES: Record<StatusIntent, string> = {
   neutral: "bg-status-neutral",
 };
 
-export function StatusBadge({
-  intent,
-  children,
-  dot = false,
-  className,
-}: StatusBadgeProps) {
+export function StatusBadge({ intent, children, dot = false, className }: StatusBadgeProps) {
   return (
     <span
       data-slot="status-badge"

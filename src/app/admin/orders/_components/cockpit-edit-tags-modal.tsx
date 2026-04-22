@@ -8,10 +8,7 @@
 
 import { Loader2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import {
-  editOrderTags,
-  listShipStationTagDefinitions,
-} from "@/actions/shipstation-orders";
+import { editOrderTags, listShipStationTagDefinitions } from "@/actions/shipstation-orders";
 import { Button } from "@/components/ui/button";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
@@ -130,11 +127,7 @@ export function CockpitEditTagsModal({
           <Button size="sm" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            disabled={!dirty || editMut.isPending}
-            onClick={() => editMut.mutate()}
-          >
+          <Button size="sm" disabled={!dirty || editMut.isPending} onClick={() => editMut.mutate()}>
             {editMut.isPending ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />

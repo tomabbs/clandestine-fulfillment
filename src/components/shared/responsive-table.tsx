@@ -186,7 +186,7 @@ export function ResponsiveTable<TRow>({
           ))}
         </div>
       ) : rows.length === 0 ? (
-        emptyState ?? null
+        (emptyState ?? null)
       ) : (
         <CardGrid
           items={rows}
@@ -222,9 +222,7 @@ export function ResponsiveTable<TRow>({
                 <TableHead className="w-10">
                   <Checkbox
                     aria-label="Select all rows"
-                    checked={
-                      rows.length > 0 && rows.every((r) => selectedIds?.has(getRowId(r)))
-                    }
+                    checked={rows.length > 0 && rows.every((r) => selectedIds?.has(getRowId(r)))}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -252,10 +250,7 @@ export function ResponsiveTable<TRow>({
               />
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell
-                  colSpan={visibleColCount + (rowExpand ? 1 : 0)}
-                  className="p-0"
-                >
+                <TableCell colSpan={visibleColCount + (rowExpand ? 1 : 0)} className="p-0">
                   {emptyState ?? null}
                 </TableCell>
               </TableRow>
@@ -269,13 +264,9 @@ export function ResponsiveTable<TRow>({
                     <TableRow
                       data-row-id={id}
                       data-selected={isSelected || undefined}
-                      className={cn(
-                        rowExpand && "cursor-pointer",
-                      )}
+                      className={cn(rowExpand && "cursor-pointer")}
                       onClick={
-                        rowExpand
-                          ? () => setExpandedRowId(isExpanded ? null : id)
-                          : undefined
+                        rowExpand ? () => setExpandedRowId(isExpanded ? null : id) : undefined
                       }
                     >
                       {selectable && (
@@ -319,7 +310,9 @@ export function ResponsiveTable<TRow>({
                             col.cellClassName,
                           )}
                         >
-                          {col.render ? col.render(row, rowIdx) : ((row as unknown as Record<string, ReactNode>)[col.key] ?? null)}
+                          {col.render
+                            ? col.render(row, rowIdx)
+                            : ((row as unknown as Record<string, ReactNode>)[col.key] ?? null)}
                         </TableCell>
                       ))}
                     </TableRow>

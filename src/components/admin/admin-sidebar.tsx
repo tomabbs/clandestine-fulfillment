@@ -174,9 +174,7 @@ export function AdminSidebar() {
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
-                      <SidebarMenuButton
-                        isActive={pathname.startsWith("/admin/settings")}
-                      >
+                      <SidebarMenuButton isActive={pathname.startsWith("/admin/settings")}>
                         <Settings />
                         <span>Settings</span>
                       </SidebarMenuButton>
@@ -193,9 +191,7 @@ export function AdminSidebar() {
                         <DropdownMenuItem
                           key={item.href}
                           onSelect={() => router.push(item.href)}
-                          className={
-                            pathname === item.href ? "bg-accent font-medium" : undefined
-                          }
+                          className={pathname === item.href ? "bg-accent font-medium" : undefined}
                         >
                           {item.title}
                         </DropdownMenuItem>

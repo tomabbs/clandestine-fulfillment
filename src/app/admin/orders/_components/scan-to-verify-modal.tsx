@@ -40,7 +40,10 @@ export function ScanToVerifyModal({ items, onClose, onAllVerified }: ScanToVerif
     const m = new Map<string, number>();
     for (const it of items) {
       if (!it.sku) continue;
-      m.set(it.sku.trim().toUpperCase(), (m.get(it.sku.trim().toUpperCase()) ?? 0) + (it.quantity ?? 1));
+      m.set(
+        it.sku.trim().toUpperCase(),
+        (m.get(it.sku.trim().toUpperCase()) ?? 0) + (it.quantity ?? 1),
+      );
     }
     return m;
   }, [items]);
@@ -121,9 +124,7 @@ export function ScanToVerifyModal({ items, onClose, onAllVerified }: ScanToVerif
         </div>
         <div className="px-4 pb-4 space-y-1">
           {items.length === 0 ? (
-            <div className="text-xs text-muted-foreground italic">
-              No items on this order.
-            </div>
+            <div className="text-xs text-muted-foreground italic">No items on this order.</div>
           ) : (
             items.map((it, i) => {
               const sku = (it.sku ?? "").trim().toUpperCase();

@@ -24,17 +24,14 @@
  */
 
 import type { ComponentProps } from "react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 export const ScrollableTabs = Tabs;
 export const ScrollableTabsTrigger = TabsTrigger;
 export const ScrollableTabsContent = TabsContent;
 
-export function ScrollableTabsList({
-  className,
-  ...props
-}: ComponentProps<typeof TabsList>) {
+export function ScrollableTabsList({ className, ...props }: ComponentProps<typeof TabsList>) {
   return (
     // Outer scroll container — this is where the magic happens. The inner
     // TabsList stays its natural width (whatever its triggers add up to);
@@ -45,10 +42,7 @@ export function ScrollableTabsList({
         "w-full overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]",
       )}
     >
-      <TabsList
-        className={cn("min-w-max", className)}
-        {...props}
-      />
+      <TabsList className={cn("min-w-max", className)} {...props} />
     </div>
   );
 }

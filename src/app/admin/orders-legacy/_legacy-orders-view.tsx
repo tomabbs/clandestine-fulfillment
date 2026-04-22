@@ -12,9 +12,9 @@
 import { Check, CheckCircle, Copy, ExternalLink, Loader2, Package } from "lucide-react";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
-import { CreateLabelPanel } from "@/components/shipping/create-label-panel";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { TrackingTimeline } from "@/components/shared/tracking-timeline";
+import { CreateLabelPanel } from "@/components/shipping/create-label-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -445,10 +445,13 @@ function OrderDetailExpanded({
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           <p className="font-semibold">Label printing moved to the new Orders cockpit.</p>
           <p className="text-xs mt-1">
-            Open <a href="/admin/orders" className="underline">/admin/orders</a> to print this
-            label. The legacy view stays available for diagnostics; flip{" "}
-            <code className="text-xs">workspaces.flags.staff_diagnostics = true</code> to
-            re-enable label printing here.
+            Open{" "}
+            <a href="/admin/orders" className="underline">
+              /admin/orders
+            </a>{" "}
+            to print this label. The legacy view stays available for diagnostics; flip{" "}
+            <code className="text-xs">workspaces.flags.staff_diagnostics = true</code> to re-enable
+            label printing here.
           </p>
         </div>
       )}
