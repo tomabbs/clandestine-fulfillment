@@ -31,7 +31,7 @@
  *   silently always "paid".
  */
 
-import { logger, schedules, task } from "@trigger.dev/sdk";
+import { idempotencyKeys, logger, schedules, task } from "@trigger.dev/sdk";
 import type { BandcampOrderItem } from "@/lib/clients/bandcamp";
 import { getOrders, refreshBandcampToken } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
@@ -121,6 +121,13 @@ export const bandcampOrderSyncTask = task({
               shipping: i.shipping ?? 0,
             }));
 
+            // B-1 per-order idempotency: keyed on Bandcamp `payment_id` (a
+            // stable BC-issued identifier), NEVER on a timestamp. Combined
+            // with the unique index on (workspace_id, bandcamp_payment_id)
+            // this prevents duplicate `warehouse_orders` inserts even if the
+            // 30-day BC `getOrders` window overlaps a prior sync run. The
+            // logical idempotency key for forensic logging is
+            // `bandcamp:order-sync:${conn.band_id}:${paymentId}`.
             const { data: existing } = await supabase
               .from("warehouse_orders")
               .select("id, shipping_cost")
@@ -267,12 +274,118 @@ export const bandcampOrderSyncTask = task({
   },
 });
 
+/**
+ * B-1 (HRD-29) — Cron flapping detection helper.
+ *
+ * When the schedule fires, we hand `bandcampOrderSyncTask.trigger()` a stable
+ * global idempotency key with a 15-minute TTL (matching the cron cadence). If
+ * an in-flight `bandcamp-order-sync` run already exists for that key,
+ * Trigger.dev returns the SAME run handle id instead of spawning a duplicate.
+ *
+ * To detect flapping (which would mask real failures behind silent dedups),
+ * we compare the freshly returned handle id against the id we recorded on the
+ * previous schedule tick. Equal id == dedup happened == previous tick is still
+ * in flight beyond the cron interval.
+ *
+ * Returned action drives a single `logger.warn` + `sensor_readings` row in the
+ * caller. Pure function so it stays trivially testable.
+ *
+ * Exported for unit testing.
+ */
+export type ScheduleAction =
+  | { kind: "fresh_trigger"; runId: string }
+  | { kind: "deduped"; runId: string; reason: "overlapping_run" };
+
+export function decideScheduleAction(
+  previousRunId: string | null,
+  currentRunId: string,
+): ScheduleAction {
+  if (previousRunId !== null && previousRunId === currentRunId) {
+    return { kind: "deduped", runId: currentRunId, reason: "overlapping_run" };
+  }
+  return { kind: "fresh_trigger", runId: currentRunId };
+}
+
+// Module-scope memo of the last triggered run id. Trigger.dev keeps a schedule
+// task warm across many ticks on the same worker, so this is a reliable signal
+// in steady state. After a redeploy / cold start the first tick reads null and
+// any dedup that round is silently ignored — acceptable, since the very next
+// tick recovers detection.
+let _lastTriggeredRunId: string | null = null;
+
+// Test-only seam — never call from production code.
+export function _resetLastTriggeredRunIdForTests(): void {
+  _lastTriggeredRunId = null;
+}
+
 export const bandcampOrderSyncSchedule = schedules.task({
   id: "bandcamp-order-sync-cron",
-  cron: "0 */6 * * *", // Every 6 hours
+  // B-1: Tightened from `0 */6 * * *` (every 6h, ShipStation-truth era) to
+  // `*/15 * * * *` (every 15m). Direct-Shopify cutover removed ShipStation as
+  // the truth source for Bandcamp order timing, so we need fresh BC order data
+  // closer to real time.
+  //
+  // Cadence budget: ~120 requests/run × 96 runs/day × N workspaces.
+  // Bandcamp's observed soft limit is ~20 req/min per token family.
+  // At N=10 workspaces this is ~200 req/min concentrated in the cron tick.
+  // If we add 5+ more bands, revisit cadence (consider */30 or per-workspace
+  // stagger).
+  cron: "*/15 * * * *",
   queue: bandcampQueue,
   run: async () => {
-    await bandcampOrderSyncTask.trigger({});
-    return { ok: true };
+    // B-1: GLOBAL-scope idempotency key with TTL matching the cron interval.
+    // If the previous tick's `bandcampOrderSyncTask` run is still in flight
+    // when the next tick fires, Trigger.dev returns the same run handle id
+    // instead of stacking a duplicate on `bandcampQueue` (concurrencyLimit:1
+    // would serialize anyway — this just prevents queue depth growth).
+    const key = await idempotencyKeys.create("bandcamp-order-sync-cron", {
+      scope: "global",
+    });
+
+    const handle = await bandcampOrderSyncTask.trigger(
+      {},
+      { idempotencyKey: key, idempotencyKeyTTL: "15m" },
+    );
+
+    const action = decideScheduleAction(_lastTriggeredRunId, handle.id);
+    _lastTriggeredRunId = handle.id;
+
+    if (action.kind === "deduped") {
+      logger.warn("bandcamp-order-sync-cron: tick deduped to in-flight run", {
+        triggered_run_id: handle.id,
+        reason: action.reason,
+        idempotency_key: key,
+      });
+
+      // Emit one sensor_readings row per active workspace so the Channels
+      // page health sensor can surface flapping. workspace_id is NOT NULL on
+      // sensor_readings, so we fan out across active workspaces (cheap insert).
+      try {
+        const supabase = createServiceRoleClient();
+        const workspaceIds = await getAllWorkspaceIds(supabase);
+        if (workspaceIds.length > 0) {
+          const nowIso = new Date().toISOString();
+          await supabase.from("sensor_readings").insert(
+            workspaceIds.map((workspace_id) => ({
+              workspace_id,
+              sensor_name: "bandcamp.cron_idem_skip",
+              status: "warning",
+              message: `bandcamp-order-sync schedule tick deduped to in-flight run ${handle.id}`,
+              value: {
+                reason: action.reason,
+                last_run_id: handle.id,
+                this_attempt_at: nowIso,
+              },
+            })),
+          );
+        }
+      } catch (err) {
+        logger.error("bandcamp-order-sync-cron: failed to emit skip telemetry", {
+          error: String(err),
+        });
+      }
+    }
+
+    return { ok: true, dedup_action: action.kind, run_id: handle.id };
   },
 });
