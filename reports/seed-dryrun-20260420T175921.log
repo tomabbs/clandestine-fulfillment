@@ -1,0 +1,12 @@
+[dotenv@17.3.1] injecting env (32) from .env.local -- tip: ⚙️  enable debug logging with { debug: true }
+
+=== Seed dry-run gate cascade ===
+workspace_id        = 1e59b9ca-ab4e-442b-952b-a649e2aadb0e
+warehouse_id (mock) = se-214575  (irrelevant in dry-run)
+location_id (mock)  = se-3213662   (irrelevant in dry-run)
+(node:3643) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+Error: failed to load bundle_components: Bad Request
+    at runShipstationSeedInventory (/Users/Shared/WorkShared/Project/clandestine-fulfillment/src/trigger/tasks/shipstation-seed-inventory.ts:183:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/Users/Shared/WorkShared/Project/clandestine-fulfillment/scripts/_dryrun-seed-preview.ts:30:18)

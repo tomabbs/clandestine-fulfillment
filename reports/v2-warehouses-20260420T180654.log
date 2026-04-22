@@ -1,0 +1,13 @@
+[dotenv@17.3.1] injecting env (32) from .env.local -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+{
+  "warehouse_id": "se-214575",
+  "name": "Clandestine Distirbution",
+  "location_count": 100
+}
+  v2 inventory rows visible (limit 5): 0
+{
+  "warehouse_id": "se-214707",
+  "name": "Inventory Warehouse",
+  "location_count": 100
+}
+  v2 inventory rows visible (limit 5): 0

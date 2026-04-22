@@ -1,0 +1,21 @@
+[dotenv@17.3.1] injecting env (32) from .env.local -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+
+=== Seed dry-run (chunked) for workspace 1e59b9ca-ab4e-442b-952b-a649e2aadb0e ===
+candidates (org-scoped variants): 1596
+bundle_excluded: 0
+bandcamp mappings loaded: 1379
+inventory levels loaded: 1524
+
+=== Dry-run gate counts ===
+{
+  "candidates": 1596,
+  "bundle_excluded": 0,
+  "blocked_by_push_mode": 726,
+  "blocked_zero_origin_sum": 822,
+  "blocked_zero_warehouse_stock": 39,
+  "seeded": 9
+}
+
+blocked_by_push_mode breakdown:
+  mapped:blocked_baseline: 509
+  unmapped: 217

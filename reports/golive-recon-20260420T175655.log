@@ -1,0 +1,50 @@
+[dotenv@17.3.1] injecting env (32) from .env.local -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+
+=== Workspaces ===
+{
+  "id": "1e59b9ca-ab4e-442b-952b-a649e2aadb0e",
+  "name": "Clandestine Distribution",
+  "inventory_sync_paused": true,
+  "fanout_rollout_percent": 0,
+  "shipstation_v2_inventory_warehouse_id": null,
+  "shipstation_v2_inventory_location_id": null,
+  "shipstation_sync_paused": false,
+  "bandcamp_sync_paused": false,
+  "clandestine_shopify_sync_paused": false,
+  "client_store_sync_paused": false
+}
+
+=== ShipStation v2 — warehouses + locations ===
+
+warehouse_id=se-214575  name=Clandestine Distirbution
+  100 locations
+  default candidate: location_id=se-3213662  name=(Unspecified)
+    location_id=se-3213662  name=(Unspecified)
+    location_id=se-3223762  name=A La Carte - 3D
+    location_id=se-3223768  name=(Unspecified)
+    … 97 more
+
+warehouse_id=se-214707  name=Inventory Warehouse
+  100 locations
+  default candidate: location_id=se-3213662  name=(Unspecified)
+    location_id=se-3213662  name=(Unspecified)
+    location_id=se-3223762  name=A La Carte - 3D
+    location_id=se-3223768  name=(Unspecified)
+    … 97 more
+
+=== DB↔v2 sample drift (first 15 SKUs per workspace) ===
+workspace 1e59b9ca-ab4e-442b-952b-a649e2aadb0e (Clandestine Distribution): sample=15, aligned=0, drift=0, missingInV2=15
+  drift rows:
+    AE-VTWC-LEOS: db=74 v2=0 delta=-74
+    AE-VTWC-VTWC: db=1 v2=0 delta=-1
+    AH-F-FTPL: db=1 v2=0 delta=-1
+    AH-F-LE18: db=115 v2=0 delta=-115
+    AL-SD-LECV-1: db=37 v2=0 delta=-37
+    AL-T-LECV-1: db=3 v2=0 delta=-3
+    ASIPV027X: db=22 v2=0 delta=-22
+    ASIPV049: db=5 v2=0 delta=-5
+    AV-TG-C: db=60 v2=0 delta=-60
+    B-A-ALP: db=124 v2=0 delta=-124
+
+=== Recent fanout activity (last 24h) ===
+(no external_sync_events rows in last 24h)

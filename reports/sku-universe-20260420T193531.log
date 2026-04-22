@@ -1,0 +1,36 @@
+[dotenv@17.3.1] injecting env (32) from .env.local -- tip: 🛡️ auth for agents: https://vestauth.com
+
+=== Bandcamp (live API) ===
+  workspace Clandestine Distribution: 17 bands
+    band_id=2807765655 (In The Pines): items=10 skus_emitted=22
+    band_id=2765573782 (Nicole McCabe): items=2 skus_emitted=6
+    band_id=2239475326 (Northern Spy Records): items=355 skus_emitted=457
+    band_id=3220891777 (Matt McBane): items=2 skus_emitted=2
+    band_id=4256323829 (Good Neighbor): items=1 skus_emitted=1
+    band_id=1097102857 (Lord Spikeheart): items=11 skus_emitted=61
+    band_id=369182255 (LEAVING RECORDS): items=422 skus_emitted=589
+    band_id=3416046922 (Micah Thomas): items=2 skus_emitted=2
+    band_id=3760430981 (Xol Meissner): items=1 skus_emitted=1
+    band_id=3694833057 (SUSS): items=15 skus_emitted=75
+    band_id=702768315 (True Panther): items=100 skus_emitted=111
+    band_id=2561454089 (LILA लीला): items=31 skus_emitted=31
+    band_id=772423451 (Whited Sepulchre Records): items=203 skus_emitted=382
+    band_id=265181677 (Egghunt Records): items=61 skus_emitted=74
+    band_id=117694227 (Birdwatcher Records): items=25 skus_emitted=25
+    band_id=1430196613 (Across the Horizon): items=1 skus_emitted=1
+    band_id=1547924804 (NNA Tapes): items=133 skus_emitted=152
+bandcamp distinct SKUs (case-sensitive): 1943
+bandcamp distinct SKUs (case-folded):    1943
+
+=== Shopify (live GraphQL) ===
+  shopify page 1: edges=250 cumulative_with_sku=250        shopify page 2: edges=250 cumulative_with_sku=500        shopify page 3: edges=250 cumulative_with_sku=750        shopify page 4: edges=250 cumulative_with_sku=1000        shopify page 5: edges=250 cumulative_with_sku=1250        shopify page 6: edges=250 cumulative_with_sku=1500        shopify page 7: edges=250 cumulative_with_sku=1750        shopify page 8: edges=250 cumulative_with_sku=2000        shopify page 9: edges=250 cumulative_with_sku=2250        shopify page 10: edges=250 cumulative_with_sku=2500        shopify page 11: edges=250 cumulative_with_sku=2750        shopify page 12: edges=250 cumulative_with_sku=3000        shopify page 13: edges=104 cumulative_with_sku=3104      
+shopify distinct SKUs (case-sensitive):  3039
+shopify distinct SKUs (case-folded):     3039
+
+=== Set math (case-folded SKU comparison) ===
+bandcamp ∩ shopify (in both):            1371
+shopify only (NOT in bandcamp):          1668
+bandcamp only (NOT in shopify):          572
+union (total distinct across both):      3611
+
+wrote: /Users/Shared/WorkShared/Project/clandestine-fulfillment/reports/sku-universe/{bandcamp-skus,shopify-skus,summary}-2026-04-20T23-35.{csv,json}
