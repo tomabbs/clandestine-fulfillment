@@ -1,12 +1,9 @@
 /**
  * Process Shopify inventory webhook — event trigger.
  *
- * Heavy processing happens here, not in the Route Handler (Rule #66).
- * Rule #65: Echo cancellation for inventory updates.
- * Rule #64: Inventory changes via record_inventory_change_txn RPC.
- * Rule #7: Uses createServiceRoleClient().
- * Rule #12: Payload is IDs only — task fetches data from Postgres.
- * Rule #20: Single write path via recordInventoryChange().
+ * NOTE: first-party Shopify webhook ingress is currently observe-only for
+ * orders/inventory topics (ShipStation authoritative). This task remains
+ * available for controlled replays or future explicit re-enable.
  */
 
 import { task } from "@trigger.dev/sdk";
@@ -56,6 +53,59 @@ export function computeDelta(webhookQuantity: number, warehouseQuantity: number)
   return webhookQuantity - warehouseQuantity;
 }
 
+interface ResolvedVariant {
+  id: string;
+  sku: string;
+  resolutionPath: "inventory_item_id";
+}
+
+async function resolveVariantInWorkspace(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  inventoryItemId: number,
+): Promise<{
+  variant: ResolvedVariant | null;
+  trace: Record<string, unknown>;
+}> {
+  const trace: Record<string, unknown> = {
+    inventory_item_id: inventoryItemId,
+    workspace_id: workspaceId,
+    attempted_paths: ["warehouse_product_variants.shopify_inventory_item_id"],
+  };
+
+  const { data: candidates } = await supabase
+    .from("warehouse_product_variants")
+    .select("id, sku")
+    .eq("shopify_inventory_item_id", String(inventoryItemId))
+    .eq("workspace_id", workspaceId)
+    .limit(2);
+
+  const candidateCount = candidates?.length ?? 0;
+  trace.variant_candidate_count = candidateCount;
+
+  if (candidateCount === 1) {
+    const only = candidates?.[0];
+    if (!only) {
+      return { variant: null, trace };
+    }
+    return {
+      variant: {
+        id: only.id,
+        sku: only.sku,
+        resolutionPath: "inventory_item_id",
+      },
+      trace,
+    };
+  }
+
+  if (candidateCount > 1) {
+    trace.reason = "variant_ambiguous_in_workspace";
+  } else {
+    trace.reason = "inventory_item_unmapped_in_workspace";
+  }
+  return { variant: null, trace };
+}
+
 export const processShopifyWebhookTask = task({
   id: "process-shopify-webhook",
   maxDuration: 60,
@@ -83,6 +133,21 @@ export const processShopifyWebhookTask = task({
       return { processed: false, reason: "no_payload" };
     }
 
+    if (event.topic !== "inventory_levels/update") {
+      await markEvent(supabase, webhookEventId, "ignored_topic");
+      return { processed: true, reason: "ignored_topic" };
+    }
+
+    if (!event.workspace_id) {
+      await markEvent(supabase, webhookEventId, "workspace_resolution_failed");
+      await mergeMetadata(supabase, webhookEventId, {
+        resolver_trace: {
+          reason: "missing_workspace_id_on_event",
+        },
+      });
+      return { processed: false, reason: "workspace_resolution_failed" };
+    }
+
     // Parse the Shopify inventory payload
     const parsed = parseShopifyInventoryPayload(webhookData);
     if (!parsed) {
@@ -93,39 +158,37 @@ export const processShopifyWebhookTask = task({
       return { processed: false, reason: "parse_failed" };
     }
 
-    // Look up SKU from inventory_item_id via our variant table
-    const { data: variant } = await supabase
-      .from("warehouse_product_variants")
-      .select("sku, id")
-      .eq("shopify_inventory_item_id", String(parsed.inventoryItemId))
-      .eq("workspace_id", event.workspace_id)
-      .single();
+    const { variant, trace } = await resolveVariantInWorkspace(
+      supabase,
+      event.workspace_id,
+      parsed.inventoryItemId,
+    );
+    await mergeMetadata(supabase, webhookEventId, { resolver_trace: trace });
 
     if (!variant) {
-      // Unknown inventory item — not one of our tracked SKUs
-      await markEvent(supabase, webhookEventId, "sku_not_found");
+      const status =
+        trace.reason === "variant_ambiguous_in_workspace"
+          ? "sku_not_found_in_workspace"
+          : "inventory_item_unmapped_in_workspace";
+      await markEvent(supabase, webhookEventId, status);
       return {
         processed: false,
-        reason: "sku_not_found",
+        reason: status,
         inventoryItemId: parsed.inventoryItemId,
       };
     }
 
     // Rule #65: Echo cancellation — check if this webhook's quantity matches
-    // what we last pushed. If so, this is our own update echoing back.
-    const appId = (webhookData.app_id as number | undefined) ?? null;
-    const echoAppId = metadata.app_id as number | undefined;
-    if (appId || echoAppId) {
-      // If we know our Shopify app ID, compare. For now, check last_pushed_quantity.
-    }
-
-    const { data: mapping } = await supabase
+    // what we last pushed in store mappings. If so, this is likely our own echo.
+    const { data: mappingCandidates } = await supabase
       .from("client_store_sku_mappings")
-      .select("last_pushed_quantity")
-      .eq("local_sku", variant.sku)
-      .eq("platform", "shopify")
-      .maybeSingle();
+      .select("last_pushed_quantity, client_store_connections!inner(platform)")
+      .eq("variant_id", variant.id)
+      .eq("client_store_connections.platform", "shopify")
+      .eq("is_active", true)
+      .limit(1);
 
+    const mapping = mappingCandidates?.[0];
     if (mapping && mapping.last_pushed_quantity === parsed.available) {
       await markEvent(supabase, webhookEventId, "echo_cancelled");
       return { processed: true, reason: "echo_cancelled", sku: variant.sku };
@@ -140,8 +203,12 @@ export const processShopifyWebhookTask = task({
       .single();
 
     if (!level) {
-      await markEvent(supabase, webhookEventId, "no_inventory_level");
-      return { processed: false, reason: "no_inventory_level", sku: variant.sku };
+      await markEvent(supabase, webhookEventId, "variant_found_but_inventory_level_missing");
+      return {
+        processed: false,
+        reason: "variant_found_but_inventory_level_missing",
+        sku: variant.sku,
+      };
     }
 
     const delta = computeDelta(parsed.available, level.available);
@@ -205,4 +272,23 @@ async function markEvent(
     .from("webhook_events")
     .update({ status, processed_at: new Date().toISOString() })
     .eq("id", eventId);
+}
+
+async function mergeMetadata(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  eventId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const { data: current } = await supabase
+    .from("webhook_events")
+    .select("metadata")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  const nextMetadata = {
+    ...((current?.metadata as Record<string, unknown> | null) ?? {}),
+    ...patch,
+  };
+
+  await supabase.from("webhook_events").update({ metadata: nextMetadata }).eq("id", eventId);
 }
