@@ -113,36 +113,59 @@ export async function getChildOrganizations(
 }
 
 // === Org merge ===
+//
+// HRD-36 (2026-04-23): The previous TS-only implementation had six confirmed bugs:
+//   (1) Five org_id-bearing tables missing from the per-table allow-list
+//       (mailorder_orders, oauth_states, shipstation_orders, sku_sync_conflicts,
+//        warehouse_billing_rule_overrides) — two NOT NULL FKs hard-blocked the source-org
+//       DELETE; three nullable FKs silently orphaned rows.
+//   (2) Silent failures inside the loop (the `.update()` `error` was never checked).
+//   (3) Not transactional (Rule #64) — each PostgREST call was its own HTTP request,
+//       so a mid-loop crash left a half-merged org with no rollback.
+//   (4) previewMerge underreported affected rows for the same reason as (1).
+//   (5) warehouse_inventory_levels.org_id is auto-derived by trigger (Rule #21) — the
+//       prior code worked only because warehouse_products happened to come first in
+//       the array; ordering was undocumented and fragile.
+//   (6) UNIQUE-constraint collisions were not pre-checked (e.g. portal_admin_settings,
+//       warehouse_billing_snapshots, client_store_connections, organization_aliases),
+//       and bug (2) silently swallowed the resulting 23505s.
+//
+// Both Server Actions now delegate to PL/pgSQL RPCs defined in
+// supabase/migrations/20260423000001_org_merge_rpc.sql:
+//   - preview_merge_organizations(p_source uuid, p_target uuid) → jsonb
+//   - merge_organizations_txn(p_source uuid, p_target uuid)     → int (rows reassigned)
 
-/** All tables with an org_id column that must be reassigned during merge. */
-const ORG_TABLES = [
-  "warehouse_products",
-  "warehouse_shipments",
-  "warehouse_orders",
-  "warehouse_inbound_shipments",
-  "warehouse_billing_snapshots",
-  "warehouse_billing_adjustments",
-  "warehouse_inventory_levels",
-  "warehouse_shipstation_stores",
-  "warehouse_review_queue",
-  "bandcamp_connections",
-  "client_store_connections",
-  "support_conversations",
-  "support_email_mappings",
-  "portal_admin_settings",
-  "users",
-  "organization_aliases",
-] as const;
+export interface MergeCollision {
+  table: string;
+  constraint: string;
+  key: Record<string, unknown>;
+  source_row_id: string | null;
+  target_row_id: string | null;
+}
 
 export interface MergePreview {
   sourceOrg: { id: string; name: string };
   targetOrg: { id: string; name: string };
   affectedRows: Record<string, number>;
   totalAffected: number;
+  collisions: MergeCollision[];
+}
+
+interface MergePreviewRpcResponse {
+  source_name: string;
+  target_name: string;
+  affected_rows: Record<string, number>;
+  total_affected: number;
+  collisions: MergeCollision[];
 }
 
 /**
  * Preview what a merge would affect without making changes.
+ *
+ * Returns per-table row counts and UNIQUE-constraint collisions. If `collisions`
+ * is non-empty, `mergeOrganizations` will refuse to run until the operator resolves
+ * each conflict manually (typically by deleting the duplicate row on the source
+ * side, or merging its data into the target row).
  */
 export async function previewMerge(
   sourceOrgId: string,
@@ -155,40 +178,37 @@ export async function previewMerge(
 
   const serviceClient = createServiceRoleClient();
 
-  const [sourceRes, targetRes] = await Promise.all([
-    serviceClient.from("organizations").select("id, name").eq("id", sourceOrgId).single(),
-    serviceClient.from("organizations").select("id, name").eq("id", targetOrgId).single(),
-  ]);
+  const { data, error } = await serviceClient.rpc("preview_merge_organizations", {
+    p_source_org_id: sourceOrgId,
+    p_target_org_id: targetOrgId,
+  });
 
-  if (!sourceRes.data) throw new Error("Source organization not found");
-  if (!targetRes.data) throw new Error("Target organization not found");
-
-  const affectedRows: Record<string, number> = {};
-  let totalAffected = 0;
-
-  for (const table of ORG_TABLES) {
-    const { count } = await serviceClient
-      .from(table)
-      .select("*", { count: "exact", head: true })
-      .eq("org_id", sourceOrgId);
-    const n = count ?? 0;
-    if (n > 0) {
-      affectedRows[table] = n;
-      totalAffected += n;
-    }
+  if (error) {
+    throw new Error(translateMergeError(error.message));
+  }
+  if (!data) {
+    throw new Error("preview_merge_organizations returned empty payload");
   }
 
+  const payload = data as MergePreviewRpcResponse;
   return {
-    sourceOrg: sourceRes.data as { id: string; name: string },
-    targetOrg: targetRes.data as { id: string; name: string },
-    affectedRows,
-    totalAffected,
+    sourceOrg: { id: sourceOrgId, name: payload.source_name },
+    targetOrg: { id: targetOrgId, name: payload.target_name },
+    affectedRows: payload.affected_rows ?? {},
+    totalAffected: payload.total_affected ?? 0,
+    collisions: payload.collisions ?? [],
   };
 }
 
 /**
- * Merge source organization into target. Reassigns all records then
- * deletes the source org. This is irreversible.
+ * Merge source organization into target. Reassigns every org_id-bearing row in
+ * a single Postgres transaction (Rule #64), then deletes the source org row.
+ *
+ * Aborts cleanly on UNIQUE-constraint collisions (Bug 6 from the HRD-36 audit) —
+ * the RPC re-checks collisions inside the transaction to close the gap between
+ * preview and confirm.
+ *
+ * This action is irreversible.
  */
 export async function mergeOrganizations(
   sourceOrgId: string,
@@ -202,52 +222,42 @@ export async function mergeOrganizations(
 
   const serviceClient = createServiceRoleClient();
 
-  // Verify both exist
-  const [sourceRes, targetRes] = await Promise.all([
-    serviceClient.from("organizations").select("id").eq("id", sourceOrgId).single(),
-    serviceClient.from("organizations").select("id").eq("id", targetOrgId).single(),
-  ]);
-  if (!sourceRes.data) throw new Error("Source organization not found");
-  if (!targetRes.data) throw new Error("Target organization not found");
+  const { data, error } = await serviceClient.rpc("merge_organizations_txn", {
+    p_source_org_id: sourceOrgId,
+    p_target_org_id: targetOrgId,
+  });
 
-  let totalMerged = 0;
-
-  // Reassign all records from source to target
-  for (const table of ORG_TABLES) {
-    // Count first, then update
-    const { count } = await serviceClient
-      .from(table)
-      .select("id", { count: "exact", head: true })
-      .eq("org_id", sourceOrgId);
-
-    if ((count ?? 0) > 0) {
-      await serviceClient
-        .from(table)
-        .update({ org_id: targetOrgId } as Record<string, unknown>)
-        .eq("org_id", sourceOrgId);
-      totalMerged += count ?? 0;
-    }
+  if (error) {
+    throw new Error(translateMergeError(error.message));
   }
 
-  // Move child organizations too
-  await serviceClient
-    .from("organizations")
-    .update({ parent_org_id: targetOrgId })
-    .eq("parent_org_id", sourceOrgId);
+  return { merged: (data as number | null) ?? 0 };
+}
 
-  // Delete the source org (now orphaned — all FKs reassigned)
-  const { error: deleteError } = await serviceClient
-    .from("organizations")
-    .delete()
-    .eq("id", sourceOrgId);
-
-  if (deleteError) {
-    throw new Error(
-      `Failed to delete source org after merge: ${deleteError.message}. Records were already reassigned to target.`,
-    );
+/**
+ * Map raw Postgres error messages from the merge RPCs to operator-friendly text.
+ * The RPCs raise structured `prefix: detail` errors so the UI can branch on the prefix.
+ */
+function translateMergeError(message: string): string {
+  if (message.includes("merge_invalid_input")) {
+    return "Invalid merge request: source and target must both be set and different.";
   }
-
-  return { merged: totalMerged };
+  if (message.includes("merge_source_not_found")) {
+    return "Source organization not found.";
+  }
+  if (message.includes("merge_target_not_found")) {
+    return "Target organization not found.";
+  }
+  if (message.includes("merge_workspace_mismatch")) {
+    return "Source and target organizations are in different workspaces. Cross-workspace merges are not supported.";
+  }
+  if (message.includes("merge_collisions_present")) {
+    return `Merge blocked by UNIQUE-constraint collisions. Resolve duplicates before retrying. Details: ${message}`;
+  }
+  if (message.includes("merge_delete_failed")) {
+    return `Reassignment succeeded but final delete failed (orphan foreign key). ${message}`;
+  }
+  return `Merge failed: ${message}`;
 }
 
 // === Organization Aliases ===

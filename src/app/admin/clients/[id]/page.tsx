@@ -1558,15 +1558,38 @@ function MergeOrgCard({ orgId }: { orgId: string }) {
                 </li>
               ))}
             </ul>
-            {preview.totalAffected === 0 && (
+            {preview.totalAffected === 0 && preview.collisions.length === 0 && (
               <p className="text-xs text-muted-foreground italic">
                 No records to reassign — organization is empty.
               </p>
             )}
+            {preview.collisions.length > 0 && (
+              <div className="border border-destructive rounded p-2 bg-destructive/10 space-y-1">
+                <p className="text-sm font-semibold text-destructive">
+                  Merge blocked: {preview.collisions.length} UNIQUE-constraint collision
+                  {preview.collisions.length === 1 ? "" : "s"} detected
+                </p>
+                <p className="text-xs text-destructive/80">
+                  Both organizations already have a row with the same key in these tables. Delete
+                  the source row (or merge its data into the target row) before retrying.
+                </p>
+                <ul className="text-xs text-destructive/90 space-y-1 mt-1">
+                  {preview.collisions.map((c) => (
+                    <li
+                      key={`${c.table}:${c.constraint}:${c.source_row_id ?? "null"}:${c.target_row_id ?? "null"}`}
+                      className="font-mono"
+                    >
+                      <span className="font-semibold">{c.table}</span> ({c.constraint}):{" "}
+                      {JSON.stringify(c.key)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <Button
               variant="destructive"
               size="sm"
-              disabled={mergeMut.isPending}
+              disabled={mergeMut.isPending || preview.collisions.length > 0}
               onClick={() => mergeMut.mutate()}
             >
               {mergeMut.isPending ? "Merging..." : "Confirm Merge & Delete"}
