@@ -15,8 +15,14 @@
  * Rule #12: Task payload is IDs only.
  */
 
-import { task } from "@trigger.dev/sdk";
+import { logger, task } from "@trigger.dev/sdk";
 import OAuth from "oauth-1.0a";
+import {
+  fetchFulfillmentOrdersForOrder,
+  runFulfillmentCreateMutation,
+  selectFulfillmentOrder,
+  toShopifyOrderGid,
+} from "@/lib/server/shopify-fulfillment";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { env } from "@/lib/shared/env";
@@ -24,6 +30,36 @@ import {
   deriveNotificationStrategy,
   type NotificationChannel,
 } from "@/lib/shared/notification-strategy";
+
+/**
+ * B-2 / HRD-28 — Shopify fulfillment failure carrier.
+ *
+ * `markShopifyFulfilled()` throws this when Shopify GraphQL returns
+ * `userErrors[]` (mutation-level rejection) OR when fulfillment-order
+ * selection has no actionable target. Top-level transport `errors[]` are
+ * thrown as plain Error by `connectionShopifyGraphQL`; we catch those at
+ * the task boundary and persist `error.message` instead. Both paths land
+ * raw arrays on `warehouse_review_queue.metadata` so debugging never has
+ * to re-run the failing call.
+ */
+class ShopifyFulfillmentError extends Error {
+  readonly userErrors: Array<{ field?: string[] | null; message: string }>;
+  readonly partialFulfillmentId: string | null;
+  readonly selectionFailure: "no_actionable_status" | "no_sku_coverage" | null;
+
+  constructor(args: {
+    message: string;
+    userErrors?: Array<{ field?: string[] | null; message: string }>;
+    partialFulfillmentId?: string | null;
+    selectionFailure?: "no_actionable_status" | "no_sku_coverage" | null;
+  }) {
+    super(args.message);
+    this.name = "ShopifyFulfillmentError";
+    this.userErrors = args.userErrors ?? [];
+    this.partialFulfillmentId = args.partialFulfillmentId ?? null;
+    this.selectionFailure = args.selectionFailure ?? null;
+  }
+}
 
 export const markPlatformFulfilledTask = task({
   id: "mark-platform-fulfilled",
@@ -87,16 +123,37 @@ export const markPlatformFulfilledTask = task({
       value: { channel, carrier, suppressShopifyEmail: strategy.suppressShopifyEmail },
     });
 
+    // B-2: pull line items so the GraphQL fulfillment-order selector can pick
+    // the FO whose SKU coverage matches what we actually shipped. We use
+    // `fulfilled_quantity` (write-only from webhook handlers per F-1 contract)
+    // to derive the remaining quantity per SKU.
+    const { data: orderItems } = await supabase
+      .from("warehouse_order_items")
+      .select("sku, quantity, fulfilled_quantity")
+      .eq("warehouse_order_id", order_id);
+
+    const requiredSkus = new Map<string, number>();
+    for (const item of orderItems ?? []) {
+      const sku = item.sku as string | null;
+      if (!sku) continue;
+      const ordered = Number(item.quantity ?? 0);
+      const fulfilled = Number(item.fulfilled_quantity ?? 0);
+      const remaining = Math.max(0, ordered - fulfilled);
+      if (remaining > 0) requiredSkus.set(sku, remaining);
+    }
+
     try {
       switch (order.source) {
         case "shopify":
-          await markShopifyFulfilled(
+          await markShopifyFulfilled({
             connection,
             platformOrderId,
-            tracking_number,
+            trackingNumber: tracking_number,
             carrier,
             notifyCustomer,
-          );
+            requiredSkus,
+            workspaceId: order.workspace_id as string,
+          });
           break;
         case "woocommerce":
           await markWooCommerceFulfilled(connection, platformOrderId, tracking_number, carrier);
@@ -126,6 +183,24 @@ export const markPlatformFulfilledTask = task({
         .update({ platform_fulfillment_status: "failed", updated_at: new Date().toISOString() })
         .eq("id", order_id);
 
+      // B-2: persist the raw GraphQL `userErrors[]` and selection-failure
+      // diagnostics on the review queue row so debugging never has to
+      // re-run the failing Shopify call. Plain Errors thrown by
+      // `connectionShopifyGraphQL` (top-level GraphQL `errors[]`,
+      // throttled, or transport) are captured via `error: msg`.
+      const fulfillmentMetadata: Record<string, unknown> = {
+        order_id: order.id,
+        platform: order.source,
+        platform_order_id: platformOrderId,
+        tracking_number,
+        error: msg,
+      };
+      if (err instanceof ShopifyFulfillmentError) {
+        fulfillmentMetadata.shopify_user_errors = err.userErrors;
+        fulfillmentMetadata.shopify_partial_fulfillment_id = err.partialFulfillmentId;
+        fulfillmentMetadata.shopify_selection_failure = err.selectionFailure;
+      }
+
       await supabase.from("warehouse_review_queue").insert({
         workspace_id: order.workspace_id,
         org_id: order.org_id,
@@ -133,13 +208,7 @@ export const markPlatformFulfilledTask = task({
         severity: "medium",
         title: `Failed to mark ${order.source} order fulfilled`,
         description: `Order ${platformOrderId}: ${msg}`,
-        metadata: {
-          order_id: order.id,
-          platform: order.source,
-          platform_order_id: platformOrderId,
-          tracking_number,
-          error: msg,
-        },
+        metadata: fulfillmentMetadata,
         group_key: `platform_fulfill:${order.id}`,
         status: "open",
       });
@@ -151,51 +220,84 @@ export const markPlatformFulfilledTask = task({
 
 // ── Platform implementations ──────────────────────────────────────────────────
 
-async function markShopifyFulfilled(
-  connection: { api_key: string | null; store_url: string },
-  orderId: string,
-  trackingNumber: string,
-  carrier: string,
-  notifyCustomer: boolean,
-): Promise<void> {
-  const apiKey = connection.api_key;
+/**
+ * B-2 / HRD-28 — mark a Shopify order fulfilled via the GraphQL
+ * `fulfillmentCreate` mutation.
+ *
+ * Replaced the legacy REST flow (GET fulfillment_orders.json → POST
+ * fulfillments.json) which had two silent footguns:
+ *   1. `status === 'open'` filter missed `IN_PROGRESS` partial-fulfillment
+ *      cases → "No open fulfillment order found" false negatives.
+ *   2. REST returned a fulfillment id alongside transport-level failures
+ *      that callers might mistake for success.
+ *
+ * GraphQL paths handled here:
+ *   - Top-level `errors[]` (transport / throttle / auth) → thrown by
+ *     `connectionShopifyGraphQL`; surfaces as plain Error.
+ *   - Mutation `userErrors[]` → thrown as `ShopifyFulfillmentError` so the
+ *     caller persists the raw array on review queue metadata.
+ *   - FO selection ambiguity → caller emits a sensor warning; oldest GID
+ *     wins (Shopify GIDs are monotonically increasing).
+ *   - Zero matching FOs → `ShopifyFulfillmentError` with selectionFailure
+ *     set; no implicit fallback (per plan).
+ *
+ * `notify_customer` strategy comes from `deriveNotificationStrategy()` —
+ * unchanged from the REST path, just renamed to GraphQL casing.
+ */
+async function markShopifyFulfilled(args: {
+  connection: { api_key: string | null; store_url: string };
+  platformOrderId: string;
+  trackingNumber: string;
+  carrier: string;
+  notifyCustomer: boolean;
+  requiredSkus: Map<string, number>;
+  workspaceId: string;
+}): Promise<void> {
+  const apiKey = args.connection.api_key;
   if (!apiKey) throw new Error("Missing api_key for Shopify connection");
 
-  const baseUrl = connection.store_url.replace(/\/$/, "");
-  const headers = { "X-Shopify-Access-Token": apiKey, "Content-Type": "application/json" };
+  const ctx = { storeUrl: args.connection.store_url, accessToken: apiKey };
+  const orderGid = toShopifyOrderGid(args.platformOrderId);
 
-  // Get open fulfillment order
-  const foRes = await fetch(
-    `${baseUrl}/admin/api/2026-01/orders/${orderId}/fulfillment_orders.json`,
-    { headers },
-  );
-  if (!foRes.ok) throw new Error(`Shopify fulfillment_orders ${foRes.status}`);
-
-  const { fulfillment_orders } = (await foRes.json()) as {
-    fulfillment_orders: Array<{ id: number; status: string }>;
-  };
-  const openFO = fulfillment_orders.find((fo) => fo.status === "open");
-  if (!openFO) throw new Error("No open fulfillment order found on Shopify");
-
-  const fulfillRes = await fetch(`${baseUrl}/admin/api/2026-01/fulfillments.json`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      fulfillment: {
-        line_items_by_fulfillment_order: [{ fulfillment_order_id: openFO.id }],
-        tracking_info: { number: trackingNumber, company: carrier },
-        // Phase 10.4 — driven by deriveNotificationStrategy. Per the canonical
-        // matrix, shopify_client under "hybrid" sends Shopify's native email
-        // (notifyCustomer=true). The legacy "false → AfterShip handles" path
-        // is gone; AfterShip is now event-ingestion-only (Phase 10.5 sunset).
-        notify_customer: notifyCustomer,
-      },
-    }),
+  const fulfillmentOrders = await fetchFulfillmentOrdersForOrder(ctx, orderGid);
+  const selection = selectFulfillmentOrder({
+    fulfillmentOrders,
+    requiredSkus: args.requiredSkus,
   });
 
-  if (!fulfillRes.ok) {
-    const body = await fulfillRes.text();
-    throw new Error(`Shopify fulfillment create ${fulfillRes.status}: ${body}`);
+  if (selection.kind === "none_match") {
+    throw new ShopifyFulfillmentError({
+      message: `No actionable fulfillment order on Shopify (${selection.reason}); fulfillmentOrders=${fulfillmentOrders.length}`,
+      selectionFailure: selection.reason,
+    });
+  }
+
+  if (selection.ambiguous) {
+    logger.warn("mark-platform-fulfilled: ambiguous fulfillment-order selection", {
+      orderGid,
+      chosen_fulfillment_order_id: selection.fulfillmentOrder.id,
+      tie_breaker: selection.tieBreakerReason ?? "covering_sku_set",
+      candidate_count: fulfillmentOrders.length,
+    });
+  }
+
+  const result = await runFulfillmentCreateMutation({
+    ctx,
+    fulfillmentOrderId: selection.fulfillmentOrder.id,
+    trackingNumber: args.trackingNumber,
+    carrier: args.carrier,
+    // Phase 10.4 — driven by deriveNotificationStrategy. shopify_client
+    // under "hybrid" sends Shopify's native email (notifyCustomer=true).
+    // AfterShip is event-ingestion-only post Phase 10.5.
+    notifyCustomer: args.notifyCustomer,
+  });
+
+  if (result.kind === "user_errors") {
+    throw new ShopifyFulfillmentError({
+      message: `Shopify fulfillmentCreate userErrors: ${result.userErrors.map((e) => e.message).join("; ")}`,
+      userErrors: result.userErrors,
+      partialFulfillmentId: result.partialFulfillmentId,
+    });
   }
 }
 
