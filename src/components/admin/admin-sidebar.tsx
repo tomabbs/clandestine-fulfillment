@@ -167,9 +167,10 @@ export function AdminSidebar() {
                   its visible content. Putting them as children of
                   DropdownMenuTrigger (outside the render element) caused
                   the button to render empty.
-                  Items use onSelect+router.push because Base UI's MenuItem
-                  doesn't accept a Link via render — props don't proxy
-                  through to Next's anchor. */}
+                  Items use onClick+router.push because Base UI's MenuItem
+                  exposes `onClick` (NOT Radix's `onSelect`, which is
+                  silently ignored) and doesn't accept a Link via render
+                  — props don't proxy through to Next's anchor. */}
               <SidebarMenuItem>
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -190,7 +191,7 @@ export function AdminSidebar() {
                       {SETTINGS_ITEMS.map((item) => (
                         <DropdownMenuItem
                           key={item.href}
-                          onSelect={() => router.push(item.href)}
+                          onClick={() => router.push(item.href)}
                           className={pathname === item.href ? "bg-accent font-medium" : undefined}
                         >
                           {item.title}
