@@ -34,22 +34,34 @@ export const runtime = "nodejs";
  * `read_all_orders` is required to read order history older than the default
  * 60-day window — necessary for cockpit backfill on long-tail clients.
  *
- * `write_webhooks` is required by the (deferred) `shopify-webhook-health-check`
- * task to recreate webhook subscriptions Shopify auto-deletes (HRD-09 / HRD-32).
- *
  * `write_merchant_managed_fulfillment_orders` is the GraphQL fulfillmentCreate
  * scope (HRD-28); the legacy `write_fulfillments` REST scope is also kept for
  * the existing REST fulfillment path until the GraphQL migration ships.
  *
+ * NOTE on webhooks: there is NO `write_webhooks` scope in Shopify. Webhook
+ * subscriptions (REST and GraphQL `webhookSubscriptionCreate`) are gated by
+ * the underlying RESOURCE scope:
+ *   - `inventory_levels/update`         → read_inventory
+ *   - `orders/create` / `orders/cancelled` → read_orders
+ *   - `refunds/create`                  → read_orders
+ * All four topics required by HRD-09.2 are covered by scopes already in this
+ * list, so the (deferred) `shopify-webhook-health-check` task does not need
+ * any extra scope to call `webhookSubscriptionCreate`.
+ *
  * Note: changing this list invalidates the consent for any existing connection
  * — Shopify forces a re-install when scopes diverge from the granted set.
+ *
+ * For Custom-distribution apps (HRD-35), the Shopify Partner Dashboard's
+ * "Configuration → Access scopes" config must ALSO declare the same set; the
+ * URL `scope=` param alone is silently trimmed to whatever the dashboard
+ * config allows.
  */
 const SHOPIFY_SCOPES =
   "read_products,write_products,read_inventory,write_inventory," +
   "read_orders,write_orders,read_all_orders," +
   "read_locations," +
   "read_fulfillments,write_fulfillments,write_merchant_managed_fulfillment_orders," +
-  "write_webhooks,write_publications";
+  "write_publications";
 
 const STATE_NONCE_TTL_MINUTES = 15;
 
