@@ -14,6 +14,16 @@ import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { LegacyOrdersView } from "../orders-legacy/_legacy-orders-view";
 import { OrdersCockpit } from "./_components/orders-cockpit";
 
+// Auth-gated + reads cookies via requireStaff() → never statically renderable.
+// Marking explicitly so `next build` skips the static prepass for this route,
+// which was triggering env() validation against CI's minimal placeholder set
+// (only the four NEXT_PUBLIC_* vars, per docs/CURSOR_CLOUD_AGENT.md). Without
+// this, the prepass calls createServerSupabaseClient() → env() and Zod throws
+// on every required server-only secret. Other admin pages succeed because
+// they hit `cookies()` before any env-touching call; this page's cockpit
+// branch invokes server helpers in a slightly different order.
+export const dynamic = "force-dynamic";
+
 export default async function AdminOrdersPage() {
   const { workspaceId } = await requireStaff();
   const flags = await getWorkspaceFlags(workspaceId);
