@@ -2,7 +2,11 @@
 
 import { z } from "zod/v4";
 import { requireAuth } from "@/lib/server/auth-context";
-import { iterateAllVariants } from "@/lib/server/shopify-connection-graphql";
+import {
+  estimateOrderVolume,
+  getInventoryLevelsAtLocation,
+  iterateAllVariants,
+} from "@/lib/server/shopify-connection-graphql";
 import {
   type RegisterWebhookSubscriptionsResult,
   registerWebhookSubscriptions,
@@ -1215,5 +1219,377 @@ export async function registerShopifyWebhookSubscriptions(input: {
     apiVersionPinned,
     apiVersionDrift,
     registeredAt,
+  };
+}
+
+// ============================================================================
+// HRD-04 + HRD-18 — runDirectShopifyDryRun
+//
+// Read-only reconciliation between local DB and remote Shopify for a single
+// connection. Operator-controlled gate before flipping `do_not_fanout=false`.
+//
+// Three independent passes, all read-only:
+//   A) Membership scan (full Shopify variant walk, same source as Step 4).
+//      Surfaces the four HRD-04 fatal classes:
+//        a) shopifyOnlySkus       — in Shopify, not in warehouse_product_variants
+//        b) warehouseOnlySkus     — in warehouse, not in Shopify
+//        c) duplicateShopifySkus  — same SKU on >1 Shopify variant (Rule #8)
+//        d) shopifyVariantsWithoutSku — Shopify variant with empty SKU
+//
+//   B) Quantity drift sample (default 50 mapped SKUs, max 200). Calls
+//      Shopify GraphQL nodes(ids:) for each remote_inventory_item_id and
+//      compares against warehouse_inventory_levels.available. Returns
+//      drift[] with per-SKU diffs sorted by absolute magnitude.
+//
+//   C) Bandwidth estimate (HRD-18). Cheap ordersCount over last 30 days,
+//      computes avgDailyOrders, estimatedDailyWebhooks (× 2 for orders/create
+//      + inventory_levels/update), peakHourlyRate (× 3 burst factor), and a
+//      recommendation field used by the Section 0.D Thursday runbook.
+//
+// SC-1 success criteria: drift count ≤ 2% of sample size on the import
+// target store within 1 hour of the baseline import.
+//
+// NEVER mutates Shopify or warehouse state. NEVER calls inventoryActivate
+// (that's the live push path's job, HRD-26). The dry-run report is the
+// artifact — operator reviews it and either flips `do_not_fanout=false` or
+// remediates the surfaced issues first.
+// ============================================================================
+
+const runDirectShopifyDryRunSchema = z.object({
+  connectionId: z.string().uuid(),
+  sampleSize: z.number().int().min(1).max(200).optional(),
+  /** HRD-18 disable for testing — skips the ordersCount call. */
+  skipBandwidthEstimate: z.boolean().optional(),
+});
+
+export type DirectShopifyDryRunDriftRow = {
+  sku: string;
+  remoteInventoryItemId: string;
+  localAvailable: number;
+  remoteAvailable: number | null;
+  diff: number;
+  /** "diff" if numeric mismatch, "remote_not_stocked_at_location" if Shopify reported no level at default_location_id (HRD-26 will lazy-activate on first push), "remote_node_missing" if the inventory item GID was deleted between mapping and dry-run. */
+  reason: "diff" | "remote_not_stocked_at_location" | "remote_node_missing";
+};
+
+export type DirectShopifyDryRunReport = {
+  connectionId: string;
+  defaultLocationId: string;
+  generatedAt: string;
+  durationMs: number;
+
+  /** Membership pass (A) — same shape as autoDiscover's report. */
+  membership: {
+    shopifyVariantsScanned: number;
+    shopifyProductsScanned: number;
+    warehouseSkusInWorkspace: number;
+    matchedSkus: number;
+    shopifyOnlySkus: string[];
+    warehouseOnlySkus: string[];
+    duplicateShopifySkus: Array<{ sku: string; variantIds: string[] }>;
+    shopifyVariantsWithoutSku: number;
+    shopifyVariantsWithoutInventoryItem: number;
+  };
+
+  /** Quantity drift pass (B). */
+  drift: {
+    sampleSize: number;
+    sampled: number;
+    matched: number;
+    drifted: number;
+    rows: DirectShopifyDryRunDriftRow[];
+  };
+
+  /** Bandwidth estimate pass (C). Null when skipped or when ordersCount fails. */
+  bandwidthEstimate: {
+    windowDays: number;
+    ordersInWindow: number;
+    avgDailyOrders: number;
+    estimatedDailyWebhooks: number;
+    peakHourlyRate: number;
+    recommendation: "safe_to_proceed" | "gradual_rollout";
+  } | null;
+
+  /** Aggregate verdict — `ok=true` only when zero fatal classes detected. */
+  verdict: {
+    ok: boolean;
+    fatalReasons: string[];
+    warnings: string[];
+  };
+};
+
+export async function runDirectShopifyDryRun(input: {
+  connectionId: string;
+  sampleSize?: number;
+  skipBandwidthEstimate?: boolean;
+}): Promise<DirectShopifyDryRunReport> {
+  const startedAt = Date.now();
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = runDirectShopifyDryRunSchema.parse(input);
+  const sampleSize = data.sampleSize ?? 50;
+
+  const serviceClient = createServiceRoleClient();
+
+  // 1) Load the connection.
+  const { data: conn, error: connErr } = await serviceClient
+    .from("client_store_connections")
+    .select("id, workspace_id, store_url, platform, api_key, default_location_id")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (connErr) throw new Error(`Connection lookup failed: ${connErr.message}`);
+  if (!conn) throw new Error("Connection not found");
+  if (conn.platform !== "shopify") {
+    throw new Error("runDirectShopifyDryRun only applies to Shopify connections");
+  }
+  if (!conn.api_key) {
+    throw new Error("Connection has no Shopify access token — complete the OAuth install first");
+  }
+  if (!conn.default_location_id) {
+    throw new Error(
+      "Connection has no default_location_id — complete Step 3 (default location) first",
+    );
+  }
+
+  const ctx = { storeUrl: conn.store_url, accessToken: conn.api_key };
+
+  // 2) PASS A — membership scan. Same walk as autoDiscover (read-only).
+  const { data: variants, error: variantsErr } = await serviceClient
+    .from("warehouse_product_variants")
+    .select("id, sku")
+    .eq("workspace_id", conn.workspace_id)
+    .not("sku", "is", null);
+  if (variantsErr) {
+    throw new Error(`Variant universe load failed: ${variantsErr.message}`);
+  }
+  const warehouseSkus = new Set<string>();
+  for (const v of variants ?? []) {
+    if (typeof v.sku === "string" && v.sku.trim()) warehouseSkus.add(v.sku.trim());
+  }
+
+  const shopifySkuSeen = new Map<string, string[]>();
+  const productIdsSeen = new Set<string>();
+  let shopifyVariantsScanned = 0;
+  let shopifyVariantsWithoutSku = 0;
+  let shopifyVariantsWithoutInventoryItem = 0;
+
+  for await (const page of iterateAllVariants(ctx)) {
+    for (const v of page) {
+      shopifyVariantsScanned++;
+      productIdsSeen.add(v.productId);
+      if (!v.sku) {
+        shopifyVariantsWithoutSku++;
+        continue;
+      }
+      if (!v.inventoryItemId) {
+        shopifyVariantsWithoutInventoryItem++;
+        continue;
+      }
+      const seen = shopifySkuSeen.get(v.sku) ?? [];
+      seen.push(v.variantId);
+      shopifySkuSeen.set(v.sku, seen);
+    }
+  }
+
+  const matchedSkuSet = new Set<string>();
+  const shopifyOnly: string[] = [];
+  for (const sku of shopifySkuSeen.keys()) {
+    if (warehouseSkus.has(sku)) matchedSkuSet.add(sku);
+    else shopifyOnly.push(sku);
+  }
+  const warehouseOnly: string[] = [];
+  for (const sku of warehouseSkus) {
+    if (!matchedSkuSet.has(sku)) warehouseOnly.push(sku);
+  }
+  shopifyOnly.sort();
+  warehouseOnly.sort();
+
+  const duplicateShopifySkus: Array<{ sku: string; variantIds: string[] }> = [];
+  for (const [sku, variantIds] of shopifySkuSeen.entries()) {
+    if (variantIds.length > 1) duplicateShopifySkus.push({ sku, variantIds });
+  }
+
+  // 3) PASS B — quantity drift sample. Pull mappings, sample, fetch remote
+  //    available, compare against warehouse_inventory_levels.available.
+  const { data: mappings, error: mappingsErr } = await serviceClient
+    .from("client_store_sku_mappings")
+    .select("remote_sku, remote_inventory_item_id")
+    .eq("connection_id", conn.id)
+    .eq("is_active", true)
+    .not("remote_inventory_item_id", "is", null)
+    .order("updated_at", { ascending: false })
+    .limit(sampleSize);
+  if (mappingsErr) {
+    throw new Error(`Mapping load failed: ${mappingsErr.message}`);
+  }
+
+  const sample = (mappings ?? []).filter(
+    (m): m is { remote_sku: string; remote_inventory_item_id: string } =>
+      typeof m.remote_sku === "string" && typeof m.remote_inventory_item_id === "string",
+  );
+
+  const driftRows: DirectShopifyDryRunDriftRow[] = [];
+  let driftMatched = 0;
+
+  if (sample.length > 0) {
+    const remoteLevels = await getInventoryLevelsAtLocation(
+      ctx,
+      sample.map((s) => s.remote_inventory_item_id),
+      conn.default_location_id,
+    );
+
+    // Local inventory lookup — workspace-scoped, sku-keyed.
+    const sampleSkus = sample.map((s) => s.remote_sku);
+    const { data: localLevels, error: localErr } = await serviceClient
+      .from("warehouse_inventory_levels")
+      .select("sku, available")
+      .in("sku", sampleSkus);
+    if (localErr) {
+      throw new Error(`Local inventory load failed: ${localErr.message}`);
+    }
+    const localBySku = new Map<string, number>();
+    for (const row of localLevels ?? []) {
+      if (typeof row.sku === "string" && typeof row.available === "number") {
+        localBySku.set(row.sku, row.available);
+      }
+    }
+
+    for (const m of sample) {
+      const localAvailable = localBySku.get(m.remote_sku) ?? 0;
+      if (!remoteLevels.has(m.remote_inventory_item_id)) {
+        driftRows.push({
+          sku: m.remote_sku,
+          remoteInventoryItemId: m.remote_inventory_item_id,
+          localAvailable,
+          remoteAvailable: null,
+          diff: localAvailable,
+          reason: "remote_node_missing",
+        });
+        continue;
+      }
+      const remoteAvailable = remoteLevels.get(m.remote_inventory_item_id);
+      if (remoteAvailable === null || remoteAvailable === undefined) {
+        driftRows.push({
+          sku: m.remote_sku,
+          remoteInventoryItemId: m.remote_inventory_item_id,
+          localAvailable,
+          remoteAvailable: null,
+          diff: localAvailable,
+          reason: "remote_not_stocked_at_location",
+        });
+        continue;
+      }
+      const diff = localAvailable - remoteAvailable;
+      if (diff === 0) {
+        driftMatched++;
+        continue;
+      }
+      driftRows.push({
+        sku: m.remote_sku,
+        remoteInventoryItemId: m.remote_inventory_item_id,
+        localAvailable,
+        remoteAvailable,
+        diff,
+        reason: "diff",
+      });
+    }
+  }
+
+  // Sort drift rows by absolute diff DESC so the worst drift is at the top.
+  driftRows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+  // 4) PASS C — bandwidth estimate (HRD-18). Optional, fail-soft.
+  let bandwidthEstimate: DirectShopifyDryRunReport["bandwidthEstimate"] = null;
+  if (!data.skipBandwidthEstimate) {
+    try {
+      bandwidthEstimate = await estimateOrderVolume(ctx, 30);
+    } catch (err) {
+      // Bandwidth estimate is informational — never fail the dry-run on it.
+      console.warn(
+        `[runDirectShopifyDryRun] ordersCount failed for connection ${conn.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // 5) Verdict aggregation.
+  const fatalReasons: string[] = [];
+  const warnings: string[] = [];
+  if (duplicateShopifySkus.length > 0) {
+    fatalReasons.push(
+      `duplicate_shopify_skus:${duplicateShopifySkus.length} (Rule #8 — same SKU on >1 Shopify variant)`,
+    );
+  }
+  if (shopifyOnly.length > 0) {
+    fatalReasons.push(
+      `shopify_only_skus:${shopifyOnly.length} (Shopify SKUs absent from warehouse_product_variants — webhook resolution will fail)`,
+    );
+  }
+  if (shopifyVariantsWithoutSku > 0) {
+    fatalReasons.push(
+      `shopify_variants_without_sku:${shopifyVariantsWithoutSku} (variant has no SKU — inventory webhooks cannot route)`,
+    );
+  }
+  if (warehouseOnly.length > 0) {
+    warnings.push(
+      `warehouse_only_skus:${warehouseOnly.length} (likely Bandcamp-only or legacy — informational)`,
+    );
+  }
+  if (shopifyVariantsWithoutInventoryItem > 0) {
+    warnings.push(
+      `shopify_variants_without_inventory_item:${shopifyVariantsWithoutInventoryItem} (variant has SKU but no inventoryItem — Shopify-side data error)`,
+    );
+  }
+  if (sample.length === 0) {
+    warnings.push(
+      "drift_sample_empty (no client_store_sku_mappings with remote_inventory_item_id — run Step 4 SKU discovery first)",
+    );
+  }
+  if (sample.length > 0) {
+    const driftPct = (driftRows.length / sample.length) * 100;
+    if (driftPct > 2) {
+      fatalReasons.push(
+        `drift_above_threshold:${driftRows.length}/${sample.length} (${driftPct.toFixed(1)}% > SC-1 ceiling 2%)`,
+      );
+    } else if (driftRows.length > 0) {
+      warnings.push(
+        `drift_within_threshold:${driftRows.length}/${sample.length} (${driftPct.toFixed(1)}% — under SC-1 ceiling)`,
+      );
+    }
+  }
+  if (bandwidthEstimate?.recommendation === "gradual_rollout") {
+    warnings.push(
+      `bandwidth_high:${bandwidthEstimate.estimatedDailyWebhooks.toFixed(0)} webhooks/day estimated — Section 0.D recommends staggering this connection's flip`,
+    );
+  }
+
+  return {
+    connectionId: conn.id,
+    defaultLocationId: conn.default_location_id,
+    generatedAt: new Date().toISOString(),
+    durationMs: Date.now() - startedAt,
+    membership: {
+      shopifyVariantsScanned,
+      shopifyProductsScanned: productIdsSeen.size,
+      warehouseSkusInWorkspace: warehouseSkus.size,
+      matchedSkus: matchedSkuSet.size,
+      shopifyOnlySkus: shopifyOnly.slice(0, 200),
+      warehouseOnlySkus: warehouseOnly.slice(0, 200),
+      duplicateShopifySkus: duplicateShopifySkus.slice(0, 100),
+      shopifyVariantsWithoutSku,
+      shopifyVariantsWithoutInventoryItem,
+    },
+    drift: {
+      sampleSize,
+      sampled: sample.length,
+      matched: driftMatched,
+      drifted: driftRows.length,
+      rows: driftRows.slice(0, 100),
+    },
+    bandwidthEstimate,
+    verdict: {
+      ok: fatalReasons.length === 0,
+      fatalReasons,
+      warnings,
+    },
   };
 }

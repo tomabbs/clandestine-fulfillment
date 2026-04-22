@@ -5,6 +5,7 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  Play,
   RefreshCw,
   ShieldAlert,
   Webhook,
@@ -13,11 +14,13 @@ import { useEffect, useState } from "react";
 import {
   type AutoDiscoverShopifySkusReport,
   autoDiscoverShopifySkus,
+  type DirectShopifyDryRunReport,
   generateShopifyInstallUrl,
   getSkuMappingSummary,
   listShopifyLocations,
   type RegisterShopifyWebhookSubscriptionsReport,
   registerShopifyWebhookSubscriptions,
+  runDirectShopifyDryRun,
   type ShopifyLocationSummary,
   setShopifyAppCredentials,
   setShopifyDefaultLocation,
@@ -119,6 +122,10 @@ export function ConfigureShopifyAppDialog({
           {tokenPresent && <Step4SkuDiscovery connectionId={connection.id} />}
 
           {tokenPresent && <Step5RegisterWebhooks connectionId={connection.id} />}
+
+          {tokenPresent && defaultLocationSet && (
+            <Step6DryRun connectionId={connection.id} doNotFanout={connection.do_not_fanout} />
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -713,6 +720,261 @@ function Step5RegisterWebhooks({ connectionId }: { connectionId: string }) {
               </ul>
             </div>
           )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Step6DryRun({
+  connectionId,
+  doNotFanout,
+}: {
+  connectionId: string;
+  doNotFanout: boolean;
+}) {
+  const [report, setReport] = useState<DirectShopifyDryRunReport | null>(null);
+  const [showFull, setShowFull] = useState(false);
+
+  const mutation = useAppMutation({
+    mutationFn: () => runDirectShopifyDryRun({ connectionId }),
+    onSuccess: (r) => setReport(r),
+  });
+
+  const fmt = (n: number) => n.toLocaleString();
+
+  return (
+    <section className="space-y-2 border-t pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-medium">Step 6 — Dry-run reconciliation (HRD-04 + HRD-18)</h3>
+        <Button
+          size="sm"
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate()}
+          variant="outline"
+        >
+          {mutation.isPending ? (
+            <>
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Running…
+            </>
+          ) : (
+            <>
+              <Play className="h-3 w-3 mr-1" /> {report ? "Re-run dry-run" : "Run dry-run"}
+            </>
+          )}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Read-only reconciliation — walks Shopify variants for membership mismatches (HRD-04),
+        samples 50 mapped SKUs and compares quantities at the configured default location, and
+        estimates webhook bandwidth (HRD-18). The verdict block must show <code>ok=true</code>{" "}
+        before flipping <code className="rounded bg-muted px-1">do_not_fanout=false</code>.
+      </p>
+
+      {mutation.error && (
+        <p className="text-red-600 text-xs">
+          {mutation.error instanceof Error ? mutation.error.message : "Dry-run failed"}
+        </p>
+      )}
+
+      {report && (
+        <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
+          {/* Verdict banner */}
+          <div
+            className={`rounded p-2 ${
+              report.verdict.ok
+                ? "border border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border border-red-200 bg-red-50 text-red-900"
+            }`}
+          >
+            <p className="font-medium">
+              {report.verdict.ok ? "Verdict: OK — safe to flip do_not_fanout" : "Verdict: BLOCKED"}
+            </p>
+            {report.verdict.fatalReasons.length > 0 && (
+              <ul className="mt-1 ml-4 list-disc text-[11px]">
+                {report.verdict.fatalReasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            )}
+            {report.verdict.warnings.length > 0 && (
+              <details className="mt-1 text-[11px]">
+                <summary className="cursor-pointer">
+                  {report.verdict.warnings.length} warnings
+                </summary>
+                <ul className="mt-1 ml-4 list-disc">
+                  {report.verdict.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {doNotFanout && report.verdict.ok && (
+              <p className="mt-1 text-[11px]">
+                Connection is currently dormant (<code>do_not_fanout=true</code>). Use the
+                "Reactivate" action on the connection card to flip after reviewing this report.
+              </p>
+            )}
+          </div>
+
+          {/* Membership stats */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 border-t pt-2">
+            <div>
+              Shopify products: <strong>{fmt(report.membership.shopifyProductsScanned)}</strong>
+            </div>
+            <div>
+              Shopify variants: <strong>{fmt(report.membership.shopifyVariantsScanned)}</strong>
+            </div>
+            <div>
+              Workspace SKUs: <strong>{fmt(report.membership.warehouseSkusInWorkspace)}</strong>
+            </div>
+            <div>
+              Matched SKUs:{" "}
+              <strong className="text-emerald-700">{fmt(report.membership.matchedSkus)}</strong>
+            </div>
+            <div>
+              Shopify-only SKUs:{" "}
+              <strong
+                className={report.membership.shopifyOnlySkus.length > 0 ? "text-red-700" : ""}
+              >
+                {fmt(report.membership.shopifyOnlySkus.length)}
+              </strong>
+            </div>
+            <div>
+              Warehouse-only SKUs:{" "}
+              <strong>{fmt(report.membership.warehouseOnlySkus.length)}</strong>
+            </div>
+            <div>
+              Duplicate Shopify SKUs:{" "}
+              <strong
+                className={report.membership.duplicateShopifySkus.length > 0 ? "text-red-700" : ""}
+              >
+                {fmt(report.membership.duplicateShopifySkus.length)}
+              </strong>
+            </div>
+            <div>
+              Variants without SKU:{" "}
+              <strong
+                className={report.membership.shopifyVariantsWithoutSku > 0 ? "text-red-700" : ""}
+              >
+                {fmt(report.membership.shopifyVariantsWithoutSku)}
+              </strong>
+            </div>
+          </div>
+
+          {/* Drift stats */}
+          <div className="border-t pt-2">
+            <p className="font-medium">
+              Quantity drift: <strong>{fmt(report.drift.matched)}</strong> matched ·{" "}
+              <strong className={report.drift.drifted > 0 ? "text-amber-700" : ""}>
+                {fmt(report.drift.drifted)}
+              </strong>{" "}
+              drifted of {fmt(report.drift.sampled)} sampled (sample size cap{" "}
+              {fmt(report.drift.sampleSize)})
+            </p>
+          </div>
+
+          {/* Bandwidth estimate (HRD-18) */}
+          {report.bandwidthEstimate && (
+            <div className="border-t pt-2 text-[11px]">
+              <p className="font-medium">
+                Bandwidth (last {report.bandwidthEstimate.windowDays}d):
+              </p>
+              <p className="ml-2">
+                {fmt(report.bandwidthEstimate.ordersInWindow)} orders ·{" "}
+                {report.bandwidthEstimate.avgDailyOrders.toFixed(1)} orders/day ·{" "}
+                {report.bandwidthEstimate.estimatedDailyWebhooks.toFixed(0)} webhooks/day · peak{" "}
+                {report.bandwidthEstimate.peakHourlyRate.toFixed(0)}/h
+              </p>
+              <p className="ml-2">
+                Recommendation:{" "}
+                <strong
+                  className={
+                    report.bandwidthEstimate.recommendation === "gradual_rollout"
+                      ? "text-amber-700"
+                      : "text-emerald-700"
+                  }
+                >
+                  {report.bandwidthEstimate.recommendation}
+                </strong>
+              </p>
+            </div>
+          )}
+
+          {(report.membership.duplicateShopifySkus.length > 0 ||
+            report.membership.shopifyOnlySkus.length > 0 ||
+            report.membership.warehouseOnlySkus.length > 0 ||
+            report.drift.rows.length > 0) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowFull(!showFull)}
+              className="h-7 text-xs"
+            >
+              {showFull ? "Hide details" : "Show details"}
+            </Button>
+          )}
+
+          {showFull && (
+            <div className="space-y-2 border-t pt-2">
+              {report.drift.rows.length > 0 && (
+                <div>
+                  <p className="font-medium text-amber-700 mb-1">
+                    Drift rows (sorted by |diff| desc):
+                  </p>
+                  <ul className="font-mono text-[11px] max-h-40 overflow-y-auto space-y-0.5">
+                    {report.drift.rows.slice(0, 30).map((r) => (
+                      <li key={r.sku}>
+                        {r.sku} — local {r.localAvailable} · remote{" "}
+                        {r.remoteAvailable === null ? "(none)" : r.remoteAvailable} · diff{" "}
+                        {r.diff > 0 ? `+${r.diff}` : r.diff} · {r.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {report.membership.duplicateShopifySkus.length > 0 && (
+                <div>
+                  <p className="font-medium text-red-700 mb-1">Duplicate Shopify SKUs:</p>
+                  <ul className="font-mono text-[11px] max-h-32 overflow-y-auto space-y-0.5">
+                    {report.membership.duplicateShopifySkus.slice(0, 30).map((d) => (
+                      <li key={d.sku}>
+                        {d.sku} → {d.variantIds.length} variants
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {report.membership.shopifyOnlySkus.length > 0 && (
+                <div>
+                  <p className="font-medium text-red-700 mb-1">Shopify-only SKUs (fatal):</p>
+                  <ul className="font-mono text-[11px] max-h-32 overflow-y-auto space-y-0.5">
+                    {report.membership.shopifyOnlySkus.slice(0, 50).map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {report.membership.warehouseOnlySkus.length > 0 && (
+                <div>
+                  <p className="font-medium text-muted-foreground mb-1">
+                    Warehouse-only SKUs (informational):
+                  </p>
+                  <ul className="font-mono text-[11px] max-h-32 overflow-y-auto space-y-0.5">
+                    {report.membership.warehouseOnlySkus.slice(0, 50).map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <p className="text-[11px] text-muted-foreground">
+            Generated {new Date(report.generatedAt).toLocaleString()} · ran in{" "}
+            {(report.durationMs / 1000).toFixed(1)}s · default location{" "}
+            <code className="font-mono">{report.defaultLocationId}</code>
+          </p>
         </div>
       )}
     </section>

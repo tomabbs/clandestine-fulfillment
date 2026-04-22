@@ -244,3 +244,119 @@ export async function* iterateAllVariants(
     if (!cursor) break;
   }
 }
+
+/**
+ * HRD-04 — fetch the `available` quantity for a list of inventory item GIDs at
+ * a single Shopify location. Returns a Map<inventoryItemId, available | null>
+ * keyed on the input GID. `null` means Shopify returned the node but it has
+ * no inventoryLevel at this location (i.e. the item is not stocked there —
+ * the same condition HRD-26 catches lazily on push).
+ *
+ * Items not returned by Shopify (deleted between mapping discovery and
+ * dry-run) are simply absent from the Map. Caller decides how to surface
+ * those — typically as warnings.
+ *
+ * Bounded to 25 items per `nodes()` call to keep the GraphQL cost <50 (each
+ * inventoryLevel costs ~2; budget per Shopify is 50/sec point cost). Larger
+ * inputs are batched transparently.
+ */
+export async function getInventoryLevelsAtLocation(
+  ctx: ConnectionShopifyContext,
+  inventoryItemIds: string[],
+  locationId: string,
+): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (inventoryItemIds.length === 0) return result;
+
+  const BATCH = 25;
+  const QUERY = `
+    query DryRunInventoryLevels($ids: [ID!]!, $locationId: ID!) {
+      nodes(ids: $ids) {
+        ... on InventoryItem {
+          id
+          inventoryLevel(locationId: $locationId) {
+            quantities(names: ["available"]) {
+              name
+              quantity
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  type LevelsResponse = {
+    nodes: Array<{
+      id: string;
+      inventoryLevel: {
+        quantities: Array<{ name: string; quantity: number }>;
+      } | null;
+    } | null>;
+  };
+
+  for (let i = 0; i < inventoryItemIds.length; i += BATCH) {
+    const ids = inventoryItemIds.slice(i, i + BATCH);
+    const data = await connectionShopifyGraphQL<LevelsResponse>(ctx, QUERY, { ids, locationId });
+    for (const node of data.nodes) {
+      if (!node?.id) continue;
+      const available = node.inventoryLevel?.quantities.find(
+        (q) => q.name === "available",
+      )?.quantity;
+      result.set(node.id, typeof available === "number" ? available : null);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * HRD-18 — bandwidth estimate for the dry-run report. Uses the cheap
+ * `ordersCount` query (introduced in 2024-10) instead of paginating actual
+ * orders. Returns the last-30-day order count + derived per-day / per-hour
+ * webhook rate estimates. The recommendation threshold (1000 webhooks/day =
+ * roughly 500 orders/day) matches the plan's HRD-18 wording.
+ *
+ * Caller may pass a custom window via `daysBack` for testing; defaults to 30.
+ */
+export async function estimateOrderVolume(
+  ctx: ConnectionShopifyContext,
+  daysBack = 30,
+): Promise<{
+  windowDays: number;
+  ordersInWindow: number;
+  avgDailyOrders: number;
+  estimatedDailyWebhooks: number;
+  peakHourlyRate: number;
+  recommendation: "safe_to_proceed" | "gradual_rollout";
+}> {
+  const sinceIso = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+  const QUERY = `
+    query DryRunOrdersCount($query: String!) {
+      ordersCount(query: $query) {
+        count
+      }
+    }
+  `;
+  type CountResponse = { ordersCount: { count: number } };
+  const data = await connectionShopifyGraphQL<CountResponse>(ctx, QUERY, {
+    query: `created_at:>=${sinceIso}`,
+  });
+
+  const ordersInWindow = data.ordersCount.count ?? 0;
+  const avgDailyOrders = ordersInWindow / daysBack;
+  // Rough: 1 orders/create + 1 inventory_levels/update per order.
+  const estimatedDailyWebhooks = avgDailyOrders * 2;
+  // Peak burst factor: assume traffic concentrates ~3x in 1h around release windows.
+  const peakHourlyRate = (estimatedDailyWebhooks / 24) * 3;
+  const recommendation: "safe_to_proceed" | "gradual_rollout" =
+    estimatedDailyWebhooks > 1000 ? "gradual_rollout" : "safe_to_proceed";
+
+  return {
+    windowDays: daysBack,
+    ordersInWindow,
+    avgDailyOrders,
+    estimatedDailyWebhooks,
+    peakHourlyRate,
+    recommendation,
+  };
+}

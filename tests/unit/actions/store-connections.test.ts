@@ -52,8 +52,25 @@ const mockIterateAllVariants =
     >
   >();
 
+// HRD-04 dry-run uses these helpers in addition to iterateAllVariants.
+const mockGetInventoryLevelsAtLocation =
+  vi.fn<(...args: unknown[]) => Promise<Map<string, number | null>>>();
+const mockEstimateOrderVolume =
+  vi.fn<
+    (...args: unknown[]) => Promise<{
+      windowDays: number;
+      ordersInWindow: number;
+      avgDailyOrders: number;
+      estimatedDailyWebhooks: number;
+      peakHourlyRate: number;
+      recommendation: "safe_to_proceed" | "gradual_rollout";
+    }>
+  >();
+
 vi.mock("@/lib/server/shopify-connection-graphql", () => ({
   iterateAllVariants: (...args: unknown[]) => mockIterateAllVariants(...args),
+  getInventoryLevelsAtLocation: (...args: unknown[]) => mockGetInventoryLevelsAtLocation(...args),
+  estimateOrderVolume: (...args: unknown[]) => mockEstimateOrderVolume(...args),
   ShopifyScopeError: class ShopifyScopeError extends Error {},
 }));
 
@@ -64,6 +81,7 @@ import {
   getSkuMappings,
   getStoreConnections,
   reactivateClientStoreConnection,
+  runDirectShopifyDryRun,
   updateStoreConnection,
 } from "@/actions/store-connections";
 // Import after mocks
@@ -723,6 +741,475 @@ describe("store-connections server actions", () => {
       expect(r.matched).toBe(2);
       expect(r.existingMappingsUpdated).toBe(1);
       expect(r.newMappingsCreated).toBe(1);
+    });
+  });
+
+  // === HRD-04 + HRD-18 — runDirectShopifyDryRun ===
+
+  describe("runDirectShopifyDryRun", () => {
+    const validId = "3790114f-f1ba-43fa-b5fa-269e513c2a37";
+
+    beforeEach(() => {
+      // vi.clearAllMocks() in the outer beforeEach only clears CALL history; queued
+      // mockResolvedValueOnce values persist across tests. Reset implementations so
+      // unconsumed `Once` values from earlier tests don't leak.
+      mockEstimateOrderVolume.mockReset();
+      mockGetInventoryLevelsAtLocation.mockReset();
+      mockIterateAllVariants.mockReset();
+    });
+
+    /** Yields a single page of Shopify variants then stops. */
+    function singlePage(
+      variants: Array<{
+        productId: string;
+        variantId: string;
+        sku: string | null;
+        inventoryItemId: string | null;
+      }>,
+    ) {
+      return (async function* () {
+        yield variants.map((v) => ({
+          productId: v.productId,
+          productTitle: "Test Product",
+          productStatus: "ACTIVE",
+          variantId: v.variantId,
+          sku: v.sku,
+          inventoryItemId: v.inventoryItemId,
+          inventoryTracked: true,
+        }));
+      })();
+    }
+
+    /** Set up the typical happy-path mockServiceFrom chain. */
+    function setupConnectionAndMappings(opts: {
+      conn: {
+        id: string;
+        workspace_id: string;
+        store_url: string;
+        platform: string;
+        api_key: string | null;
+        default_location_id: string | null;
+      } | null;
+      warehouseSkus?: Array<{ id: string; sku: string }>;
+      mappings?: Array<{ remote_sku: string; remote_inventory_item_id: string | null }>;
+      localLevels?: Array<{ sku: string; available: number }>;
+    }) {
+      mockServiceFrom.mockImplementation((table: string) => {
+        if (table === "client_store_connections") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: opts.conn, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_product_variants") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                not: vi.fn().mockResolvedValue({ data: opts.warehouseSkus ?? [], error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === "client_store_sku_mappings") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  not: vi.fn().mockReturnValue({
+                    order: vi.fn().mockReturnValue({
+                      limit: vi.fn().mockResolvedValue({ data: opts.mappings ?? [], error: null }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "warehouse_inventory_levels") {
+          return {
+            select: vi.fn().mockReturnValue({
+              in: vi.fn().mockResolvedValue({ data: opts.localLevels ?? [], error: null }),
+            }),
+          };
+        }
+        return { select: vi.fn() };
+      });
+    }
+
+    it("rejects non-staff callers", async () => {
+      vi.mocked(requireAuth).mockResolvedValueOnce({
+        supabase: { from: mockFrom } as never,
+        authUserId: "auth-1",
+        userRecord: {
+          id: "user-1",
+          workspace_id: "ws-1",
+          org_id: "org-1",
+          role: "client",
+          email: "client@test.com",
+          name: "Client",
+        },
+        isStaff: false,
+      });
+      await expect(runDirectShopifyDryRun({ connectionId: validId })).rejects.toThrow("Forbidden");
+    });
+
+    it("rejects malformed connection ids before touching the database", async () => {
+      await expect(runDirectShopifyDryRun({ connectionId: "not-a-uuid" })).rejects.toThrow();
+      expect(mockServiceFrom).not.toHaveBeenCalled();
+    });
+
+    it("throws when connection is missing", async () => {
+      setupConnectionAndMappings({ conn: null });
+      await expect(runDirectShopifyDryRun({ connectionId: validId })).rejects.toThrow(
+        "Connection not found",
+      );
+    });
+
+    it("throws when connection is not Shopify", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.example.com",
+          platform: "woocommerce",
+          api_key: "wc_key",
+          default_location_id: "loc-1",
+        },
+      });
+      await expect(runDirectShopifyDryRun({ connectionId: validId })).rejects.toThrow(
+        "only applies to Shopify",
+      );
+    });
+
+    it("throws when connection has no api_key", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: null,
+          default_location_id: "loc-1",
+        },
+      });
+      await expect(runDirectShopifyDryRun({ connectionId: validId })).rejects.toThrow(
+        "OAuth install",
+      );
+    });
+
+    it("throws when connection has no default_location_id (Step 3 incomplete)", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: null,
+        },
+      });
+      await expect(runDirectShopifyDryRun({ connectionId: validId })).rejects.toThrow(
+        /default_location_id|Step 3/,
+      );
+    });
+
+    it("returns ok=true when membership clean and quantities match", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: "gid://shopify/Location/1",
+        },
+        warehouseSkus: [
+          { id: "var-1", sku: "LP-001" },
+          { id: "var-2", sku: "LP-002" },
+        ],
+        mappings: [
+          { remote_sku: "LP-001", remote_inventory_item_id: "gid://shopify/InventoryItem/111" },
+          { remote_sku: "LP-002", remote_inventory_item_id: "gid://shopify/InventoryItem/222" },
+        ],
+        localLevels: [
+          { sku: "LP-001", available: 5 },
+          { sku: "LP-002", available: 10 },
+        ],
+      });
+      mockIterateAllVariants.mockReturnValueOnce(
+        singlePage([
+          {
+            productId: "gid://shopify/Product/1",
+            variantId: "gid://shopify/ProductVariant/11",
+            sku: "LP-001",
+            inventoryItemId: "gid://shopify/InventoryItem/111",
+          },
+          {
+            productId: "gid://shopify/Product/2",
+            variantId: "gid://shopify/ProductVariant/22",
+            sku: "LP-002",
+            inventoryItemId: "gid://shopify/InventoryItem/222",
+          },
+        ]),
+      );
+      mockGetInventoryLevelsAtLocation.mockResolvedValueOnce(
+        new Map([
+          ["gid://shopify/InventoryItem/111", 5],
+          ["gid://shopify/InventoryItem/222", 10],
+        ]),
+      );
+      mockEstimateOrderVolume.mockResolvedValueOnce({
+        windowDays: 30,
+        ordersInWindow: 60,
+        avgDailyOrders: 2,
+        estimatedDailyWebhooks: 4,
+        peakHourlyRate: 0.5,
+        recommendation: "safe_to_proceed",
+      });
+
+      const r = await runDirectShopifyDryRun({ connectionId: validId });
+
+      expect(r.verdict.ok).toBe(true);
+      expect(r.verdict.fatalReasons).toEqual([]);
+      expect(r.membership.matchedSkus).toBe(2);
+      expect(r.membership.shopifyOnlySkus).toEqual([]);
+      expect(r.membership.warehouseOnlySkus).toEqual([]);
+      expect(r.drift.matched).toBe(2);
+      expect(r.drift.drifted).toBe(0);
+      expect(r.bandwidthEstimate?.recommendation).toBe("safe_to_proceed");
+      expect(r.defaultLocationId).toBe("gid://shopify/Location/1");
+    });
+
+    it("flags duplicate Shopify SKUs and shopify-only SKUs as fatal", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: "gid://shopify/Location/1",
+        },
+        warehouseSkus: [{ id: "var-1", sku: "DUP-001" }],
+        mappings: [],
+      });
+      mockIterateAllVariants.mockReturnValueOnce(
+        singlePage([
+          {
+            productId: "gid://shopify/Product/1",
+            variantId: "gid://shopify/ProductVariant/11",
+            sku: "DUP-001",
+            inventoryItemId: "gid://shopify/InventoryItem/111",
+          },
+          {
+            productId: "gid://shopify/Product/2",
+            variantId: "gid://shopify/ProductVariant/22",
+            sku: "DUP-001",
+            inventoryItemId: "gid://shopify/InventoryItem/222",
+          },
+          {
+            productId: "gid://shopify/Product/3",
+            variantId: "gid://shopify/ProductVariant/33",
+            sku: "ORPHAN-001",
+            inventoryItemId: "gid://shopify/InventoryItem/333",
+          },
+        ]),
+      );
+      mockEstimateOrderVolume.mockResolvedValueOnce({
+        windowDays: 30,
+        ordersInWindow: 0,
+        avgDailyOrders: 0,
+        estimatedDailyWebhooks: 0,
+        peakHourlyRate: 0,
+        recommendation: "safe_to_proceed",
+      });
+
+      const r = await runDirectShopifyDryRun({
+        connectionId: validId,
+        skipBandwidthEstimate: true,
+      });
+
+      expect(r.verdict.ok).toBe(false);
+      expect(r.verdict.fatalReasons.some((s) => s.startsWith("duplicate_shopify_skus"))).toBe(true);
+      expect(r.verdict.fatalReasons.some((s) => s.startsWith("shopify_only_skus"))).toBe(true);
+      expect(r.membership.duplicateShopifySkus).toHaveLength(1);
+      expect(r.membership.duplicateShopifySkus[0].sku).toBe("DUP-001");
+      expect(r.membership.shopifyOnlySkus).toEqual(["ORPHAN-001"]);
+      // No drift sample → empty-sample warning, but no drift fatals.
+      expect(r.drift.sampled).toBe(0);
+      expect(r.verdict.warnings.some((s) => s.startsWith("drift_sample_empty"))).toBe(true);
+    });
+
+    it("flags drift_above_threshold when >2% of sample drifts (SC-1 ceiling)", async () => {
+      // Build 3 mappings, force 1 to drift → 33% drift > 2%.
+      const mappings = [
+        { remote_sku: "A-1", remote_inventory_item_id: "gid://shopify/InventoryItem/1" },
+        { remote_sku: "A-2", remote_inventory_item_id: "gid://shopify/InventoryItem/2" },
+        { remote_sku: "A-3", remote_inventory_item_id: "gid://shopify/InventoryItem/3" },
+      ];
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: "gid://shopify/Location/1",
+        },
+        warehouseSkus: [
+          { id: "var-1", sku: "A-1" },
+          { id: "var-2", sku: "A-2" },
+          { id: "var-3", sku: "A-3" },
+        ],
+        mappings,
+        localLevels: [
+          { sku: "A-1", available: 5 },
+          { sku: "A-2", available: 5 },
+          { sku: "A-3", available: 5 },
+        ],
+      });
+      mockIterateAllVariants.mockReturnValueOnce(
+        singlePage([
+          {
+            productId: "gid://shopify/Product/1",
+            variantId: "gid://shopify/ProductVariant/11",
+            sku: "A-1",
+            inventoryItemId: "gid://shopify/InventoryItem/1",
+          },
+          {
+            productId: "gid://shopify/Product/2",
+            variantId: "gid://shopify/ProductVariant/22",
+            sku: "A-2",
+            inventoryItemId: "gid://shopify/InventoryItem/2",
+          },
+          {
+            productId: "gid://shopify/Product/3",
+            variantId: "gid://shopify/ProductVariant/33",
+            sku: "A-3",
+            inventoryItemId: "gid://shopify/InventoryItem/3",
+          },
+        ]),
+      );
+      // Remote: A-1 matches (5), A-2 drifts (3 vs local 5), A-3 missing.
+      mockGetInventoryLevelsAtLocation.mockResolvedValueOnce(
+        new Map([
+          ["gid://shopify/InventoryItem/1", 5],
+          ["gid://shopify/InventoryItem/2", 3],
+          // A-3 deliberately absent → remote_node_missing
+        ]),
+      );
+
+      const r = await runDirectShopifyDryRun({
+        connectionId: validId,
+        skipBandwidthEstimate: true,
+      });
+
+      expect(r.drift.sampled).toBe(3);
+      expect(r.drift.matched).toBe(1);
+      expect(r.drift.drifted).toBe(2);
+      expect(r.verdict.ok).toBe(false);
+      expect(r.verdict.fatalReasons.some((s) => s.startsWith("drift_above_threshold"))).toBe(true);
+      // Sorted by |diff| desc: A-3 (diff=5, missing) tied with A-2 (diff=2)
+      expect(r.drift.rows[0].sku).toBe("A-3");
+      expect(r.drift.rows[0].reason).toBe("remote_node_missing");
+    });
+
+    it("classifies remote_not_stocked_at_location when Shopify returns null inventoryLevel (HRD-26 path)", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: "gid://shopify/Location/1",
+        },
+        warehouseSkus: [{ id: "var-1", sku: "LP-001" }],
+        mappings: [
+          { remote_sku: "LP-001", remote_inventory_item_id: "gid://shopify/InventoryItem/111" },
+        ],
+        localLevels: [{ sku: "LP-001", available: 7 }],
+      });
+      mockIterateAllVariants.mockReturnValueOnce(
+        singlePage([
+          {
+            productId: "gid://shopify/Product/1",
+            variantId: "gid://shopify/ProductVariant/11",
+            sku: "LP-001",
+            inventoryItemId: "gid://shopify/InventoryItem/111",
+          },
+        ]),
+      );
+      // Returned but null = item exists in Shopify but not stocked at this location
+      mockGetInventoryLevelsAtLocation.mockResolvedValueOnce(
+        new Map([["gid://shopify/InventoryItem/111", null]]),
+      );
+
+      const r = await runDirectShopifyDryRun({
+        connectionId: validId,
+        skipBandwidthEstimate: true,
+      });
+
+      expect(r.drift.rows).toHaveLength(1);
+      expect(r.drift.rows[0].reason).toBe("remote_not_stocked_at_location");
+      expect(r.drift.rows[0].remoteAvailable).toBeNull();
+    });
+
+    it("recommends gradual_rollout when bandwidth estimate exceeds 1000 webhooks/day", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: "gid://shopify/Location/1",
+        },
+        warehouseSkus: [],
+        mappings: [],
+      });
+      mockIterateAllVariants.mockReturnValueOnce(singlePage([]));
+      mockEstimateOrderVolume.mockResolvedValueOnce({
+        windowDays: 30,
+        ordersInWindow: 30000,
+        avgDailyOrders: 1000,
+        estimatedDailyWebhooks: 2000,
+        peakHourlyRate: 250,
+        recommendation: "gradual_rollout",
+      });
+
+      const r = await runDirectShopifyDryRun({ connectionId: validId });
+
+      expect(r.bandwidthEstimate?.recommendation).toBe("gradual_rollout");
+      expect(r.verdict.warnings.some((s) => s.startsWith("bandwidth_high"))).toBe(true);
+    });
+
+    it("does not fail dry-run when ordersCount throws (bandwidth estimate is fail-soft)", async () => {
+      setupConnectionAndMappings({
+        conn: {
+          id: validId,
+          workspace_id: "ws-1",
+          store_url: "https://shop.myshopify.com",
+          platform: "shopify",
+          api_key: "shpat_xyz",
+          default_location_id: "gid://shopify/Location/1",
+        },
+        warehouseSkus: [],
+        mappings: [],
+      });
+      mockIterateAllVariants.mockReturnValueOnce(singlePage([]));
+      mockEstimateOrderVolume.mockRejectedValueOnce(new Error("ordersCount unavailable"));
+
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const r = await runDirectShopifyDryRun({ connectionId: validId });
+      expect(r.bandwidthEstimate).toBeNull();
+      // Empty sample warning still present; no fatal.
+      expect(r.verdict.fatalReasons).toEqual([]);
+      consoleSpy.mockRestore();
     });
   });
 });
