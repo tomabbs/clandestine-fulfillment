@@ -31,7 +31,8 @@ const CTX = {
   storeUrl: "https://test-shop.myshopify.com",
   accessToken: "shpat_test_token",
 };
-const CALLBACK = "https://app.example.com/api/webhooks/client-store?connection_id=conn-1&platform=shopify";
+const CALLBACK =
+  "https://app.example.com/api/webhooks/client-store?connection_id=conn-1&platform=shopify";
 
 beforeEach(() => {
   mockedGraphQL.mockReset();
@@ -81,7 +82,10 @@ describe("listWebhookSubscriptions", () => {
               id: "gid://shopify/WebhookSubscription/2",
               topic: "ORDERS_CANCELLED",
               apiVersion: { handle: "2026-01" },
-              endpoint: { __typename: "WebhookHttpEndpoint", callbackUrl: "https://other.example.com/wh" },
+              endpoint: {
+                __typename: "WebhookHttpEndpoint",
+                callbackUrl: "https://other.example.com/wh",
+              },
             },
           },
         ],
@@ -224,7 +228,10 @@ describe("registerWebhookSubscriptions", () => {
       webhookSubscriptionCreate: {
         webhookSubscription: null,
         userErrors: [
-          { field: ["webhookSubscription", "callbackUrl"], message: "URL is invalid for this topic" },
+          {
+            field: ["webhookSubscription", "callbackUrl"],
+            message: "URL is invalid for this topic",
+          },
         ],
       },
     });
