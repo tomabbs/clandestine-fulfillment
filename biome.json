@@ -13,6 +13,14 @@
         "useExhaustiveDependencies": "warn",
         "noUnusedImports": "warn",
         "noUnusedVariables": "warn"
+      },
+      "a11y": {
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": {
+            "inputComponents": ["Input", "Textarea", "Select", "Switch", "Checkbox", "RadioGroup"]
+          }
+        }
       }
     }
   },

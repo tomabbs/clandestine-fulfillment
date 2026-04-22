@@ -182,6 +182,7 @@ export function ResponsiveTable<TRow>({
       {loading ? (
         <div className="space-y-2">
           {Array.from({ length: loadingRowCount }).map((_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: decorative skeleton placeholders without semantic identity
             <div key={`mobile-skel-${i}`} className="skeleton-shimmer h-24" />
           ))}
         </div>

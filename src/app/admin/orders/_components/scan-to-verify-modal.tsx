@@ -126,7 +126,7 @@ export function ScanToVerifyModal({ items, onClose, onAllVerified }: ScanToVerif
           {items.length === 0 ? (
             <div className="text-xs text-muted-foreground italic">No items on this order.</div>
           ) : (
-            items.map((it, i) => {
+            items.map((it) => {
               const sku = (it.sku ?? "").trim().toUpperCase();
               const expected = it.quantity ?? 1;
               const scanned = scannedCounts[sku] ?? 0;
@@ -134,7 +134,7 @@ export function ScanToVerifyModal({ items, onClose, onAllVerified }: ScanToVerif
               const done = sku && remaining === 0;
               return (
                 <div
-                  key={`${sku}-${i}`}
+                  key={`${sku}-${it.item_index}`}
                   className={`flex items-center justify-between rounded border px-2 py-1.5 text-sm ${
                     done ? "border-emerald-200 bg-emerald-50" : "border-gray-200"
                   }`}

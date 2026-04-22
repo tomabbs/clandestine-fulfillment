@@ -181,6 +181,7 @@ export default async function PackingSlipPage({ params }: RouteParams) {
           </thead>
           <tbody>
             {data.items.map((it, idx) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: print-only packing slip; no re-orders or re-renders
               <tr key={`${it.sku ?? "x"}-${idx}`}>
                 <td>
                   {/* Phase 11.1 — album thumbnail when BC mapping has one. */}

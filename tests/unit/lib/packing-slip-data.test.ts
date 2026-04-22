@@ -57,6 +57,7 @@ function makeMockClient() {
           const rows = filtered();
           return { data: rows[0] ?? null, error: null };
         },
+        // biome-ignore lint/suspicious/noThenProperty: intentional thenable to mimic Supabase PostgREST builder
         then(onFulfilled: (v: unknown) => unknown) {
           return Promise.resolve({ data: filtered(), error: null }).then(onFulfilled);
         },

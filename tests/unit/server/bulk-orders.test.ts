@@ -83,6 +83,7 @@ function makeMockClient() {
           }
           return builder;
         },
+        // biome-ignore lint/suspicious/noThenProperty: intentional thenable to mimic Supabase PostgREST builder
         then(onFulfilled: (v: unknown) => unknown) {
           if (table === "shipstation_orders") {
             const matches = dbState.shipstation_orders.filter(

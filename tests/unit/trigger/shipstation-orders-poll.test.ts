@@ -117,6 +117,7 @@ function makeChain(tableName: string) {
       const results = matchByEqs().slice(0, _limit);
       return { data: results[0] ?? null, error: null };
     },
+    // biome-ignore lint/suspicious/noThenProperty: intentional thenable to mimic Supabase PostgREST builder
     then(onFulfilled: (v: { data: null; error: null }) => unknown) {
       // Update / delete / array-insert all settle here.
       if (_isDelete) {

@@ -314,8 +314,11 @@ function RateDeltaField({
       </p>
       <div className="mt-3 grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs">Warn ($)</label>
+          <label htmlFor="ep-price-warn" className="text-xs">
+            Warn ($)
+          </label>
           <input
+            id="ep-price-warn"
             type="number"
             step="0.1"
             min="0"
@@ -326,8 +329,11 @@ function RateDeltaField({
           />
         </div>
         <div>
-          <label className="text-xs">Halt ($)</label>
+          <label htmlFor="ep-price-halt" className="text-xs">
+            Halt ($)
+          </label>
           <input
+            id="ep-price-halt"
             type="number"
             step="0.1"
             min="0"

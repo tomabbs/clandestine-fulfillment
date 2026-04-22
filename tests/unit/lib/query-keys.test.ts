@@ -214,7 +214,7 @@ describe("queryKeysV2 — scoped contract", () => {
 
   describe("v1 / v2 namespace isolation", () => {
     it("legacy roots and v2 roots never share a top-level token", () => {
-      const v1Roots = new Set(Object.values(queryKeys).map((g) => g.all[0]));
+      const v1Roots: Set<string> = new Set(Object.values(queryKeys).map((g) => g.all[0]));
       const v2Roots = ["shipping-v2", "billing-v2", "orders-v2", "auth-context-v2"];
       for (const r of v2Roots) {
         expect(v1Roots.has(r)).toBe(false);

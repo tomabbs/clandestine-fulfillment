@@ -97,6 +97,7 @@ function makeMockSupabase() {
           }
           return { data: null, error: null };
         },
+        // biome-ignore lint/suspicious/noThenProperty: intentional thenable to mimic Supabase PostgREST builder
         then(onFulfilled: (v: { data: null; error: null }) => unknown) {
           if (_updates && table === "warehouse_shipments") {
             const id = _eqs.find((e) => e[0] === "id")?.[1] as string;

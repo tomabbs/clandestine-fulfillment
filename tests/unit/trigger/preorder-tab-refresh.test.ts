@@ -73,6 +73,7 @@ function makeMockClient() {
           // not used in this test
           return { data: null, error: null };
         },
+        // biome-ignore lint/suspicious/noThenProperty: intentional thenable to mimic Supabase PostgREST builder
         then(onFulfilled: (v: { data: unknown; error: null }) => unknown) {
           if (_updates && table === "shipstation_orders") {
             const id = _eqs.find((e) => e[0] === "id")?.[1] as string;

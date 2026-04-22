@@ -104,6 +104,7 @@ function makeMockSupabase(): {
           return { data: null, error: { message: "no insert payload" } };
         },
         // .update().eq() returns thenable that resolves on await
+        // biome-ignore lint/suspicious/noThenProperty: intentional thenable to mimic Supabase PostgREST builder
         then(onFulfilled: (v: { data: null; error: null }) => unknown) {
           if (_updatePayload && _eqs.length > 0) {
             const idEq = _eqs.find((e) => e[0] === "id");
