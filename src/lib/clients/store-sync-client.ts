@@ -72,6 +72,39 @@ export function createStoreSyncClient(
 
 // === Shopify sync ===
 
+/**
+ * Extract the numeric Shopify location ID from either a GID
+ * ("gid://shopify/Location/123456") or a bare numeric string ("123456").
+ * Returns null if the input is not parseable.
+ */
+export function extractNumericShopifyLocationId(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = value.match(/(\d+)\s*$/);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * HRD-26 — detect Shopify "inventory item is not stocked at this location"
+ * errors. These come back as HTTP 422 with a body that mentions the inventory
+ * item is not stocked / not connected at the target location. The exact
+ * wording has shifted across API versions; match defensively against the
+ * stable substrings.
+ */
+export function isInventoryNotActiveAtLocationError(httpStatus: number, body: string): boolean {
+  if (httpStatus !== 422) return false;
+  const lower = body.toLowerCase();
+  return (
+    lower.includes("not stocked at") ||
+    lower.includes("inventory item is not stocked") ||
+    lower.includes("inventory item does not have inventory tracked") ||
+    lower.includes("inventory_item not connected") ||
+    lower.includes("location not active") ||
+    lower.includes("not active at this location")
+  );
+}
+
 function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
   const apiKey = connection.api_key;
   if (!apiKey) throw new Error("Shopify connection missing api_key");
@@ -114,6 +147,72 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     return { locationId: level.location_id, available: level.available };
   }
 
+  /**
+   * HRD-26 — connect (activate) an inventory_item at a Shopify location.
+   * Uses the REST `inventory_levels/connect.json` endpoint, which is the
+   * REST analogue of the GraphQL `inventoryActivate` mutation. Returning
+   * the level allows the caller to immediately retry `set.json`.
+   */
+  async function connectInventoryAtLocation(
+    inventoryItemId: number,
+    locationId: number,
+  ): Promise<void> {
+    const res = await fetch(`${baseUrl}/admin/api/2026-01/inventory_levels/connect.json`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        location_id: locationId,
+        inventory_item_id: inventoryItemId,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(
+        `Shopify inventoryActivate (REST connect) failed: HTTP ${res.status} — ${body}`,
+      );
+    }
+  }
+
+  /**
+   * HRD-26 — log an `inventory_activate` audit row so admins can grep for
+   * "this SKU was activated at this location at this timestamp" without
+   * joining external_sync_events. delta = 0 by definition (the row records
+   * a structural change, not an inventory adjustment). The
+   * source enum was extended in migration 20260422000001 to admit
+   * 'inventory_activate'. Best-effort — duplicate (sku, correlation_id) is
+   * the dedup key and re-attempts swallow the conflict.
+   */
+  async function logInventoryActivateAudit(
+    sku: string,
+    inventoryItemId: number,
+    locationId: number,
+  ): Promise<void> {
+    try {
+      const { createServiceRoleClient } = await import("@/lib/server/supabase-server");
+      const supabase = createServiceRoleClient();
+      const correlationId = `inv-activate:${connection.id}:${locationId}:${inventoryItemId}:${Date.now()}`;
+      await supabase.from("warehouse_inventory_activity").insert({
+        workspace_id: connection.workspace_id,
+        sku,
+        delta: 0,
+        source: "inventory_activate",
+        correlation_id: correlationId,
+        metadata: {
+          connection_id: connection.id,
+          platform: connection.platform,
+          shopify_inventory_item_id: String(inventoryItemId),
+          shopify_location_id: String(locationId),
+          activated_at: new Date().toISOString(),
+        },
+      });
+    } catch (err) {
+      console.warn(
+        `[ShopifySync] inventory_activate audit row insert failed (non-fatal):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   return {
     async pushInventory(sku, quantity, _idempotencyKey) {
       const variant = await findVariantBySku(sku);
@@ -122,25 +221,65 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
         return;
       }
 
-      const level = await getLocationAndQuantity(variant.inventoryItemId);
-      if (!level) {
-        console.warn(`[ShopifySync] No inventory level for SKU ${sku} — skipping push`);
-        return;
+      // HRD-26: prefer the staff-selected default_location_id (HRD-05). Fall
+      // back to whichever location the item is currently activated at — this
+      // preserves pre-cutover behavior for connections that haven't picked a
+      // default yet.
+      let targetLocationId: number | null = extractNumericShopifyLocationId(
+        connection.default_location_id,
+      );
+      if (targetLocationId == null) {
+        const level = await getLocationAndQuantity(variant.inventoryItemId);
+        if (!level) {
+          console.warn(`[ShopifySync] No inventory level for SKU ${sku} — skipping push`);
+          return;
+        }
+        targetLocationId = level.locationId;
       }
 
-      const res = await fetch(`${baseUrl}/admin/api/2026-01/inventory_levels/set.json`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          location_id: level.locationId,
-          inventory_item_id: variant.inventoryItemId,
-          available: quantity,
-        }),
-      });
-      if (!res.ok) {
+      const inventoryItemId = variant.inventoryItemId;
+      async function attemptSet(): Promise<
+        { ok: true } | { ok: false; status: number; body: string }
+      > {
+        const res = await fetch(`${baseUrl}/admin/api/2026-01/inventory_levels/set.json`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            location_id: targetLocationId,
+            inventory_item_id: inventoryItemId,
+            available: quantity,
+          }),
+        });
+        if (res.ok) return { ok: true };
         const body = await res.text();
-        throw new Error(`Shopify inventory set failed: HTTP ${res.status} — ${body}`);
+        return { ok: false, status: res.status, body };
       }
+
+      const first = await attemptSet();
+      if (first.ok) return;
+
+      // HRD-26: if Shopify rejected because the item isn't stocked at the
+      // target location, lazily connect+retry once. This is the common case
+      // when a merchant adds a new location after initial discovery (or when
+      // the staff-selected default_location_id differs from the location the
+      // item was originally created at).
+      if (isInventoryNotActiveAtLocationError(first.status, first.body)) {
+        try {
+          await connectInventoryAtLocation(variant.inventoryItemId, targetLocationId);
+          await logInventoryActivateAudit(sku, variant.inventoryItemId, targetLocationId);
+        } catch (activateErr) {
+          throw new Error(
+            `Shopify inventory set failed (location not active) and inventoryActivate also failed: HTTP ${first.status} — ${first.body}; activateErr=${activateErr instanceof Error ? activateErr.message : String(activateErr)}`,
+          );
+        }
+        const retry = await attemptSet();
+        if (retry.ok) return;
+        throw new Error(
+          `Shopify inventory set retry-after-activate failed: HTTP ${retry.status} — ${retry.body}`,
+        );
+      }
+
+      throw new Error(`Shopify inventory set failed: HTTP ${first.status} — ${first.body}`);
     },
 
     async getRemoteQuantity(sku) {

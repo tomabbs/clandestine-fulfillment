@@ -17,7 +17,10 @@ vi.mock("@/lib/server/webhook-body", () => ({
 }));
 
 vi.mock("@/lib/shared/env", () => ({
-  env: () => ({ SHOPIFY_WEBHOOK_SECRET: "test-secret" }),
+  env: () => ({
+    SHOPIFY_WEBHOOK_SECRET: "test-secret",
+    SHOPIFY_STORE_URL: "https://clandestine-store.myshopify.com",
+  }),
 }));
 
 vi.mock("@trigger.dev/sdk", () => ({
@@ -43,9 +46,21 @@ function makeRequest(body: Record<string, unknown>, headers: Record<string, stri
   });
 }
 
-/** Set up mockFrom to handle webhook_events insert and return inserted row. */
-function mockWebhookInsertSuccess() {
+/** Set up mockFrom for resolved workspace + successful webhook insert. */
+function mockResolvedWorkspaceAndInsert() {
   mockFrom.mockImplementation((table: string) => {
+    if (table === "workspaces") {
+      return {
+        select: vi.fn().mockReturnValue({
+          order: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue({
+              data: [{ id: "ws-1" }],
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
     if (table === "webhook_events") {
       return {
         insert: vi.fn().mockReturnValue({
@@ -56,6 +71,9 @@ function mockWebhookInsertSuccess() {
             }),
           }),
         }),
+        update: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: null }),
+        }),
       };
     }
     return { insert: vi.fn(), update: vi.fn(), select: vi.fn() };
@@ -65,6 +83,18 @@ function mockWebhookInsertSuccess() {
 /** Set up mockFrom to simulate duplicate (insert returns null). */
 function mockWebhookInsertDuplicate() {
   mockFrom.mockImplementation((table: string) => {
+    if (table === "workspaces") {
+      return {
+        select: vi.fn().mockReturnValue({
+          order: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue({
+              data: [{ id: "ws-1" }],
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
     if (table === "webhook_events") {
       return {
         insert: vi.fn().mockReturnValue({
@@ -78,6 +108,24 @@ function mockWebhookInsertDuplicate() {
       };
     }
     return { insert: vi.fn(), update: vi.fn(), select: vi.fn() };
+  });
+}
+
+function mockUnresolvedWorkspaceAndInsert() {
+  mockFrom.mockImplementation((table: string) => {
+    if (table === "webhook_events") {
+      return {
+        insert: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: { id: "evt-unresolved" },
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
+    return {};
   });
 }
 
@@ -140,176 +188,81 @@ describe("POST /api/webhooks/shopify", () => {
     expect(mockTrigger).not.toHaveBeenCalled();
   });
 
-  it("enqueues process-shopify-webhook task for new webhooks", async () => {
-    mockWebhookInsertSuccess();
-    const req = makeRequest({ id: 1, name: "Test Order" });
+  it("marks inventory webhook as ignored when shipstation is authoritative", async () => {
+    mockResolvedWorkspaceAndInsert();
+    const req = makeRequest(
+      { inventory_item_id: 1, available: 42 },
+      {
+        "X-Shopify-Topic": "inventory_levels/update",
+        "X-Shopify-WebHook-Id": "wh-shipstation-mode",
+        "X-Shopify-Shop-Domain": "clandestine-store.myshopify.com",
+      },
+    );
 
     const res = await POST(req);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);
-    expect(mockTrigger).toHaveBeenCalledWith(
-      "process-shopify-webhook",
-      expect.objectContaining({
-        webhookEventId: "evt-1",
-        topic: "orders/create",
-      }),
-    );
+    expect(json.status).toBe("ignored_shipstation_authoritative");
+    expect(mockTrigger).not.toHaveBeenCalled();
   });
 
-  describe("echo cancellation (Rule #65)", () => {
-    it("cancels inventory_levels/update that matches last_pushed_quantity", async () => {
-      const mockWebhookUpdate = vi.fn().mockReturnValue({
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      });
+  it("returns workspace_resolution_failed when shop domain does not match configured domain", async () => {
+    mockUnresolvedWorkspaceAndInsert();
+    const req = makeRequest(
+      { id: 1 },
+      {
+        "X-Shopify-Shop-Domain": "other-store.myshopify.com",
+      },
+    );
 
-      mockFrom.mockImplementation((table: string) => {
-        if (table === "webhook_events") {
-          return {
-            insert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi.fn().mockResolvedValue({
-                  data: { id: "evt-echo" },
-                  error: null,
-                }),
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.status).toBe("workspace_resolution_failed");
+    expect(mockTrigger).not.toHaveBeenCalled();
+  });
+
+  it("returns workspace_ambiguous when multiple workspaces exist", async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "workspaces") {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue({
+                data: [{ id: "ws-1" }, { id: "ws-2" }],
+                error: null,
               }),
             }),
-            update: mockWebhookUpdate,
-          };
-        }
-        if (table === "client_store_sku_mappings") {
-          return {
+          }),
+        };
+      }
+      if (table === "webhook_events") {
+        return {
+          insert: vi.fn().mockReturnValue({
             select: vi.fn().mockReturnValue({
-              eq: vi.fn().mockReturnValue({
-                eq: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockReturnValue({
-                    maybeSingle: vi.fn().mockResolvedValue({
-                      data: { id: "map-1", last_pushed_quantity: 42 },
-                      error: null,
-                    }),
-                  }),
-                }),
+              single: vi.fn().mockResolvedValue({
+                data: { id: "evt-ambiguous" },
+                error: null,
               }),
             }),
-          };
-        }
-        return {};
-      });
-
-      const req = makeRequest(
-        { inventory_item_id: 9001, available: 42 },
-        {
-          "X-Shopify-Hmac-SHA256": "valid-sig",
-          "X-Shopify-Topic": "inventory_levels/update",
-          "X-Shopify-Webhook-Id": "wh-echo-1",
-        },
-      );
-
-      const res = await POST(req);
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.status).toBe("echo_cancelled");
-      expect(mockTrigger).not.toHaveBeenCalled();
+          }),
+        };
+      }
+      return {};
     });
 
-    it("processes inventory_levels/update when quantity differs from last_pushed", async () => {
-      mockFrom.mockImplementation((table: string) => {
-        if (table === "webhook_events") {
-          return {
-            insert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi.fn().mockResolvedValue({
-                  data: { id: "evt-real" },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === "client_store_sku_mappings") {
-          return {
-            select: vi.fn().mockReturnValue({
-              eq: vi.fn().mockReturnValue({
-                eq: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockReturnValue({
-                    maybeSingle: vi.fn().mockResolvedValue({
-                      data: { id: "map-1", last_pushed_quantity: 50 },
-                      error: null,
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          };
-        }
-        return {};
-      });
+    const req = makeRequest(
+      { id: 1 },
+      {
+        "X-Shopify-Shop-Domain": "clandestine-store.myshopify.com",
+      },
+    );
 
-      const req = makeRequest(
-        { inventory_item_id: 9001, available: 42 },
-        {
-          "X-Shopify-Hmac-SHA256": "valid-sig",
-          "X-Shopify-Topic": "inventory_levels/update",
-          "X-Shopify-Webhook-Id": "wh-real-1",
-        },
-      );
-
-      const res = await POST(req);
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.ok).toBe(true);
-      expect(json.status).toBeUndefined();
-      expect(mockTrigger).toHaveBeenCalledWith(
-        "process-shopify-webhook",
-        expect.objectContaining({ webhookEventId: "evt-real" }),
-      );
-    });
-
-    it("processes inventory_levels/update when no SKU mapping exists", async () => {
-      mockFrom.mockImplementation((table: string) => {
-        if (table === "webhook_events") {
-          return {
-            insert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi.fn().mockResolvedValue({
-                  data: { id: "evt-nomap" },
-                  error: null,
-                }),
-              }),
-            }),
-          };
-        }
-        if (table === "client_store_sku_mappings") {
-          return {
-            select: vi.fn().mockReturnValue({
-              eq: vi.fn().mockReturnValue({
-                eq: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockReturnValue({
-                    maybeSingle: vi.fn().mockResolvedValue({
-                      data: null,
-                      error: null,
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          };
-        }
-        return {};
-      });
-
-      const req = makeRequest(
-        { inventory_item_id: 9001, available: 42 },
-        {
-          "X-Shopify-Hmac-SHA256": "valid-sig",
-          "X-Shopify-Topic": "inventory_levels/update",
-          "X-Shopify-Webhook-Id": "wh-nomap-1",
-        },
-      );
-
-      const res = await POST(req);
-      expect(res.status).toBe(200);
-      expect(mockTrigger).toHaveBeenCalled();
-    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.status).toBe("workspace_ambiguous");
+    expect(mockTrigger).not.toHaveBeenCalled();
   });
 });

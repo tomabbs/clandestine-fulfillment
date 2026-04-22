@@ -11,6 +11,13 @@ import { triggerBundleFanout } from "@/lib/server/bundles";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import {
+  checkMonotonicGuard,
+  extractEventContext,
+  markStaleDropped,
+  stashEntityIdOnCurrentRow,
+  writeLastSeenAt,
+} from "@/lib/server/webhook-monotonic-guard";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
 export const processClientStoreWebhookTask = task({
@@ -61,15 +68,64 @@ export const processClientStoreWebhookTask = task({
       }
     }
 
+    // HRD-01: monotonic timestamp guard — drop out-of-order deliveries before
+    // any side effect. Skipped (fail-open) when the topic / payload doesn't
+    // give us an entity id or timestamp to compare against; the audit row's
+    // `metadata.stale_dropped` block records the verdict either way.
+    const platform = (event.platform as string) ?? "unknown";
+    const eventContext = extractEventContext(platform, topic, webhookData, {
+      triggeredAt: (metadata.triggered_at as string | undefined) ?? null,
+    });
+
+    if (connectionId && eventContext.entityId) {
+      await stashEntityIdOnCurrentRow(
+        supabase,
+        payload.webhookEventId,
+        metadata,
+        eventContext.entityId,
+      );
+
+      const guard = await checkMonotonicGuard(supabase, {
+        currentEventId: payload.webhookEventId,
+        platform,
+        topic,
+        connectionId,
+        context: eventContext,
+      });
+
+      if (guard.stale) {
+        await markStaleDropped(supabase, payload.webhookEventId, metadata, guard);
+        return {
+          processed: false,
+          reason: "stale_dropped",
+          entityId: guard.entityId,
+          priorTimestamp: guard.priorTimestamp,
+          currentTimestamp: guard.currentTimestamp,
+        };
+      }
+    }
+
+    let result: Record<string, unknown>;
     if (topic.includes("inventory") || topic.includes("stock")) {
-      return await handleInventoryUpdate(supabase, event, webhookData, connectionId);
+      result = await handleInventoryUpdate(supabase, event, webhookData, connectionId);
+    } else if (topic.includes("order")) {
+      result = await handleOrderCreated(supabase, event, webhookData, connectionId);
+    } else {
+      return { processed: false, reason: "unknown_topic", topic };
     }
 
-    if (topic.includes("order")) {
-      return await handleOrderCreated(supabase, event, webhookData, connectionId);
+    // HRD-01: stamp last_seen_at on success so the next delivery for the
+    // same entity has a comparison anchor. Skipped when the event didn't
+    // carry a timestamp (fail-open path above).
+    if (
+      eventContext.entityId &&
+      eventContext.eventTimestamp &&
+      (result.processed === true || result.reason === "echo_cancelled")
+    ) {
+      await writeLastSeenAt(supabase, payload.webhookEventId, eventContext.eventTimestamp);
     }
 
-    return { processed: false, reason: "unknown_topic", topic };
+    return result;
   },
 });
 

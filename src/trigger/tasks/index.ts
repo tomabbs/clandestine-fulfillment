@@ -11,16 +11,36 @@ export { bandcampInventoryPushTask } from "./bandcamp-inventory-push";
 // verify-then-fallback at 30-min intervals. The bandcampMarkShippedTask itself
 // remains for the manual "Sync to Bandcamp" force-push button on the shipping log.
 export { bandcampMarkShippedTask } from "./bandcamp-mark-shipped";
+export {
+  bandcampOrderSyncSchedule,
+  bandcampOrderSyncTask,
+} from "./bandcamp-order-sync";
+export { bandcampPushOnSkuTask } from "./bandcamp-push-on-sku";
+export { bandcampSalePollTask } from "./bandcamp-sale-poll";
 export { bandcampShippingVerifyTask } from "./bandcamp-shipping-verify";
+export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
 // Phase 9.1 — bulk label buy orchestrator + nightly print_batch_jobs purge.
 export { bulkBuyLabelsTask } from "./bulk-buy-labels";
-export { printBatchJobsPurgeTask } from "./print-batch-jobs-purge";
+// Phase 0.7 — Distro discriminator (creates warehouse_products with org_id=NULL
+// for Clandestine Shopify products without a Bandcamp upstream)
+export { clandestineShopifySyncTask } from "./clandestine-shopify-sync";
+export { clientStoreOrderDetectTask } from "./client-store-order-detect";
 // Phase 10.2 — EasyPost tracker registration (DUAL-MODE alongside aftership-register
 // until the Phase 10.5 sunset gate. Both tasks fire on every label.)
 export { easypostRegisterTrackerTask } from "./easypost-register-tracker";
-// Phase 10.5 prep — daily parity check between AfterShip and EasyPost trackers.
-// Diagnostic only; gates the eventual AfterShip sunset.
-export { trackerParitySensorTask } from "./tracker-parity-sensor";
+export { inboundCheckinComplete } from "./inbound-checkin-complete";
+export { inboundProductCreate } from "./inbound-product-create";
+export { monthlyBillingTask } from "./monthly-billing";
+export { multiStoreInventoryPushTask } from "./multi-store-inventory-push";
+export { pirateShipImportTask } from "./pirate-ship-import";
+export { preorderFulfillmentTask, preorderReleaseVariantTask } from "./preorder-fulfillment";
+export { preorderSetupTask } from "./preorder-setup";
+export { printBatchJobsPurgeTask } from "./print-batch-jobs-purge";
+export { processClientStoreWebhookTask } from "./process-client-store-webhook";
+// Phase 2 — SHIP_NOTIFY processor (decrements via recordInventoryChange)
+export { processShipstationShipmentTask } from "./process-shipstation-shipment";
+export { processShopifyWebhookTask } from "./process-shopify-webhook";
+export { redisBackfillTask } from "./redis-backfill";
 // Phase 12 — Unified customer-facing email pipeline (Resend). Single task
 // driven by post-label-purchase (shipped) + EP webhook (OOD/Delivered/exception).
 // Strategy-gated; safe to deploy pre-cutover.
@@ -29,31 +49,6 @@ export { sendTrackingEmailTask } from "./send-tracking-email";
 // rate documented for EP at peak load. Re-fires send-tracking-email for any
 // shipment whose status warranted an email but no notification_sends row exists.
 export { sendTrackingEmailReconCronTask } from "./send-tracking-email-recon";
-// Phase 7.1 — hourly health metrics for the unified-shipping pipeline.
-export { unifiedShippingSensorsTask } from "./unified-shipping-sensors";
-export {
-  bandcampOrderSyncSchedule,
-  bandcampOrderSyncTask,
-} from "./bandcamp-order-sync";
-export { bandcampPushOnSkuTask } from "./bandcamp-push-on-sku";
-export { bandcampSalePollTask } from "./bandcamp-sale-poll";
-export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
-// Phase 0.7 — Distro discriminator (creates warehouse_products with org_id=NULL
-// for Clandestine Shopify products without a Bandcamp upstream)
-export { clandestineShopifySyncTask } from "./clandestine-shopify-sync";
-export { clientStoreOrderDetectTask } from "./client-store-order-detect";
-export { inboundCheckinComplete } from "./inbound-checkin-complete";
-export { inboundProductCreate } from "./inbound-product-create";
-export { monthlyBillingTask } from "./monthly-billing";
-export { multiStoreInventoryPushTask } from "./multi-store-inventory-push";
-export { pirateShipImportTask } from "./pirate-ship-import";
-export { preorderFulfillmentTask, preorderReleaseVariantTask } from "./preorder-fulfillment";
-export { preorderSetupTask } from "./preorder-setup";
-export { processClientStoreWebhookTask } from "./process-client-store-webhook";
-// Phase 2 — SHIP_NOTIFY processor (decrements via recordInventoryChange)
-export { processShipstationShipmentTask } from "./process-shipstation-shipment";
-export { processShopifyWebhookTask } from "./process-shopify-webhook";
-export { redisBackfillTask } from "./redis-backfill";
 export { sensorCheckTask } from "./sensor-check";
 // Phase 5 — tiered ShipStation v2 ↔ DB reconcile sensor.
 //          Three schedules (hot 5m / warm 30m / cold 6h) call the same
@@ -86,6 +81,11 @@ export { shopifyOrderSyncTask } from "./shopify-order-sync";
 export { shopifySyncTask } from "./shopify-sync";
 export { storageCalcTask } from "./storage-calc";
 export { supportEscalationTask } from "./support-escalation";
+// Phase 10.5 prep — daily parity check between AfterShip and EasyPost trackers.
+// Diagnostic only; gates the eventual AfterShip sunset.
+export { trackerParitySensorTask } from "./tracker-parity-sensor";
+// Phase 7.1 — hourly health metrics for the unified-shipping pipeline.
+export { unifiedShippingSensorsTask } from "./unified-shipping-sensors";
 
 // ── NEW: EasyPost / Label tasks (Phase 5A) ────────────────────────────────────
 
@@ -184,5 +184,14 @@ export { skuRectifyViaAliasTask } from "./sku-rectify-via-alias";
 export { skuSyncAuditTask } from "./sku-sync-audit";
 // ── Tag cleanup (admin settings) ──────────────────────────────────────────────
 export { tagCleanupBackfillTask } from "./tag-cleanup-backfill";
+// HRD-17.1 — recovery sweeper for webhook_events rows that never made it past
+// tasks.trigger() in the client-store route handler. Belt-and-braces: the
+// route handler now updates status to 'enqueued' / 'enqueue_failed', and this
+// sweeper picks up anything left in 'received' or 'enqueue_failed' >2 min old.
+// Idempotency-key-protected (HRD-29 global scope) so it can't double-fire.
+export {
+  webhookEventsRecoverySweepSchedule,
+  webhookEventsRecoverySweepTask,
+} from "./webhook-events-recovery-sweep";
 // Tier 1 hardening #8 — weekly Supabase backup verification probe
 export { weeklyBackupVerifySchedule, weeklyBackupVerifyTask } from "./weekly-backup-verify";
