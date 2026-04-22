@@ -105,8 +105,17 @@ export const processClientStoreWebhookTask = task({
       }
     }
 
+    // Topic dispatch — order matters. `orders/cancelled` would also match
+    // `topic.includes("order")`, so the cancel and refund branches MUST run
+    // before the orders/create branch. `refunds/create` doesn't include
+    // "order" in the topic string, but the explicit ordering keeps the
+    // table easy to read.
     let result: Record<string, unknown>;
-    if (topic.includes("inventory") || topic.includes("stock")) {
+    if (topic.includes("refund")) {
+      result = await handleRefund(supabase, event, webhookData, connectionId);
+    } else if (topic.includes("cancel")) {
+      result = await handleOrderCancelled(supabase, event, webhookData, connectionId);
+    } else if (topic.includes("inventory") || topic.includes("stock")) {
       result = await handleInventoryUpdate(supabase, event, webhookData, connectionId);
     } else if (topic.includes("order")) {
       result = await handleOrderCreated(supabase, event, webhookData, connectionId);
@@ -129,69 +138,190 @@ export const processClientStoreWebhookTask = task({
   },
 });
 
+/**
+ * Inventory update handler — platform-aware.
+ *
+ * Shopify `inventory_levels/update` payload (per Shopify Admin API webhook docs):
+ *   { inventory_item_id, location_id, available, updated_at }
+ * It does NOT carry a SKU. We resolve to our SKU via
+ * `client_store_sku_mappings.remote_inventory_item_id` (HRD-03 column,
+ * populated by `autoDiscoverShopifySkus`).
+ *
+ * WooCommerce / Squarespace `*_stock` payloads carry `sku` + `quantity`
+ * directly — kept on the existing path so this rewrite is non-breaking.
+ *
+ * HRD-05: when the connection has a `default_location_id` set and the
+ * webhook reports inventory at a different location, the row is persisted
+ * as `wrong_location` and NOT applied. Operators can grep these rows to
+ * spot multi-location merchants who picked the wrong default at install
+ * time. Unset `default_location_id` falls through (today's behavior).
+ *
+ * Echo cancellation (Rule #65): same logic as before, just keyed by SKU
+ * once it's resolved (regardless of whether the SKU came from the payload
+ * or from the inventory_item_id mapping).
+ */
 async function handleInventoryUpdate(
   supabase: ReturnType<typeof createServiceRoleClient>,
   event: Record<string, unknown>,
   data: Record<string, unknown>,
   connectionId: string | undefined,
 ) {
-  const sku = (data.sku as string) ?? "";
-  const newQuantity = data.quantity as number | undefined;
+  const platform = (event.platform as string) ?? "";
+  const eventId = event.id as string;
+  const workspaceId = event.workspace_id as string;
 
-  if (!sku || newQuantity === undefined) {
-    return { processed: false, reason: "missing_sku_or_quantity" };
-  }
+  // ─── Phase 1 — extract SKU + new-quantity per platform shape ───
+  let sku = "";
+  let newQuantity: number | undefined;
+  let resolvedFromInventoryItem = false;
+  let inventoryItemIdString: string | null = null;
 
-  // Rule #65: Echo cancellation
-  if (connectionId) {
-    const { data: mapping } = await supabase
+  if (platform === "shopify") {
+    const inventoryItemId = data.inventory_item_id;
+    const available = data.available;
+    const locationId = data.location_id;
+
+    if (inventoryItemId === undefined || inventoryItemId === null) {
+      return { processed: false, reason: "missing_inventory_item_id" };
+    }
+    if (available === undefined || available === null || typeof available !== "number") {
+      return { processed: false, reason: "missing_available" };
+    }
+    inventoryItemIdString = String(inventoryItemId);
+    newQuantity = available;
+
+    // HRD-05 wrong-location guard. We require the connection to be known —
+    // an inventory webhook with no connection context can't be location-checked.
+    if (!connectionId) {
+      return { processed: false, reason: "missing_connection_id" };
+    }
+
+    const { data: connection } = await supabase
+      .from("client_store_connections")
+      .select("default_location_id")
+      .eq("id", connectionId)
+      .maybeSingle();
+
+    const defaultLocationId = connection?.default_location_id ?? null;
+
+    if (defaultLocationId && locationId !== undefined && locationId !== null) {
+      const incomingLocationId = String(locationId);
+      const expectedLocationId = String(defaultLocationId);
+      if (incomingLocationId !== expectedLocationId) {
+        await supabase
+          .from("webhook_events")
+          .update({ status: "wrong_location" })
+          .eq("id", eventId);
+        return {
+          processed: false,
+          reason: "wrong_location",
+          inventory_item_id: inventoryItemIdString,
+          incoming_location_id: incomingLocationId,
+          expected_location_id: expectedLocationId,
+        };
+      }
+    }
+
+    // Resolve inventory_item_id → SKU via HRD-03 mapping column
+    const { data: mappingRow } = await supabase
       .from("client_store_sku_mappings")
-      .select("last_pushed_quantity")
+      .select("remote_sku, variant_id, last_pushed_quantity")
       .eq("connection_id", connectionId)
-      .eq("remote_sku", sku)
-      .single();
+      .eq("remote_inventory_item_id", inventoryItemIdString)
+      .maybeSingle();
 
-    if (mapping && mapping.last_pushed_quantity === newQuantity) {
-      // This is our own push echoing back
+    if (!mappingRow?.remote_sku) {
+      // SKU mapping missing — we can't safely route this event. The autoDiscoverShopifySkus
+      // step is supposed to backfill these rows for every variant before the connection's
+      // do_not_fanout flag is flipped. A miss here means either (a) staff flipped the gate
+      // before running autoDiscover, or (b) a brand-new variant was added in Shopify after
+      // the last autoDiscover run. Surface as `sku_mapping_missing` so the operator sees it.
       await supabase
         .from("webhook_events")
-        .update({ status: "echo_cancelled" })
-        .eq("id", event.id as string);
+        .update({ status: "sku_mapping_missing" })
+        .eq("id", eventId);
+      return {
+        processed: false,
+        reason: "sku_mapping_missing",
+        inventory_item_id: inventoryItemIdString,
+      };
+    }
 
+    sku = mappingRow.remote_sku;
+    resolvedFromInventoryItem = true;
+
+    // Echo cancellation pulled into one branch — we already have the row.
+    if (mappingRow.last_pushed_quantity === newQuantity) {
+      await supabase.from("webhook_events").update({ status: "echo_cancelled" }).eq("id", eventId);
       return { processed: true, reason: "echo_cancelled", sku };
+    }
+  } else {
+    // WooCommerce / Squarespace / unknown — preserve existing payload shape.
+    const payloadSku = (data.sku as string) ?? "";
+    const payloadQuantity = data.quantity as number | undefined;
+    if (!payloadSku || payloadQuantity === undefined) {
+      return { processed: false, reason: "missing_sku_or_quantity" };
+    }
+    sku = payloadSku;
+    newQuantity = payloadQuantity;
+
+    if (connectionId) {
+      const { data: mapping } = await supabase
+        .from("client_store_sku_mappings")
+        .select("last_pushed_quantity")
+        .eq("connection_id", connectionId)
+        .eq("remote_sku", sku)
+        .maybeSingle();
+
+      if (mapping && mapping.last_pushed_quantity === newQuantity) {
+        await supabase
+          .from("webhook_events")
+          .update({ status: "echo_cancelled" })
+          .eq("id", eventId);
+        return { processed: true, reason: "echo_cancelled", sku };
+      }
     }
   }
 
-  // Get current warehouse inventory to compute delta
+  // ─── Phase 2 — compute delta against current warehouse level ───
   const { data: level } = await supabase
     .from("warehouse_inventory_levels")
     .select("available")
-    .eq("workspace_id", event.workspace_id as string)
+    .eq("workspace_id", workspaceId)
     .eq("sku", sku)
-    .single();
+    .maybeSingle();
 
   if (!level) return { processed: false, reason: "sku_not_found", sku };
 
   const delta = newQuantity - level.available;
   if (delta === 0) return { processed: true, reason: "no_change", sku };
 
-  const platform = event.platform as string;
-  const source =
-    platform === "shopify" ? "shopify" : platform === "woocommerce" ? "woocommerce" : "shopify";
+  // ─── Phase 3 — single write path (Rule #20) ───
+  const source: "shopify" | "woocommerce" | "squarespace" =
+    platform === "shopify"
+      ? "shopify"
+      : platform === "woocommerce"
+        ? "woocommerce"
+        : platform === "squarespace"
+          ? "squarespace"
+          : "shopify";
 
   await recordInventoryChange({
-    workspaceId: event.workspace_id as string,
+    workspaceId,
     sku,
     delta,
-    source: source as "shopify" | "woocommerce",
-    correlationId: `webhook:${event.platform}:${event.id}`,
-    metadata: { webhook_event_id: event.id, platform },
+    source,
+    correlationId: `webhook:${platform}:${eventId}`,
+    metadata: {
+      webhook_event_id: eventId,
+      platform,
+      ...(resolvedFromInventoryItem && inventoryItemIdString
+        ? { resolved_from_inventory_item_id: inventoryItemIdString }
+        : {}),
+    },
   });
 
-  await supabase
-    .from("webhook_events")
-    .update({ status: "processed" })
-    .eq("id", event.id as string);
+  await supabase.from("webhook_events").update({ status: "processed" }).eq("id", eventId);
 
   return { processed: true, sku, delta };
 }
@@ -250,6 +380,9 @@ async function handleOrderCreated(
       workspace_id: workspaceId,
       sku: (li.sku as string) ?? "",
       quantity: (li.quantity as number) ?? 1,
+      // Persist the platform line-item id so the refund + cancel handlers
+      // can resolve back to the right warehouse_order_items row.
+      shopify_line_item_id: li.id !== undefined && li.id !== null ? String(li.id) : null,
     }));
     await supabase.from("warehouse_order_items").insert(items);
 
@@ -378,4 +511,377 @@ async function handleOrderCreated(
     .eq("id", event.id as string);
 
   return { processed: true, orderId: newOrder?.id };
+}
+
+/**
+ * Refund handler — Shopify `refunds/create`.
+ *
+ * Payload shape (per Shopify Admin API):
+ *   {
+ *     id, order_id, created_at, processed_at,
+ *     refund_line_items: [
+ *       { id, line_item_id, quantity, restock_type: 'return'|'no_restock'|'cancel', ... }
+ *     ]
+ *   }
+ *
+ * Polarity: ONLY `restock_type === 'return'` re-credits inventory. The other
+ * two values are explicit signals that the merchant either chose not to
+ * restock (`no_restock`) or already credited via the cancellation path
+ * (`cancel`). HRD-07.2: empty refund_line_items array is a normal Shopify
+ * shape (refund-without-restock — store credit only) and must NOT throw.
+ *
+ * Idempotency: each refund_line_item gets a stable correlation_id of
+ * `refund:{event.id}:{refund_line_item.id}` so retries are no-ops at
+ * `recordInventoryChange()` (the underlying RPC dedups on
+ * `(sku, correlation_id)` per Rule #32).
+ */
+async function handleRefund(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  event: Record<string, unknown>,
+  data: Record<string, unknown>,
+  connectionId: string | undefined,
+) {
+  const eventId = event.id as string;
+  const workspaceId = event.workspace_id as string;
+  const platform = (event.platform as string) ?? "shopify";
+
+  const refundLineItems =
+    (data.refund_line_items as Array<Record<string, unknown>> | undefined) ?? [];
+
+  // HRD-07.2 — empty array is a valid Shopify shape, log+return rather than throw.
+  if (refundLineItems.length === 0) {
+    await supabase.from("webhook_events").update({ status: "processed" }).eq("id", eventId);
+    return { processed: true, reason: "empty_refund_line_items", refund_id: data.id };
+  }
+
+  const remoteOrderId = (data.order_id as string | number | undefined) ?? null;
+  let parentOrder: { id: string; org_id: string } | null = null;
+  if (remoteOrderId !== null && remoteOrderId !== undefined) {
+    const { data: orderRow } = await supabase
+      .from("warehouse_orders")
+      .select("id, org_id")
+      .eq("workspace_id", workspaceId)
+      .eq("external_order_id", String(remoteOrderId))
+      .maybeSingle();
+    parentOrder = orderRow ?? null;
+  }
+
+  const recreditResults: {
+    refund_line_item_id: string | number | null;
+    sku: string | null;
+    quantity: number;
+    status: "ok" | "skipped_no_restock" | "skipped_zero_quantity" | "sku_unresolved" | "error";
+    reason?: string;
+  }[] = [];
+
+  for (const rli of refundLineItems) {
+    const refundLineItemId = (rli.id as string | number | undefined) ?? null;
+    const lineItemId = (rli.line_item_id as string | number | undefined) ?? null;
+    const restockType = (rli.restock_type as string | undefined) ?? null;
+    const quantity = (rli.quantity as number | undefined) ?? 0;
+
+    if (restockType !== "return") {
+      recreditResults.push({
+        refund_line_item_id: refundLineItemId,
+        sku: null,
+        quantity,
+        status: "skipped_no_restock",
+        reason: restockType ?? "missing_restock_type",
+      });
+      continue;
+    }
+
+    if (quantity <= 0) {
+      recreditResults.push({
+        refund_line_item_id: refundLineItemId,
+        sku: null,
+        quantity,
+        status: "skipped_zero_quantity",
+      });
+      continue;
+    }
+
+    // Resolve SKU — prefer the parent warehouse_order_items row keyed by
+    // remote line_item_id (canonical). Falls back to nothing if the parent
+    // order isn't ours (could be a refund for an order that landed before
+    // the connection went active).
+    let warehouseSku: string | null = null;
+
+    if (parentOrder && lineItemId !== null) {
+      const { data: orderItem } = await supabase
+        .from("warehouse_order_items")
+        .select("sku")
+        .eq("order_id", parentOrder.id)
+        .eq("shopify_line_item_id", String(lineItemId))
+        .maybeSingle();
+      if (orderItem?.sku) {
+        warehouseSku = orderItem.sku;
+      }
+    }
+
+    // Fallback — try by SKU passed inline on the refund_line_item (Shopify
+    // includes the original SKU on most payload variants).
+    if (!warehouseSku && rli.sku) {
+      const remoteSku = String(rli.sku);
+      if (connectionId) {
+        const { data: mapping } = await supabase
+          .from("client_store_sku_mappings")
+          .select("variant_id, warehouse_product_variants!inner(sku)")
+          .eq("connection_id", connectionId)
+          .eq("remote_sku", remoteSku)
+          .maybeSingle();
+        const wpv = mapping?.warehouse_product_variants as unknown as { sku: string } | null;
+        if (wpv?.sku) warehouseSku = wpv.sku;
+      }
+    }
+
+    if (!warehouseSku) {
+      recreditResults.push({
+        refund_line_item_id: refundLineItemId,
+        sku: null,
+        quantity,
+        status: "sku_unresolved",
+        reason: "no_warehouse_order_item_or_mapping",
+      });
+      continue;
+    }
+
+    const correlationId = `refund:${eventId}:${refundLineItemId ?? lineItemId ?? "anon"}`;
+    try {
+      const result = await recordInventoryChange({
+        workspaceId,
+        sku: warehouseSku,
+        delta: quantity,
+        source: platform === "woocommerce" ? "woocommerce" : "shopify",
+        correlationId,
+        metadata: {
+          webhook_event_id: eventId,
+          platform,
+          kind: "refund",
+          refund_id: data.id,
+          refund_line_item_id: refundLineItemId,
+          remote_line_item_id: lineItemId,
+          parent_order_id: parentOrder?.id ?? null,
+        },
+      });
+      recreditResults.push({
+        refund_line_item_id: refundLineItemId,
+        sku: warehouseSku,
+        quantity,
+        status: result.success || result.alreadyProcessed ? "ok" : "error",
+      });
+    } catch (err) {
+      recreditResults.push({
+        refund_line_item_id: refundLineItemId,
+        sku: warehouseSku,
+        quantity,
+        status: "error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Surface any unresolved or errored rows to the review queue so staff can
+  // reconcile manually. Rule #55 — actionable, deduplicated by group_key.
+  const failures = recreditResults.filter(
+    (r) => r.status === "sku_unresolved" || r.status === "error",
+  );
+  if (failures.length > 0 && parentOrder) {
+    await supabase.from("warehouse_review_queue").upsert(
+      {
+        workspace_id: workspaceId,
+        org_id: parentOrder.org_id,
+        category: "refund_partial_apply",
+        severity: failures.some((f) => f.status === "error") ? "high" : "medium",
+        title: `Refund ${data.id}: ${failures.length} line item(s) need manual review`,
+        description: failures
+          .map(
+            (f) =>
+              `rli=${f.refund_line_item_id ?? "?"} sku=${f.sku ?? "?"} qty=${f.quantity} ${f.status}${f.reason ? ` (${f.reason})` : ""}`,
+          )
+          .join("; "),
+        metadata: {
+          refund_id: data.id,
+          parent_order_id: parentOrder.id,
+          recredit_results: recreditResults,
+        },
+        status: "open",
+        group_key: `refund_partial:${eventId}`,
+        occurrence_count: 1,
+      },
+      { onConflict: "group_key", ignoreDuplicates: false },
+    );
+  }
+
+  // Trigger downstream push so cleared inventory is reflected on every
+  // channel — same pattern as orders/create.
+  if (recreditResults.some((r) => r.status === "ok")) {
+    await Promise.allSettled([
+      tasks.trigger("bandcamp-inventory-push", {}),
+      tasks.trigger("multi-store-inventory-push", {}),
+    ]).catch(() => {
+      /* non-critical */
+    });
+  }
+
+  await supabase.from("webhook_events").update({ status: "processed" }).eq("id", eventId);
+
+  return {
+    processed: true,
+    refund_id: data.id,
+    parent_order_id: parentOrder?.id ?? null,
+    recredits: recreditResults,
+  };
+}
+
+/**
+ * Order-cancelled handler — Shopify `orders/cancelled`.
+ *
+ * Payload shape (per Shopify Admin API):
+ *   { id, cancelled_at, cancel_reason, line_items: [...] }
+ *
+ * Re-credits the inventory the original `orders/create` decremented. Uses
+ * the SAME line-item-id-keyed correlation-ID base as `handleOrderCreated`,
+ * but with a `cancel:` prefix so the underlying `(sku, correlation_id)`
+ * UNIQUE constraint dedups retries without colliding with the original
+ * decrement.
+ *
+ * Idempotency strategy: the warehouse_orders row's fulfillment_status is
+ * flipped to 'cancelled' once. Re-deliveries find the existing 'cancelled'
+ * row and short-circuit with `reason='already_cancelled'`. The recredit
+ * loop is itself idempotent thanks to recordInventoryChange's correlation
+ * ID dedup, so even a retried cancel that races past the status check
+ * results in zero double-credits.
+ */
+async function handleOrderCancelled(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  event: Record<string, unknown>,
+  data: Record<string, unknown>,
+  _connectionId: string | undefined,
+) {
+  const eventId = event.id as string;
+  const workspaceId = event.workspace_id as string;
+  const platform = (event.platform as string) ?? "shopify";
+
+  const remoteOrderId = (data.id as string | number | undefined) ?? null;
+  if (remoteOrderId === null || remoteOrderId === undefined) {
+    return { processed: false, reason: "missing_order_id" };
+  }
+
+  const { data: order } = await supabase
+    .from("warehouse_orders")
+    .select("id, org_id, fulfillment_status")
+    .eq("workspace_id", workspaceId)
+    .eq("external_order_id", String(remoteOrderId))
+    .maybeSingle();
+
+  if (!order) {
+    // The cancel arrived for an order we never ingested. Common cases:
+    // (a) order was created BEFORE the connection went active, (b) the
+    // orders/create webhook is in the recovery sweeper queue and hasn't
+    // landed yet. Return without error so the row is marked processed.
+    await supabase.from("webhook_events").update({ status: "processed" }).eq("id", eventId);
+    return { processed: true, reason: "order_not_found", remote_order_id: remoteOrderId };
+  }
+
+  if (order.fulfillment_status === "cancelled") {
+    return { processed: true, reason: "already_cancelled", orderId: order.id };
+  }
+
+  // Re-credit each warehouse_order_items row. The correlation-ID prefix
+  // keeps the recredit distinct from the original decrement so retries
+  // don't collide.
+  const { data: items } = await supabase
+    .from("warehouse_order_items")
+    .select("id, sku, quantity, shopify_line_item_id")
+    .eq("order_id", order.id);
+
+  const recreditResults: {
+    sku: string;
+    quantity: number;
+    status: "ok" | "error";
+    reason?: string;
+  }[] = [];
+
+  for (const item of items ?? []) {
+    if (!item.sku || !item.quantity || item.quantity <= 0) continue;
+
+    const lineItemId = item.shopify_line_item_id ?? item.id;
+    const correlationId = `cancel:${eventId}:${item.sku}:${lineItemId}`;
+
+    try {
+      const result = await recordInventoryChange({
+        workspaceId,
+        sku: item.sku,
+        delta: item.quantity,
+        source: platform === "woocommerce" ? "woocommerce" : "shopify",
+        correlationId,
+        metadata: {
+          webhook_event_id: eventId,
+          platform,
+          kind: "cancel",
+          order_id: order.id,
+          remote_order_id: remoteOrderId,
+          warehouse_order_item_id: item.id,
+        },
+      });
+      recreditResults.push({
+        sku: item.sku,
+        quantity: item.quantity,
+        status: result.success || result.alreadyProcessed ? "ok" : "error",
+      });
+    } catch (err) {
+      recreditResults.push({
+        sku: item.sku,
+        quantity: item.quantity,
+        status: "error",
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  await supabase
+    .from("warehouse_orders")
+    .update({ fulfillment_status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("id", order.id);
+
+  // Surface any errored rows to the review queue.
+  const failures = recreditResults.filter((r) => r.status === "error");
+  if (failures.length > 0) {
+    await supabase.from("warehouse_review_queue").upsert(
+      {
+        workspace_id: workspaceId,
+        org_id: order.org_id,
+        category: "cancel_partial_apply",
+        severity: "high",
+        title: `Order ${order.id}: cancel re-credit failed for ${failures.length} SKU(s)`,
+        description: failures
+          .map((f) => `${f.sku}: qty=${f.quantity} ${f.reason ?? "error"}`)
+          .join("; "),
+        metadata: { order_id: order.id, recredit_results: recreditResults },
+        status: "open",
+        group_key: `cancel_partial:${eventId}`,
+        occurrence_count: 1,
+      },
+      { onConflict: "group_key", ignoreDuplicates: false },
+    );
+  }
+
+  if (recreditResults.some((r) => r.status === "ok")) {
+    await Promise.allSettled([
+      tasks.trigger("bandcamp-inventory-push", {}),
+      tasks.trigger("multi-store-inventory-push", {}),
+    ]).catch(() => {
+      /* non-critical */
+    });
+  }
+
+  await supabase.from("webhook_events").update({ status: "processed" }).eq("id", eventId);
+
+  return {
+    processed: true,
+    orderId: order.id,
+    remote_order_id: remoteOrderId,
+    recredits: recreditResults,
+  };
 }
