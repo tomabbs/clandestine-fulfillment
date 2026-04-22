@@ -14,8 +14,16 @@
 import { logger, schedules } from "@trigger.dev/sdk";
 import { getInventory as redisGetInventory } from "@/lib/clients/redis-inventory";
 import { listInventory } from "@/lib/clients/shipstation-inventory-v2";
+import { getInventoryLevelsAtLocation } from "@/lib/server/shopify-connection-graphql";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
+
+// B-4 / HRD-15 — cap on Shopify-direct probes per connection per run.
+// `inventoryLevels` GraphQL costs ~2 points per item; Shopify's bucket is
+// 50 pts/sec for standard plans. 50 SKUs per connection × ~2 pts = 100 pts
+// over <2 seconds is safely inside the per-connection budget. High-SKU
+// stores rotate which subset is sampled across consecutive runs.
+const MAX_SHOPIFY_DIRECT_PROBES_PER_CONNECTION = 50;
 
 interface SkuRow {
   sku: string;
@@ -25,7 +33,40 @@ interface SkuRow {
   redisAvailable: number | null;
   shipstationAvailable: number | null;
   bandcampAvailable: number | null;
-  classification: "agreed" | "delayed_propagation" | "drift_minor" | "drift_major";
+  /** B-4: per-SKU available from a direct Shopify Admin GraphQL probe at the connection's default_location_id. NULL when no shopify mapping, or the probe failed, or the SKU was over the per-connection probe cap this run. */
+  shopifyDirectAvailable: number | null;
+  /**
+   * B-4 / HRD-15 — symmetric 5-source classification.
+   *
+   *   - agreed              all 5 sources match
+   *   - delayed_propagation DB === Redis but external sources lag (existing)
+   *   - drift_minor         maxDiff <= 2 anywhere
+   *   - legacy_drift        Shopify-direct AND DB agree but ShipStation v2 disagrees
+   *                         (informational artifact only — NOT a review queue item;
+   *                         tells us where the SS v2 truth was wrong before cutover)
+   *   - bandcamp_drift      Shopify-direct + DB + SS agree but Bandcamp disagrees
+   *                         (existing handling)
+   *   - drift_major         everything else
+   */
+  classification:
+    | "agreed"
+    | "delayed_propagation"
+    | "drift_minor"
+    | "legacy_drift"
+    | "bandcamp_drift"
+    | "drift_major";
+}
+
+interface ShopifyConnectionForProbe {
+  id: string;
+  store_url: string;
+  api_key: string | null;
+  default_location_id: string | null;
+}
+
+interface ShopifySkuMapping {
+  remote_inventory_item_id: string | null;
+  connection_id: string;
 }
 
 interface SampledRow {
@@ -98,6 +139,92 @@ export const megaplanSpotCheckTask = schedules.task({
       }
       const sampled = (sampledRaw ?? []) as SampledRow[];
 
+      // ─── B-4 / HRD-15: pre-batch Shopify-direct probes by connection ──
+      // We batch BEFORE the per-row loop so each connection produces ONE
+      // GraphQL request covering up to MAX_SHOPIFY_DIRECT_PROBES_PER_CONNECTION
+      // SKUs. Per-row code below just reads from this Map. Failures are
+      // captured per-connection (not per-SKU) — a single connection error
+      // marks all its SKUs as `shopifyDirectAvailable: null` and continues.
+      const shopifyDirectByVariantId = new Map<string, number | null>();
+      let shopifyDirectProbeCount = 0;
+      let shopifyDirectProbeFailures = 0;
+      try {
+        const variantIds = sampled.map((s) => s.variant_id);
+        if (variantIds.length > 0) {
+          const { data: mappings } = await supabase
+            .from("client_store_sku_mappings")
+            .select("variant_id, remote_inventory_item_id, connection_id")
+            .in("variant_id", variantIds);
+
+          // Group: connection_id → variant_id[] (capped per connection)
+          const variantsByConnection = new Map<
+            string,
+            Array<{ variantId: string; remoteInventoryItemId: string }>
+          >();
+          for (const m of (mappings ?? []) as Array<ShopifySkuMapping & { variant_id: string }>) {
+            if (!m.remote_inventory_item_id) continue;
+            const list = variantsByConnection.get(m.connection_id) ?? [];
+            if (list.length >= MAX_SHOPIFY_DIRECT_PROBES_PER_CONNECTION) continue;
+            list.push({
+              variantId: m.variant_id,
+              remoteInventoryItemId: m.remote_inventory_item_id,
+            });
+            variantsByConnection.set(m.connection_id, list);
+          }
+
+          if (variantsByConnection.size > 0) {
+            const { data: connections } = await supabase
+              .from("client_store_connections")
+              .select("id, store_url, api_key, default_location_id, platform")
+              .eq("platform", "shopify")
+              .in("id", Array.from(variantsByConnection.keys()));
+
+            const connectionById = new Map<string, ShopifyConnectionForProbe>();
+            for (const c of (connections ?? []) as Array<ShopifyConnectionForProbe>) {
+              connectionById.set(c.id, c);
+            }
+
+            for (const [connectionId, items] of variantsByConnection) {
+              const conn = connectionById.get(connectionId);
+              if (!conn || !conn.api_key || !conn.default_location_id) {
+                // Connection missing creds or default_location_id — null out
+                // these variants without an HTTP call. The dry-run gate
+                // (HRD-04) is supposed to set default_location_id before
+                // do_not_fanout flips, so this is rare in practice.
+                for (const it of items) shopifyDirectByVariantId.set(it.variantId, null);
+                continue;
+              }
+              try {
+                const inventoryLevels = await getInventoryLevelsAtLocation(
+                  { storeUrl: conn.store_url, accessToken: conn.api_key },
+                  items.map((i) => i.remoteInventoryItemId),
+                  conn.default_location_id,
+                );
+                for (const it of items) {
+                  const lvl = inventoryLevels.get(it.remoteInventoryItemId);
+                  shopifyDirectByVariantId.set(it.variantId, lvl ?? null);
+                  if (lvl !== null && lvl !== undefined) shopifyDirectProbeCount += 1;
+                }
+              } catch (err) {
+                shopifyDirectProbeFailures += 1;
+                logger.warn("[megaplan-spot-check] Shopify-direct probe failed", {
+                  connectionId,
+                  workspaceId: ws.id,
+                  err: String(err),
+                });
+                for (const it of items) shopifyDirectByVariantId.set(it.variantId, null);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Pre-batch failures must not block the rest of the spot-check.
+        logger.warn("[megaplan-spot-check] Shopify-direct pre-batch failed", {
+          workspaceId: ws.id,
+          err: String(err),
+        });
+      }
+
       const rows: SkuRow[] = [];
       for (const row of sampled) {
         const { data: level } = await supabase
@@ -138,6 +265,10 @@ export const megaplanSpotCheckTask = schedules.task({
           mapping?.bandcamp_origin_quantities,
         );
 
+        const shopifyDirectAvailable = shopifyDirectByVariantId.has(row.variant_id)
+          ? (shopifyDirectByVariantId.get(row.variant_id) ?? null)
+          : null;
+
         rows.push({
           sku: row.sku,
           variantId: row.variant_id,
@@ -146,12 +277,14 @@ export const megaplanSpotCheckTask = schedules.task({
           redisAvailable,
           shipstationAvailable,
           bandcampAvailable,
-          classification: classify(
-            dbAvailable,
-            redisAvailable,
-            shipstationAvailable,
-            bandcampAvailable,
-          ),
+          shopifyDirectAvailable,
+          classification: classify({
+            db: dbAvailable,
+            redis: redisAvailable,
+            ss: shipstationAvailable,
+            bc: bandcampAvailable,
+            shopify: shopifyDirectAvailable,
+          }),
         });
       }
 
@@ -167,7 +300,20 @@ export const megaplanSpotCheckTask = schedules.task({
           drift_minor_count: summary.minor,
           drift_major_count: summary.major,
           delayed_propagation_count: summary.delayed,
-          summary_json: { rows },
+          // B-4 / HRD-15 — count of SKUs successfully verified via direct
+          // Shopify GraphQL probe this run. Per-SKU values live in
+          // summary_json.rows[].shopifyDirectAvailable. Failures are NOT
+          // counted; this is the operational metric "how much of the spot
+          // check was 5-source vs degraded to 4-source". When this count
+          // collapses to zero across runs, surface as a Channels page alert.
+          shopify_direct_available: shopifyDirectProbeCount,
+          summary_json: {
+            rows,
+            shopify_direct_probe_count: shopifyDirectProbeCount,
+            shopify_direct_probe_failures: shopifyDirectProbeFailures,
+            legacy_drift_count: summary.legacyDrift,
+            bandcamp_drift_count: summary.bandcampDrift,
+          },
           artifact_md: artifactMd,
         })
         .eq("id", runRow.id);
@@ -240,23 +386,59 @@ export const megaplanSpotCheckTask = schedules.task({
   },
 });
 
-function classify(
-  db: number,
-  redis: number | null,
-  ss: number | null,
-  bc: number | null,
-): SkuRow["classification"] {
-  // If any source failed to read, that's drift_major — we can't verify agreement.
-  if (redis === null || ss === null || bc === null) return "drift_major";
-  if (db === redis && db === ss && db === bc) return "agreed";
+/**
+ * B-4 / HRD-15 — symmetric 5-source classification.
+ *
+ * The Shopify-direct value (`shopify`) is treated as a NEW source, not a
+ * replacement for any existing source. The classifier preserves prior
+ * behavior on 4-source inputs (when `shopify === null`) so this change is
+ * non-breaking for connections without a Shopify mapping.
+ *
+ * Disagreement priority (most-specific first):
+ *   1. shopify-direct vs DB > 2 → drift_major (escalation direction)
+ *   2. shopify === db AND ss disagrees → legacy_drift (informational)
+ *   3. shopify === db === ss AND bc disagrees → bandcamp_drift
+ *   4. Existing 4-source rules apply otherwise (agreed / delayed / minor / major)
+ */
+export function classify(args: {
+  db: number;
+  redis: number | null;
+  ss: number | null;
+  bc: number | null;
+  shopify: number | null;
+}): SkuRow["classification"] {
+  const { db, redis, ss, bc, shopify } = args;
 
-  // DB/Redis agreement but external lag is the textbook "delayed propagation"
-  // signal — happens routinely between recordInventoryChange() commit and the
-  // ShipStation v2 push completing. Persistence rule downstream will flag if
-  // it stays delayed across two runs.
+  // Existing 4-source guard: any failed read on the legacy sources = major.
+  if (redis === null || ss === null || bc === null) return "drift_major";
+
+  // Shopify-direct is the new authoritative source for cutover. A direct
+  // disagreement >2 is always escalated; this is the "Shopify says X but
+  // the warehouse believes Y" signal that motivated HRD-15.
+  if (shopify !== null && Math.abs(db - shopify) > 2) return "drift_major";
+
+  // 5-way agreement (or 4-way agreement when no shopify mapping exists)
+  const allAgree = db === redis && db === ss && db === bc && (shopify === null || db === shopify);
+  if (allAgree) return "agreed";
+
+  // legacy_drift: shopify-direct AND DB agree but ShipStation v2 disagrees.
+  // Tells us where SS truth was wrong before cutover. Informational artifact
+  // only — the persistence rule does NOT escalate this to a review queue
+  // item.
+  if (shopify !== null && db === shopify && db !== ss) return "legacy_drift";
+
+  // bandcamp_drift: shopify-direct + DB + SS agree but Bandcamp disagrees.
+  // Existing handling; surfaces sticky push lag without spamming the queue.
+  if (shopify !== null && db === shopify && db === ss && db !== bc) {
+    return "bandcamp_drift";
+  }
+
+  // Existing rules: DB/Redis agreement + external lag = delayed propagation.
   if (db === redis && (db !== ss || db !== bc)) return "delayed_propagation";
 
-  const maxDiff = Math.max(Math.abs(db - redis), Math.abs(db - ss), Math.abs(db - bc));
+  const diffs = [Math.abs(db - redis), Math.abs(db - ss), Math.abs(db - bc)];
+  if (shopify !== null) diffs.push(Math.abs(db - shopify));
+  const maxDiff = Math.max(...diffs);
   return maxDiff <= 2 ? "drift_minor" : "drift_major";
 }
 
@@ -266,6 +448,8 @@ function summarize(rows: SkuRow[]) {
     delayed: rows.filter((r) => r.classification === "delayed_propagation").length,
     minor: rows.filter((r) => r.classification === "drift_minor").length,
     major: rows.filter((r) => r.classification === "drift_major").length,
+    legacyDrift: rows.filter((r) => r.classification === "legacy_drift").length,
+    bandcampDrift: rows.filter((r) => r.classification === "bandcamp_drift").length,
   };
 }
 
@@ -275,13 +459,19 @@ function renderArtifactMarkdown(
   summary: ReturnType<typeof summarize>,
 ): string {
   const header = `# Spot-check ${new Date().toISOString()} — ${ws.name ?? ws.id}\n\n`;
-  const sum = `**Summary:** ${summary.agreed} agreed | ${summary.delayed} delayed | ${summary.minor} minor | ${summary.major} major\n\n`;
+  const sum =
+    `**Summary:** ${summary.agreed} agreed | ${summary.delayed} delayed | ` +
+    `${summary.minor} minor | ${summary.major} major | ` +
+    `${summary.legacyDrift} legacy_drift | ${summary.bandcampDrift} bandcamp_drift\n\n`;
   const table =
-    "| SKU | DB | Redis | ShipStation | Bandcamp | Class |\n|---|---:|---:|---:|---:|---|\n" +
+    "| SKU | DB | Redis | Shopify-direct | ShipStation | Bandcamp | Class |\n" +
+    "|---|---:|---:|---:|---:|---:|---|\n" +
     rows
       .map(
         (r) =>
-          `| ${r.sku} | ${r.dbAvailable} | ${r.redisAvailable ?? "—"} | ${r.shipstationAvailable ?? "—"} | ${r.bandcampAvailable ?? "—"} | ${r.classification} |`,
+          `| ${r.sku} | ${r.dbAvailable} | ${r.redisAvailable ?? "—"} | ` +
+          `${r.shopifyDirectAvailable ?? "—"} | ${r.shipstationAvailable ?? "—"} | ` +
+          `${r.bandcampAvailable ?? "—"} | ${r.classification} |`,
       )
       .join("\n");
   return header + sum + table;
