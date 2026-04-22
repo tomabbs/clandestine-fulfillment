@@ -2,6 +2,11 @@
 
 import { z } from "zod/v4";
 import { requireAuth } from "@/lib/server/auth-context";
+import { iterateAllVariants } from "@/lib/server/shopify-connection-graphql";
+import {
+  type RegisterWebhookSubscriptionsResult,
+  registerWebhookSubscriptions,
+} from "@/lib/server/shopify-webhook-subscriptions";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 import type {
@@ -801,4 +806,412 @@ export async function setShopifyDefaultLocation(input: {
   if (error) throw new Error(`Failed to set default location: ${error.message}`);
 
   return { success: true };
+}
+
+// ============================================================================
+// HRD-35 step 6 / HRD-03 — autoDiscoverShopifySkus
+//
+// Walks every product variant in the connected Shopify store and matches
+// each Shopify SKU against `warehouse_product_variants.sku` for the
+// connection's workspace. Populates `client_store_sku_mappings` with the
+// remote_product_id / remote_variant_id / remote_inventory_item_id triple
+// needed by inventory webhooks (HRD-03 unique-index protection enforced via
+// idx_sku_mappings_connection_inventory_item from migration 20260422000001).
+//
+// SUPERSEDES the legacy `autoDiscoverSkus` (above) FOR SHOPIFY ONLY. The
+// legacy function is kept for Squarespace + WooCommerce code paths until
+// those platforms get their own per-platform discoverers. The new function:
+//   - uses GraphQL (variants.json REST is being deprecated 2025-10),
+//   - captures `inventoryItem.id` so HRD-03 webhook resolution works,
+//   - detects duplicate SKUs across Shopify variants (Rule #8 violation),
+//   - reports unmatched + warehouse-not-in-Shopify counts for HRD-04 staging.
+//
+// HRD-04 prerequisite: the dry-run reconciliation Server Action consumes the
+// mappings produced by this discovery pass. Calling discovery without later
+// running dry-run is fine; calling dry-run with no mappings yields an empty
+// matched-set, which is the correct degenerate behavior.
+//
+// Read-only against Shopify. Writes only to client_store_sku_mappings.
+// Never enables / deactivates inventory tracking, never touches inventory
+// quantities — that's the dry-run (read) and the live webhook handler (write).
+// ============================================================================
+
+const autoDiscoverShopifySkusSchema = z.object({
+  connectionId: z.string().uuid(),
+});
+
+export type AutoDiscoverShopifySkusReport = {
+  connectionId: string;
+  shopifyVariantsScanned: number;
+  shopifyProductsScanned: number;
+  warehouseSkusInWorkspace: number;
+  matched: number;
+  newMappingsCreated: number;
+  existingMappingsUpdated: number;
+  shopifyVariantsWithoutSku: number;
+  shopifyVariantsWithoutInventoryItem: number;
+  /** Shopify SKUs that don't exist in the workspace's warehouse_product_variants. Hard error per HRD-04 — the operator must reconcile before flipping fanout. */
+  unmatchedShopifySkus: string[];
+  /** Same SKU appearing on >1 Shopify variant in this store. Per Rule #8 this is a data error in Shopify; surfaced for staff review. */
+  duplicateShopifySkus: Array<{ sku: string; variantIds: string[] }>;
+  /** Workspace SKUs that exist on warehouse_product_variants but were NOT found in Shopify. Informational — these may be Bandcamp-only or ShipStation-only. */
+  warehouseSkusNotInShopify: string[];
+  durationMs: number;
+};
+
+/**
+ * Discover Shopify SKUs and persist mappings. Idempotent — re-running on
+ * the same connection updates existing rows in place (matched on the
+ * `(connection_id, remote_inventory_item_id)` unique index added by migration
+ * 20260422000001).
+ *
+ * SKU normalization: trim() only. We do NOT lowercase or strip zero-width
+ * chars here — `shipstation-export.ts` does that for export-side dedup, but
+ * for matching we want byte-exact equality with `warehouse_product_variants.sku`
+ * to avoid silently merging two warehouse rows that DO have a meaningful case
+ * or whitespace difference.
+ */
+export async function autoDiscoverShopifySkus(input: {
+  connectionId: string;
+}): Promise<AutoDiscoverShopifySkusReport> {
+  const startedAt = Date.now();
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = autoDiscoverShopifySkusSchema.parse(input);
+
+  const serviceClient = createServiceRoleClient();
+
+  // 1) Load the connection (auth, store_url, workspace_id).
+  const { data: conn, error: connErr } = await serviceClient
+    .from("client_store_connections")
+    .select("id, workspace_id, store_url, platform, api_key")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (connErr) throw new Error(`Connection lookup failed: ${connErr.message}`);
+  if (!conn) throw new Error("Connection not found");
+  if (conn.platform !== "shopify") {
+    throw new Error("autoDiscoverShopifySkus only applies to Shopify connections");
+  }
+  if (!conn.api_key) {
+    throw new Error("Connection has no Shopify access token — complete the OAuth install first");
+  }
+
+  // 2) Load the workspace's SKU universe. Returns Map<sku, variantId>.
+  //    Loading ALL active variants in one query — the universe is bounded
+  //    (~3k variants observed at 2026-04 export) so this is cheap.
+  const { data: variants, error: variantsErr } = await serviceClient
+    .from("warehouse_product_variants")
+    .select("id, sku")
+    .eq("workspace_id", conn.workspace_id)
+    .not("sku", "is", null);
+  if (variantsErr) throw new Error(`Variant universe load failed: ${variantsErr.message}`);
+
+  const skuToVariantId = new Map<string, string>();
+  for (const v of variants ?? []) {
+    if (typeof v.sku !== "string") continue;
+    const trimmed = v.sku.trim();
+    if (!trimmed) continue;
+    // First-row wins on workspace-side collisions (Rule #31 should prevent these
+    // from existing at all — surface in unmatched if they do).
+    if (!skuToVariantId.has(trimmed)) {
+      skuToVariantId.set(trimmed, v.id);
+    }
+  }
+
+  // 3) Walk Shopify variants. Build candidate match list + duplicate detector.
+  const shopifySkuSeen = new Map<string, string[]>(); // sku → variantIds
+  const candidateMatches: Array<{
+    sku: string;
+    variantId: string; // warehouse variant id
+    remoteVariantId: string;
+    remoteProductId: string;
+    remoteInventoryItemId: string;
+  }> = [];
+  let shopifyVariantsScanned = 0;
+  let shopifyProductsScanned = 0;
+  let shopifyVariantsWithoutSku = 0;
+  let shopifyVariantsWithoutInventoryItem = 0;
+
+  // Track unique product ids for the count.
+  const productIdsSeen = new Set<string>();
+
+  for await (const page of iterateAllVariants({
+    storeUrl: conn.store_url,
+    accessToken: conn.api_key,
+  })) {
+    for (const v of page) {
+      shopifyVariantsScanned++;
+      productIdsSeen.add(v.productId);
+
+      if (!v.sku) {
+        shopifyVariantsWithoutSku++;
+        continue;
+      }
+      if (!v.inventoryItemId) {
+        shopifyVariantsWithoutInventoryItem++;
+        continue;
+      }
+
+      const seenForSku = shopifySkuSeen.get(v.sku) ?? [];
+      seenForSku.push(v.variantId);
+      shopifySkuSeen.set(v.sku, seenForSku);
+
+      const warehouseVariantId = skuToVariantId.get(v.sku);
+      if (!warehouseVariantId) continue;
+
+      candidateMatches.push({
+        sku: v.sku,
+        variantId: warehouseVariantId,
+        remoteVariantId: v.variantId,
+        remoteProductId: v.productId,
+        remoteInventoryItemId: v.inventoryItemId,
+      });
+    }
+  }
+  shopifyProductsScanned = productIdsSeen.size;
+
+  // 4) Detect duplicate SKUs in Shopify (Rule #8 violation).
+  const duplicateShopifySkus: Array<{ sku: string; variantIds: string[] }> = [];
+  for (const [sku, variantIds] of shopifySkuSeen.entries()) {
+    if (variantIds.length > 1) {
+      duplicateShopifySkus.push({ sku, variantIds });
+    }
+  }
+
+  // 5) Persist mappings — upsert keyed on (connection_id, remote_inventory_item_id)
+  //    so re-runs are idempotent. We DO NOT delete pre-existing mappings whose
+  //    remote_inventory_item_id no longer appears in Shopify; those are handled
+  //    by a separate cleanup pass (deferred). Staff can manually deactivate via
+  //    the existing UI if needed.
+  let newMappingsCreated = 0;
+  let existingMappingsUpdated = 0;
+
+  if (candidateMatches.length > 0) {
+    // Pre-load existing mappings keyed by (remote_inventory_item_id) for this
+    // connection so we can compute new vs updated counts deterministically.
+    const { data: existing } = await serviceClient
+      .from("client_store_sku_mappings")
+      .select("id, remote_inventory_item_id")
+      .eq("connection_id", conn.id)
+      .not("remote_inventory_item_id", "is", null);
+    const existingItemIds = new Set<string>();
+    for (const row of existing ?? []) {
+      if (row.remote_inventory_item_id) existingItemIds.add(row.remote_inventory_item_id);
+    }
+
+    // Chunk inserts to keep PostgREST URL-length bounded.
+    const CHUNK = 500;
+    for (let i = 0; i < candidateMatches.length; i += CHUNK) {
+      const chunk = candidateMatches.slice(i, i + CHUNK);
+      const payloads = chunk.map((m) => ({
+        workspace_id: conn.workspace_id,
+        connection_id: conn.id,
+        variant_id: m.variantId,
+        remote_sku: m.sku,
+        remote_product_id: m.remoteProductId,
+        remote_variant_id: m.remoteVariantId,
+        remote_inventory_item_id: m.remoteInventoryItemId,
+        is_active: true,
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error: upsertErr } = await serviceClient
+        .from("client_store_sku_mappings")
+        .upsert(payloads, {
+          onConflict: "connection_id,remote_inventory_item_id",
+          ignoreDuplicates: false,
+        });
+      if (upsertErr) {
+        throw new Error(
+          `Mapping upsert failed at chunk offset ${i}: ${upsertErr.message}. Aborting — partial state may remain on prior chunks.`,
+        );
+      }
+
+      for (const m of chunk) {
+        if (existingItemIds.has(m.remoteInventoryItemId)) {
+          existingMappingsUpdated++;
+        } else {
+          newMappingsCreated++;
+        }
+      }
+    }
+  }
+
+  // 6) Compute report sets.
+  const matchedSkus = new Set(candidateMatches.map((c) => c.sku));
+  const unmatchedShopifySkus: string[] = [];
+  for (const sku of shopifySkuSeen.keys()) {
+    if (!skuToVariantId.has(sku)) unmatchedShopifySkus.push(sku);
+  }
+  unmatchedShopifySkus.sort();
+
+  const warehouseSkusNotInShopify: string[] = [];
+  for (const sku of skuToVariantId.keys()) {
+    if (!matchedSkus.has(sku)) warehouseSkusNotInShopify.push(sku);
+  }
+  warehouseSkusNotInShopify.sort();
+
+  return {
+    connectionId: conn.id,
+    shopifyVariantsScanned,
+    shopifyProductsScanned,
+    warehouseSkusInWorkspace: skuToVariantId.size,
+    matched: candidateMatches.length,
+    newMappingsCreated,
+    existingMappingsUpdated,
+    shopifyVariantsWithoutSku,
+    shopifyVariantsWithoutInventoryItem,
+    unmatchedShopifySkus: unmatchedShopifySkus.slice(0, 200), // cap for serializability
+    duplicateShopifySkus: duplicateShopifySkus.slice(0, 100),
+    warehouseSkusNotInShopify: warehouseSkusNotInShopify.slice(0, 200),
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+/**
+ * Convenience getter — returns the cached SKU mapping summary for a connection
+ * without re-walking Shopify. Used by the dialog to show "X SKUs mapped" state
+ * on dialog open before the operator clicks Discover.
+ */
+export async function getSkuMappingSummary(input: { connectionId: string }): Promise<{
+  totalMappings: number;
+  withInventoryItemId: number;
+  lastDiscoveredAt: string | null;
+}> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = z.object({ connectionId: z.string().uuid() }).parse(input);
+
+  const serviceClient = createServiceRoleClient();
+  const { data: rows, error } = await serviceClient
+    .from("client_store_sku_mappings")
+    .select("id, remote_inventory_item_id, updated_at")
+    .eq("connection_id", data.connectionId)
+    .eq("is_active", true);
+
+  if (error) throw new Error(`Mapping summary load failed: ${error.message}`);
+
+  const totalMappings = rows?.length ?? 0;
+  const withInventoryItemId = (rows ?? []).filter((r) => r.remote_inventory_item_id).length;
+  const lastDiscoveredAt = (rows ?? []).reduce<string | null>((max, r) => {
+    if (!r.updated_at) return max;
+    if (max === null || r.updated_at > max) return r.updated_at;
+    return max;
+  }, null);
+
+  return { totalMappings, withInventoryItemId, lastDiscoveredAt };
+}
+
+// Note: ShopifyScopeError is thrown by autoDiscoverShopifySkus when the per-connection
+// access token is missing the read_products / read_inventory scope. The dialog
+// catches all errors generically; the .message includes the missing scope name
+// so the operator knows to re-install the app. We deliberately do NOT re-export
+// the class from this Server Action file — Next.js "use server" files may only
+// export async functions, and re-exporting a class would break the build.
+
+// ============================================================================
+// HRD-09.2 — webhook auto-register (operator-controlled)
+//
+// Registers the four required Shopify webhook topics against the per-
+// connection app's offline token, then persists the resulting subscription
+// IDs + Shopify-pinned apiVersion onto `client_store_connections.metadata`.
+//
+// Operator-controlled: NOT auto-fired on OAuth callback. The dialog exposes
+// a "Register webhooks" button. We only ever call Shopify with the per-
+// connection token — never the env-singleton.
+//
+// Idempotent at the Shopify level (the helper looks for a pre-existing
+// (topic, callbackUrl) tuple before creating). Idempotent at the metadata
+// level (we replace the whole `webhook_subscriptions` array on each run so
+// re-registration after a callback URL change converges the persisted view).
+// ============================================================================
+
+const registerShopifyWebhookSubscriptionsSchema = z.object({
+  connectionId: z.string().uuid(),
+});
+
+export type RegisterShopifyWebhookSubscriptionsReport = RegisterWebhookSubscriptionsResult & {
+  callbackUrl: string;
+  /** Whichever apiVersion all created subscriptions resolved to. Null when nothing succeeded. */
+  apiVersionPinned: string | null;
+  /** True when one or more subscriptions report a different apiVersion handle. Surfaces drift the deferred shopify-webhook-health-check task will catch on its own; surfacing it here lets the operator notice immediately. */
+  apiVersionDrift: boolean;
+  registeredAt: string;
+};
+
+export async function registerShopifyWebhookSubscriptions(input: {
+  connectionId: string;
+}): Promise<RegisterShopifyWebhookSubscriptionsReport> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = registerShopifyWebhookSubscriptionsSchema.parse(input);
+
+  const serviceClient = createServiceRoleClient();
+  const { data: conn, error: connErr } = await serviceClient
+    .from("client_store_connections")
+    .select("id, store_url, platform, api_key, metadata")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (connErr) throw new Error(`Connection lookup failed: ${connErr.message}`);
+  if (!conn) throw new Error("Connection not found");
+  if (conn.platform !== "shopify") {
+    throw new Error("registerShopifyWebhookSubscriptions only applies to Shopify connections");
+  }
+  if (!conn.api_key) {
+    throw new Error("Connection has no Shopify access token — complete the OAuth install first");
+  }
+
+  // Single canonical callback URL per connection. Both `connection_id` and
+  // `platform` are query-string params on the live route; passing them here
+  // means the route handler's `searchParams.get("connection_id")` resolves
+  // even when Shopify forwards no other identifying header.
+  const callbackUrl = `${env().NEXT_PUBLIC_APP_URL}/api/webhooks/client-store?connection_id=${conn.id}&platform=shopify`;
+
+  const result = await registerWebhookSubscriptions(
+    { storeUrl: conn.store_url, accessToken: conn.api_key },
+    callbackUrl,
+  );
+
+  const apiVersions = new Set(result.registered.map((r) => r.apiVersion));
+  const apiVersionPinned = result.registered[0]?.apiVersion ?? null;
+  const apiVersionDrift = apiVersions.size > 1;
+  const registeredAt = new Date().toISOString();
+
+  // Merge into existing metadata rather than replacing — other code paths
+  // (channel-sync logging, do_not_fanout flag rollouts, etc.) may write to
+  // unrelated metadata keys. JSON-merge is structural so a stale array or
+  // unrelated key never gets clobbered.
+  const existingMeta = (conn.metadata && typeof conn.metadata === "object"
+    ? (conn.metadata as Record<string, unknown>)
+    : {}) as Record<string, unknown>;
+  const nextMeta = {
+    ...existingMeta,
+    webhook_callback_url: callbackUrl,
+    webhook_subscriptions: result.registered.map((r) => ({
+      id: r.id,
+      topic: r.topic,
+      apiVersion: r.apiVersion,
+      callbackUrl: r.callbackUrl,
+      reused: r.reused,
+      registeredAt,
+    })),
+    webhook_register_failures: result.failed.length > 0 ? result.failed : undefined,
+    webhook_register_last_run_at: registeredAt,
+  };
+
+  const { error: updateErr } = await serviceClient
+    .from("client_store_connections")
+    .update({ metadata: nextMeta, updated_at: registeredAt })
+    .eq("id", data.connectionId);
+  if (updateErr) {
+    throw new Error(`Failed to persist webhook subscription metadata: ${updateErr.message}`);
+  }
+
+  return {
+    ...result,
+    callbackUrl,
+    apiVersionPinned,
+    apiVersionDrift,
+    registeredAt,
+  };
 }

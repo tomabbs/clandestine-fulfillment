@@ -1,10 +1,23 @@
 "use client";
 
-import { CheckCircle2, Copy, ExternalLink, Loader2, ShieldAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  ShieldAlert,
+  Webhook,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import {
+  type AutoDiscoverShopifySkusReport,
+  autoDiscoverShopifySkus,
   generateShopifyInstallUrl,
+  getSkuMappingSummary,
   listShopifyLocations,
+  registerShopifyWebhookSubscriptions,
+  type RegisterShopifyWebhookSubscriptionsReport,
   type ShopifyLocationSummary,
   setShopifyAppCredentials,
   setShopifyDefaultLocation,
@@ -21,14 +34,21 @@ import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 /**
  * HRD-35 onboarding dialog for a single Shopify client_store_connections row.
  *
- * Three-step flow (matches the Server Action contract in store-connections.ts):
+ * Four-step flow (matches the Server Action contract in store-connections.ts):
  *   1) Paste per-connection Custom-distribution app Client ID + Client Secret.
  *   2) Generate install URL → operator clicks it to complete OAuth in Shopify.
  *   3) After install, pick a default Shopify location for inventory ops.
+ *   4) Walk Shopify variants and populate client_store_sku_mappings (HRD-03).
  *
  * The dialog is read-only-aware: each step shows the current state of the
  * connection so an operator can re-open the dialog mid-flow without losing
  * context.
+ *
+ * Operator-controlled — none of these steps fire automatically. Steps 4-6
+ * (discover, register webhooks, dry-run) are explicitly NOT auto-fired on
+ * OAuth callback because each one writes meaningful state (mappings, webhook
+ * subscriptions in Shopify, etc.) and the operator should choose when to
+ * proceed.
  */
 export function ConfigureShopifyAppDialog({
   open,
@@ -64,17 +84,13 @@ export function ConfigureShopifyAppDialog({
           <DialogTitle>Configure Shopify app — {connection.org_name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-2 text-sm">
-          <div className="flex flex-wrap gap-2">
-            <StepBadge label="Step 1: App credentials" done={credsConfigured} />
-            <StepBadge label="Step 2: OAuth installed" done={tokenPresent} />
-            <StepBadge label="Step 3: Default location" done={defaultLocationSet} />
-            {connection.do_not_fanout && (
-              <Badge variant="outline" className="gap-1">
-                <ShieldAlert className="h-3 w-3" />
-                Dormant (do_not_fanout)
-              </Badge>
-            )}
-          </div>
+          <StepBadgeRow
+            connectionId={connection.id}
+            credsConfigured={credsConfigured}
+            tokenPresent={tokenPresent}
+            defaultLocationSet={defaultLocationSet}
+            doNotFanout={connection.do_not_fanout}
+          />
 
           <div className="rounded-md border bg-muted/30 p-3">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Store</p>
@@ -99,6 +115,10 @@ export function ConfigureShopifyAppDialog({
               currentDefaultLocationId={connection.default_location_id}
             />
           )}
+
+          {tokenPresent && <Step4SkuDiscovery connectionId={connection.id} />}
+
+          {tokenPresent && <Step5RegisterWebhooks connectionId={connection.id} />}
         </div>
       </DialogContent>
     </Dialog>
@@ -111,6 +131,43 @@ function StepBadge({ label, done }: { label: string; done: boolean }) {
       {done ? <CheckCircle2 className="h-3 w-3" /> : <span className="h-3 w-3" />}
       {label}
     </Badge>
+  );
+}
+
+function StepBadgeRow({
+  connectionId,
+  credsConfigured,
+  tokenPresent,
+  defaultLocationSet,
+  doNotFanout,
+}: {
+  connectionId: string;
+  credsConfigured: boolean;
+  tokenPresent: boolean;
+  defaultLocationSet: boolean;
+  doNotFanout: boolean;
+}) {
+  // Step 4 done = at least one active SKU mapping with a remote_inventory_item_id
+  const summary = useAppQuery({
+    queryKey: ["sku-mapping-summary", connectionId],
+    queryFn: () => getSkuMappingSummary({ connectionId }),
+    tier: CACHE_TIERS.SESSION,
+  });
+  const skuDiscoveryDone = (summary.data?.withInventoryItemId ?? 0) > 0;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <StepBadge label="Step 1: App credentials" done={credsConfigured} />
+      <StepBadge label="Step 2: OAuth installed" done={tokenPresent} />
+      <StepBadge label="Step 3: Default location" done={defaultLocationSet} />
+      <StepBadge label="Step 4: SKU discovery" done={skuDiscoveryDone} />
+      {doNotFanout && (
+        <Badge variant="outline" className="gap-1">
+          <ShieldAlert className="h-3 w-3" />
+          Dormant (do_not_fanout)
+        </Badge>
+      )}
+    </div>
   );
 }
 
@@ -363,6 +420,300 @@ function Step3DefaultLocation({
                 : "Set as default"}
           </Button>
         </>
+      )}
+    </section>
+  );
+}
+
+function Step4SkuDiscovery({ connectionId }: { connectionId: string }) {
+  const [report, setReport] = useState<AutoDiscoverShopifySkusReport | null>(null);
+  const [showFull, setShowFull] = useState(false);
+
+  const summary = useAppQuery({
+    queryKey: ["sku-mapping-summary", connectionId],
+    queryFn: () => getSkuMappingSummary({ connectionId }),
+    tier: CACHE_TIERS.SESSION,
+  });
+
+  const mutation = useAppMutation({
+    mutationFn: () => autoDiscoverShopifySkus({ connectionId }),
+    invalidateKeys: [["sku-mapping-summary", connectionId]],
+    onSuccess: (r) => setReport(r),
+  });
+
+  const fmt = (n: number) => n.toLocaleString();
+
+  return (
+    <section className="space-y-2 border-t pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-medium">Step 4 — Discover Shopify SKUs (HRD-03)</h3>
+        <Button
+          size="sm"
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate()}
+          variant="outline"
+        >
+          {mutation.isPending ? (
+            <>
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Walking Shopify…
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-3 w-3 mr-1" /> {report ? "Re-run discovery" : "Run discovery"}
+            </>
+          )}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Walks every product variant in the store, matches by SKU against{" "}
+        <code className="rounded bg-muted px-1">warehouse_product_variants</code> for this
+        workspace, and writes{" "}
+        <code className="rounded bg-muted px-1">client_store_sku_mappings</code>. Read-only against
+        Shopify; no inventory pushes. Idempotent — safe to re-run.
+      </p>
+
+      {/* Pre-existing summary */}
+      {summary.data && !report && (
+        <div className="rounded-md border bg-muted/30 p-3 text-xs">
+          <p>
+            Currently <strong>{fmt(summary.data.totalMappings)}</strong> active mappings (
+            <strong>{fmt(summary.data.withInventoryItemId)}</strong> with{" "}
+            <code>remote_inventory_item_id</code>)
+            {summary.data.lastDiscoveredAt && (
+              <>
+                {" "}
+                · last updated{" "}
+                {new Date(summary.data.lastDiscoveredAt).toLocaleString(undefined, {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })}
+              </>
+            )}
+            .
+          </p>
+        </div>
+      )}
+
+      {mutation.error && (
+        <p className="text-red-600 text-xs">
+          {mutation.error instanceof Error ? mutation.error.message : "Discovery failed"}
+        </p>
+      )}
+
+      {report && (
+        <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div>
+              Shopify products scanned: <strong>{fmt(report.shopifyProductsScanned)}</strong>
+            </div>
+            <div>
+              Shopify variants scanned: <strong>{fmt(report.shopifyVariantsScanned)}</strong>
+            </div>
+            <div>
+              Workspace SKU universe: <strong>{fmt(report.warehouseSkusInWorkspace)}</strong>
+            </div>
+            <div>
+              Matched: <strong className="text-emerald-700">{fmt(report.matched)}</strong>
+            </div>
+            <div>
+              New mappings created: <strong>{fmt(report.newMappingsCreated)}</strong>
+            </div>
+            <div>
+              Existing mappings updated: <strong>{fmt(report.existingMappingsUpdated)}</strong>
+            </div>
+            <div>
+              Variants without SKU: <strong>{fmt(report.shopifyVariantsWithoutSku)}</strong>
+            </div>
+            <div>
+              Variants without inventoryItem:{" "}
+              <strong>{fmt(report.shopifyVariantsWithoutInventoryItem)}</strong>
+            </div>
+            <div>
+              Unmatched Shopify SKUs:{" "}
+              <strong className={report.unmatchedShopifySkus.length > 0 ? "text-amber-700" : ""}>
+                {fmt(report.unmatchedShopifySkus.length)}
+              </strong>
+            </div>
+            <div>
+              Duplicate Shopify SKUs:{" "}
+              <strong className={report.duplicateShopifySkus.length > 0 ? "text-red-700" : ""}>
+                {fmt(report.duplicateShopifySkus.length)}
+              </strong>
+            </div>
+            <div className="col-span-2">
+              Warehouse SKUs not in Shopify (likely Bandcamp/legacy):{" "}
+              <strong>{fmt(report.warehouseSkusNotInShopify.length)}</strong>
+            </div>
+            <div className="col-span-2 text-muted-foreground">
+              Walked in {(report.durationMs / 1000).toFixed(1)}s
+            </div>
+          </div>
+
+          {(report.unmatchedShopifySkus.length > 0 ||
+            report.duplicateShopifySkus.length > 0 ||
+            report.warehouseSkusNotInShopify.length > 0) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowFull(!showFull)}
+              className="h-7 text-xs"
+            >
+              {showFull ? "Hide details" : "Show details"}
+            </Button>
+          )}
+
+          {showFull && (
+            <div className="space-y-2 border-t pt-2">
+              {report.duplicateShopifySkus.length > 0 && (
+                <div>
+                  <p className="font-medium text-red-700 mb-1">
+                    Duplicate Shopify SKUs (Rule #8 violation — multiple Shopify variants share a
+                    SKU):
+                  </p>
+                  <ul className="font-mono text-[11px] max-h-32 overflow-y-auto space-y-0.5">
+                    {report.duplicateShopifySkus.slice(0, 30).map((d) => (
+                      <li key={d.sku}>
+                        {d.sku} → {d.variantIds.length} variants
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {report.unmatchedShopifySkus.length > 0 && (
+                <div>
+                  <p className="font-medium text-amber-700 mb-1">
+                    Unmatched Shopify SKUs (in Shopify, not in warehouse):
+                  </p>
+                  <ul className="font-mono text-[11px] max-h-32 overflow-y-auto space-y-0.5">
+                    {report.unmatchedShopifySkus.slice(0, 50).map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {report.warehouseSkusNotInShopify.length > 0 && (
+                <div>
+                  <p className="font-medium text-muted-foreground mb-1">
+                    Warehouse SKUs not in Shopify (informational — may be Bandcamp/legacy):
+                  </p>
+                  <ul className="font-mono text-[11px] max-h-32 overflow-y-auto space-y-0.5">
+                    {report.warehouseSkusNotInShopify.slice(0, 50).map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Step5RegisterWebhooks({ connectionId }: { connectionId: string }) {
+  const [report, setReport] = useState<RegisterShopifyWebhookSubscriptionsReport | null>(null);
+
+  const mutation = useAppMutation({
+    mutationFn: () => registerShopifyWebhookSubscriptions({ connectionId }),
+    invalidateKeys: [queryKeys.storeConnections.all],
+    onSuccess: (r) => setReport(r),
+  });
+
+  return (
+    <section className="space-y-2 border-t pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-medium">Step 5 — Register Shopify webhooks (HRD-09.2)</h3>
+        <Button
+          size="sm"
+          disabled={mutation.isPending}
+          onClick={() => mutation.mutate()}
+          variant="outline"
+        >
+          {mutation.isPending ? (
+            <>
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" /> Registering…
+            </>
+          ) : (
+            <>
+              <Webhook className="h-3 w-3 mr-1" />{" "}
+              {report ? "Re-register webhooks" : "Register webhooks"}
+            </>
+          )}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Calls Shopify <code className="rounded bg-muted px-1">webhookSubscriptionCreate</code> for{" "}
+        <code className="rounded bg-muted px-1">inventory_levels/update</code>,{" "}
+        <code className="rounded bg-muted px-1">orders/create</code>,{" "}
+        <code className="rounded bg-muted px-1">orders/cancelled</code>, and{" "}
+        <code className="rounded bg-muted px-1">refunds/create</code>. Idempotent — re-running on a
+        store that already has these subscriptions reuses the existing rows. The pinned API version
+        Shopify reports per subscription is persisted to the connection's metadata for the deferred{" "}
+        <code className="rounded bg-muted px-1">shopify-webhook-health-check</code> drift sensor.
+      </p>
+
+      {mutation.error && (
+        <p className="text-red-600 text-xs">
+          {mutation.error instanceof Error ? mutation.error.message : "Webhook registration failed"}
+        </p>
+      )}
+
+      {report && (
+        <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div>
+              Topics registered: <strong>{report.registered.length}</strong>
+            </div>
+            <div>
+              Failed:{" "}
+              <strong className={report.failed.length > 0 ? "text-red-700" : ""}>
+                {report.failed.length}
+              </strong>
+            </div>
+            <div className="col-span-2">
+              Pinned API version:{" "}
+              <strong className={report.apiVersionDrift ? "text-amber-700" : ""}>
+                {report.apiVersionPinned ?? "—"}
+                {report.apiVersionDrift && " (drift detected)"}
+              </strong>
+            </div>
+            <div className="col-span-2 break-all">
+              Callback URL: <code className="font-mono">{report.callbackUrl}</code>
+            </div>
+          </div>
+
+          {report.registered.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="font-medium mb-1">Subscriptions:</p>
+              <ul className="font-mono text-[11px] space-y-0.5">
+                {report.registered.map((s) => (
+                  <li key={s.id}>
+                    {s.topic} — apiVersion={s.apiVersion}{" "}
+                    {s.reused ? (
+                      <span className="text-muted-foreground">(reused)</span>
+                    ) : (
+                      <span className="text-emerald-700">(created)</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {report.failed.length > 0 && (
+            <div className="border-t pt-2">
+              <p className="font-medium text-red-700 mb-1">Failed:</p>
+              <ul className="font-mono text-[11px] space-y-0.5">
+                {report.failed.map((f) => (
+                  <li key={f.topic}>
+                    {f.topic} — {f.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
