@@ -145,18 +145,26 @@ export async function routeInboundEmail({
   // Strategy 3: unmatched — review-queue item for manual triage.
   // R-5: correct column names. The schema is (category, severity, title,
   // description, metadata, group_key) — NOT (source, payload).
+  //
+  // Bug-fix (post-replay): `group_key` MUST be unique per email. Earlier
+  // versions hashed only the sender address, which (combined with a
+  // `pickRealFrom` bug that returned the same recipient-list string for every
+  // unmatched email) collapsed every row into one and silently dedup'd ~140
+  // rows down to a single review-queue entry. Always include the
+  // webhook_event_id so each unmatched message gets its own row.
   const reviewInsert = await supabase.from("warehouse_review_queue").insert({
     workspace_id: workspaceId,
     category: "support_email_unmatched",
     severity: "medium",
-    group_key: `unmatched_email:${senderAddress}`,
-    title: `Unmatched inbound support email from ${senderAddress}`,
+    group_key: `unmatched_email:${webhookEventId}`,
+    title: `Unmatched inbound support email from ${senderAddress || email.envelopeFrom}`,
     description: `Subject: ${email.subject}\n\nBody preview: ${email.text.slice(0, 500)}`,
     metadata: {
       email_id: email.emailId,
       message_id: email.messageId,
       envelope_from: email.envelopeFrom,
       real_from: email.realFrom,
+      sender_address: senderAddress,
       to: email.to,
       cc: email.cc,
       subject: email.subject,
@@ -165,9 +173,14 @@ export async function routeInboundEmail({
     },
   });
   if (reviewInsert.error) {
+    // Loud + Sentry. Earlier this only Sentry-captured, which made silent
+    // collisions invisible to local replay scripts and CI fixtures.
+    console.error(
+      `[resend-inbound] review_queue insert failed for webhookEventId=${webhookEventId}: ${reviewInsert.error.message}`,
+    );
     Sentry.captureException(reviewInsert.error, {
       tags: { route: "resend-inbound", failure: "review_queue_insert_failed" },
-      extra: { senderAddress, emailId: email.emailId },
+      extra: { senderAddress, emailId: email.emailId, webhookEventId },
     });
   }
 
@@ -179,9 +192,18 @@ export async function routeInboundEmail({
 }
 
 function extractEmailAddress(from: string): string {
-  // Handles "Name <email@example.com>" or plain "email@example.com"
-  const match = from.match(/<([^>]+)>/);
-  return (match ? match[1] : from.trim()).toLowerCase();
+  // Handles:
+  //   "Name <email@example.com>"   → email@example.com
+  //   "email@example.com"          → email@example.com
+  //   "a@x.com, b@y.com"           → a@x.com  (first only — defensive against
+  //                                   recipient-list blobs leaking into the
+  //                                   sender field)
+  if (!from) return "";
+  const angled = from.match(/<([^>]+)>/);
+  if (angled) return angled[1].trim().toLowerCase();
+  // Find FIRST RFC-ish address in the string (handles comma/space separated).
+  const flat = from.match(/[\w.!#$%&'*+\-/=?^_`{|}~]+@[\w.-]+\.[A-Za-z]{2,}/);
+  return (flat ? flat[0] : from.trim()).toLowerCase();
 }
 
 async function appendMessageToConversation(

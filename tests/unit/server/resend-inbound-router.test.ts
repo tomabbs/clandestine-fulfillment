@@ -310,16 +310,48 @@ describe("routeInboundEmail", () => {
     expect(reviewInsert?.payload).toHaveProperty("metadata");
     expect(reviewInsert?.payload).not.toHaveProperty("source");
     expect(reviewInsert?.payload).not.toHaveProperty("payload");
-    // dedup hint must include sender to deduplicate per-sender review noise
+    // Bug-fix (post-replay): `group_key` MUST be unique per email
+    // (webhook_event_id) — earlier sender-only keying collapsed every
+    // unmatched email into ONE row because a `pickRealFrom` bug returned
+    // the same recipient-list string for every message.
     expect(reviewInsert?.payload).toMatchObject({
-      group_key: expect.stringContaining("random@example.com"),
+      group_key: "unmatched_email:evt-7",
       severity: "medium",
     });
+    // sender_address still surfaces in metadata for triage UX
+    const meta = reviewInsert?.payload.metadata as Record<string, unknown>;
+    expect(meta?.sender_address).toBe("random@example.com");
     const evtUpdate = updates.find((u) => u.table === "webhook_events" && u.id === "evt-7");
     expect(evtUpdate?.payload).toMatchObject({
       status: "review_queued",
       topic: "support_email_unmatched",
     });
+  });
+
+  it("Bug-fix (post-replay): even if a malformed multi-address realFrom leaks through, group_key stays unique per webhook_event_id", async () => {
+    // Reproduces the exact production failure mode that surfaced after the
+    // first replay run: `pickRealFrom` was returning the recipient
+    // forwarding chain ("a@x.com b@y.com, c@z.com, d@w.com") instead of the
+    // sender. Even in that scenario, group_key per webhook_event_id keeps
+    // each row distinct so the UNIQUE(group_key) constraint can't collapse
+    // them.
+    const { supabase, inserts } = makeFakeSupabase();
+    const result = await routeInboundEmail({
+      supabase,
+      workspaceId: "ws-1",
+      webhookEventId: "evt-multi-1",
+      email: makeEmail({
+        realFrom: "a@x.com b@y.com, c@z.com, d@w.com",
+        envelopeFrom: "fwd@example.com",
+        subject: "Question",
+      }),
+    });
+    expect(result.status).toBe("review_queued");
+    const ri = inserts.find((i) => i.table === "warehouse_review_queue");
+    expect(ri?.payload).toMatchObject({ group_key: "unmatched_email:evt-multi-1" });
+    // extractEmailAddress should pick FIRST address from the blob
+    const meta = ri?.payload.metadata as Record<string, unknown>;
+    expect(meta?.sender_address).toBe("a@x.com");
   });
 
   it("strips display name from realFrom when matching support_email_mappings", async () => {
