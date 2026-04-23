@@ -1,8 +1,12 @@
 import crypto from "node:crypto";
-import { tasks } from "@trigger.dev/sdk";
+import * as Sentry from "@sentry/nextjs";
 import { NextResponse } from "next/server";
-import { parseInboundEmail } from "@/lib/clients/resend-client";
-import { getAllWorkspaceIds } from "@/lib/server/auth-context";
+import {
+  type FetchedInboundEmail,
+  fetchInboundEmail,
+  parseInboundWebhook,
+} from "@/lib/clients/resend-client";
+import { routeInboundEmail } from "@/lib/server/resend-inbound-router";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { env } from "@/lib/shared/env";
 
@@ -10,13 +14,6 @@ import { env } from "@/lib/shared/env";
 // scripts/check-webhook-runtime.sh.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const OPTIONAL_SUPPORT_CONVERSATION_COLUMNS = ["client_last_read_at"] as const;
-const OPTIONAL_SUPPORT_MESSAGE_COLUMNS = ["source", "delivered_via_email"] as const;
-
-function isMissingColumnMessage(message: string, columns: readonly string[]): boolean {
-  return columns.some((column) => message.includes(`Could not find the '${column}' column`));
-}
 
 // Rule #63: Verify Resend Svix signature before any side effects
 function verifySvixSignature(
@@ -45,8 +42,36 @@ function verifySvixSignature(
   return false;
 }
 
+/**
+ * Resolve the workspace that should own this inbound email.
+ *
+ * Single-tenant deployments: just the oldest workspace, deterministic
+ * (matches the workspace seeded at install). When we go multi-tenant we'll
+ * need to derive workspace from the destination address (envelopeTo).
+ *
+ * R-7: ORDER BY created_at ASC fixes the prior heap-order bug where the
+ * "first" workspace returned by Postgres could vary between calls.
+ */
+async function resolveWorkspaceId(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("workspaces")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    Sentry.captureException(error, {
+      tags: { route: "resend-inbound", failure: "workspace_lookup_failed" },
+    });
+    return null;
+  }
+  return data?.id ?? null;
+}
+
 export async function POST(req: Request): Promise<Response> {
-  // Rule #36: Always use req.text() for raw body
+  // Rule #36: always use req.text() for raw body
   const rawBody = await req.text();
 
   const svixId = req.headers.get("svix-id");
@@ -70,329 +95,114 @@ export async function POST(req: Request): Promise<Response> {
 
   const supabase = createServiceRoleClient();
 
-  // Resolve workspace from DB (no user auth in webhook context)
-  const workspaceIds = await getAllWorkspaceIds(supabase);
-  const workspaceId = workspaceIds[0];
+  // R-7: deterministic workspace resolution.
+  const workspaceId = await resolveWorkspaceId(supabase);
   if (!workspaceId) {
+    Sentry.captureMessage("[resend-inbound] no workspace configured", {
+      level: "error",
+      tags: { route: "resend-inbound", failure: "no_workspace" },
+    });
     return NextResponse.json({ error: "No workspace configured" }, { status: 500 });
   }
 
-  // Rule #62: Dedup via webhook_events INSERT ON CONFLICT
+  // Rule #62: dedup via webhook_events INSERT ON CONFLICT
+  let parsedBody: unknown;
+  try {
+    parsedBody = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
+
   const { data: dedupRow, error: dedupError } = await supabase
     .from("webhook_events")
     .insert({
       workspace_id: workspaceId,
       platform: "resend",
       external_webhook_id: svixId,
-      metadata: JSON.parse(rawBody),
+      topic: "email.received",
+      metadata: parsedBody,
     })
     .select("id")
     .single();
 
   if (!dedupRow) {
-    if (dedupError && !dedupError.message?.includes("duplicate")) {
-      console.error("webhook_events insert failed:", dedupError.message);
+    if (dedupError?.code === "23505") {
+      // True duplicate — Resend retried a delivery we already processed.
+      return NextResponse.json({ ok: true, status: "duplicate" });
     }
-    return NextResponse.json({ ok: true });
-  }
-
-  // Parse the Resend inbound email event
-  const eventData = JSON.parse(rawBody);
-  // Resend wraps inbound email in a `data` field for event payloads
-  const emailPayload = eventData.data ?? eventData;
-  const email = parseInboundEmail(emailPayload);
-
-  // Strategy 0: Bandcamp email classification
-  // All three types come from noreply@bandcamp.com — classify before acting.
-  const fromAddress = extractEmailAddress(email.from ?? "");
-  const subjectRaw = email.subject ?? "";
-  const subjectLower = subjectRaw.toLowerCase();
-  const bodyLower = (email.body ?? "").toLowerCase();
-
-  const isBandcamp =
-    /^noreply@bandcamp\.com$/i.test(fromAddress) || /bandcamp\.com$/i.test(fromAddress);
-
-  if (isBandcamp) {
-    // Type 1: Order — "Bam!/Cha-ching! Another order for..." or body contains "just bought/paid"
-    const isBandcampOrder =
-      /^(bam!|cha-ching!)/i.test(subjectRaw) ||
-      /another order for/i.test(subjectLower) ||
-      /just (bought|paid)/i.test(bodyLower);
-
-    // Type 2: Fan/customer message — "A message from Bandcamp, on behalf of..."
-    const isBandcampFanMessage =
-      /a message from bandcamp/i.test(subjectLower) || /on behalf of/i.test(subjectLower);
-
-    // Type 3: New release alert — "New release from...", "New music from..."
-    // No action needed — silently dismiss
-    const isBandcampNewRelease =
-      /new (release|music|album|ep|single) from/i.test(subjectLower) ||
-      /just (released|dropped)/i.test(subjectLower);
-
-    if (isBandcampOrder) {
-      // Trigger immediate inventory poll
-      try {
-        await tasks.trigger("bandcamp-sale-poll", {});
-        await supabase.from("webhook_events").update({ status: "processed" }).eq("id", dedupRow.id);
-      } catch {
-        /* non-critical — regular poll will pick it up */
-      }
-      return NextResponse.json({ ok: true, status: "bandcamp_order_poll_triggered" });
-    }
-
-    if (isBandcampNewRelease) {
-      // No action needed — silently dismiss
-      await supabase.from("webhook_events").update({ status: "processed" }).eq("id", dedupRow.id);
-      return NextResponse.json({ ok: true, status: "bandcamp_new_release_skipped" });
-    }
-
-    if (isBandcampFanMessage) {
-      // Fall through to existing support conversation routing below.
-      // Strategy 1–3 will create a support conversation or review queue item.
-      // Staff can reply — Bandcamp relays replies back to the fan.
-      // Do NOT return here — let the existing strategies handle it.
-    }
-
-    // Unknown Bandcamp email type — fall through to existing strategies
-  }
-
-  // Non-Bandcamp emails: only process if they match an existing support conversation
-  // or a known support email mapping. Otherwise silently dismiss to avoid flooding
-  // the review queue with unrelated emails forwarded from the fulfillment inbox.
-  if (!isBandcamp) {
-    const relatedIds = [email.inReplyTo, ...email.references].filter((value): value is string =>
-      Boolean(value),
-    );
-
-    // Check for existing conversation thread
-    if (relatedIds.length > 0) {
-      const { data: existingMsg } = await supabase
-        .from("support_messages")
-        .select("conversation_id")
-        .in("email_message_id", relatedIds)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingMsg) {
-        await appendMessageToConversation(supabase, existingMsg.conversation_id, email);
-        return NextResponse.json({ ok: true, status: "support_thread_reply" });
-      }
-    }
-
-    // Check for known support email mapping
-    const senderAddr = extractEmailAddress(email.from);
-    const { data: mapping } = await supabase
-      .from("support_email_mappings")
-      .select("org_id")
-      .eq("email_address", senderAddr)
-      .eq("is_active", true)
-      .single();
-
-    if (mapping) {
-      await createConversationFromEmail(supabase, mapping.org_id, email);
-      return NextResponse.json({ ok: true, status: "support_new_conversation" });
-    }
-
-    // Unknown non-Bandcamp email — silently dismiss (no review queue noise)
-    await supabase.from("webhook_events").update({ status: "dismissed" }).eq("id", dedupRow.id);
-    return NextResponse.json({ ok: true, status: "non_bandcamp_dismissed" });
-  }
-
-  const relatedMessageIdCandidates = [email.inReplyTo, ...email.references].filter(
-    (value): value is string => Boolean(value),
-  );
-
-  // Strategy 1: Match by In-Reply-To / References against existing messages
-  if (relatedMessageIdCandidates.length > 0) {
-    const { data: existingMessage } = await supabase
-      .from("support_messages")
-      .select("conversation_id")
-      .in("email_message_id", relatedMessageIdCandidates)
-      .limit(1)
-      .maybeSingle();
-
-    if (existingMessage) {
-      await appendMessageToConversation(supabase, existingMessage.conversation_id, email);
-      return NextResponse.json({ ok: true });
-    }
-  }
-
-  // Strategy 2: Match by sender email address via support_email_mappings
-  const senderAddress = extractEmailAddress(email.from);
-  const { data: emailMapping } = await supabase
-    .from("support_email_mappings")
-    .select("org_id")
-    .eq("email_address", senderAddress)
-    .eq("is_active", true)
-    .single();
-
-  if (emailMapping) {
-    await createConversationFromEmail(supabase, emailMapping.org_id, email);
-    return NextResponse.json({ ok: true });
-  }
-
-  // Strategy 3: Unmatched — create review queue item for staff to manually route
-  await supabase.from("warehouse_review_queue").insert({
-    workspace_id: workspaceId,
-    source: "support_email",
-    severity: "medium",
-    group_key: `unmatched_email:${senderAddress}`,
-    title: `Unmatched inbound support email from ${senderAddress}`,
-    description: `Subject: ${email.subject}\n\nBody preview: ${email.body.slice(0, 500)}`,
-    payload: { email },
-  });
-
-  return NextResponse.json({ ok: true });
-}
-
-function extractEmailAddress(from: string): string {
-  // Handles "Name <email@example.com>" or plain "email@example.com"
-  const match = from.match(/<([^>]+)>/);
-  return (match ? match[1] : from.trim()).toLowerCase();
-}
-
-async function appendMessageToConversation(
-  supabase: ReturnType<typeof createServiceRoleClient>,
-  conversationId: string,
-  email: { body: string; messageId: string },
-): Promise<void> {
-  const { data: existingByMessageId } = await supabase
-    .from("support_messages")
-    .select("id")
-    .eq("email_message_id", email.messageId)
-    .maybeSingle();
-
-  if (existingByMessageId) return;
-
-  // Get conversation workspace_id for the message
-  const { data: conversation } = await supabase
-    .from("support_conversations")
-    .select("workspace_id")
-    .eq("id", conversationId)
-    .single();
-
-  if (!conversation) return;
-
-  let messageInsert = await supabase.from("support_messages").insert({
-    conversation_id: conversationId,
-    workspace_id: conversation.workspace_id,
-    sender_type: "client",
-    source: "email",
-    delivered_via_email: true,
-    body: email.body,
-    email_message_id: email.messageId,
-  });
-  if (
-    messageInsert.error &&
-    isMissingColumnMessage(messageInsert.error.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)
-  ) {
-    messageInsert = await supabase.from("support_messages").insert({
-      conversation_id: conversationId,
-      workspace_id: conversation.workspace_id,
-      sender_type: "client",
-      body: email.body,
-      email_message_id: email.messageId,
+    // Any other failure (RLS, schema drift, network hiccup) — DO NOT
+    // silently 200. Sentry-capture and 500 so Resend retries. (Bug 9 fix.)
+    Sentry.captureException(dedupError ?? new Error("webhook_events insert returned no row"), {
+      tags: { route: "resend-inbound", failure: "dedup_insert_failed" },
     });
+    return NextResponse.json({ error: "dedup insert failed" }, { status: 500 });
   }
 
-  let conversationUpdate = await supabase
-    .from("support_conversations")
-    .update({
-      status: "waiting_on_staff",
-      updated_at: new Date().toISOString(),
-      client_last_read_at: new Date().toISOString(),
-    })
-    .eq("id", conversationId);
-  if (
-    conversationUpdate.error &&
-    isMissingColumnMessage(conversationUpdate.error.message, OPTIONAL_SUPPORT_CONVERSATION_COLUMNS)
-  ) {
-    conversationUpdate = await supabase
-      .from("support_conversations")
-      .update({
-        status: "waiting_on_staff",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", conversationId);
-  }
-}
-
-async function createConversationFromEmail(
-  supabase: ReturnType<typeof createServiceRoleClient>,
-  orgId: string,
-  email: { subject: string; body: string; messageId: string },
-): Promise<void> {
-  const { data: existingByMessageId } = await supabase
-    .from("support_messages")
-    .select("id")
-    .eq("email_message_id", email.messageId)
-    .maybeSingle();
-
-  if (existingByMessageId) return;
-
-  // Resolve workspace from the org
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("workspace_id")
-    .eq("id", orgId)
-    .single();
-
-  const wsId = org?.workspace_id;
-  if (!wsId) return;
-
-  let { data: conversation, error: conversationError } = await supabase
-    .from("support_conversations")
-    .insert({
-      workspace_id: wsId,
-      org_id: orgId,
-      subject: email.subject,
-      status: "waiting_on_staff",
-      inbound_email_id: email.messageId,
-      client_last_read_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (
-    conversationError &&
-    isMissingColumnMessage(conversationError.message, OPTIONAL_SUPPORT_CONVERSATION_COLUMNS)
-  ) {
-    const retry = await supabase
-      .from("support_conversations")
-      .insert({
-        workspace_id: wsId,
-        org_id: orgId,
-        subject: email.subject,
-        status: "waiting_on_staff",
-        inbound_email_id: email.messageId,
-      })
-      .select("id")
-      .single();
-    conversation = retry.data;
-    conversationError = retry.error;
-  }
-
-  if (conversationError || !conversation) return;
-
-  let messageInsert = await supabase.from("support_messages").insert({
-    conversation_id: conversation.id,
-    workspace_id: wsId,
-    sender_type: "client",
-    source: "email",
-    delivered_via_email: true,
-    body: email.body,
-    email_message_id: email.messageId,
-  });
-  if (
-    messageInsert.error &&
-    isMissingColumnMessage(messageInsert.error.message, OPTIONAL_SUPPORT_MESSAGE_COLUMNS)
-  ) {
-    messageInsert = await supabase.from("support_messages").insert({
-      conversation_id: conversation.id,
-      workspace_id: wsId,
-      sender_type: "client",
-      body: email.body,
-      email_message_id: email.messageId,
+  // R-1: parse the Resend webhook envelope (NOT the email body — that
+  // requires a separate API call, see R-2 below).
+  let envelope: ReturnType<typeof parseInboundWebhook>;
+  try {
+    envelope = parseInboundWebhook(parsedBody);
+  } catch (err) {
+    Sentry.captureException(err, {
+      tags: { route: "resend-inbound", failure: "envelope_parse_failed" },
+      extra: { rawBodyPreview: rawBody.slice(0, 500) },
     });
+    await supabase
+      .from("webhook_events")
+      .update({ status: "envelope_parse_failed" })
+      .eq("id", dedupRow.id);
+    // 200 so Resend stops retrying — the row is in the DB for forensics
+    // and the replay job (scripts/_replay-resend-inbound.ts) can re-run
+    // once the schema is fixed.
+    return NextResponse.json({ ok: true, status: "envelope_parse_failed" });
+  }
+
+  // Resend only sends `email.received` for inbound; bail safely on anything
+  // else (the OUTBOUND delivery-status events go to /api/webhooks/resend).
+  if (envelope.type !== "email.received") {
+    await supabase
+      .from("webhook_events")
+      .update({ status: "ignored_event_type" })
+      .eq("id", dedupRow.id);
+    return NextResponse.json({ ok: true, status: "ignored_event_type", type: envelope.type });
+  }
+
+  // R-2: fetch the full email content (body + headers + recovered real
+  // sender) via the Resend Receiving API. The webhook envelope alone has
+  // none of these.
+  let email: FetchedInboundEmail;
+  try {
+    email = await fetchInboundEmail(envelope.emailId);
+  } catch (err) {
+    Sentry.captureException(err, {
+      tags: { route: "resend-inbound", failure: "fetch_body_failed" },
+      extra: { emailId: envelope.emailId },
+    });
+    await supabase
+      .from("webhook_events")
+      .update({ status: "fetch_body_failed" })
+      .eq("id", dedupRow.id);
+    // 500 so Resend retries — the body fetch is transient (Resend API
+    // outage, 429, etc.) and the email_id is stable.
+    return NextResponse.json({ error: "fetch body failed" }, { status: 500 });
+  }
+
+  try {
+    const result = await routeInboundEmail({
+      supabase,
+      workspaceId,
+      webhookEventId: dedupRow.id,
+      email,
+    });
+    return NextResponse.json({ ok: true, ...result });
+  } catch (err) {
+    Sentry.captureException(err, {
+      tags: { route: "resend-inbound", failure: "routing_error" },
+      extra: { emailId: envelope.emailId, realFrom: email.realFrom },
+    });
+    await supabase.from("webhook_events").update({ status: "routing_error" }).eq("id", dedupRow.id);
+    // 200 — the row is captured, replay job can re-fire after the bug fix.
+    return NextResponse.json({ ok: true, status: "routing_error" });
   }
 }

@@ -124,46 +124,159 @@ export async function sendTrackingEmail(input: {
   return { messageId: data.id };
 }
 
-export const inboundEmailSchema = z.object({
-  from: z.string(),
-  to: z.string(),
-  subject: z.string().default("(no subject)"),
-  text: z.string().default(""),
-  message_id: z.string(),
-  in_reply_to: z.string().optional(),
-  references: z.string().optional(),
+// Resend `email.received` webhook event payload (verified against
+// https://resend.com/docs/webhooks/emails/received and against real
+// payloads in webhook_events.metadata).
+//
+// CRITICAL: Resend webhooks ONLY include envelope metadata. The body, HTML,
+// headers, and attachments are NOT in the webhook — they must be fetched
+// separately via `resend.emails.receiving.get(email_id)`. See
+// `fetchInboundEmail()` below.
+export const inboundEmailWebhookSchema = z.object({
+  type: z.string(),
+  data: z.object({
+    email_id: z.string(),
+    from: z.string(),
+    to: z.array(z.string()).default([]),
+    cc: z.array(z.string()).default([]),
+    bcc: z.array(z.string()).default([]),
+    subject: z.string().default("(no subject)"),
+    message_id: z.string().default(""),
+    created_at: z.string().optional(),
+    attachments: z.array(z.unknown()).default([]),
+  }),
 });
 
-export type InboundEmail = z.infer<typeof inboundEmailSchema>;
+export type InboundEmailWebhook = z.infer<typeof inboundEmailWebhookSchema>;
 
-export interface ParsedInboundEmail {
-  from: string;
-  to: string;
+export interface ParsedInboundWebhook {
+  type: string;
+  emailId: string;
+  envelopeFrom: string;
+  envelopeTo: string[];
+  cc: string[];
+  bcc: string[];
   subject: string;
-  body: string;
+  messageId: string;
+}
+
+/**
+ * Parse a Resend `email.received` webhook envelope. Throws Zod errors on
+ * shape mismatches — callers MUST wrap in try/catch and report failures to
+ * Sentry so we never silently 500 on a payload-shape change.
+ */
+export function parseInboundWebhook(payload: unknown): ParsedInboundWebhook {
+  const parsed = inboundEmailWebhookSchema.parse(payload);
+  return {
+    type: parsed.type,
+    emailId: parsed.data.email_id,
+    envelopeFrom: parsed.data.from,
+    envelopeTo: parsed.data.to,
+    cc: parsed.data.cc,
+    bcc: parsed.data.bcc,
+    subject: parsed.data.subject,
+    messageId: parsed.data.message_id,
+  };
+}
+
+export interface FetchedInboundEmail {
+  emailId: string;
+  envelopeFrom: string;
+  envelopeTo: string[];
+  /**
+   * The recovered "real" sender — taken from common forwarder-preserving
+   * headers in priority order: `X-Original-From` > `Reply-To` >
+   * `Return-Path` > `From` > envelope `from`. This survives the typical
+   * Gmail/Workspace forward where envelope `from` is rewritten to the
+   * forwarding address.
+   */
+  realFrom: string;
+  to: string[];
+  cc: string[];
+  subject: string;
+  text: string;
+  html: string | null;
   messageId: string;
   inReplyTo: string | undefined;
   references: string[];
+  headers: Record<string, string>;
 }
 
-export function parseInboundEmail(payload: unknown): ParsedInboundEmail {
-  const parsed = inboundEmailSchema.parse(payload);
-  const references = parsed.references
-    ? parsed.references
+/**
+ * Fetch the full email content (body + headers) for a Resend inbound event.
+ * The webhook payload only contains envelope metadata, so the route handler
+ * MUST call this before any classification or storage logic.
+ */
+export async function fetchInboundEmail(emailId: string): Promise<FetchedInboundEmail> {
+  const resend = getResendClient();
+  const { data, error } = await resend.emails.receiving.get(emailId);
+  if (error || !data) {
+    throw new Error(
+      `Failed to fetch inbound email ${emailId}: ${error?.message ?? "unknown error"}`,
+    );
+  }
+
+  // Headers come back with original casing — normalize to lowercase keys for
+  // case-insensitive lookup.
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data.headers ?? {})) {
+    if (typeof value === "string") headers[key.toLowerCase()] = value;
+  }
+
+  const realFrom = pickRealFrom({ envelopeFrom: data.from, headers });
+
+  const refsHeader = headers.references ?? "";
+  const references = refsHeader
+    ? refsHeader
         .split(/\s+/)
-        .map((value) => value.trim())
+        .map((v) => v.trim())
         .filter(Boolean)
     : [];
 
   return {
-    from: parsed.from,
-    to: parsed.to,
-    subject: parsed.subject,
-    body: parsed.text,
-    messageId: parsed.message_id,
-    inReplyTo: parsed.in_reply_to,
+    emailId: data.id,
+    envelopeFrom: data.from,
+    envelopeTo: data.to,
+    realFrom,
+    to: data.to,
+    cc: data.cc ?? [],
+    subject: data.subject,
+    text: data.text ?? "",
+    html: data.html,
+    messageId: data.message_id ?? headers["message-id"] ?? "",
+    inReplyTo: headers["in-reply-to"] || undefined,
     references,
+    headers,
   };
+}
+
+/**
+ * Recover the original sender after intermediate forwarding. Most operator
+ * setups forward from a Workspace/Gmail mailbox into Resend Inbound, which
+ * rewrites envelope `from` to the forwarding mailbox. The original sender
+ * survives in one of these headers (priority order based on common
+ * forwarders: Gmail, Google Workspace, Microsoft 365, manual MX setups).
+ */
+function pickRealFrom({
+  envelopeFrom,
+  headers,
+}: {
+  envelopeFrom: string;
+  headers: Record<string, string>;
+}): string {
+  const candidates = [
+    headers["x-original-from"],
+    headers["x-forwarded-for"],
+    headers["reply-to"],
+    headers["return-path"],
+    headers.from,
+    envelopeFrom,
+  ];
+  for (const c of candidates) {
+    const value = (c ?? "").trim();
+    if (value) return value;
+  }
+  return envelopeFrom;
 }
 
 function escapeHtml(value: string): string {

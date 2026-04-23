@@ -53,13 +53,17 @@ function setupSupabaseMock(opts: {
 
     return {
       select: vi.fn().mockImplementation(() => ({
+        // R-3: sweeper now adds a second `.in("platform", [...])` filter so
+        // it never picks up Resend / EasyPost / AfterShip rows.
         in: vi.fn().mockImplementation(() => ({
-          lt: vi.fn().mockImplementation(() => ({
-            order: vi.fn().mockImplementation(() => ({
-              limit: vi.fn().mockResolvedValue({
-                data: opts.selectError ? null : opts.pending,
-                error: opts.selectError ?? null,
-              }),
+          in: vi.fn().mockImplementation(() => ({
+            lt: vi.fn().mockImplementation(() => ({
+              order: vi.fn().mockImplementation(() => ({
+                limit: vi.fn().mockResolvedValue({
+                  data: opts.selectError ? null : opts.pending,
+                  error: opts.selectError ?? null,
+                }),
+              })),
             })),
           })),
         })),

@@ -94,10 +94,15 @@ export async function POST(req: NextRequest) {
   const externalId = svixId
     ? `resend:${svixId}`
     : `resend:${payload.type ?? "unknown"}:${messageId}`;
+  // R-6: column is `metadata` not `payload`. The prior shape silently
+  // failed every insert (caught by the fail-open below), which meant
+  // bounce/complaint events could be processed multiple times on Resend
+  // retries. Restored proper dedup.
   const { error: dedupError } = await supabase.from("webhook_events").insert({
     platform: "resend",
     external_webhook_id: externalId,
-    payload: { type: payload.type, email_id: messageId },
+    topic: payload.type ?? "unknown",
+    metadata: { type: payload.type, email_id: messageId },
   });
   if (dedupError) {
     if (dedupError.code === "23505") {
