@@ -16,7 +16,16 @@
  *
  * Cap at 100 rows per sweep to bound runtime; if the queue is ever deeper than
  * that we'll drain over multiple cron ticks rather than blowing maxDuration.
+ *
+ * R-3: STRICTLY scoped to client-store platforms (shopify / woocommerce /
+ * squarespace). Earlier versions ran without a platform filter and would
+ * pick up Resend / EasyPost / AfterShip rows stuck at 'received', fire them
+ * at `process-client-store-webhook` (which doesn't understand their payload
+ * shape), and flip status='enqueued' anyway — making genuinely-broken rows
+ * look processed. Each non-client-store platform owns its own ingress and
+ * does not need this sweeper.
  */
+const SWEEP_PLATFORMS = ["shopify", "woocommerce", "squarespace"] as const;
 
 import { idempotencyKeys, logger, schedules, task, tasks } from "@trigger.dev/sdk";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -43,6 +52,7 @@ async function runSweep(): Promise<SweepResult> {
     .from("webhook_events")
     .select("id, platform, status, created_at")
     .in("status", ["received", "enqueue_failed"])
+    .in("platform", [...SWEEP_PLATFORMS])
     .lt("created_at", cutoffIso)
     .order("created_at", { ascending: true })
     .limit(100);
