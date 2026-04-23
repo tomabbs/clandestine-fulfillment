@@ -217,13 +217,19 @@ export async function fetchInboundEmail(emailId: string): Promise<FetchedInbound
   }
 
   // Headers come back with original casing — normalize to lowercase keys for
-  // case-insensitive lookup.
-  const headers: Record<string, string> = {};
+  // case-insensitive lookup. Keep the raw value (string OR parsed object) so
+  // `pickRealFrom` can dig into structured header shapes.
+  const headersRaw: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data.headers ?? {})) {
-    if (typeof value === "string") headers[key.toLowerCase()] = value;
+    headersRaw[key.toLowerCase()] = value;
+  }
+  // Public surface stays string-only for backward compatibility.
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headersRaw)) {
+    if (typeof value === "string") headers[key] = value;
   }
 
-  const realFrom = pickRealFrom({ envelopeFrom: data.from, headers });
+  const realFrom = pickRealFrom({ envelopeFrom: data.from, headers: headersRaw });
 
   const refsHeader = headers.references ?? "";
   const references = refsHeader
@@ -254,29 +260,78 @@ export async function fetchInboundEmail(emailId: string): Promise<FetchedInbound
  * Recover the original sender after intermediate forwarding. Most operator
  * setups forward from a Workspace/Gmail mailbox into Resend Inbound, which
  * rewrites envelope `from` to the forwarding mailbox. The original sender
- * survives in one of these headers (priority order based on common
- * forwarders: Gmail, Google Workspace, Microsoft 365, manual MX setups).
+ * survives in one of these headers (priority order: Gmail, Google Workspace,
+ * Microsoft 365, manual MX setups).
+ *
+ * IMPORTANT: do NOT include `x-forwarded-for` here — in email semantics that
+ * header lists the recipient forwarding chain (e.g. `fulfillment@... tom@...,
+ * catie@..., orders@...`), NOT the sender. Picking it produces a multi-address
+ * blob that collapses every unmatched email into the same `group_key` and
+ * silently dedups them down to a single review-queue row.
+ *
+ * Resend's `emails.receiving.get()` returns most headers as strings but a few
+ * (`return-path`, sometimes `from`/`reply-to`) come back as parsed objects with
+ * `{ value: [{ address, name }] }` shape — `headerValueToString` handles both.
  */
 function pickRealFrom({
   envelopeFrom,
   headers,
 }: {
   envelopeFrom: string;
-  headers: Record<string, string>;
+  headers: Record<string, unknown>;
 }): string {
   const candidates = [
     headers["x-original-from"],
-    headers["x-forwarded-for"],
-    headers["reply-to"],
-    headers["return-path"],
+    headers["x-original-sender"],
+    headers["x-google-original-from"],
     headers.from,
+    headers["reply-to"],
+    headers.sender,
     envelopeFrom,
   ];
-  for (const c of candidates) {
-    const value = (c ?? "").trim();
+  for (const raw of candidates) {
+    const value = headerValueToString(raw).trim();
     if (value) return value;
   }
   return envelopeFrom;
+}
+
+/**
+ * Resend returns header values as either:
+ *  - a plain string ("AmericanBubbleBoy" <hello@americanbubbleboy.com>)
+ *  - a structured object ({ value: [{ address, name }], html, text })
+ *  - an array of either of the above
+ *
+ * Normalize to a single human-readable string.
+ */
+function headerValueToString(raw: unknown): string {
+  if (raw == null) return "";
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const s = headerValueToString(item);
+      if (s) return s;
+    }
+    return "";
+  }
+  if (typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    const valueField = obj.value;
+    if (Array.isArray(valueField) && valueField.length > 0) {
+      const first = valueField[0] as Record<string, unknown> | null;
+      if (first && typeof first === "object") {
+        const address = typeof first.address === "string" ? first.address : "";
+        const name = typeof first.name === "string" ? first.name : "";
+        if (name && address) return `"${name}" <${address}>`;
+        if (address) return address;
+      }
+    }
+    const text = obj.text;
+    if (typeof text === "string" && text) return text;
+    const html = obj.html;
+    if (typeof html === "string" && html) return html;
+  }
+  return "";
 }
 
 function escapeHtml(value: string): string {
