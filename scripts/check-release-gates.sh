@@ -50,6 +50,17 @@ else
   emit_fail "HRD-23b" "scripts/check-fulfilled-quantity-writers.sh failed — re-run for details"
 fi
 
+# ─── Phase 1 §9.2 D8 / N-13 / X-7 — push-formula source-of-truth guard ───────
+# Bans inline `Math.max(0, *available* - *safety*)` reconstructions outside
+# the `effective-sellable.ts` helper. Without this guard, a focused per-SKU
+# push and the 5-min cron sweep can silently disagree on push value, causing
+# Bandcamp / Shopify inventory to oscillate per drop.
+if bash scripts/check-push-formula-helper.sh >/dev/null 2>&1; then
+  emit_pass "P1-D8" "scripts/check-push-formula-helper.sh"
+else
+  emit_fail "P1-D8" "scripts/check-push-formula-helper.sh failed — re-run for details"
+fi
+
 # ─── Test-file gates ─────────────────────────────────────────────────────────
 # Each gate is one vitest invocation. Vitest exits non-zero on any failure.
 run_test_gate() {
@@ -71,6 +82,15 @@ run_test_gate "HRD-10" "/api/oauth/shopify shop-domain verify suite" \
 
 run_test_gate "HRD-35.3" "shopify-webhook-subscriptions registrar + diff suite" \
   "tests/unit/lib/server/shopify-webhook-subscriptions.test.ts"
+
+# Phase 0 §9.1 D6 — GDPR webhook secret resolver release gate.
+# Asserts resolveShopifyGdprWebhookSecrets returns ≥1 non-empty candidate
+# whenever a connection has shopify_app_client_secret_encrypted set OR
+# env.SHOPIFY_CLIENT_SECRET is set. Without this, GDPR pings to per-client
+# Custom-distribution apps would silently 401 and Shopify would drop the
+# subscription on next App Store review.
+run_test_gate "P0-D6" "Shopify GDPR webhook secret resolver (per-connection + env fallback)" \
+  "tests/unit/lib/server/shopify-gdpr-secret.test.ts"
 
 # ─── Schema gates (require DATABASE_URL + psql) ──────────────────────────────
 if [[ -z "${DATABASE_URL:-}" ]] || ! command -v psql >/dev/null 2>&1; then

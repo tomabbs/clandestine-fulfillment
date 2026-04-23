@@ -37,13 +37,24 @@ export type ExternalSyncSystem =
   | "shipstation_v1"
   | "shipstation_v2"
   | "bandcamp"
-  | "clandestine_shopify";
+  | "clandestine_shopify"
+  // Phase 1 §9.2 D1 — per-platform per-SKU push paths. Distinct systems
+  // (vs a single "client_store") so analytics on external_sync_events can
+  // segment by storefront without parsing metadata. Migration:
+  // 20260424000003_external_sync_events_client_store.sql.
+  | "client_store_shopify"
+  | "client_store_squarespace"
+  | "client_store_woocommerce";
 
 export type ExternalSyncAction =
   | "increment"
   | "decrement"
   | "adjust"
   | "modify"
+  // Phase 1 §9.2 D1/D2 — absolute-quantity push verb. Used by the new
+  // client-store + clandestine focused-push tasks. Reserved future verb
+  // `cas_set` for the Pass 2 Shopify CAS contract.
+  | "set"
   | "alias_add"
   | "alias_remove"
   | "sku_rename";

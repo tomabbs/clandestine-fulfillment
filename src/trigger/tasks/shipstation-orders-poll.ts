@@ -14,6 +14,7 @@
 
 import { logger, schedules, task } from "@trigger.dev/sdk";
 import { fetchOrders, type ShipStationOrder } from "@/lib/clients/shipstation";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { deriveOrderPreorderState, type PreorderVariantRecord } from "@/lib/shared/order-preorder";
 import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
@@ -43,11 +44,18 @@ async function runPoll(args: {
 }): Promise<PollResult> {
   const supabase = createServiceRoleClient();
 
-  const { data: workspace } = args.workspaceId
-    ? { data: { id: args.workspaceId } }
-    : await supabase.from("workspaces").select("id").limit(1).single();
-  if (!workspace) throw new Error("No workspace found");
-  const workspaceId = workspace.id;
+  // CF-1 (Phase 0.5): the cron entry point now enumerates every workspace
+  // and calls runPoll({ workspaceId }) per workspace; if a caller invokes
+  // runPoll without a workspaceId we still honor the legacy single-workspace
+  // path for backward compatibility (older webhook-trigger payloads + tests).
+  // The "no workspace found" branch remains a hard error so misconfigured
+  // installs surface immediately rather than silently skipping the poll.
+  if (!args.workspaceId) {
+    const { data: workspace } = await supabase.from("workspaces").select("id").limit(1).single();
+    if (!workspace) throw new Error("No workspace found");
+    args = { ...args, workspaceId: workspace.id };
+  }
+  const workspaceId = args.workspaceId as string;
 
   // Cursor logic: read last_sync_cursor, fall back to FIRST_POLL_LOOKBACK_DAYS.
   // Webhook-triggered runs override with `windowMinutes`.
@@ -315,7 +323,38 @@ export const shipstationOrdersPollTask = schedules.task({
   queue: shipstationQueue,
   maxDuration: 600,
   cron: "*/15 * * * *",
-  run: async () => runPoll({}),
+  // CF-1 (Phase 0.5): fan out across every workspace instead of binding to
+  // the first row of `workspaces`. Pre-fix this cron only polled one
+  // workspace, so any second-tenant ShipStation connection was invisible to
+  // the cockpit + poll cursor. Mirrors the `bandcamp-order-sync` pattern.
+  // The shared `shipstationQueue` (concurrencyLimit: 1) still serializes
+  // the SS API hits across all workspaces.
+  run: async () => {
+    const supabase = createServiceRoleClient();
+    const workspaceIds = await getAllWorkspaceIds(supabase);
+    let totalUpserted = 0;
+    let totalUnmatched = 0;
+    let lastCursor: string | null = null;
+    for (const workspaceId of workspaceIds) {
+      try {
+        const res = await runPoll({ workspaceId });
+        totalUpserted += res.upserted;
+        totalUnmatched += res.unmatched;
+        lastCursor = res.cursorAdvancedTo;
+      } catch (err) {
+        logger.error("[shipstation-orders-poll] workspace failed", {
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return {
+      upserted: totalUpserted,
+      unmatched: totalUnmatched,
+      cursorAdvancedTo: lastCursor,
+      workspacesPolled: workspaceIds.length,
+    };
+  },
 });
 
 // ── Webhook-triggered narrow window (Phase 1.3) ──────────────────────────────

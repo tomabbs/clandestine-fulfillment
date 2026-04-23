@@ -50,7 +50,13 @@ export type IntegrationHealthState =
   | "delayed"
   | "partial"
   | "manual_review"
-  | "disconnected";
+  | "disconnected"
+  // Phase 0 §9.1 D2 — Shopify variant `inventoryPolicy = CONTINUE` observed
+  // for SKUs NOT on the per-channel preorder whitelist. Sync still flows,
+  // but oversells are possible until the operator runs `auditShopifyPolicy`
+  // (fixMode='fix_drift') or fixes the variants in Shopify Admin.
+  // Surfaced on Channels page as an actionable warning, not a hard outage.
+  | "policy_drift";
 
 export type OrderSource =
   | "shopify"

@@ -6,16 +6,23 @@
  *   customers/redact       — customer requests data deletion
  *   shop/redact            — shop uninstalled, delete shop data
  *
- * Shopify signs GDPR webhooks with the app's client secret.
+ * Shopify signs GDPR webhooks with the **app's** Client Secret (NOT the
+ * per-webhook subscription `webhook_secret`). With per-client Custom-
+ * distribution apps (HRD-35), the matching secret lives on
+ * `client_store_connections.shopify_app_client_secret_encrypted` for
+ * the shop domain. Phase 0 / §9.1 D6 — `resolveShopifyGdprWebhookSecrets`
+ * walks per-connection secrets first then falls back to
+ * `env.SHOPIFY_CLIENT_SECRET`. We accept the first one that validates.
+ *
  * Rule #36: Raw body must be read before any parsing.
  * Rule #62: Dedup via webhook_events INSERT.
  */
 
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { resolveShopifyGdprWebhookSecrets } from "@/lib/server/shopify-gdpr-secret";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { readWebhookBody, verifyHmacSignature } from "@/lib/server/webhook-body";
-import { env } from "@/lib/shared/env";
 
 // F-2: see client-store/route.ts for rationale; enforced by
 // scripts/check-webhook-runtime.sh.
@@ -25,13 +32,20 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const rawBody = await readWebhookBody(req);
 
-  const secret = env().SHOPIFY_CLIENT_SECRET;
-  if (secret) {
+  const { candidates } = await resolveShopifyGdprWebhookSecrets(req);
+  if (candidates.length > 0) {
     const signature = req.headers.get("X-Shopify-Hmac-SHA256");
     if (!signature) {
       return NextResponse.json({ error: "Missing signature" }, { status: 401 });
     }
-    const valid = await verifyHmacSignature(rawBody, secret, signature);
+    let valid = false;
+    for (const secret of candidates) {
+      // eslint-disable-next-line no-await-in-loop -- short-circuit on first match
+      if (await verifyHmacSignature(rawBody, secret, signature)) {
+        valid = true;
+        break;
+      }
+    }
     if (!valid) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }

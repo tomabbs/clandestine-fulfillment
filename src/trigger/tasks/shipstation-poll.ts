@@ -4,6 +4,7 @@
 
 import { logger, schedules } from "@trigger.dev/sdk";
 import { fetchOrders, fetchShipments, type ShipStationShipment } from "@/lib/clients/shipstation";
+import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { normalizeOrderNumber } from "@/lib/shared/order-utils";
 import { matchShipmentOrg } from "@/trigger/lib/match-shipment-org";
@@ -14,127 +15,163 @@ export const shipstationPollTask = schedules.task({
   queue: shipstationQueue,
   maxDuration: 600,
   cron: "*/30 * * * *",
+  // CF-1 (Phase 0.5): fan out across every workspace instead of binding to
+  // the first row of `workspaces`. Mirrors `bandcamp-order-sync` pattern;
+  // the shared `shipstationQueue` (concurrencyLimit: 1) still serializes
+  // the SS API hits across all workspaces.
   run: async () => {
     const supabase = createServiceRoleClient();
-
-    const { data: workspace } = await supabase.from("workspaces").select("id").limit(1).single();
-    if (!workspace) throw new Error("No workspace found");
-    const workspaceId = workspace.id;
-
-    const { data: syncState } = await supabase
-      .from("warehouse_sync_state")
-      .select("*")
-      .eq("sync_type", "shipstation_poll")
-      .maybeSingle();
-
-    const LOOKBACK_DAYS = 30;
-    const thirtyDaysAgo = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-    // ── Pre-fetch ShipStation orders for shippingAmount ──────────────────────
-    // Build orderNumber → shippingAmount map before iterating shipments.
-    // modifyDateStart aligned to same 30-day window (orders get modified when shipped).
-    // One API call regardless of shipment count — avoids N+1 pattern.
-    // Keys are normalized (lowercased + trimmed) for consistent lookup.
-    const ssOrderShippingMap = new Map<string, number>();
-    try {
-      const ordersResult = await fetchOrders({
-        modifyDateStart: thirtyDaysAgo,
-        orderStatus: "shipped",
-        pageSize: 500,
-      });
-      for (const order of ordersResult.orders) {
-        if (order.orderNumber && order.shippingAmount != null) {
-          ssOrderShippingMap.set(order.orderNumber.toLowerCase().trim(), order.shippingAmount);
-        }
+    const workspaceIds = await getAllWorkspaceIds(supabase);
+    let aggregate = 0;
+    for (const workspaceId of workspaceIds) {
+      try {
+        const { processed } = await runShipstationPoll(supabase, workspaceId);
+        aggregate += processed;
+      } catch (err) {
+        logger.error("[shipstation-poll] workspace failed", {
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      if (ordersResult.pages > 1) {
-        for (let p = 2; p <= ordersResult.pages; p++) {
-          const page = await fetchOrders({
-            modifyDateStart: thirtyDaysAgo,
-            orderStatus: "shipped",
-            pageSize: 500,
-            page: p,
-          });
-          for (const order of page.orders) {
-            if (order.orderNumber && order.shippingAmount != null) {
-              ssOrderShippingMap.set(order.orderNumber.toLowerCase().trim(), order.shippingAmount);
-            }
+    }
+    return { processed: aggregate, workspacesPolled: workspaceIds.length };
+  },
+});
+
+/**
+ * Per-workspace body — extracted so the cron can fan out across workspaces
+ * without losing the original logic. Exported for unit testing.
+ */
+export async function runShipstationPoll(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+): Promise<{ processed: number }> {
+  const result = await runShipstationPollInner(supabase, workspaceId);
+  return result;
+}
+
+async function runShipstationPollInner(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+): Promise<{ processed: number }> {
+  const { data: syncState } = await supabase
+    .from("warehouse_sync_state")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("sync_type", "shipstation_poll")
+    .maybeSingle();
+
+  const LOOKBACK_DAYS = 30;
+  const thirtyDaysAgo = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  // ── Pre-fetch ShipStation orders for shippingAmount ──────────────────────
+  // Build orderNumber → shippingAmount map before iterating shipments.
+  // modifyDateStart aligned to same 30-day window (orders get modified when shipped).
+  // One API call regardless of shipment count — avoids N+1 pattern.
+  // Keys are normalized (lowercased + trimmed) for consistent lookup.
+  const ssOrderShippingMap = new Map<string, number>();
+  try {
+    const ordersResult = await fetchOrders({
+      modifyDateStart: thirtyDaysAgo,
+      orderStatus: "shipped",
+      pageSize: 500,
+    });
+    for (const order of ordersResult.orders) {
+      if (order.orderNumber && order.shippingAmount != null) {
+        ssOrderShippingMap.set(order.orderNumber.toLowerCase().trim(), order.shippingAmount);
+      }
+    }
+    if (ordersResult.pages > 1) {
+      for (let p = 2; p <= ordersResult.pages; p++) {
+        const page = await fetchOrders({
+          modifyDateStart: thirtyDaysAgo,
+          orderStatus: "shipped",
+          pageSize: 500,
+          page: p,
+        });
+        for (const order of page.orders) {
+          if (order.orderNumber && order.shippingAmount != null) {
+            ssOrderShippingMap.set(order.orderNumber.toLowerCase().trim(), order.shippingAmount);
           }
         }
       }
-      logger.info("Pre-fetched ShipStation order shipping amounts", {
-        orderCount: ssOrderShippingMap.size,
-      });
-    } catch (err) {
-      logger.warn("Failed to pre-fetch ShipStation orders for shipping amounts", {
-        error: String(err),
-      });
-      // Non-fatal — customer_shipping_charged will be null for this poll cycle
+    }
+    logger.info("Pre-fetched ShipStation order shipping amounts", {
+      orderCount: ssOrderShippingMap.size,
+      workspaceId,
+    });
+  } catch (err) {
+    logger.warn("Failed to pre-fetch ShipStation orders for shipping amounts", {
+      error: String(err),
+      workspaceId,
+    });
+    // Non-fatal — customer_shipping_charged will be null for this poll cycle
+  }
+
+  // ── Fetch and ingest shipments ───────────────────────────────────────────
+  let page = 1;
+  let totalProcessed = 0;
+  let hasMore = true;
+
+  logger.info("Starting ShipStation poll", { shipDateStart: thirtyDaysAgo, workspaceId });
+
+  while (hasMore) {
+    const result = await fetchShipments({
+      shipDateStart: thirtyDaysAgo,
+      page,
+      pageSize: 100,
+      sortBy: "ShipDate",
+      sortDir: "ASC",
+      includeShipmentItems: true,
+    });
+
+    logger.info("Fetched shipments page", {
+      page,
+      total: result.total,
+      pages: result.pages,
+      count: result.shipments.length,
+      workspaceId,
+    });
+
+    for (const shipment of result.shipments) {
+      await ingestFromPoll(supabase, shipment, workspaceId, ssOrderShippingMap);
+      totalProcessed++;
     }
 
-    // ── Fetch and ingest shipments ───────────────────────────────────────────
-    let page = 1;
-    let totalProcessed = 0;
-    let hasMore = true;
+    hasMore = page < result.pages;
+    page++;
+  }
 
-    logger.info("Starting ShipStation poll", { shipDateStart: thirtyDaysAgo, workspaceId });
-
-    while (hasMore) {
-      const result = await fetchShipments({
-        shipDateStart: thirtyDaysAgo,
-        page,
-        pageSize: 100,
-        sortBy: "ShipDate",
-        sortDir: "ASC",
-        includeShipmentItems: true,
-      });
-
-      logger.info("Fetched shipments page", {
-        page,
-        total: result.total,
-        pages: result.pages,
-        count: result.shipments.length,
-      });
-
-      for (const shipment of result.shipments) {
-        await ingestFromPoll(supabase, shipment, workspaceId, ssOrderShippingMap);
-        totalProcessed++;
-      }
-
-      hasMore = page < result.pages;
-      page++;
-    }
-
-    // ── Update sync cursor ───────────────────────────────────────────────────
-    const now = new Date().toISOString();
-    if (syncState) {
-      await supabase
-        .from("warehouse_sync_state")
-        .update({
-          last_sync_cursor: now,
-          last_sync_wall_clock: now,
-          metadata: { last_poll_processed: totalProcessed },
-        })
-        .eq("id", syncState.id);
-    } else {
-      await supabase.from("warehouse_sync_state").insert({
-        workspace_id: workspaceId,
-        sync_type: "shipstation_poll",
+  // ── Update sync cursor ───────────────────────────────────────────────────
+  const now = new Date().toISOString();
+  if (syncState) {
+    await supabase
+      .from("warehouse_sync_state")
+      .update({
         last_sync_cursor: now,
         last_sync_wall_clock: now,
         metadata: { last_poll_processed: totalProcessed },
-      });
-    }
-
-    await supabase.from("sensor_readings").insert({
-      sensor_name: "trigger:shipstation-poll",
-      status: "healthy",
-      message: `Processed ${totalProcessed} shipments`,
+      })
+      .eq("id", syncState.id);
+  } else {
+    await supabase.from("warehouse_sync_state").insert({
+      workspace_id: workspaceId,
+      sync_type: "shipstation_poll",
+      last_sync_cursor: now,
+      last_sync_wall_clock: now,
+      metadata: { last_poll_processed: totalProcessed },
     });
+  }
 
-    return { processed: totalProcessed };
-  },
-});
+  await supabase.from("sensor_readings").insert({
+    workspace_id: workspaceId,
+    sensor_name: "trigger:shipstation-poll",
+    status: "healthy",
+    message: `Processed ${totalProcessed} shipments`,
+  });
+
+  return { processed: totalProcessed };
+}
 
 async function ingestFromPoll(
   supabase: ReturnType<typeof createServiceRoleClient>,

@@ -657,4 +657,76 @@ describe("POST /api/webhooks/client-store", () => {
     expect(inserted.dedup_key).toBe(`${CONNECTION_ID}:evt-stable-business-id`);
     expect(inserted.external_webhook_id).toBe("evt-stable-business-id");
   });
+
+  // ─── HRD-22 / OQ-1 closure (Phase 0 §9.1 D5) ────────────────────────────
+  //
+  // Plan §9.1 D5 wants this combined invariant pinned in one place so a
+  // future refactor can't silently drop either side:
+  //   1. external_webhook_id MUST resolve to the X-Shopify-Event-Id header
+  //      value when both Event-Id and Webhook-Id are present (Event-Id is
+  //      per-business-event = stable across retries; Webhook-Id is
+  //      per-delivery = changes each retry → would permit double-process).
+  //   2. dedup_key MUST be `{connection_id}:{event-id}` (per-connection
+  //      scope, not the loose `'shopify:{event-id}'` that the plan prose
+  //      sketched — connection scope is stricter, since two connections in
+  //      the same workspace could theoretically collide on Shopify event-id
+  //      across different shops).
+  //   3. Three retries of the SAME business event with rotating Webhook-Ids
+  //      MUST collapse to a single dedup_key (the row only inserts once;
+  //      the second + third retries hit the dedup constraint).
+  //
+  // Closes OQ-1: "Confirm `X-Shopify-Event-Id` is the canonical dedup
+  // header for retries of the same business event."
+  it("HRD-22 / OQ-1: Event-Id is the canonical dedup header — three retries of one event collapse to one row", async () => {
+    // Track unique dedup_keys per insert. We can't replay duplicate-error
+    // semantics through the existing setupSupabaseMock helper without
+    // more plumbing, so we run three POSTs with the same Event-Id but
+    // rotating Webhook-Ids and assert all three resolve to the SAME
+    // dedup_key + external_webhook_id. The DB-level UNIQUE(platform,
+    // external_webhook_id) constraint (migration 008 line 67) is what
+    // actually rejects retries 2/3 in production; the contract this test
+    // pins is "the route picks the stable identifier for the dedup key".
+    const { insertCalls } = setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "shopify",
+        webhook_secret: null,
+      },
+      insertResult: "ok",
+    });
+
+    const stableEventId = "evt-business-event-stable-123";
+    for (let retry = 1; retry <= 3; retry++) {
+      await POST(
+        makeRequest(
+          { id: 1, sku: "TEST" },
+          {
+            headers: {
+              "X-Shopify-Event-Id": stableEventId,
+              // Webhook-Id rotates on every retry — proves we don't fall
+              // back to it when Event-Id is present.
+              "X-Shopify-Webhook-Id": `wh-delivery-${retry}-${Math.random()}`,
+            },
+          },
+        ),
+      );
+    }
+
+    expect(insertCalls).toHaveLength(3);
+    const dedupKeys = insertCalls.map(
+      (c) => (c.payload as Record<string, unknown>).dedup_key as string,
+    );
+    const externalIds = insertCalls.map(
+      (c) => (c.payload as Record<string, unknown>).external_webhook_id as string,
+    );
+    // All three retries MUST produce the same dedup_key — proves
+    // X-Shopify-Webhook-Id rotation does not poison the dedup boundary.
+    expect(new Set(dedupKeys).size).toBe(1);
+    expect(dedupKeys[0]).toBe(`${CONNECTION_ID}:${stableEventId}`);
+    // external_webhook_id is the unsuffixed Event-Id (per-event scope at
+    // the column level; the dedup_key carries the connection prefix).
+    expect(new Set(externalIds).size).toBe(1);
+    expect(externalIds[0]).toBe(stableEventId);
+  });
 });

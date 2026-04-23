@@ -21,10 +21,24 @@ export { bandcampShippingVerifyTask } from "./bandcamp-shipping-verify";
 export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
 // Phase 9.1 — bulk label buy orchestrator + nightly print_batch_jobs purge.
 export { bulkBuyLabelsTask } from "./bulk-buy-labels";
+// Phase 1 §9.2 D2 — per-SKU Clandestine Shopify push. Replaces the inline
+// `inventoryAdjustQuantities` block in inventory-fanout.ts. Pinned to its
+// own queue (`clandestine-shopify-push`) — distinct from the per-client
+// queue because the auth surfaces are unrelated (env-singleton token vs
+// per-connection offline tokens) and a runaway Clandestine push must not
+// starve client pushes (or vice versa).
+export { clandestineShopifyPushOnSkuTask } from "./clandestine-shopify-push-on-sku";
 // Phase 0.7 — Distro discriminator (creates warehouse_products with org_id=NULL
 // for Clandestine Shopify products without a Bandcamp upstream)
 export { clandestineShopifySyncTask } from "./clandestine-shopify-sync";
 export { clientStoreOrderDetectTask } from "./client-store-order-detect";
+// Phase 1 §9.2 D1 — per-(connection_id, sku) client-store push. Replaces
+// the empty-payload `multi-store-inventory-push` enqueue from the
+// focused-push side of inventory-fanout.ts. The 5-min cron stays alive as
+// a drift safety net (X-2 audit). Pinned to a single shared
+// `client-store-push` queue (concurrency 15) for Pass 1; Pass 2 splits
+// into per-platform queues if isolation is observed to be the bottleneck.
+export { clientStorePushOnSkuTask } from "./client-store-push-on-sku";
 // Phase 10.2 — EasyPost tracker registration (DUAL-MODE alongside aftership-register
 // until the Phase 10.5 sunset gate. Both tasks fire on every label.)
 export { easypostRegisterTrackerTask } from "./easypost-register-tracker";
@@ -78,6 +92,15 @@ export { shipstationV2DecrementTask } from "./shipstation-v2-decrement";
 export { shopifyFullBackfillTask } from "./shopify-full-backfill";
 export { shopifyImageBackfillTask } from "./shopify-image-backfill";
 export { shopifyOrderSyncTask } from "./shopify-order-sync";
+// Phase 0 §9.1 D2 — daily AUTHORITATIVE audit of Shopify variant
+// inventoryPolicy. Persists last_inventory_policy + last_policy_check_at on
+// client_store_sku_mappings; surfaces drift as `policy_drift` Channels health
+// state + critical review queue item (group_key dedup per connection).
+export { shopifyPolicyAuditTask } from "./shopify-policy-audit";
+// Phase 0 §9.1 D3 — staff-triggered remediation companion. Flips drifted
+// SKUs (CONTINUE + !preorder_whitelist) back to DENY via
+// productVariantsBulkUpdate. Enqueued by `auditShopifyPolicy({fixMode:'fix_drift'})`.
+export { shopifyPolicyFixTask } from "./shopify-policy-fix";
 export { shopifySyncTask } from "./shopify-sync";
 export { storageCalcTask } from "./storage-calc";
 export { supportEscalationTask } from "./support-escalation";

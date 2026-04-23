@@ -297,6 +297,28 @@ describe("shipstation-orders-poll (Phase 1.2)", () => {
     expect(tables.shipstation_orders[0]?.org_id).toBeNull();
   });
 
+  // CF-1 (Phase 0.5) — runPoll honors an explicit workspaceId arg without
+  // touching the legacy `workspaces.limit(1)` shortcut. The cron entry point
+  // calls runPoll({ workspaceId }) per workspace; the contract under test
+  // here is that runPoll itself respects the override and writes per-
+  // workspace cursors. Two workspace IDs and an empty workspaces table
+  // proves the fallback is not silently invoked.
+  it("CF-1: explicit workspaceId arg writes cursor scoped to that workspace and skips workspaces.limit(1)", async () => {
+    tables.workspaces = []; // legacy shortcut would throw "No workspace found"
+    fetchOrdersMock.mockResolvedValue({ orders: [], total: 0, page: 1, pages: 1 });
+
+    const resA = await runPoll({ workspaceId: "ws_alpha" });
+    const resB = await runPoll({ workspaceId: "ws_beta" });
+
+    expect(resA.upserted).toBe(0);
+    expect(resB.upserted).toBe(0);
+
+    const cursors = tables.warehouse_sync_state.map((r) => r.workspace_id);
+    expect(cursors).toContain("ws_alpha");
+    expect(cursors).toContain("ws_beta");
+    expect(cursors).toHaveLength(2);
+  });
+
   it("upsert by (workspace_id, shipstation_order_id) — second poll updates same row", async () => {
     matchShipmentOrgMock.mockResolvedValue({
       orgId: "org_1",

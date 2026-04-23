@@ -1,8 +1,14 @@
+/**
+ * Shopify shop/redact GDPR webhook.
+ * Phase 0 / §9.1 D6 — verifies against per-connection app Client Secret
+ * with env fallback (see `resolveShopifyGdprWebhookSecrets`).
+ */
+
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { resolveShopifyGdprWebhookSecrets } from "@/lib/server/shopify-gdpr-secret";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { readWebhookBody, verifyHmacSignature } from "@/lib/server/webhook-body";
-import { env } from "@/lib/shared/env";
 
 // F-2: see client-store/route.ts for rationale; enforced by
 // scripts/check-webhook-runtime.sh.
@@ -11,11 +17,19 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   const rawBody = await readWebhookBody(req);
-  const secret = env().SHOPIFY_CLIENT_SECRET;
-  if (secret) {
+
+  const { candidates } = await resolveShopifyGdprWebhookSecrets(req);
+  if (candidates.length > 0) {
     const signature = req.headers.get("X-Shopify-Hmac-SHA256");
     if (!signature) return NextResponse.json({ error: "Missing signature" }, { status: 401 });
-    const valid = await verifyHmacSignature(rawBody, secret, signature);
+    let valid = false;
+    for (const secret of candidates) {
+      // eslint-disable-next-line no-await-in-loop -- short-circuit on first match
+      if (await verifyHmacSignature(rawBody, secret, signature)) {
+        valid = true;
+        break;
+      }
+    }
     if (!valid) return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

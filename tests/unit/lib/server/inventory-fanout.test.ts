@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { determineFanoutTargets, shouldEchoSkipShipstationV2 } from "@/lib/server/inventory-fanout";
 
@@ -105,6 +107,86 @@ describe("inventory-fanout — ShipStation v2 echo-skip logic", () => {
 
   it("does NOT skip v2 fanout when source is undefined (defensive default)", () => {
     expect(shouldEchoSkipShipstationV2(undefined)).toBe(false);
+  });
+});
+
+// CF-2 (Phase 0.5) — regression guard for cross-tenant SKU mapping leak.
+// fanoutInventoryChange is heavily Supabase-coupled and exercising the full
+// chain inside vitest is expensive (Sentry spans + Trigger.dev tasks +
+// 5+ table reads). Instead, assert at source level that the
+// `client_store_sku_mappings` query is scoped by workspace_id. This catches
+// the regression with zero infra.
+describe("inventory-fanout — CF-2 cross-tenant filter (source-level guard)", () => {
+  const src = readFileSync(
+    resolve(__dirname, "../../../../src/lib/server/inventory-fanout.ts"),
+    "utf8",
+  );
+
+  it('scopes client_store_sku_mappings lookup with .eq("workspace_id", workspaceId)', () => {
+    // Find the actual query block (the `.from("client_store_sku_mappings")`
+    // call, not the comment that mentions the table name) and verify all
+    // three filters live in the same chain. If any disappear the assertion
+    // fails — a future refactor that drops workspace_id filtering would
+    // re-introduce the cross-tenant leak that CF-2 closed.
+    const idx = src.indexOf('.from("client_store_sku_mappings")');
+    expect(idx).toBeGreaterThan(-1);
+    const block = src.slice(idx, idx + 800);
+    expect(block).toMatch(/\.eq\("workspace_id",\s*workspaceId\)/);
+    expect(block).toMatch(/\.eq\("remote_sku",\s*sku\)/);
+    expect(block).toMatch(/\.eq\("is_active",\s*true\)/);
+  });
+});
+
+// Phase 1 §9.2 D3 — source-level guards that pin the per-SKU enqueue
+// refactor. fanoutInventoryChange() must NOT inline `inventoryAdjustQuantities`
+// anymore (the Clandestine push moves into `clandestine-shopify-push-on-sku`),
+// and it must NOT enqueue the empty-payload `multi-store-inventory-push` for
+// the per-SKU happy path (the per-(connection_id, sku) `client-store-push-on-sku`
+// task replaces it). The 5-min crons remain alive as drift safety nets, but
+// they are NOT enqueued from the focused-push branch — only from the bundle-
+// parent fallback near the bottom of the function.
+describe("inventory-fanout — Phase 1 D3 per-SKU enqueue refactor (source-level guard)", () => {
+  const src = readFileSync(
+    resolve(__dirname, "../../../../src/lib/server/inventory-fanout.ts"),
+    "utf8",
+  );
+
+  it("no longer calls inventoryAdjustQuantities inline (must enqueue clandestine-shopify-push-on-sku instead)", () => {
+    expect(src).not.toMatch(/inventoryAdjustQuantities\s*\(/);
+  });
+
+  it("imports the new per-SKU task payload types instead of the Shopify client", () => {
+    expect(src).not.toMatch(/from\s+["']@\/lib\/clients\/shopify-client["']/);
+    expect(src).toMatch(
+      /import\s+type\s+\{\s*ClandestineShopifyPushOnSkuPayload\s*\}\s+from\s+["']@\/trigger\/tasks\/clandestine-shopify-push-on-sku["']/,
+    );
+    expect(src).toMatch(
+      /import\s+type\s+\{\s*ClientStorePushOnSkuPayload\s*\}\s+from\s+["']@\/trigger\/tasks\/client-store-push-on-sku["']/,
+    );
+  });
+
+  it("enqueues clandestine-shopify-push-on-sku from the focused-push branch", () => {
+    expect(src).toMatch(/tasks\.trigger\(\s*["']clandestine-shopify-push-on-sku["']/);
+  });
+
+  it("enqueues client-store-push-on-sku per skuMapping row (not the empty global sweep)", () => {
+    // Per-row enqueue uses connectionId from the mapping row.
+    expect(src).toMatch(/tasks\.trigger\(\s*["']client-store-push-on-sku["']/);
+    // Pin the per-row loop variable so a regression to the empty-payload
+    // global sweep is caught at source level.
+    expect(src).toMatch(/for\s*\(\s*const\s+mapping\s+of\s+skuMappings/);
+  });
+
+  it("retains the bundle-parent fallback to the global sweeps (intentional Pass 1 trade-off)", () => {
+    // The bundle fallback at the bottom of the function still hits the
+    // global sweeps; that's documented as a known Pass 2 follow-up.
+    const bundleStart = src.indexOf("parentBundles?.length");
+    expect(bundleStart).toBeGreaterThan(-1);
+    const bundleBlock = src.slice(bundleStart, bundleStart + 800);
+    expect(bundleBlock).toMatch(/tasks\.trigger\(\s*["']bandcamp-inventory-push["'],\s*\{\}\s*\)/);
+    expect(bundleBlock).toMatch(
+      /tasks\.trigger\(\s*["']multi-store-inventory-push["'],\s*\{\}\s*\)/,
+    );
   });
 });
 

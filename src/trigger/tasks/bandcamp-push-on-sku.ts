@@ -50,6 +50,7 @@
 
 import { logger, task } from "@trigger.dev/sdk";
 import { refreshBandcampToken, updateQuantities } from "@/lib/clients/bandcamp";
+import { computeEffectiveSellable } from "@/lib/server/effective-sellable";
 import {
   beginExternalSync,
   markExternalSyncError,
@@ -245,25 +246,18 @@ export const bandcampPushOnSkuTask = task({
       };
     }
 
-    // 7) compute pushed_quantity using same formula as cron
-    const { data: level } = await supabase
-      .from("warehouse_inventory_levels")
-      .select("available, safety_stock")
-      .eq("variant_id", variant.id)
-      .maybeSingle();
-
-    const available = level?.available ?? 0;
-    const perSkuSafety = (level?.safety_stock as number | null) ?? null;
-
-    const { data: ws } = await supabase
-      .from("workspaces")
-      .select("default_safety_stock")
-      .eq("id", workspaceId)
-      .single();
-
-    const workspaceSafety = (ws?.default_safety_stock as number | null) ?? 3;
-    const effectiveSafety = perSkuSafety ?? workspaceSafety;
-    const pushedQuantity = Math.max(0, available - effectiveSafety);
+    // 7) compute pushed_quantity via the shared push-formula helper
+    //    (Phase 1 §9.2 D8 / N-13 / X-7). This is the same source of truth
+    //    the new client-store and clandestine per-SKU tasks use AND the
+    //    `bandcamp-inventory-push` cron uses below — eliminating the
+    //    dual-edit hazard where a focused-push delta could disagree with
+    //    a cron sweep landing seconds later for the same SKU.
+    const sellable = await computeEffectiveSellable(supabase, {
+      workspaceId,
+      sku,
+      channel: "bandcamp",
+    });
+    const pushedQuantity = sellable.effectiveSellable;
 
     // 8) ledger acquire — idempotency
     const claim = await beginExternalSync(supabase, {

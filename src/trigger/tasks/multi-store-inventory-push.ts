@@ -11,8 +11,12 @@ import { schedules } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
+import {
+  type EffectiveSellableChannel,
+  evaluateEffectiveSellable,
+} from "@/lib/server/effective-sellable";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
-import type { ClientStoreConnection } from "@/lib/shared/types";
+import type { ClientStoreConnection, StorePlatform } from "@/lib/shared/types";
 
 const MAX_CONSECUTIVE_FAILURES = 5;
 const BACKOFF_BASE_MS = 60_000; // 1 minute
@@ -156,6 +160,26 @@ type BundleComponent = {
   quantity: number;
 };
 
+/**
+ * Maps a `client_store_connections.platform` value onto the channel name
+ * `evaluateEffectiveSellable` expects. Returns null for unknown platforms
+ * (BigCommerce etc. — not yet wired into the push helper).
+ */
+function platformToEffectiveSellableChannel(
+  platform: StorePlatform,
+): EffectiveSellableChannel | null {
+  switch (platform) {
+    case "shopify":
+      return "client_store_shopify";
+    case "squarespace":
+      return "client_store_squarespace";
+    case "woocommerce":
+      return "client_store_woocommerce";
+    default:
+      return null;
+  }
+}
+
 async function pushConnectionInventory(
   supabase: ReturnType<typeof createServiceRoleClient>,
   connection: ClientStoreConnection,
@@ -207,12 +231,18 @@ async function pushConnectionInventory(
   const client = createStoreSyncClient(connection, skuMappingContext);
   let pushed = 0;
 
+  // Phase 1 §9.2 D8 / N-13 — channel for the shared push-formula helper.
+  // The cron loops per-connection so the channel is fixed per loop body.
+  const channel = platformToEffectiveSellableChannel(connection.platform);
+
   for (const mapping of mappings) {
     const inv = inventoryByVariant.get(mapping.variant_id);
     const rawAvailable = inv?.available ?? 0;
-    const effectiveSafety = inv?.safetyStock ?? workspaceSafetyStock;
 
-    // Compute bundle minimum if this variant is configured as a bundle
+    // Compute bundle minimum if this variant is configured as a bundle.
+    // Bundle math stays here — it's not a push-formula concern, it's an
+    // upstream `available` derivation that determines the input to the
+    // push formula.
     let effectiveAvailable = rawAvailable;
     const components = bundleMap.get(mapping.variant_id);
     if (components?.length) {
@@ -225,7 +255,24 @@ async function pushConnectionInventory(
       effectiveAvailable = Math.min(rawAvailable, Math.max(0, componentMin));
     }
 
-    const pushedQuantity = Math.max(0, effectiveAvailable - effectiveSafety);
+    // Push formula via the shared helper (X-7 dual-edit invariant).
+    // Pass `channel = null` (e.g. unknown platform) → helper returns
+    // effectiveSellable: 0 + reason='unknown_channel', defensively
+    // pushing zero — the cron continues processing other mappings.
+    const sellable = evaluateEffectiveSellable(channel ?? "client_store_shopify", {
+      variant: { id: mapping.variant_id },
+      level: {
+        available: effectiveAvailable,
+        safety_stock: inv?.safetyStock ?? null,
+      },
+      // The cron does not yet read per-mapping safety_stock or
+      // per-channel-table values; both are Pass 2 enrichment. Fall
+      // through to legacy level-row safety_stock or workspace default.
+      connectionMappingSafety: null,
+      perChannelSafety: null,
+      workspaceDefaultSafety: workspaceSafetyStock,
+    });
+    const pushedQuantity = sellable.effectiveSellable;
 
     // Skip if effective quantity hasn't changed (compare buffered value, not raw)
     if (mapping.last_pushed_quantity === pushedQuantity) continue;

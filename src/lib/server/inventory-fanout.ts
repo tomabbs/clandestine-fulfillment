@@ -53,13 +53,12 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { tasks } from "@trigger.dev/sdk";
-import { inventoryAdjustQuantities } from "@/lib/clients/shopify-client";
 import { loadFanoutGuard } from "@/lib/server/fanout-guard";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { InventorySource } from "@/lib/shared/types";
+import type { ClandestineShopifyPushOnSkuPayload } from "@/trigger/tasks/clandestine-shopify-push-on-sku";
+import type { ClientStorePushOnSkuPayload } from "@/trigger/tasks/client-store-push-on-sku";
 import type { ShipstationV2AdjustOnSkuPayload } from "@/trigger/tasks/shipstation-v2-adjust-on-sku";
-
-const SHOPIFY_LOCATION_ID = "gid://shopify/Location/104066613563";
 
 /**
  * Sources whose originating event already reflects ShipStation v2 state.
@@ -179,6 +178,13 @@ export async function fanoutInventoryChange(
         .eq("sku", sku)
         .single();
 
+      // Phase 1 §9.2 D2/D3 — enqueue the per-SKU Clandestine Shopify push
+      // instead of inlining `inventoryAdjustQuantities`. The 5-min crons
+      // (`multi-store-inventory-push`, `bandcamp-inventory-push`) stay as
+      // drift safety nets per X-2 audit; the per-SKU task is the steady-
+      // state happy path. Latency drops from ~5min to <30s while the
+      // ledger + guard cascade move into the focused task body where
+      // they can be unit-tested in isolation.
       if (
         variant?.shopify_inventory_item_id &&
         delta != null &&
@@ -186,19 +192,24 @@ export async function fanoutInventoryChange(
         guard.shouldFanout("clandestine_shopify", effectiveCorrelationId)
       ) {
         try {
+          const payload: ClandestineShopifyPushOnSkuPayload = {
+            workspaceId,
+            sku,
+            delta,
+            correlationId: effectiveCorrelationId,
+            reason: source ? `fanout:${source}` : "fanout",
+            metadata: {
+              origin: "inventory-fanout",
+              source: source ?? null,
+            },
+          };
           await Sentry.startSpan(
             {
               name: "inventory.fanout.shopify",
               op: "fanout.shopify",
               attributes: { "fanout.sku": sku, "fanout.delta": delta },
             },
-            () =>
-              inventoryAdjustQuantities(
-                variant.shopify_inventory_item_id as string,
-                SHOPIFY_LOCATION_ID,
-                delta,
-                effectiveCorrelationId,
-              ),
+            () => tasks.trigger("clandestine-shopify-push-on-sku", payload),
           );
           shopifyPushed = true;
         } catch (err) {
@@ -207,15 +218,22 @@ export async function fanoutInventoryChange(
             extra: { workspaceId, correlationId: effectiveCorrelationId },
           });
           console.error(
-            `[fanout] Shopify push failed for SKU=${sku}:`,
+            `[fanout] Clandestine Shopify enqueue failed for SKU=${sku}:`,
             err instanceof Error ? err.message : err,
           );
         }
       }
 
+      // CF-2 (Phase 0.5): scope `client_store_sku_mappings` lookup to the
+      // originating workspace. Pre-fix the query matched on `(is_active,
+      // remote_sku)` only, so two workspaces sharing a SKU on different
+      // connections would both fanout — a cross-tenant write. The mappings
+      // table has its own `workspace_id` column (migration
+      // `20260316000011_store_connections.sql`).
       const { data: skuMappings } = await supabase
         .from("client_store_sku_mappings")
         .select("connection_id")
+        .eq("workspace_id", workspaceId)
         .eq("is_active", true)
         .eq("remote_sku", sku);
 
@@ -232,12 +250,45 @@ export async function fanoutInventoryChange(
 
       const targets = determineFanoutTargets((skuMappings ?? []).length > 0, !!hasBandcampMapping);
 
+      // Phase 1 §9.2 D1/D3 — enqueue per-(connection_id, sku) push tasks
+      // INSTEAD OF the empty-payload `multi-store-inventory-push` global
+      // sweep. Each skuMapping row already carries the connection_id we
+      // need; one targeted enqueue per row drops fanout latency from
+      // ~5min to <30s. The 5-min cron stays alive as a drift safety net
+      // (X-2 audit) — it sweeps SKUs the focused enqueues missed (e.g.
+      // Trigger.dev cloud transient enqueue failures here, or per-SKU
+      // tasks that exhausted their retry budget downstream).
       if (targets.pushToStores && guard.shouldFanout("client_store", effectiveCorrelationId)) {
-        try {
-          await tasks.trigger("multi-store-inventory-push", {});
-          storeConnectionsPushed = (skuMappings ?? []).length;
-        } catch {
-          /* non-critical */
+        for (const mapping of skuMappings ?? []) {
+          const m = mapping as { connection_id: string };
+          try {
+            const payload: ClientStorePushOnSkuPayload = {
+              workspaceId,
+              connectionId: m.connection_id,
+              sku,
+              correlationId: `${effectiveCorrelationId}:${m.connection_id}`,
+              reason: source ? `fanout:${source}` : "fanout",
+              metadata: {
+                origin: "inventory-fanout",
+                source: source ?? null,
+              },
+            };
+            await tasks.trigger("client-store-push-on-sku", payload);
+            storeConnectionsPushed++;
+          } catch (err) {
+            Sentry.captureException(err, {
+              tags: { fanout_target: "client_store", sku },
+              extra: {
+                workspaceId,
+                connectionId: m.connection_id,
+                correlationId: effectiveCorrelationId,
+              },
+            });
+            console.error(
+              `[fanout] client-store enqueue failed for SKU=${sku} connection=${m.connection_id}:`,
+              err instanceof Error ? err.message : err,
+            );
+          }
         }
       }
 
@@ -319,6 +370,16 @@ export async function fanoutInventoryChange(
           .eq("component_variant_id", variant.id)
           .limit(1);
 
+        // Phase 1 §9.2 D3 — bundle-parent fallback intentionally keeps the
+        // global cron sweep. When a component SKU changes, every bundle
+        // PARENT that depends on it must be re-evaluated; resolving the
+        // exact parent SKU set + their per-connection mapping rows here
+        // would re-implement most of the cron body inline. Bundle parents
+        // are a low-volume edge case (typically <5% of SKUs); paying a
+        // 5-min latency tax for them is an acceptable Pass 1 trade-off.
+        // Pass 2 follow-up if bundle latency ever matters: query
+        // bundle_components for the parent set and enqueue per-(parent
+        // SKU, connection) rows the same way the primary path does.
         if (parentBundles?.length) {
           if (!targets.pushToBandcamp && guard.shouldFanout("bandcamp", effectiveCorrelationId)) {
             try {

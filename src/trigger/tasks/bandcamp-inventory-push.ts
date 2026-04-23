@@ -16,6 +16,7 @@ import { schedules } from "@trigger.dev/sdk";
 import { getMerchDetails, refreshBandcampToken, updateQuantities } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { computeEffectiveBundleAvailable } from "@/lib/server/bundles";
+import { evaluateEffectiveSellable } from "@/lib/server/effective-sellable";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
 
@@ -241,7 +242,22 @@ export const bandcampInventoryPushTask = schedules.task({
               }
             }
 
-            const pushedQuantity = Math.max(0, effectiveAvailable - effectiveSafety);
+            // Phase 1 §9.2 D8 / N-13 — push formula via shared helper. The
+            // cron has bulk-loaded levels above; we still own the bundle
+            // math (it's an `available` derivation, not a push-formula
+            // concern) but the safety-stock resolution + clamp belong to
+            // the helper for X-7 dual-edit safety.
+            const sellable = evaluateEffectiveSellable("bandcamp", {
+              variant: { id: mapping.variant_id },
+              level: {
+                available: effectiveAvailable,
+                safety_stock: inv?.safetyStock ?? null,
+              },
+              connectionMappingSafety: null,
+              perChannelSafety: null,
+              workspaceDefaultSafety: workspaceSafetyStock,
+            });
+            const pushedQuantity = sellable.effectiveSellable;
             const options = optionsByPackageId.get(mapping.bandcamp_item_id);
 
             if (options) {
