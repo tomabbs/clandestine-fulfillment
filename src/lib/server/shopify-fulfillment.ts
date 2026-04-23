@@ -4,7 +4,8 @@
  * Replaces the legacy REST flow (GET `/orders/{id}/fulfillment_orders.json`
  * + POST `/fulfillments.json`) with a single `fulfillmentCreate` mutation
  * over the connection's Admin GraphQL endpoint. Pinned to the same API
- * version as `connectionShopifyGraphQL` (2026-01) per HRD-09.2.
+ * version as `connectionShopifyGraphQL` (`SHOPIFY_CLIENT_API_VERSION` —
+ * currently 2026-04) per HRD-09.2.
  *
  * Why this is its own module:
  *   - Fulfillment-order selection is a tricky pure decision (open vs in

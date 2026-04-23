@@ -2,7 +2,8 @@
  * Mark a mail-order as shipped on its originating platform.
  *
  * Sources:
- *   clandestine_shopify → mark order fulfilled on main Clandestine Shopify (2026-01)
+ *   clandestine_shopify → mark order fulfilled on main Clandestine Shopify
+ *                         (env-singleton — version sourced from SHOPIFY_API_VERSION)
  *   clandestine_discogs → send shipping message + status update to Discogs
  *
  * On success: sets platform_fulfillment_status = 'confirmed'
@@ -96,13 +97,14 @@ async function markMainShopifyFulfilled(
   carrier: string,
 ): Promise<void> {
   const shopifyUrl = env().SHOPIFY_STORE_URL.replace(/\/$/, "");
+  const apiVersion = env().SHOPIFY_API_VERSION;
   const headers = {
     "X-Shopify-Access-Token": env().SHOPIFY_ADMIN_API_TOKEN,
     "Content-Type": "application/json",
   };
 
   const foRes = await fetch(
-    `${shopifyUrl}/admin/api/2026-01/orders/${orderId}/fulfillment_orders.json`,
+    `${shopifyUrl}/admin/api/${apiVersion}/orders/${orderId}/fulfillment_orders.json`,
     { headers },
   );
   if (!foRes.ok) throw new Error(`Shopify fulfillment_orders ${foRes.status}`);
@@ -116,7 +118,7 @@ async function markMainShopifyFulfilled(
     return;
   }
 
-  const fulfillRes = await fetch(`${shopifyUrl}/admin/api/2026-01/fulfillments.json`, {
+  const fulfillRes = await fetch(`${shopifyUrl}/admin/api/${apiVersion}/fulfillments.json`, {
     method: "POST",
     headers,
     body: JSON.stringify({

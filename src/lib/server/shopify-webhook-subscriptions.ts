@@ -71,7 +71,7 @@ export interface WebhookSubscriptionRecord {
   id: string;
   /** REST-style dotted form, e.g. `orders/create` (matches X-Shopify-Topic header) */
   topic: string;
-  /** Shopify's API version pinned for THIS subscription (e.g. `2026-01`). */
+  /** Shopify's API version pinned for THIS subscription (e.g. `2026-04`). */
   apiVersion: string;
   callbackUrl: string;
   /** Whether we created the row in this call, or it already existed and we reused it. */

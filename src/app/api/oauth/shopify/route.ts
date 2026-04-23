@@ -26,6 +26,7 @@ import {
   registerWebhookSubscriptions,
 } from "@/lib/server/shopify-webhook-subscriptions";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { SHOPIFY_CLIENT_API_VERSION } from "@/lib/shared/constants";
 import { env } from "@/lib/shared/env";
 
 export const runtime = "nodejs";
@@ -312,7 +313,14 @@ export async function GET(request: NextRequest) {
     const verification = await verifyShopDomain({
       shopParam: shop,
       accessToken,
-      apiVersion: env().SHOPIFY_API_VERSION,
+      // Phase 1 Pass 2 — per-client OAuth path uses the shared per-client
+      // version constant, NOT the env-singleton SHOPIFY_API_VERSION (which
+      // governs the main Clandestine Shopify store). Mixing them was a
+      // pre-existing latent bug: the env singleton could lag the client
+      // surface (e.g. env=2026-01 while client surfaces are 2026-04) and
+      // the OAuth verifier would silently disagree with downstream
+      // GraphQL calls about which schema version to expect.
+      apiVersion: SHOPIFY_CLIENT_API_VERSION,
     });
     if (verification.kind !== "ok") {
       // Persist a security review queue item — even benign mismatches

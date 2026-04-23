@@ -52,9 +52,16 @@ export type ExternalSyncAction =
   | "adjust"
   | "modify"
   // Phase 1 §9.2 D1/D2 — absolute-quantity push verb. Used by the new
-  // client-store + clandestine focused-push tasks. Reserved future verb
-  // `cas_set` for the Pass 2 Shopify CAS contract.
+  // client-store + clandestine focused-push tasks for the legacy
+  // (non-CAS) path.
   | "set"
+  // Phase 1 §9.2 D5 — Shopify Compare-And-Set absolute write. Distinct
+  // verb from `set` so analytics can isolate CAS mismatch frequency,
+  // exhaustion rate, and p99 latency without filtering by metadata.
+  // One ledger row per logical adjustment; per-attempt history in
+  // response_body.attempts[]. Migration:
+  // 20260427000001_external_sync_events_cas_set.sql.
+  | "cas_set"
   | "alias_add"
   | "alias_remove"
   | "sku_rename";

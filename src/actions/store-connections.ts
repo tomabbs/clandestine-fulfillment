@@ -18,6 +18,12 @@ import {
   type WebhookSubscriptionRecord,
 } from "@/lib/server/shopify-webhook-subscriptions";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+// HRD-09.2: pin a single API version for client-store Shopify reads invoked
+// from Server Actions. The OAuth callback also uses this version implicitly
+// (Shopify pins the version per-app, not per-request — we just have to use the
+// same version here that the app config declares). Phase 1 Pass 2 — sourced
+// from the shared constant so a single bump touches every per-client surface.
+import { SHOPIFY_CLIENT_API_VERSION as SHOPIFY_API_VERSION } from "@/lib/shared/constants";
 import { env } from "@/lib/shared/env";
 import type {
   ClientStoreConnection,
@@ -25,12 +31,6 @@ import type {
   ConnectionStatus,
   StorePlatform,
 } from "@/lib/shared/types";
-
-// HRD-09.2: pin a single API version for client-store Shopify reads invoked
-// from Server Actions. The OAuth callback also uses this version implicitly
-// (Shopify pins the version per-app, not per-request — we just have to use the
-// same version here that the app config declares).
-const SHOPIFY_API_VERSION = "2026-01";
 
 // === Zod schemas (Rule #5) ===
 
@@ -319,7 +319,7 @@ export async function testStoreConnection(
       case "shopify": {
         // Shopify client store test — simple REST call
         if (!conn.api_key) throw new Error("Missing API key");
-        const res = await fetch(`${conn.store_url}/admin/api/2026-01/shop.json`, {
+        const res = await fetch(`${conn.store_url}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
           headers: { "X-Shopify-Access-Token": conn.api_key },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -470,7 +470,7 @@ export async function autoDiscoverSkus(
 
       // Paginate through all products
       let pageUrl: string | null =
-        `${shopifyUrl}/admin/api/2026-01/products.json?limit=250&fields=id,variants`;
+        `${shopifyUrl}/admin/api/${SHOPIFY_API_VERSION}/products.json?limit=250&fields=id,variants`;
       while (pageUrl) {
         const res: Response = await fetch(pageUrl, { headers: shopifyHeaders });
         if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);

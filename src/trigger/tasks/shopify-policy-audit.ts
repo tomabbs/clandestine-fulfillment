@@ -63,10 +63,11 @@ import { shipstationQueue } from "@/trigger/lib/shipstation-queue";
 
 // ─── GraphQL — variant.inventoryPolicy + inventoryItem.tracked walk ────────
 //
-// Pinned to `2026-01` here (same as the rest of the per-connection client
-// surface). The 2026-04 bump (CAS `changeFromQuantity` + `@idempotent`) is a
-// separate sequenced env-var change per X-6, but the policy-audit query is
-// API-version-agnostic — `inventoryPolicy` has been stable on the
+// Pinned to `SHOPIFY_CLIENT_API_VERSION` (currently 2026-04) via the shared
+// constant — same as the rest of the per-connection client surface. The
+// 2026-04 bump landed in Phase 1 Pass 2 to enable CAS (`changeFromQuantity`
+// + `@idempotent`), but this audit query itself is API-version-agnostic —
+// `inventoryPolicy` has been stable on the
 // `ProductVariant` type since 2024-01.
 
 interface AuditVariantRow {

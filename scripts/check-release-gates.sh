@@ -61,6 +61,19 @@ else
   emit_fail "P1-D8" "scripts/check-push-formula-helper.sh failed — re-run for details"
 fi
 
+# ─── Phase 1 §9.2 D4 Step A — Shopify API version source-of-truth ────────────
+# Bans hard-coded `"YYYY-MM"` API version literals outside the canonical
+# constant `SHOPIFY_CLIENT_API_VERSION`. Without this guard, a per-client
+# call site can be left at the prior pinning while the rest of the
+# surface bumps to 2026-04 — `inventorySetQuantities.changeFromQuantity`
+# silently fails closed at the schema for THAT call site only, and the
+# CAS retry loop loses its compare-and-set guarantee with no log signal.
+if bash scripts/check-shopify-api-version.sh >/dev/null 2>&1; then
+  emit_pass "P1-D4A" "scripts/check-shopify-api-version.sh"
+else
+  emit_fail "P1-D4A" "scripts/check-shopify-api-version.sh failed — re-run for details"
+fi
+
 # ─── Test-file gates ─────────────────────────────────────────────────────────
 # Each gate is one vitest invocation. Vitest exits non-zero on any failure.
 run_test_gate() {
@@ -91,6 +104,16 @@ run_test_gate "HRD-35.3" "shopify-webhook-subscriptions registrar + diff suite" 
 # subscription on next App Store review.
 run_test_gate "P0-D6" "Shopify GDPR webhook secret resolver (per-connection + env fallback)" \
   "tests/unit/lib/server/shopify-gdpr-secret.test.ts"
+
+# Phase 1 §9.2 D4 Step C — Shopify CAS (compareQuantity + @idempotent) contract test.
+# The unit suite mocks the GraphQL transport. This contract test hits a real
+# 2026-04 Shopify dev store to pin the schema (compareQuantity field name,
+# INVALID_COMPARE_QUANTITY userError code, @idempotent dedup behavior).
+# Skips itself when SHOPIFY_CONTRACT_TEST=1 and SHOPIFY_CONTRACT_* env are
+# missing. The cutover workflow MUST set REQUIRE_SHOPIFY_CONTRACT=1 + the
+# contract env so a missing-env skip becomes a hard failure pre-tag.
+run_test_gate "P1-D4C" "Shopify CAS 2026-04 contract suite (skipped without SHOPIFY_CONTRACT_TEST=1)" \
+  "tests/contract/shopify-cas-2026-04.test.ts"
 
 # ─── Schema gates (require DATABASE_URL + psql) ──────────────────────────────
 if [[ -z "${DATABASE_URL:-}" ]] || ! command -v psql >/dev/null 2>&1; then

@@ -29,6 +29,10 @@
 import { tasks } from "@trigger.dev/sdk";
 import { z } from "zod/v4";
 import { requireAuth } from "@/lib/server/auth-context";
+import {
+  type ConnectionPolicyHealthResult,
+  deriveConnectionPolicyHealth,
+} from "@/lib/server/channels-policy-health";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import {
   auditShopifyConnection,
@@ -109,5 +113,103 @@ export async function auditShopifyPolicy(
     enqueuedRunId: handle.id,
     driftCount: report.driftCount,
     report,
+  };
+}
+
+// ─── Phase 0 follow-up — Channels page policy_drift readout ─────────────────
+//
+// The audit cron persists per-mapping `last_inventory_policy` +
+// `last_policy_check_at`. The Channels page renders ONE badge per Shopify
+// connection — this Server Action is the read-side that powers it.
+//
+// Pure derivation lives in `deriveConnectionPolicyHealth` (already shipped
+// in Phase 0). This loader's job is the I/O — load connection status, load
+// the minimal mapping snapshot, sample up to 5 drift SKUs for the badge
+// tooltip, and hand the bundle to the pure helper.
+//
+// Authorization: staff-only. Clients see their own per-connection badge via
+// a separate read path (Phase 5+ scope) — this loader is the staff-side
+// surface.
+const getConnectionPolicyHealthSchema = z.object({
+  connectionId: z.string().uuid(),
+});
+
+export type GetConnectionPolicyHealthInput = z.input<typeof getConnectionPolicyHealthSchema>;
+
+export type GetConnectionPolicyHealthResult = ConnectionPolicyHealthResult & {
+  connectionId: string;
+};
+
+/**
+ * Cap on `driftSkusSampled` size — operator badge tooltip, not a report.
+ * Keeping this in code (not env) so the test pins the contract.
+ */
+export const POLICY_HEALTH_DRIFT_SAMPLE_LIMIT = 5;
+
+export async function getConnectionPolicyHealth(
+  input: GetConnectionPolicyHealthInput,
+): Promise<GetConnectionPolicyHealthResult> {
+  const auth = await requireAuth();
+  if (!auth.isStaff) throw new Error("Forbidden — staff only");
+  const data = getConnectionPolicyHealthSchema.parse(input);
+
+  const supabase = createServiceRoleClient();
+
+  const { data: conn, error: connErr } = await supabase
+    .from("client_store_connections")
+    .select("id, platform, connection_status")
+    .eq("id", data.connectionId)
+    .maybeSingle();
+  if (connErr) throw new Error(`Connection lookup failed: ${connErr.message}`);
+  if (!conn) throw new Error("Connection not found");
+  if (conn.platform !== "shopify") {
+    throw new Error("getConnectionPolicyHealth only applies to Shopify connections");
+  }
+
+  // We need the full snapshot of *active* mappings to compute drift count
+  // and last-audit timestamp. The partial index
+  // `idx_sku_mappings_policy_drift` only covers the drifted subset, which
+  // is fine for the count but loses the "everything is DENY but audit is
+  // fresh" healthy verdict — so we read all active mappings here.
+  const { data: mappings, error: mapErr } = await supabase
+    .from("client_store_sku_mappings")
+    .select("last_inventory_policy, preorder_whitelist, last_policy_check_at, remote_sku")
+    .eq("connection_id", data.connectionId)
+    .eq("is_active", true);
+  if (mapErr) throw new Error(`Mapping snapshot fetch failed: ${mapErr.message}`);
+
+  const snapshot = (mappings ?? []).map((m) => ({
+    last_inventory_policy: m.last_inventory_policy as "DENY" | "CONTINUE" | null,
+    preorder_whitelist: Boolean(m.preorder_whitelist),
+    last_policy_check_at: m.last_policy_check_at as string | null,
+  }));
+
+  const result = deriveConnectionPolicyHealth({
+    connectionStatus: (conn.connection_status ?? "active") as
+      | "pending"
+      | "active"
+      | "disabled_auth_failure"
+      | "error",
+    mappings: snapshot,
+  });
+
+  // Populate the SKU sample only when we'll actually render it (drift state).
+  // The pure derivation can't do this because it doesn't have `remote_sku` in
+  // its input shape — the loader owns the I/O contract.
+  let driftSkusSampled: string[] = [];
+  if (result.state === "policy_drift") {
+    driftSkusSampled = (mappings ?? [])
+      .filter(
+        (m) => m.last_inventory_policy === "CONTINUE" && Boolean(m.preorder_whitelist) === false,
+      )
+      .map((m) => (m.remote_sku as string | null) ?? "")
+      .filter((sku) => sku.length > 0)
+      .slice(0, POLICY_HEALTH_DRIFT_SAMPLE_LIMIT);
+  }
+
+  return {
+    ...result,
+    driftSkusSampled,
+    connectionId: conn.id,
   };
 }

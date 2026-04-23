@@ -54,7 +54,14 @@ const DEFAULT_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 export interface ConnectionPolicyHealthResult {
   state: IntegrationHealthState;
   driftCount: number;
-  driftSkusSampled: never[]; // populated by callers that fetch `remote_sku`
+  /**
+   * Sample of `remote_sku` values from drifted mappings. Pure
+   * `deriveConnectionPolicyHealth` always returns `[]`; callers that have
+   * the SKU strings in scope (typically the Server Action loader) populate
+   * this for the badge tooltip. Cap the sample at ~5 in callers — this
+   * surface is operator-facing, not a full report.
+   */
+  driftSkusSampled: string[];
   lastAuditAt: string | null;
   reason: string;
 }

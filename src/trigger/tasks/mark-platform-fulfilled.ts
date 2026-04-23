@@ -2,7 +2,8 @@
  * Mark a fulfillment order as shipped on its originating platform.
  *
  * Platforms:
- *   shopify    → fulfillment_orders + fulfillments API (2026-01)
+ *   shopify    → fulfillment_orders + fulfillments API (per-client, version
+ *                from `SHOPIFY_CLIENT_API_VERSION` — currently 2026-04)
  *   woocommerce → PUT /orders/{id} status: completed + tracking meta
  *   squarespace → POST /commerce/orders/{id}/fulfillments  ← C1 fix (not "no API")
  *   discogs    → PLAINTEXT OAuth 1.0a message + status update

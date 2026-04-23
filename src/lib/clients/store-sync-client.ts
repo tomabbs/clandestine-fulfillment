@@ -1,4 +1,5 @@
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
+import { SHOPIFY_CLIENT_API_VERSION } from "@/lib/shared/constants";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
 // Unified store sync interface — dispatches to platform-specific clients.
@@ -119,7 +120,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     sku: string,
   ): Promise<{ variantId: number; inventoryItemId: number } | null> {
     const res = await fetch(
-      `${baseUrl}/admin/api/2026-01/variants.json?sku=${encodeURIComponent(sku)}`,
+      `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/variants.json?sku=${encodeURIComponent(sku)}`,
       { headers },
     );
     if (!res.ok) throw new Error(`Shopify variant lookup failed: HTTP ${res.status}`);
@@ -135,7 +136,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     inventoryItemId: number,
   ): Promise<{ locationId: number; available: number } | null> {
     const res = await fetch(
-      `${baseUrl}/admin/api/2026-01/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
+      `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
       { headers },
     );
     if (!res.ok) throw new Error(`Shopify inventory levels fetch failed: HTTP ${res.status}`);
@@ -157,14 +158,17 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     inventoryItemId: number,
     locationId: number,
   ): Promise<void> {
-    const res = await fetch(`${baseUrl}/admin/api/2026-01/inventory_levels/connect.json`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        location_id: locationId,
-        inventory_item_id: inventoryItemId,
-      }),
-    });
+    const res = await fetch(
+      `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/inventory_levels/connect.json`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          location_id: locationId,
+          inventory_item_id: inventoryItemId,
+        }),
+      },
+    );
     if (!res.ok) {
       const body = await res.text();
       throw new Error(
@@ -241,15 +245,18 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
       async function attemptSet(): Promise<
         { ok: true } | { ok: false; status: number; body: string }
       > {
-        const res = await fetch(`${baseUrl}/admin/api/2026-01/inventory_levels/set.json`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            location_id: targetLocationId,
-            inventory_item_id: inventoryItemId,
-            available: quantity,
-          }),
-        });
+        const res = await fetch(
+          `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/inventory_levels/set.json`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              location_id: targetLocationId,
+              inventory_item_id: inventoryItemId,
+              available: quantity,
+            }),
+          },
+        );
         if (res.ok) return { ok: true };
         const body = await res.text();
         return { ok: false, status: res.status, body };
@@ -292,7 +299,7 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
 
     async getOrders(since) {
       const res = await fetch(
-        `${baseUrl}/admin/api/2026-01/orders.json?created_at_min=${encodeURIComponent(since)}&status=any&limit=50`,
+        `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/orders.json?created_at_min=${encodeURIComponent(since)}&status=any&limit=50`,
         { headers },
       );
       if (!res.ok) throw new Error(`Shopify orders fetch failed: HTTP ${res.status}`);

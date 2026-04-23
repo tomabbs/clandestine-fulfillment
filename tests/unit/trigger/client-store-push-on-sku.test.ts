@@ -1,12 +1,25 @@
 /**
- * Phase 1 §9.2 D1 — companion test for `client-store-push-on-sku`.
+ * Phase 1 §9.2 D1 + Pass 2 D5 — companion test for `client-store-push-on-sku`.
  *
- * Covers the full skip cascade (guard → connection missing → dormant →
- * unsupported platform → no Shopify default location → no mapping →
- * unknown variant → ledger duplicate → unchanged quantity) and the
- * happy-path push (which must update `last_pushed_quantity` /
- * `last_pushed_at` for Rule #65 echo-cancellation and the future Pass 2
- * Shopify CAS baseline).
+ * Pass 2 splits the platform path:
+ *   - Shopify routes through `setShopifyInventoryCas` (per-connection
+ *     transport) — uses ledger action `cas_set`, skips the
+ *     unchanged-quantity elision, requires `remote_inventory_item_id`.
+ *   - Squarespace + WooCommerce stay on the legacy
+ *     `createStoreSyncClient(...).pushInventory(...)` dispatcher with
+ *     ledger action `set`.
+ *
+ * Coverage:
+ *   - skip cascade (guard, connection missing, dormant, unsupported
+ *     platform, no Shopify default location, no mapping, missing
+ *     remote_inventory_item_id, ledger duplicate, unchanged quantity for
+ *     non-Shopify, unknown variant)
+ *   - Shopify CAS happy path (transport shape, GID normalisation,
+ *     `cas_set` ledger action, `last_pushed_*` write-back)
+ *   - Shopify CAS exhaustion (returns `cas_exhausted`, does NOT throw,
+ *     does NOT write `last_pushed_*`)
+ *   - Squarespace + WooCommerce go through legacy dispatcher
+ *   - Legacy dispatcher push failure marks ledger error + rethrows
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +28,7 @@ import type { ClientStoreConnection } from "@/lib/shared/types";
 const {
   mockPushInventory,
   mockCreateStoreSyncClient,
+  mockSetCas,
   mockBegin,
   mockSuccess,
   mockError,
@@ -23,6 +37,7 @@ const {
 } = vi.hoisted(() => ({
   mockPushInventory: vi.fn(),
   mockCreateStoreSyncClient: vi.fn(),
+  mockSetCas: vi.fn(),
   mockBegin: vi.fn(),
   mockSuccess: vi.fn(),
   mockError: vi.fn(),
@@ -32,6 +47,10 @@ const {
 
 vi.mock("@/lib/clients/store-sync-client", () => ({
   createStoreSyncClient: mockCreateStoreSyncClient,
+}));
+
+vi.mock("@/lib/server/shopify-cas-retry", () => ({
+  setShopifyInventoryCas: mockSetCas,
 }));
 
 vi.mock("@/lib/server/external-sync-events", () => ({
@@ -64,8 +83,6 @@ vi.mock("@trigger.dev/sdk", () => ({
 vi.mock("@/trigger/lib/client-store-push-queues", () => ({
   clientStorePushQueue: { name: "client-store-push" },
 }));
-
-// ── Supabase chain stub ──────────────────────────────────────────────────────
 
 interface ChainResult {
   data: unknown;
@@ -132,6 +149,8 @@ const ORG_ID = "33333333-3333-3333-3333-333333333333";
 const SKU = "ACME-LP-001";
 const REMOTE_SKU = "ACME-LP-001";
 const CORR = "fanout:ACME-LP-001:1700000000000";
+const REMOTE_INVENTORY_ITEM_GID = "gid://shopify/InventoryItem/77777";
+const SHOPIFY_LOCATION_GID = "gid://shopify/Location/123456";
 
 function basePayload() {
   return {
@@ -177,7 +196,7 @@ function makeConnection(overrides: Partial<ClientStoreConnection> = {}): ClientS
     last_error_at: null,
     last_error: null,
     do_not_fanout: false,
-    default_location_id: "gid://shopify/Location/123456",
+    default_location_id: SHOPIFY_LOCATION_GID,
     shopify_app_client_id: null,
     shopify_app_client_secret_encrypted: null,
     created_at: new Date().toISOString(),
@@ -192,6 +211,7 @@ function makeMapping(overrides: Record<string, unknown> = {}) {
     variant_id: "44444444-4444-4444-4444-444444444444",
     remote_product_id: "gid://shopify/Product/9999",
     remote_variant_id: "gid://shopify/ProductVariant/1111",
+    remote_inventory_item_id: REMOTE_INVENTORY_ITEM_GID,
     remote_sku: REMOTE_SKU,
     last_pushed_quantity: 0,
     safety_stock: 0,
@@ -221,7 +241,25 @@ function sellable(
   };
 }
 
-describe("clientStorePushOnSkuTask", () => {
+function casSuccess(finalQty = 7, attempts = 1) {
+  return {
+    ok: true,
+    finalNewQuantity: finalQty,
+    adjustmentGroupId: "gid://shopify/InventoryAdjustmentGroup/abc",
+    attempts: Array.from({ length: attempts }, (_, i) => ({
+      attempt: i + 1,
+      expectedQuantity: 5,
+      desiredQuantity: finalQty,
+      idempotencyKey: `client_store_shopify:${CORR}:${SKU}${i === 0 ? "" : `:retry${i}`}`,
+      durationMs: 100,
+      outcome: "success" as const,
+      adjustmentGroupId: "gid://shopify/InventoryAdjustmentGroup/abc",
+      newQuantity: finalQty,
+    })),
+  };
+}
+
+describe("clientStorePushOnSkuTask (Pass 2 — Shopify CAS branch)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setResults({});
@@ -234,13 +272,17 @@ describe("clientStorePushOnSkuTask", () => {
     });
     mockLoadGuard.mockResolvedValue(makeGuard(true));
     mockComputeEffectiveSellable.mockResolvedValue(sellable());
+    mockSetCas.mockResolvedValue(casSuccess());
   });
+
+  // ── skip cascade ──────────────────────────────────────────────────────────
 
   it("skips when fanout-guard blocks (rollout_excluded)", async () => {
     mockLoadGuard.mockResolvedValueOnce(makeGuard(false, "rollout_excluded"));
     const result = await runTask(basePayload());
     expect(result.status).toBe("skipped_guard");
     expect(mockBegin).not.toHaveBeenCalled();
+    expect(mockSetCas).not.toHaveBeenCalled();
     expect(mockPushInventory).not.toHaveBeenCalled();
   });
 
@@ -260,6 +302,7 @@ describe("clientStorePushOnSkuTask", () => {
     const result = await runTask(basePayload());
     expect(result.status).toBe("skipped_dormant");
     expect(result.status === "skipped_dormant" && result.reason).toBe("do_not_fanout");
+    expect(mockSetCas).not.toHaveBeenCalled();
     expect(mockPushInventory).not.toHaveBeenCalled();
   });
 
@@ -295,6 +338,19 @@ describe("clientStorePushOnSkuTask", () => {
     expect(mockComputeEffectiveSellable).not.toHaveBeenCalled();
   });
 
+  it("Pass 2: skips Shopify mapping without remote_inventory_item_id", async () => {
+    setResults({
+      client_store_connections: { data: makeConnection() },
+      client_store_sku_mappings: { data: makeMapping({ remote_inventory_item_id: null }) },
+    });
+    const result = await runTask(basePayload());
+    expect(result.status).toBe("skipped_no_remote_inventory_item_id");
+    expect(mockBegin).not.toHaveBeenCalled();
+    expect(mockSetCas).not.toHaveBeenCalled();
+    // Critical: must NOT silently drop into the legacy dispatcher.
+    expect(mockPushInventory).not.toHaveBeenCalled();
+  });
+
   it("skips when computeEffectiveSellable reports variant_not_found", async () => {
     setResults({
       client_store_connections: { data: makeConnection() },
@@ -308,9 +364,25 @@ describe("clientStorePushOnSkuTask", () => {
     expect(mockBegin).not.toHaveBeenCalled();
   });
 
-  it("elides the push when effective_sellable equals last_pushed_quantity (Rule #65 echo)", async () => {
+  it("Pass 2: Shopify does NOT short-circuit on unchanged quantity (CAS converges)", async () => {
     setResults({
       client_store_connections: { data: makeConnection() },
+      client_store_sku_mappings: {
+        data: makeMapping({ last_pushed_quantity: 7 }),
+      },
+    });
+    const result = await runTask(basePayload());
+    // Pre-Pass-2 this returned 'skipped_unchanged_quantity'. Pass 2
+    // proceeds to CAS so a stale Shopify number gets reconciled.
+    expect(result.status).toBe("ok");
+    expect(mockSetCas).toHaveBeenCalledTimes(1);
+  });
+
+  it("non-Shopify still elides on unchanged quantity (Rule #65 echo, dispatcher path)", async () => {
+    setResults({
+      client_store_connections: {
+        data: makeConnection({ platform: "squarespace", default_location_id: null }),
+      },
       client_store_sku_mappings: {
         data: makeMapping({ last_pushed_quantity: 7 }),
       },
@@ -334,76 +406,170 @@ describe("clientStorePushOnSkuTask", () => {
     });
     const result = await runTask(basePayload());
     expect(result.status).toBe("skipped_ledger_duplicate");
+    expect(mockSetCas).not.toHaveBeenCalled();
     expect(mockPushInventory).not.toHaveBeenCalled();
     expect(mappingUpdate).not.toHaveBeenCalled();
   });
 
-  it("pushes effective_sellable on the happy path and updates last_pushed_*", async () => {
+  // ── Shopify CAS happy path ────────────────────────────────────────────────
+
+  it("Shopify happy path → CAS (per-connection transport, cas_set ledger, last_pushed_* write-back)", async () => {
     setResults({
       client_store_connections: { data: makeConnection() },
       client_store_sku_mappings: { data: makeMapping() },
     });
     const result = await runTask(basePayload());
     expect(result.status).toBe("ok");
-    expect(result.status === "ok" && result.pushedQuantity).toBe(7);
-    expect(mockCreateStoreSyncClient).toHaveBeenCalledTimes(1);
-    expect(mockPushInventory).toHaveBeenCalledTimes(1);
-    const [calledSku, calledQty, idemKey] = mockPushInventory.mock.calls[0];
-    expect(calledSku).toBe(REMOTE_SKU);
-    expect(calledQty).toBe(7);
-    expect(idemKey).toContain(CONNECTION_ID);
-    expect(idemKey).toContain("mapping_1");
-    expect(idemKey).toContain("7");
-    expect(mappingUpdate).toHaveBeenCalledTimes(1);
-    expect(mockSuccess).toHaveBeenCalledTimes(1);
+    if (result.status !== "ok") return;
+    expect(result.pushedQuantity).toBe(7);
+    expect(result.attempts).toBe(1);
+
+    // CAS called with per-connection transport + correct GIDs.
+    expect(mockSetCas).toHaveBeenCalledTimes(1);
+    const casCall = mockSetCas.mock.calls[0][0];
+    expect(casCall.transport).toEqual({
+      kind: "per_connection",
+      ctx: { storeUrl: "https://acme.myshopify.com", accessToken: "shpat_test" },
+    });
+    expect(casCall.inventoryItemId).toBe(REMOTE_INVENTORY_ITEM_GID);
+    expect(casCall.locationId).toBe(SHOPIFY_LOCATION_GID);
+    expect(casCall.system).toBe("client_store_shopify");
+    expect(casCall.sku).toBe(SKU);
+    expect(casCall.correlationId).toBe(CORR);
+    expect(casCall.workspaceId).toBe(WORKSPACE_ID);
+    expect(casCall.orgId).toBe(ORG_ID);
+    expect(casCall.ledgerId).toBe("ledger_cs_1");
+    expect(typeof casCall.computeDesired).toBe("function");
+
+    // Ledger acquired with cas_set, NOT set.
     expect(mockBegin).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         system: "client_store_shopify",
-        action: "set",
-        correlation_id: CORR,
+        action: "cas_set",
         sku: SKU,
+        correlation_id: CORR,
+      }),
+    );
+
+    // last_pushed_* write-back happens (echo cancellation Rule #65).
+    expect(mappingUpdate).toHaveBeenCalledTimes(1);
+
+    // Legacy dispatcher and markExternalSyncSuccess NOT called for Shopify.
+    expect(mockPushInventory).not.toHaveBeenCalled();
+    expect(mockSuccess).not.toHaveBeenCalled();
+  });
+
+  it("Shopify CAS computeDesired callback invokes computeEffectiveSellable per attempt", async () => {
+    setResults({
+      client_store_connections: { data: makeConnection() },
+      client_store_sku_mappings: { data: makeMapping() },
+    });
+    await runTask(basePayload());
+    const casCall = mockSetCas.mock.calls[0][0];
+    mockComputeEffectiveSellable.mockClear();
+    const desired = await casCall.computeDesired(999); // remote=999 ignored
+    expect(desired).toBe(7);
+    expect(mockComputeEffectiveSellable).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        sku: SKU,
+        channel: "client_store_shopify",
+        connectionId: CONNECTION_ID,
       }),
     );
   });
 
-  it("uses client_store_squarespace ledger system for Squarespace connections", async () => {
+  it("Shopify CAS normalises numeric default_location_id and remote_inventory_item_id to GIDs", async () => {
     setResults({
       client_store_connections: {
-        data: makeConnection({
-          platform: "squarespace",
-          default_location_id: null, // not required for non-Shopify
-        }),
+        data: makeConnection({ default_location_id: "987654" }),
+      },
+      client_store_sku_mappings: {
+        data: makeMapping({ remote_inventory_item_id: "555444" }),
+      },
+    });
+    await runTask(basePayload());
+    const casCall = mockSetCas.mock.calls[0][0];
+    expect(casCall.locationId).toBe("gid://shopify/Location/987654");
+    expect(casCall.inventoryItemId).toBe("gid://shopify/InventoryItem/555444");
+  });
+
+  it("Shopify CAS exhaustion returns cas_exhausted, does NOT throw, does NOT update last_pushed_*", async () => {
+    setResults({
+      client_store_connections: { data: makeConnection() },
+      client_store_sku_mappings: { data: makeMapping() },
+    });
+    mockSetCas.mockResolvedValueOnce({
+      ok: false,
+      reason: "exhausted",
+      attempts: [
+        { attempt: 1, outcome: "compare_mismatch" },
+        { attempt: 2, outcome: "compare_mismatch" },
+        { attempt: 3, outcome: "compare_mismatch" },
+      ],
+      lastActualQuantity: 11,
+    });
+    const result = await runTask(basePayload());
+    expect(result.status).toBe("cas_exhausted");
+    if (result.status !== "cas_exhausted") return;
+    expect(result.attempts).toBe(3);
+    expect(result.lastActualQuantity).toBe(11);
+    expect(mappingUpdate).not.toHaveBeenCalled();
+    expect(mockError).not.toHaveBeenCalled();
+  });
+
+  it("Shopify CAS non-CAS error rethrows + defensively marks ledger error", async () => {
+    setResults({
+      client_store_connections: { data: makeConnection() },
+      client_store_sku_mappings: { data: makeMapping() },
+    });
+    mockSetCas.mockRejectedValueOnce(new Error("Shopify 503"));
+    await expect(runTask(basePayload())).rejects.toThrow(/Shopify 503/);
+    expect(mockError).toHaveBeenCalledTimes(1);
+    expect(mappingUpdate).not.toHaveBeenCalled();
+  });
+
+  // ── Squarespace + WooCommerce: legacy dispatcher path ─────────────────────
+
+  it("Squarespace stays on legacy dispatcher with action=set", async () => {
+    setResults({
+      client_store_connections: {
+        data: makeConnection({ platform: "squarespace", default_location_id: null }),
       },
       client_store_sku_mappings: { data: makeMapping() },
     });
     const result = await runTask(basePayload());
     expect(result.status).toBe("ok");
+    expect(mockSetCas).not.toHaveBeenCalled();
+    expect(mockPushInventory).toHaveBeenCalledTimes(1);
     expect(mockBegin).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ system: "client_store_squarespace" }),
+      expect.objectContaining({ system: "client_store_squarespace", action: "set" }),
     );
+    expect(mappingUpdate).toHaveBeenCalledTimes(1);
+    expect(mockSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it("uses client_store_woocommerce ledger system for WooCommerce connections", async () => {
+  it("WooCommerce stays on legacy dispatcher with action=set", async () => {
     setResults({
       client_store_connections: {
-        data: makeConnection({
-          platform: "woocommerce",
-          default_location_id: null,
-        }),
+        data: makeConnection({ platform: "woocommerce", default_location_id: null }),
       },
       client_store_sku_mappings: { data: makeMapping() },
     });
     const result = await runTask(basePayload());
     expect(result.status).toBe("ok");
+    expect(mockSetCas).not.toHaveBeenCalled();
+    expect(mockPushInventory).toHaveBeenCalledTimes(1);
     expect(mockBegin).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ system: "client_store_woocommerce" }),
+      expect.objectContaining({ system: "client_store_woocommerce", action: "set" }),
     );
   });
 
-  it("skips bigcommerce (not supported in Pass 1)", async () => {
+  it("skips bigcommerce (not supported in Pass 1/2)", async () => {
     setResults({
       client_store_connections: {
         data: makeConnection({
@@ -417,12 +583,14 @@ describe("clientStorePushOnSkuTask", () => {
     expect(mockComputeEffectiveSellable).not.toHaveBeenCalled();
   });
 
-  it("marks ledger error and rethrows when pushInventory fails", async () => {
+  it("legacy dispatcher push failure marks ledger error + rethrows", async () => {
     setResults({
-      client_store_connections: { data: makeConnection() },
+      client_store_connections: {
+        data: makeConnection({ platform: "squarespace", default_location_id: null }),
+      },
       client_store_sku_mappings: { data: makeMapping() },
     });
-    mockPushInventory.mockRejectedValueOnce(new Error("Shopify 429 rate-limited"));
+    mockPushInventory.mockRejectedValueOnce(new Error("Squarespace 429 rate-limited"));
     await expect(runTask(basePayload())).rejects.toThrow(/rate-limited/);
     expect(mockError).toHaveBeenCalledTimes(1);
     expect(mockSuccess).not.toHaveBeenCalled();

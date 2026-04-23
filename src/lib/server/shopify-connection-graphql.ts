@@ -18,10 +18,14 @@
  * the call sites stay greppable.
  */
 
+import { SHOPIFY_CLIENT_API_VERSION } from "@/lib/shared/constants";
+
 const MAX_RETRIES = 3;
 const THROTTLE_WAIT_MS = 2000;
 
-const SHOPIFY_API_VERSION = "2026-01";
+// Phase 1 Pass 2 — alias for legibility at call sites in this file. The real
+// truth lives in `SHOPIFY_CLIENT_API_VERSION` (Rule #58 single owner).
+const SHOPIFY_API_VERSION = SHOPIFY_CLIENT_API_VERSION;
 
 interface GraphQLResponse<T> {
   data?: T;
@@ -137,9 +141,10 @@ export async function connectionShopifyGraphQL<T>(
  * Bounded to 50 products per page × 100 variants per product (Shopify default
  * page size cap). Caller decides what to DO with the variants.
  *
- * Pinned to API version `2026-01` to match the OAuth route's scope set
- * (HRD-09.2 ApiVersion-pinning happens at the webhook subscription layer,
- * not here).
+ * Pinned to `SHOPIFY_CLIENT_API_VERSION` (currently 2026-04 — see
+ * `src/lib/shared/constants.ts`) to match the OAuth route's scope set.
+ * HRD-09.2 ApiVersion-pinning happens at the webhook subscription layer,
+ * not here.
  */
 export async function* iterateAllVariants(
   ctx: ConnectionShopifyContext,

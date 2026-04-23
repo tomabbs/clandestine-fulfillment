@@ -1,10 +1,23 @@
 /**
- * Phase 1 §9.2 D1 — per-(connection_id, sku) client-store push.
+ * Phase 1 §9.2 D1 + Pass 2 D5 — per-(connection_id, sku) client-store push.
  *
  * Replaces the empty-payload `multi-store-inventory-push` enqueue from the
  * focused-push side of `inventory-fanout.ts`. The 5-min cron stays alive
  * as a drift safety net (X-2 audit) — this task is the steady-state happy
  * path that drops fanout latency from ~5 min to <30 s.
+ *
+ * Pass 2 platform routing:
+ *   - **Shopify** → routes through `setShopifyInventoryCas` (per-connection
+ *     transport). Absolute-write with compareQuantity + @idempotent and
+ *     a 3-attempt 50/150/400ms hot-path retry loop. CAS exhaustion files
+ *     a `cas_exhausted` review queue item and returns `cas_exhausted`
+ *     status (does NOT throw — the reconcile sweep picks up residual drift).
+ *   - **Squarespace / WooCommerce** → stays on the legacy
+ *     `createStoreSyncClient(...).pushInventory(...)` dispatcher.
+ *     Squarespace's stock_quantity PUT and WooCommerce's stock_quantity
+ *     PUT do NOT have a CAS analog — their HTTP layer is "set absolute,
+ *     last write wins". Per-platform mismatch detection is handled by the
+ *     `inv.propagation_lag` sensor + the cron sweep, not inline.
  *
  * Skip cascade (in order, all short-circuit):
  *   1. fanout-guard (`client_store` integration kill switch + per-workspace
@@ -19,35 +32,36 @@
  *      (Shopify only). Without a chosen location, `pushInventory` would
  *      fall back to whatever location Shopify reports first, which can
  *      differ from the staff-chosen warehouse location.
- *   6. `external_sync_events` ledger acquired (`UNIQUE(system, correlation_id,
- *      sku, action='set')`) — duplicate retries collide, return
- *      `skipped_ledger_duplicate`.
- *   7. `effective_sellable` value identical to `last_pushed_quantity` —
+ *   6. Shopify-specific (Pass 2): mapping.remote_inventory_item_id missing.
+ *      Means the OAuth-discover pass hasn't populated the inventory item
+ *      GID yet — without it, CAS can't address Shopify's inventory ledger.
+ *      Returns `skipped_no_remote_inventory_item_id`. Falling back to the
+ *      legacy dispatcher would silently bypass CAS, so we'd rather skip
+ *      and surface staff to re-run the discovery.
+ *   7. `external_sync_events` ledger acquired (`UNIQUE(system, correlation_id,
+ *      sku, action)` where action=`cas_set` for Shopify, `set` for others)
+ *      — duplicate retries collide, return `skipped_ledger_duplicate`.
+ *   8. `effective_sellable` value identical to `last_pushed_quantity` —
  *      no-op push (saves an HTTPS round-trip and an
- *      `inventory_levels/update` echo from Shopify).
+ *      `inventory_levels/update` echo from Shopify). Applies to legacy
+ *      dispatcher only; Shopify CAS path skips this gate because CAS
+ *      always wants to converge against Shopify's actual remote, not
+ *      our last-pushed memory.
  *
  * On success:
- *   - Calls `client.pushInventory(sku, effectiveSellable, idempotencyKey)`.
- *   - Updates `client_store_sku_mappings.last_pushed_quantity` +
+ *   - Shopify (Pass 2 CAS path): `setShopifyInventoryCas` writes the
+ *     ledger row + per-attempt history.
+ *   - Legacy path: marks the ledger row `success` with pushed quantity.
+ *   - Both: update `client_store_sku_mappings.last_pushed_quantity` +
  *     `last_pushed_at` so Rule #65 echo-cancellation works on the next
- *     storefront webhook AND so Pass 2 Shopify CAS has the right
- *     `changeFromQuantity` baseline.
- *   - Marks the ledger row `success` with the pushed quantity in
- *     `response_body`.
+ *     storefront webhook.
  *
  * On failure:
- *   - Marks the ledger row `error` with the error body.
- *   - Re-throws so Trigger.dev retries via its built-in policy (the task
- *     does NOT carry a custom retry — Trigger.dev defaults are sufficient
- *     for transient network errors).
- *
- * Echo / CAS layering reminder (plan §9.2 D7):
- *   `effectiveSellable` is the value we PUSH. The CAS comparator
- *   (`changeFromQuantity`) — when Pass 2 lands — uses raw remote
- *   `available` (last observed via `last_pushed_quantity`), NOT the
- *   safety-stock-adjusted value. Mixing the two would make every CAS call
- *   mismatch on local reservation churn instead of real concurrent
- *   writes.
+ *   - Shopify CAS exhaustion: returns `cas_exhausted` (helper handled
+ *     ledger + review queue). Does NOT throw.
+ *   - Shopify CAS non-CAS error / legacy push error: marks the ledger
+ *     row `error` and re-throws so Trigger.dev retries via its built-in
+ *     policy.
  *
  * Rules: #7 (service-role), #12 (IDs only), #15 (stable correlation_id),
  *        #43 (single-write fanout step 4), #44 (track last_pushed_*),
@@ -63,14 +77,39 @@ import {
 } from "@/lib/server/effective-sellable";
 import {
   beginExternalSync,
+  type ExternalSyncAction,
   type ExternalSyncSystem,
   markExternalSyncError,
   markExternalSyncSuccess,
 } from "@/lib/server/external-sync-events";
 import { loadFanoutGuard } from "@/lib/server/fanout-guard";
+import { setShopifyInventoryCas } from "@/lib/server/shopify-cas-retry";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 import { clientStorePushQueue } from "@/trigger/lib/client-store-push-queues";
+
+/**
+ * Shopify stores the REST `default_location_id` as the numeric id (per the
+ * comment on `client_store_connections.default_location_id`). The CAS
+ * helper expects a GraphQL GID. Tolerate both shapes — operators have
+ * historically pasted the GID form into the staff UI by accident, and
+ * we don't want to break those connections.
+ */
+function toShopifyLocationGid(value: string): string {
+  return value.startsWith("gid://shopify/Location/") ? value : `gid://shopify/Location/${value}`;
+}
+
+/**
+ * `remote_inventory_item_id` is set by `discoverShopifySkus` from the
+ * Admin GraphQL response, which always returns a GID. Older code paths
+ * (manual imports, hand-edited rows) might still carry a numeric REST
+ * id, so normalise the same way as the location id.
+ */
+function toShopifyInventoryItemGid(value: string): string {
+  return value.startsWith("gid://shopify/InventoryItem/")
+    ? value
+    : `gid://shopify/InventoryItem/${value}`;
+}
 
 export interface ClientStorePushOnSkuPayload {
   workspaceId: string;
@@ -96,6 +135,16 @@ export type ClientStorePushOnSkuResult =
       sku: string;
       pushedQuantity: number;
       ledgerId: string;
+      /** Pass 2: number of CAS attempts (Shopify only). 1 for legacy paths. */
+      attempts?: number;
+    }
+  | {
+      status: "cas_exhausted";
+      connectionId: string;
+      sku: string;
+      ledgerId: string;
+      attempts: number;
+      lastActualQuantity: number | null;
     }
   | {
       status:
@@ -104,6 +153,7 @@ export type ClientStorePushOnSkuResult =
         | "skipped_dormant"
         | "skipped_no_mapping"
         | "skipped_no_default_location"
+        | "skipped_no_remote_inventory_item_id"
         | "skipped_unknown_platform"
         | "skipped_ledger_duplicate"
         | "skipped_unchanged_quantity"
@@ -249,11 +299,13 @@ export const clientStorePushOnSkuTask = task({
     }
 
     // 4) mapping lookup — both `remote_sku` (the storefront's SKU) AND
-    //    variant_id resolution.
+    //    variant_id resolution. `remote_inventory_item_id` is required
+    //    for the Pass 2 Shopify CAS branch (skipped with a dedicated
+    //    status if NULL — see step 5b).
     const { data: mapping } = await supabase
       .from("client_store_sku_mappings")
       .select(
-        "id, variant_id, remote_product_id, remote_variant_id, remote_sku, last_pushed_quantity, safety_stock",
+        "id, variant_id, remote_product_id, remote_variant_id, remote_inventory_item_id, remote_sku, last_pushed_quantity, safety_stock",
       )
       .eq("connection_id", conn.id)
       .eq("workspace_id", workspaceId)
@@ -298,8 +350,32 @@ export const clientStorePushOnSkuTask = task({
 
     const pushedQuantity = sellable.effectiveSellable;
 
+    // 5b) Pass 2 — Shopify-only invariant. CAS needs the inventory item GID.
+    //     If the OAuth-discover pass hasn't populated it (or the row was
+    //     hand-edited away), skip with a dedicated status so staff
+    //     re-run discovery rather than silently dropping into the
+    //     non-CAS legacy dispatcher.
+    if (conn.platform === "shopify" && !mapping.remote_inventory_item_id) {
+      logger.warn("[client-store-push-on-sku] Shopify mapping missing remote_inventory_item_id", {
+        connectionId,
+        sku,
+        mappingId: mapping.id,
+      });
+      return {
+        status: "skipped_no_remote_inventory_item_id",
+        connectionId,
+        sku,
+        reason: "remote_inventory_item_id_required_for_shopify_cas",
+      };
+    }
+
     // 6) no-op push elision — Rule #44 echo-cancellation baseline.
+    //    SKIPPED for Shopify in Pass 2: CAS always wants to converge
+    //    against Shopify's *actual* remote, not our memory of it. If
+    //    Shopify and our `last_pushed_quantity` agree, the CAS write is
+    //    @idempotent and effectively a no-op anyway.
     if (
+      conn.platform !== "shopify" &&
       typeof mapping.last_pushed_quantity === "number" &&
       mapping.last_pushed_quantity === pushedQuantity
     ) {
@@ -316,12 +392,15 @@ export const clientStorePushOnSkuTask = task({
       };
     }
 
-    // 7) ledger acquire — idempotency
+    // 7) ledger acquire — idempotency. Action verb segments Pass 2 CAS
+    //    writes (`cas_set`) from the legacy absolute-set path (`set`)
+    //    so analytics / sensors can tell them apart.
+    const ledgerAction: ExternalSyncAction = conn.platform === "shopify" ? "cas_set" : "set";
     const claim = await beginExternalSync(supabase, {
       system: syncSystem,
       correlation_id: correlationId,
       sku,
-      action: "set",
+      action: ledgerAction,
       request_body: {
         connection_id: conn.id,
         platform: conn.platform,
@@ -352,7 +431,104 @@ export const clientStorePushOnSkuTask = task({
       };
     }
 
-    // 8) push to remote storefront via the dispatcher
+    // 8a) Pass 2 — Shopify CAS branch (per-connection transport).
+    if (conn.platform === "shopify") {
+      // Type-narrowing: step 5 already checked default_location_id and
+      // step 5b already checked remote_inventory_item_id, but TS can't
+      // see that across the conditional branches. Re-assert here.
+      const inventoryItemGid = toShopifyInventoryItemGid(
+        mapping.remote_inventory_item_id as string,
+      );
+      const locationGid = toShopifyLocationGid(conn.default_location_id as string);
+
+      try {
+        const result = await setShopifyInventoryCas({
+          supabase,
+          transport: {
+            kind: "per_connection",
+            ctx: { storeUrl: conn.store_url, accessToken: conn.api_key as string },
+          },
+          inventoryItemId: inventoryItemGid,
+          locationId: locationGid,
+          workspaceId,
+          orgId: conn.org_id ?? null,
+          sku,
+          correlationId,
+          // Narrowed: in this branch `conn.platform === "shopify"` so the
+          // ledger system is always the client-store flavor. (We can't pass
+          // the broader `syncSystem` here — the CAS retry helper requires
+          // a Shopify-only literal so its review-queue rows stay segmented.)
+          system: "client_store_shopify",
+          ledgerId: claim.id,
+          // Re-read effective_sellable each retry — a sale that lands
+          // between attempts moves the desired value with the truth.
+          // The `remoteAvailable` parameter is the Shopify-side count;
+          // we ignore it for compute (Postgres is truth) but the helper
+          // forwards it as `expectedQuantity` for CAS.
+          computeDesired: async () => {
+            const fresh = await computeEffectiveSellable(supabase, {
+              workspaceId,
+              sku,
+              channel,
+              connectionId: conn.id,
+            });
+            return fresh.effectiveSellable;
+          },
+          reason: "fanout",
+        });
+
+        if (result.ok) {
+          // Rule #44 / Rule #65 — record what we pushed for echo cancel.
+          await supabase
+            .from("client_store_sku_mappings")
+            .update({
+              last_pushed_quantity: result.finalNewQuantity,
+              last_pushed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", mapping.id);
+
+          return {
+            status: "ok",
+            connectionId,
+            sku,
+            pushedQuantity: result.finalNewQuantity,
+            ledgerId: claim.id,
+            attempts: result.attempts.length,
+          };
+        }
+
+        // CAS exhausted — helper marked ledger error + filed
+        // cas_exhausted review queue row. Don't throw: reconcile sweep
+        // picks up residual drift.
+        return {
+          status: "cas_exhausted",
+          connectionId,
+          sku,
+          ledgerId: claim.id,
+          attempts: result.attempts.length,
+          lastActualQuantity: result.lastActualQuantity,
+        };
+      } catch (err) {
+        // Defensive (the helper already marks ledger error before
+        // throwing on non-CAS paths, but a computeDesired throw can
+        // bubble through). Mark idempotently and re-throw for retry.
+        try {
+          await markExternalSyncError(supabase, claim.id, err);
+        } catch {
+          // ignore double-mark errors
+        }
+        logger.error("[client-store-push-on-sku] Shopify CAS pipeline failed", {
+          connectionId,
+          sku,
+          correlationId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    }
+
+    // 8b) Legacy dispatcher branch (Squarespace / WooCommerce).
     try {
       const skuMappingContext = new Map([
         [
@@ -393,6 +569,7 @@ export const clientStorePushOnSkuTask = task({
         sku,
         pushedQuantity,
         ledgerId: claim.id,
+        attempts: 1,
       };
     } catch (err) {
       await markExternalSyncError(supabase, claim.id, err);

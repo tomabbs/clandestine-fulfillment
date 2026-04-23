@@ -110,6 +110,35 @@ const HOT_RECENT_SALE_WINDOW_HOURS = 24;
 /** Warm-tier recency window for "sold in the last 30 days" SKU filter. */
 const WARM_RECENT_SALE_WINDOW_DAYS = 30;
 
+/**
+ * Pass 2 D6 — no-other-writer gate. Skip reconcile auto-fix when ANY
+ * `client_store_sku_mappings` row for this (workspace, SKU) was pushed
+ * to within the last 60s. Rationale:
+ *   - Reconcile observes drift between ShipStation v2 and our DB and
+ *     absorbs it via `recordInventoryChange(source='reconcile')`.
+ *   - That recordInventoryChange triggers fanout to every channel —
+ *     including Shopify CAS via `client-store-push-on-sku` and
+ *     `clandestine-shopify-push-on-sku`.
+ *   - If a Shopify (or other client-store) push happened within the
+ *     last 60s for this SKU, the drift we observed MIGHT be caused by
+ *     that in-flight push (the storefront's webhook hasn't echoed back
+ *     to update our last-known remote yet). Absorbing now risks
+ *     stomping over a write that's already converging.
+ *   - 60s comfortably covers Shopify webhook propagation (typically
+ *     <5s) plus our own webhook handler latency budget.
+ *   - The drift row stays in `result.drifts` with
+ *     `auto_fix_applied:false` + `skip_reason:'recent_other_writer'`
+ *     so the next reconcile pass will pick it up if it persists.
+ *
+ * Why the gate is conservative (60s, not 5s):
+ *   - We'd rather defer one reconcile round-trip than emit a churn
+ *     pulse to Shopify CAS that the sensor itself caused.
+ *   - The `inv.propagation_lag` sensor will surface the SKU as
+ *     `delayed` if the gate keeps firing, which is the correct
+ *     escalation path (operator visibility, not auto-stomping).
+ */
+export const RECONCILE_NO_OTHER_WRITER_WINDOW_MS = 60_000;
+
 // ─── Public surface ──────────────────────────────────────────────────────────
 
 export interface ReconcilePayload {
@@ -127,6 +156,10 @@ export interface ReconcileDriftRow {
   drift: number;
   severity: "silent" | "low" | "high";
   auto_fix_applied: boolean;
+  /** Pass 2 D6 — populated when the no-other-writer gate held the auto-fix. */
+  skip_reason?: "recent_other_writer";
+  /** ISO timestamp of the most recent client-store push that gated us. */
+  most_recent_writer_at?: string;
   review_queue_id?: string;
 }
 
@@ -140,6 +173,8 @@ export interface ReconcileWorkspaceResult {
   lowReviewItemsUpserted: number;
   highReviewItemsUpserted: number;
   bundlesSkipped: number;
+  /** Pass 2 D6 — count of drifts gated by the no-other-writer window. */
+  recentWriterGated: number;
   drifts: ReconcileDriftRow[];
   notes?: string;
 }
@@ -154,6 +189,12 @@ export interface ReconcileDeps {
   inventoryFetcher?: typeof listInventory;
   getWorkspaceIds?: typeof getAllWorkspaceIds;
   recordInventoryChange?: typeof recordInventoryChange;
+  /**
+   * Pass 2 D6 — clock injection for the no-other-writer gate. Tests
+   * pin Date.now() so the 60s window is deterministic. Defaults to
+   * Date.now in production.
+   */
+  now?: () => number;
 }
 
 // ─── Internal row shapes ─────────────────────────────────────────────────────
@@ -191,6 +232,7 @@ export async function runShipstationBandcampReconcile(
     : (deps.inventoryFetcher ?? listInventory);
   const getWorkspaces = deps.getWorkspaceIds ?? getAllWorkspaceIds;
   const writeInventory = deps.recordInventoryChange ?? recordInventoryChange;
+  const now = deps.now ?? Date.now;
 
   const workspaceIds =
     payload.workspaceIds && payload.workspaceIds.length > 0
@@ -208,6 +250,7 @@ export async function runShipstationBandcampReconcile(
       fetchInventory,
       writeInventory,
       supabase,
+      now,
     );
     result.workspaces.push(wsResult);
 
@@ -234,6 +277,7 @@ async function runWorkspace(
   fetchInventory: typeof listInventory,
   writeInventory: typeof recordInventoryChange,
   supabase: ReturnType<typeof createServiceRoleClient>,
+  now: () => number,
 ): Promise<ReconcileWorkspaceResult> {
   const baseResult: ReconcileWorkspaceResult = {
     workspaceId,
@@ -245,6 +289,7 @@ async function runWorkspace(
     lowReviewItemsUpserted: 0,
     highReviewItemsUpserted: 0,
     bundlesSkipped: 0,
+    recentWriterGated: 0,
     drifts: [],
   };
 
@@ -310,6 +355,16 @@ async function runWorkspace(
   const v2BySku = new Map<string, number>();
   for (const r of v2Records) v2BySku.set(r.sku, Number(r.available) || 0);
 
+  // 5b) Pass 2 D6 — fetch most-recent client_store_sku_mappings.last_pushed_at
+  //     per SKU for this workspace. Used by the no-other-writer gate
+  //     in the per-SKU loop. We do this in a single query before the
+  //     loop so we don't fan out one PostgREST call per drift row.
+  const mostRecentPushBySku = await fetchMostRecentPushBySku(
+    supabase,
+    workspaceId,
+    Array.from(ourBySku.keys()),
+  );
+
   // 6) Per-SKU drift evaluation.
   for (const [sku, ours] of Array.from(ourBySku.entries())) {
     // SKU at 0 is invisible to `GET /v2/inventory?sku=…` (Phase 0 §4.2.3 —
@@ -320,6 +375,46 @@ async function runWorkspace(
     const v2Available = v2BySku.get(sku) ?? 0;
     const drift = v2Available - ours.available;
     if (Math.abs(drift) === 0) continue;
+
+    // Pass 2 D6 — no-other-writer gate. Defer auto-fix when any
+    // client-store push touched this SKU within the last 60s; the
+    // observed drift may be in flight from that push and absorbing
+    // would create a churn pulse. The drift is still RECORDED in
+    // `result.drifts` (with skip_reason='recent_other_writer') so
+    // operators / tests can see we deferred, and the next reconcile
+    // round will pick it up if it persists.
+    const mostRecent = mostRecentPushBySku.get(sku);
+    const gated =
+      mostRecent != null && now() - Date.parse(mostRecent) < RECONCILE_NO_OTHER_WRITER_WINDOW_MS;
+
+    if (gated) {
+      baseResult.driftDetected++;
+      baseResult.recentWriterGated++;
+      const severity: "silent" | "low" | "high" =
+        Math.abs(drift) <= SILENT_DRIFT_TOLERANCE
+          ? "silent"
+          : Math.abs(drift) > HIGH_SEVERITY_DRIFT_THRESHOLD
+            ? "high"
+            : "low";
+      baseResult.drifts.push({
+        sku,
+        workspace_id: workspaceId,
+        v2_available: v2Available,
+        our_available: ours.available,
+        drift,
+        severity,
+        auto_fix_applied: false,
+        skip_reason: "recent_other_writer",
+        most_recent_writer_at: mostRecent,
+      });
+      logger.info("[shipstation-bandcamp-reconcile] no-other-writer gate held auto-fix", {
+        workspaceId,
+        sku,
+        drift,
+        most_recent_writer_at: mostRecent,
+      });
+      continue;
+    }
 
     if (Math.abs(drift) <= SILENT_DRIFT_TOLERANCE) {
       // Silent auto-fix path — absorb the delta into our DB; no review item.
@@ -378,6 +473,7 @@ async function runWorkspace(
     silentFixes: baseResult.silentFixes,
     lowReviewItemsUpserted: baseResult.lowReviewItemsUpserted,
     highReviewItemsUpserted: baseResult.highReviewItemsUpserted,
+    recentWriterGated: baseResult.recentWriterGated,
   });
 
   return baseResult;
@@ -446,6 +542,54 @@ async function selectCandidateSkus(
     skus.add(row.sku);
   }
   return Array.from(skus);
+}
+
+// ─── Pass 2 D6 — most-recent-pushed-at lookup for the no-other-writer gate ──
+
+/**
+ * Returns a map of SKU → ISO timestamp of the most recent
+ * `client_store_sku_mappings.last_pushed_at` for that (workspace, SKU)
+ * across all client store connections. Returns the latest stamp when a
+ * SKU has multiple mapping rows (the gate is "ANY active writer in the
+ * window").
+ *
+ * The query is INTENTIONALLY scoped to `is_active=true` mappings —
+ * historical/disabled mappings can have stale `last_pushed_at` values
+ * that would falsely gate every reconcile run forever.
+ */
+export async function fetchMostRecentPushBySku(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  skus: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (skus.length === 0) return out;
+
+  // Chunk to keep the IN-list under PostgREST's URL-length budget.
+  const CHUNK = 200;
+  for (let i = 0; i < skus.length; i += CHUNK) {
+    const chunk = skus.slice(i, i + CHUNK);
+    const { data } = await supabase
+      .from("client_store_sku_mappings")
+      .select("remote_sku, last_pushed_at")
+      .eq("workspace_id", workspaceId)
+      .eq("is_active", true)
+      .in("remote_sku", chunk)
+      .not("last_pushed_at", "is", null);
+
+    for (const row of (data ?? []) as Array<{
+      remote_sku: string;
+      last_pushed_at: string | null;
+    }>) {
+      if (!row.last_pushed_at) continue;
+      const existing = out.get(row.remote_sku);
+      if (!existing || Date.parse(row.last_pushed_at) > Date.parse(existing)) {
+        out.set(row.remote_sku, row.last_pushed_at);
+      }
+    }
+  }
+
+  return out;
 }
 
 // ─── Auto-fix helper ─────────────────────────────────────────────────────────

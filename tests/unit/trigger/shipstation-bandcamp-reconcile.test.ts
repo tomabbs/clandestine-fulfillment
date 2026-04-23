@@ -57,6 +57,7 @@ vi.mock("@/lib/server/supabase-server", () => ({
 import {
   HIGH_SEVERITY_DRIFT_THRESHOLD,
   HOT_LOW_STOCK_THRESHOLD,
+  RECONCILE_NO_OTHER_WRITER_WINDOW_MS,
   type ReconcileDeps,
   type ReconcilePayload,
   type ReconcileTier,
@@ -90,6 +91,8 @@ interface TableHandlers {
   warehouse_inventory_levels_lowstock?: ChainResult; // hot tier low stock
   warehouse_inventory_activity?: ChainResult; // hot/warm tier sold-since
   warehouse_review_queue_existing?: ChainResult;
+  /** Pass 2 D6 — most-recent-pushed-at lookup for the no-other-writer gate. */
+  client_store_sku_mappings?: ChainResult;
   channel_sync_log?: ChainResult;
 }
 
@@ -195,6 +198,18 @@ function makeSupabase(handlers: TableHandlers) {
     },
   });
 
+  // Pass 2 D6 — fetchMostRecentPushBySku reads from
+  // client_store_sku_mappings via select → eq → eq → in → not chain.
+  const clientStoreMappingsBuilder = () => {
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      in: () => builder,
+      not: () => thenable(handlers.client_store_sku_mappings ?? { data: [] }),
+    };
+    return builder;
+  };
+
   return {
     _inserts: inserts,
     _updates: updates,
@@ -210,6 +225,8 @@ function makeSupabase(handlers: TableHandlers) {
           return activityBuilder();
         case "warehouse_review_queue":
           return reviewQueueBuilder();
+        case "client_store_sku_mappings":
+          return clientStoreMappingsBuilder();
         case "channel_sync_log":
           return channelLogBuilder();
         default:
@@ -236,6 +253,7 @@ function buildDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
     recordInventoryChange:
       overrides.recordInventoryChange ??
       vi.fn(async () => ({ success: true, newQuantity: 0, alreadyProcessed: false })),
+    now: overrides.now,
   };
 }
 
@@ -523,5 +541,154 @@ describe("runShipstationBandcampReconcile", () => {
         correlationId: "reconcile:warm:run-xyz:FIX-CORR",
       }),
     );
+  });
+
+  // ── Pass 2 D6 — no-other-writer 60s gate ────────────────────────────────
+
+  describe("Pass 2 D6 — no-other-writer 60s gate", () => {
+    const NOW_MS = 1_700_000_000_000;
+    const WITHIN_WINDOW_ISO = new Date(
+      NOW_MS - (RECONCILE_NO_OTHER_WRITER_WINDOW_MS - 5_000),
+    ).toISOString(); // 55s ago — gate FIRES
+    const OUTSIDE_WINDOW_ISO = new Date(
+      NOW_MS - (RECONCILE_NO_OTHER_WRITER_WINDOW_MS + 5_000),
+    ).toISOString(); // 65s ago — gate does NOT fire
+
+    function pinNow() {
+      return () => NOW_MS;
+    }
+
+    function buildBaseSupabase(handlers: Partial<TableHandlers> = {}) {
+      return makeSupabase({
+        workspaces: WS_DEFAULTS,
+        warehouse_inventory_levels_cold: {
+          data: [{ sku: "GATED-1", variant_id: "var-g" }],
+        },
+        warehouse_inventory_levels_lookup: {
+          data: [{ sku: "GATED-1", variant_id: "var-g", available: 10 }],
+        },
+        ...handlers,
+      });
+    }
+
+    it("Case 1: no client_store mapping rows for SKU → no gate, auto-fix proceeds", async () => {
+      const supabase = buildBaseSupabase({ client_store_sku_mappings: { data: [] } });
+      // |drift|=3 — would normally trigger low-severity review.
+      const inventoryFetcher = vi.fn(async () => [{ sku: "GATED-1", available: 7 } as never]);
+      const recordInventoryChange = vi.fn(async () => ({
+        success: true,
+        newQuantity: 7,
+        alreadyProcessed: false,
+      }));
+
+      const result = await runTier(
+        "cold",
+        buildDeps({
+          supabase: supabase as never,
+          inventoryFetcher,
+          recordInventoryChange,
+          now: pinNow(),
+        }),
+      );
+
+      expect(result.workspaces[0].recentWriterGated).toBe(0);
+      expect(result.workspaces[0].driftDetected).toBe(1);
+      expect(result.workspaces[0].lowReviewItemsUpserted).toBe(1);
+      expect(recordInventoryChange).toHaveBeenCalledTimes(1);
+      expect(result.workspaces[0].drifts[0].auto_fix_applied).toBe(true);
+      expect(result.workspaces[0].drifts[0].skip_reason).toBeUndefined();
+    });
+
+    it("Case 2: mapping exists with last_pushed_at OUTSIDE 60s window → no gate, auto-fix proceeds", async () => {
+      const supabase = buildBaseSupabase({
+        client_store_sku_mappings: {
+          data: [{ remote_sku: "GATED-1", last_pushed_at: OUTSIDE_WINDOW_ISO }],
+        },
+      });
+      const inventoryFetcher = vi.fn(async () => [{ sku: "GATED-1", available: 7 } as never]);
+      const recordInventoryChange = vi.fn(async () => ({
+        success: true,
+        newQuantity: 7,
+        alreadyProcessed: false,
+      }));
+
+      const result = await runTier(
+        "cold",
+        buildDeps({
+          supabase: supabase as never,
+          inventoryFetcher,
+          recordInventoryChange,
+          now: pinNow(),
+        }),
+      );
+
+      expect(result.workspaces[0].recentWriterGated).toBe(0);
+      expect(recordInventoryChange).toHaveBeenCalledTimes(1);
+      expect(result.workspaces[0].drifts[0].auto_fix_applied).toBe(true);
+    });
+
+    it("Case 3: mapping with last_pushed_at INSIDE 60s window → gate FIRES, auto-fix skipped, drift still recorded", async () => {
+      const supabase = buildBaseSupabase({
+        client_store_sku_mappings: {
+          data: [{ remote_sku: "GATED-1", last_pushed_at: WITHIN_WINDOW_ISO }],
+        },
+      });
+      const inventoryFetcher = vi.fn(async () => [{ sku: "GATED-1", available: 7 } as never]);
+      const recordInventoryChange = vi.fn();
+
+      const result = await runTier(
+        "cold",
+        buildDeps({
+          supabase: supabase as never,
+          inventoryFetcher,
+          recordInventoryChange,
+          now: pinNow(),
+        }),
+      );
+
+      expect(result.workspaces[0].recentWriterGated).toBe(1);
+      expect(result.workspaces[0].driftDetected).toBe(1);
+      // Critical: NO writes during the gated window.
+      expect(recordInventoryChange).not.toHaveBeenCalled();
+      // No review queue churn either — gate held BEFORE the review-queue
+      // upsert (we're not yet sure the drift is real).
+      expect(result.workspaces[0].lowReviewItemsUpserted).toBe(0);
+      expect(result.workspaces[0].highReviewItemsUpserted).toBe(0);
+      // Drift IS recorded so the operator can see it.
+      expect(result.workspaces[0].drifts).toHaveLength(1);
+      expect(result.workspaces[0].drifts[0].auto_fix_applied).toBe(false);
+      expect(result.workspaces[0].drifts[0].skip_reason).toBe("recent_other_writer");
+      expect(result.workspaces[0].drifts[0].most_recent_writer_at).toBe(WITHIN_WINDOW_ISO);
+    });
+
+    it("Case 4: multiple mapping rows — most-recent INSIDE window wins, gate fires", async () => {
+      const supabase = buildBaseSupabase({
+        client_store_sku_mappings: {
+          data: [
+            // Old push — would NOT gate on its own.
+            { remote_sku: "GATED-1", last_pushed_at: OUTSIDE_WINDOW_ISO },
+            // Recent push from a different connection — DOES gate.
+            { remote_sku: "GATED-1", last_pushed_at: WITHIN_WINDOW_ISO },
+          ],
+        },
+      });
+      const inventoryFetcher = vi.fn(async () => [{ sku: "GATED-1", available: 7 } as never]);
+      const recordInventoryChange = vi.fn();
+
+      const result = await runTier(
+        "cold",
+        buildDeps({
+          supabase: supabase as never,
+          inventoryFetcher,
+          recordInventoryChange,
+          now: pinNow(),
+        }),
+      );
+
+      expect(result.workspaces[0].recentWriterGated).toBe(1);
+      expect(recordInventoryChange).not.toHaveBeenCalled();
+      // Most-recent stamp wins.
+      expect(result.workspaces[0].drifts[0].most_recent_writer_at).toBe(WITHIN_WINDOW_ISO);
+    });
   });
 });

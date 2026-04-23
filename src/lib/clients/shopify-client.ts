@@ -435,7 +435,7 @@ function toProductGid(id: string): string {
  * Add media (images) to an existing Shopify product.
  * Use this instead of productUpdate+images — that field was removed in 2024-01.
  *
- * API version: 2026-01+
+ * API version: 2026-04+ (env-singleton path uses `SHOPIFY_API_VERSION` from env)
  * Mutation: productCreateMedia
  */
 export async function productCreateMedia(
