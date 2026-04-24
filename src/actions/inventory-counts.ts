@@ -436,10 +436,9 @@ export async function getCountSessionState(sku: string): Promise<CountSessionSta
 
   const startedByRaw = (level as unknown as { users?: { id: string; name: string | null } | null })
     ?.users;
-  const startedBy =
-    startedByRaw && startedByRaw.id
-      ? { id: startedByRaw.id, name: startedByRaw.name ?? null }
-      : null;
+  const startedBy = startedByRaw?.id
+    ? { id: startedByRaw.id, name: startedByRaw.name ?? null }
+    : null;
 
   return {
     status: ((level?.count_status as string | null) ?? "idle") as "idle" | "count_in_progress",

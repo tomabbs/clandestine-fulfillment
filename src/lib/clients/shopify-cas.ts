@@ -203,7 +203,7 @@ interface InventorySetQuantitiesResponse {
  * stable).
  */
 function isCompareMismatchUserError(err: { code: string | null; message: string }): boolean {
-  if (err.code && err.code.toUpperCase().includes("COMPARE")) return true;
+  if (err.code?.toUpperCase().includes("COMPARE")) return true;
   return /compare\s+quantity/i.test(err.message);
 }
 
