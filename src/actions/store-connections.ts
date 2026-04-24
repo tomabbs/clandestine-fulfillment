@@ -13,8 +13,6 @@ import {
   persistWebhookRegistrationMetadata,
   type RegisterWebhookSubscriptionsResult,
   registerWebhookSubscriptions,
-  SHOPIFY_REQUIRED_WEBHOOK_TOPICS,
-  topicEnumToRest,
   type WebhookSubscriptionRecord,
 } from "@/lib/server/shopify-webhook-subscriptions";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -25,6 +23,7 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 // from the shared constant so a single bump touches every per-client surface.
 import { SHOPIFY_CLIENT_API_VERSION as SHOPIFY_API_VERSION } from "@/lib/shared/constants";
 import { env } from "@/lib/shared/env";
+import { SHOPIFY_REQUIRED_WEBHOOK_TOPICS_REST } from "@/lib/shared/shopify-webhook-topics";
 import type {
   ClientStoreConnection,
   ClientStoreSkuMapping,
@@ -1368,12 +1367,6 @@ export async function getChannelWebhookHealth(input: {
     diffError,
   };
 }
-
-// Re-export so the Channels page can render badges that include the canonical
-// list of required topics (the diff helper already knows about them, but the
-// UI's "missing topic" badge needs the list directly).
-export const SHOPIFY_REQUIRED_WEBHOOK_TOPICS_REST: readonly string[] =
-  SHOPIFY_REQUIRED_WEBHOOK_TOPICS.map(topicEnumToRest);
 
 // ============================================================================
 // HRD-04 + HRD-18 — runDirectShopifyDryRun

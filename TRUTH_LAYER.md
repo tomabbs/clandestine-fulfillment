@@ -32,6 +32,7 @@ If any required file is missing or stale for the requested scope, return `BLOCKE
 - Workspace-scoped admin reads must derive tenant scope on the server from `requireAuth()` rather than trusting a client-cached workspace id for the primary row filter.
 - Admin query surfaces must not collapse auth/query failures into the same empty-state copy used for true zero-row results.
 - Admin settings pages should avoid hard dependencies on separate bootstrap context reads when the primary domain actions can derive workspace scope from auth directly.
+- Cold-config admin pages whose initial reads require request-bound auth context may server-render their initial dataset and then use client-side mutations plus `router.refresh()` for freshness instead of invoking read actions from client query hooks during bootstrap. `/admin/settings/store-connections` now follows this pattern to avoid post-OAuth request-scope failures during page render.
 - Org/workspace sensitive writes are protected by RLS or service-role actions with explicit authorization checks.
 - Trigger.dev handles background and asynchronous workflows; debugging must include related tasks.
 - Webhook handlers must preserve idempotency and bounded retries.

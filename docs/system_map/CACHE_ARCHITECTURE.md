@@ -32,6 +32,7 @@ Every query must be classified:
 3. **Cold config/reference**
    - Examples: settings, mappings, static lookup lists.
    - Refresh: long TTL + mutation-driven invalidation.
+   - When the first read requires request-bound auth/session state, prefer a server-rendered bootstrap payload plus client-side mutations with `router.refresh()` over client-side bootstrap calls to request-scoped Server Actions. `/admin/settings/store-connections` now follows this pattern.
 
 ## Query Key and Scope Contract
 
