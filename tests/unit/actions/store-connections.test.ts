@@ -295,9 +295,21 @@ describe("store-connections server actions", () => {
 
   describe("disableStoreConnection", () => {
     it("sets connection_status to error and do_not_fanout to true", async () => {
+      // Phase 3 D1 — disable now does a cutover_state lookup first to
+      // reject mid-cutover connections.
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: { cutover_state: "legacy" },
+              error: null,
+            }),
+          }),
+        }),
+      });
+
       const mockEq = vi.fn().mockResolvedValue({ error: null });
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEq });
-
       mockServiceFrom.mockReturnValueOnce({
         update: mockUpdate,
       });
@@ -312,6 +324,43 @@ describe("store-connections server actions", () => {
         }),
       );
     });
+
+    // Phase 3 D1 — defensive guard. The DB CHECK constraint
+    // `client_store_connections_cutover_dormancy_check` blocks
+    // `(cutover_state IN ('shadow','direct'), do_not_fanout=true)`. We
+    // surface a clear, actionable error in the action layer rather than
+    // letting the operator hit a generic Postgres constraint violation.
+    it.each([
+      ["shadow"],
+      ["direct"],
+    ] as const)("throws when cutover_state=%s without performing the update", async (state) => {
+      const mockSelectEq = vi.fn().mockReturnValue({
+        single: vi.fn().mockResolvedValue({
+          data: { cutover_state: state },
+          error: null,
+        }),
+      });
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({ eq: mockSelectEq }),
+      });
+
+      await expect(disableStoreConnection("conn-1")).rejects.toThrow(
+        /Roll back cutover_state to 'legacy'/,
+      );
+      // Only the lookup .from() call should have happened — no update.
+      expect(mockServiceFrom).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws Connection not found when the lookup row is missing", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: null, error: { message: "not found" } }),
+          }),
+        }),
+      });
+      await expect(disableStoreConnection("conn-1")).rejects.toThrow("Connection not found");
+    });
   });
 
   // === reactivateClientStoreConnection (Phase 0.8) ===
@@ -320,7 +369,7 @@ describe("store-connections server actions", () => {
     const validId = "11111111-1111-4111-8111-111111111111";
 
     it("flips do_not_fanout=false, status=active, clears errors, writes audit log", async () => {
-      // Connection lookup
+      // Connection lookup — Phase 3 D1 SELECT now includes cutover_state.
       mockServiceFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
@@ -329,6 +378,7 @@ describe("store-connections server actions", () => {
                 workspace_id: "ws-1",
                 platform: "shopify",
                 store_url: "https://shop.example.com",
+                cutover_state: "legacy",
               },
               error: null,
             }),
@@ -407,6 +457,34 @@ describe("store-connections server actions", () => {
       await expect(reactivateClientStoreConnection({ connectionId: validId })).rejects.toThrow(
         "Connection not found",
       );
+    });
+
+    // Phase 3 D1 — defensive guard. The DB CHECK constraint enforces the
+    // enum, but a row landed by a hand-fired SQL or a future migration that
+    // misses a callsite must still be rejected here so it surfaces with a
+    // clear message instead of being silently re-activated.
+    it("throws when the row's cutover_state is unrecognized (defensive)", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: {
+                workspace_id: "ws-1",
+                platform: "shopify",
+                store_url: "https://shop.example.com",
+                cutover_state: "rolling_back",
+              },
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      await expect(reactivateClientStoreConnection({ connectionId: validId })).rejects.toThrow(
+        /invalid cutover_state='rolling_back'/,
+      );
+      // Guard short-circuits before update / audit log.
+      expect(mockServiceFrom).toHaveBeenCalledTimes(1);
     });
   });
 

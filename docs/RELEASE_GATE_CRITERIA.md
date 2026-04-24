@@ -136,6 +136,30 @@ listed on the rollback ticket.
 
 ---
 
+### C.2 Per-connection cutover state machine preconditions (Phase 3 Pass 1 — added 2026-04-23)
+
+Hard gates required **in addition to A–C.1** before any production deployment
+that exposes the per-connection cutover wizard. These are also CI-enforceable
+via `bash scripts/check-release-gates.sh`.
+
+| ID | Gate | How verified |
+|---|---|---|
+| C.2.1 | `client_store_connections.cutover_state` column present (`text`, `NOT NULL DEFAULT 'legacy'`), constrained to `legacy | shadow | direct`, with audit columns `cutover_started_at`, `cutover_completed_at`, `shadow_mode_log_id`, `shadow_window_tolerance_seconds`. | Schema probe in `scripts/check-release-gates.sh` (`information_schema.columns`); `pnpm vitest run tests/unit/lib/server/client-store-fanout-gate.test.ts` covers the legacy/shadow/direct branches and the unrecognized-value defensive deny. |
+| C.2.2 | `connection_shadow_log` table exists with the columns needed by the Pass 2 comparison hook (`workspace_id`, `connection_id`, `correlation_id`, `sku`, `pushed_quantity`, `pushed_at`, `ss_observed_quantity`, `observed_at`, `match`, `drift_units`, `cutover_state_at_push`, `metadata`). | Schema probe in `scripts/check-release-gates.sh`; the table is the primary substrate for Pass 2 D3 diagnostics — without it the wizard cannot render the 7-day match-rate. |
+| C.2.3 | `connection_shadow_log` rows are retained ≥30 days (drift artifact retention). | _Pass 2 follow-up._ Implemented via the `prune-shadow-log` Trigger task (to be added in Pass 2). Until then this gate is recorded as `INFO` and does not block. |
+| C.2.4 | `connection_echo_overrides` table exists with a partial unique index that prevents two active rows for the same `(connection_id, override_type)` pair. | Schema probe in `scripts/check-release-gates.sh`; the partial unique index `uq_connection_echo_overrides_active` enforces the invariant. |
+| C.2.5 | The DB CHECK constraint `client_store_connections_cutover_dormancy_check` rejects `(cutover_state IN ('shadow','direct'), do_not_fanout=true)` so a mid-cutover row cannot be silently disabled out from under the wizard. | Schema probe in `scripts/check-release-gates.sh`; `pnpm vitest run tests/unit/actions/store-connections.test.ts` covers the actionable-error branch in `disableStoreConnection`. |
+| C.2.6 | The same constraint also blocks `(cutover_state='shadow', do_not_fanout=true)` (rephrasing of C.2.5 — kept separate so the cutover runbook can cite the shadow-specific failure mode). | Same probe; assertions in the disable-action test file cover both `shadow` and `direct`. |
+| C.2.7 | `shadow_window_tolerance_seconds` is bounded between 30 and 600 by the DB CHECK `client_store_connections_shadow_window_check`. | _Pass 2 follow-up._ Schema constraint exists today (Pass 1 migration); release-gate assertion will be added when Pass 2 wires the column into the wizard. |
+
+Phase 3 Pass 1 deliverables (D1, partial D4, partial D6) are GA-safe today
+because all changes are additive: the DB defaults every existing row to
+`cutover_state='legacy'`, the gate treats `'legacy'` exactly as before, and
+no fanout call site changes behavior unless an operator explicitly inserts a
+`connection_echo_overrides` row (which Pass 2 will gate behind the wizard).
+
+---
+
 ### D. Trigger runtime smoke checks
 
 Follow:

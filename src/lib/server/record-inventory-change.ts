@@ -9,6 +9,18 @@ interface RecordInventoryChangeParams {
   source: InventorySource;
   correlationId: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Phase 3 D4 — originating client_store_connections.id when this event
+   * came from a storefront webhook. Plumbed through to fanoutInventoryChange
+   * so the per-connection echo override (`connection_echo_overrides`) can
+   * flip echo-skip OFF for connections that have completed cutover-direct.
+   *
+   * Convention: webhook handlers SHOULD pass this explicitly. Older call
+   * sites that just include `connection_id` inside `metadata` continue to
+   * work — the lookup falls back to `metadata.connection_id` for backward
+   * compatibility, but the explicit field is the canonical surface.
+   */
+  originatingConnectionId?: string | null;
 }
 
 interface RecordInventoryChangeResult {
@@ -34,7 +46,16 @@ interface RecordInventoryChangeResult {
 export async function recordInventoryChange(
   params: RecordInventoryChangeParams,
 ): Promise<RecordInventoryChangeResult> {
-  const { workspaceId, sku, delta, source, correlationId, metadata } = params;
+  const { workspaceId, sku, delta, source, correlationId, metadata, originatingConnectionId } =
+    params;
+  // Phase 3 D4 — back-compat: pull connection_id from metadata if the caller
+  // hasn't surfaced it explicitly. Existing webhook handlers already write
+  // `metadata: { connection_id }` so this gives the per-connection echo
+  // override coverage of every storefront-driven event without touching every
+  // call site. Explicit field wins when both are set.
+  const resolvedOriginatingConnectionId =
+    originatingConnectionId ??
+    (typeof metadata?.connection_id === "string" ? (metadata.connection_id as string) : null);
 
   const redisResult = await adjustInventory(sku, "available", delta, correlationId);
 
@@ -78,11 +99,17 @@ export async function recordInventoryChange(
     // can echo-skip ShipStation v2 for events that already reflect v2
     // state (`shipstation` SHIP_NOTIFY, `reconcile` drift sensor). All
     // other sources legitimately need the v2 fanout push.
-    fanoutInventoryChange(workspaceId, sku, redisResult, delta, correlationId, source).catch(
-      (err) => {
-        console.error(`[recordInventoryChange] Fanout failed for SKU=${sku}:`, err);
-      },
-    );
+    fanoutInventoryChange(
+      workspaceId,
+      sku,
+      redisResult,
+      delta,
+      correlationId,
+      source,
+      resolvedOriginatingConnectionId,
+    ).catch((err) => {
+      console.error(`[recordInventoryChange] Fanout failed for SKU=${sku}:`, err);
+    });
   } catch {
     // Fanout is non-critical — cron jobs will pick up changes
   }

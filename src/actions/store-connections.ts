@@ -212,10 +212,26 @@ export async function reactivateClientStoreConnection(input: {
 
   const { data: connection, error: fetchError } = await serviceClient
     .from("client_store_connections")
-    .select("workspace_id, platform, store_url")
+    .select("workspace_id, platform, store_url, cutover_state")
     .eq("id", data.connectionId)
     .single();
   if (fetchError || !connection) throw new Error("Connection not found");
+
+  // Phase 3 D1 — defensive guard. The DB CHECK constraint
+  // `client_store_connections_cutover_state_check` enforces the enum, so
+  // an unrecognized value here means a hand-fired SQL or future migration
+  // landed an invalid row. Reject early with a clear message rather than
+  // letting the (invisible) cutover_state surface confuse a downstream
+  // consumer of `do_not_fanout=false`.
+  const validCutoverStates = ["legacy", "shadow", "direct"] as const;
+  type ValidCutoverState = (typeof validCutoverStates)[number];
+  if (!validCutoverStates.includes(connection.cutover_state as ValidCutoverState)) {
+    throw new Error(
+      `Cannot reactivate connection with invalid cutover_state='${connection.cutover_state}'. ` +
+        `Expected one of: ${validCutoverStates.join(", ")}. ` +
+        `Investigate the row in client_store_connections before retrying.`,
+    );
+  }
 
   const now = new Date().toISOString();
   const { error: updateError } = await serviceClient
@@ -258,10 +274,33 @@ export async function reactivateClientStoreConnection(input: {
 /**
  * Disable a connection — sets status to error and stops fanout.
  * Rule #53: do_not_fanout stops inventory pushes to degraded connections.
+ *
+ * Phase 3 D1 — defensive guard. A connection with `cutover_state IN
+ * ('shadow', 'direct')` cannot have `do_not_fanout=true` (DB CHECK
+ * `client_store_connections_cutover_dormancy_check`). Setting do_not_fanout
+ * on a mid-cutover connection is almost always an operator mistake — they
+ * almost certainly meant to first roll back to `cutover_state='legacy'`.
+ * We surface a clear error instead of letting Postgres throw a constraint
+ * violation that surfaces as a confusing generic 500.
  */
 export async function disableStoreConnection(connectionId: string): Promise<{ success: true }> {
   await requireAuth();
   const serviceClient = createServiceRoleClient();
+
+  const { data: connection, error: fetchError } = await serviceClient
+    .from("client_store_connections")
+    .select("cutover_state")
+    .eq("id", connectionId)
+    .single();
+  if (fetchError || !connection) throw new Error("Connection not found");
+
+  if (connection.cutover_state === "shadow" || connection.cutover_state === "direct") {
+    throw new Error(
+      `Cannot disable connection — cutover_state='${connection.cutover_state}'. ` +
+        `Roll back cutover_state to 'legacy' before disabling. ` +
+        `(Direct disable would violate client_store_connections_cutover_dormancy_check.)`,
+    );
+  }
 
   const { error } = await serviceClient
     .from("client_store_connections")

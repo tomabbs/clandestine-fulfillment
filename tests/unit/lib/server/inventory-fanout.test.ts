@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { determineFanoutTargets, shouldEchoSkipShipstationV2 } from "@/lib/server/inventory-fanout";
+import {
+  determineFanoutTargets,
+  resolveShipstationV2EchoSkip,
+  shouldEchoSkipShipstationV2,
+} from "@/lib/server/inventory-fanout";
 
 // === Pause guard — logic tests ===
 // fanoutInventoryChange itself requires Supabase + external services.
@@ -215,5 +219,158 @@ describe("inventory-fanout", () => {
       expect(targets.pushToStores).toBe(false);
       expect(targets.pushToBandcamp).toBe(false);
     });
+  });
+});
+
+// === Phase 3 D4 — connection-aware echo-skip (resolveShipstationV2EchoSkip) ===
+//
+// resolveShipstationV2EchoSkip extends shouldEchoSkipShipstationV2 with a
+// per-connection override read from `connection_echo_overrides`. Tests pin
+// the contract:
+//
+//   - Direct-v2 sources (`shipstation`, `reconcile`) ALWAYS echo-skip,
+//     regardless of any override row. Their writes are v2's own — pushing
+//     back is the literal Rule #65 echo loop.
+//   - Storefront-driven sources (`shopify`, `squarespace`, `woocommerce`,
+//     `bandcamp`) default to echo-skip (SS Inventory Sync mirrors them
+//     into v2 already), BUT respect a `(connection_id, exclude_from_v2_echo,
+//     is_active=true)` row to flip echo-skip OFF — that's the cutover-direct
+//     hand-off where this connection's storefront events MUST be pushed to
+//     v2 because SS Inventory Sync no longer mirrors it.
+//   - Warehouse-side sources (`manual`, `manual_inventory_count`,
+//     `cycle_count`, `inbound`, `preorder`, `backfill`) and undefined source
+//     never echo-skip — irrelevant to override logic.
+//   - DB lookup failures fail CLOSED (still echo-skip) — the alternative
+//     would silently re-introduce double-decrement on transient errors.
+
+interface MockSelectChain {
+  data: { id: string } | null;
+  error: Error | null;
+}
+
+function makeMockSupabase(chain: MockSelectChain) {
+  // Builds a chained mock that satisfies the shape called by the resolver:
+  // .from(t).select(c).eq(...).eq(...).eq(...).limit(n).maybeSingle()
+  const fromImpl = (_table: string) => {
+    const builder = {
+      select: (_cols: string) => builder,
+      eq: (_col: string, _val: unknown) => builder,
+      limit: (_n: number) => builder,
+      maybeSingle: async () => {
+        if (chain.error) throw chain.error;
+        return { data: chain.data, error: null };
+      },
+    };
+    return builder;
+  };
+  return { from: fromImpl };
+}
+
+describe("resolveShipstationV2EchoSkip — Phase 3 D4 per-connection override", () => {
+  it("returns false when source is undefined (mirrors sync helper)", async () => {
+    const supabase = makeMockSupabase({ data: null, error: null });
+    expect(await resolveShipstationV2EchoSkip(undefined, "conn-1", supabase)).toBe(false);
+  });
+
+  it.each([
+    ["manual"],
+    ["inbound"],
+    ["preorder"],
+    ["backfill"],
+    ["manual_inventory_count"],
+    ["cycle_count"],
+  ] as const)("returns false (no skip) for warehouse-originated source=%s regardless of override", async (source) => {
+    // Even with an active override row in the DB, warehouse-side sources
+    // are not in SHIPSTATION_V2_ECHO_SOURCES at all — short-circuits to
+    // false before the DB lookup.
+    const supabase = makeMockSupabase({ data: { id: "ovr-1" }, error: null });
+    expect(await resolveShipstationV2EchoSkip(source, "conn-1", supabase)).toBe(false);
+  });
+
+  it.each([
+    ["shipstation"],
+    ["reconcile"],
+  ] as const)("returns true (always skip) for direct-v2 source=%s, ignoring any override", async (source) => {
+    // Even with an active override row in the DB, direct-v2 sources cannot
+    // be pushed back to v2 — that's the Rule #65 echo loop. The override
+    // table only governs storefront-driven sources.
+    const supabase = makeMockSupabase({ data: { id: "ovr-1" }, error: null });
+    expect(await resolveShipstationV2EchoSkip(source, "conn-1", supabase)).toBe(true);
+  });
+
+  it.each([
+    ["shopify"],
+    ["squarespace"],
+    ["woocommerce"],
+    ["bandcamp"],
+  ] as const)("returns true (default echo-skip) for storefront source=%s with NO override row", async (source) => {
+    const supabase = makeMockSupabase({ data: null, error: null });
+    expect(await resolveShipstationV2EchoSkip(source, "conn-1", supabase)).toBe(true);
+  });
+
+  it.each([
+    ["shopify"],
+    ["squarespace"],
+    ["woocommerce"],
+    ["bandcamp"],
+  ] as const)("returns false (override applies) for storefront source=%s with active exclude_from_v2_echo row", async (source) => {
+    const supabase = makeMockSupabase({ data: { id: "ovr-1" }, error: null });
+    expect(await resolveShipstationV2EchoSkip(source, "conn-1", supabase)).toBe(false);
+  });
+
+  it.each([
+    ["shopify"],
+    ["squarespace"],
+    ["woocommerce"],
+    ["bandcamp"],
+  ] as const)("returns true (no override applies) for storefront source=%s when originatingConnectionId is null", async (source) => {
+    // Legacy callsites that don't plumb the connection_id yet still get
+    // the pre-Phase-3 behavior (always echo-skip). This is the safe default
+    // until every caller is updated.
+    const supabase = makeMockSupabase({ data: { id: "ovr-1" }, error: null });
+    expect(await resolveShipstationV2EchoSkip(source, null, supabase)).toBe(true);
+    expect(await resolveShipstationV2EchoSkip(source, undefined, supabase)).toBe(true);
+  });
+
+  it("fails CLOSED (returns true / still echo-skips) when the override lookup throws", async () => {
+    // A transient DB error must NOT silently flip echo-skip off — that
+    // would re-introduce the double-decrement bug Rule #65 prevents. The
+    // safe failure mode is to keep echo-skipping until the override can be
+    // confirmed.
+    const supabase = makeMockSupabase({ data: null, error: new Error("transient db failure") });
+    expect(await resolveShipstationV2EchoSkip("shopify", "conn-1", supabase)).toBe(true);
+  });
+});
+
+// === Phase 3 D4 — fanoutInventoryChange signature accepts originatingConnectionId ===
+//
+// Source-level guard: the published signature must include the
+// originatingConnectionId parameter so callers (recordInventoryChange,
+// process-client-store-webhook) can plumb it through. A regression that
+// drops the param would silently revert per-connection cutover behavior.
+describe("inventory-fanout — Phase 3 originatingConnectionId plumbing (source-level guard)", () => {
+  const src = readFileSync(
+    resolve(__dirname, "../../../../src/lib/server/inventory-fanout.ts"),
+    "utf8",
+  );
+
+  it("fanoutInventoryChange exposes originatingConnectionId as an optional parameter", () => {
+    // Pin the parameter spelling + optional shape so a refactor that drops
+    // it (or renames it) breaks loudly rather than silently restoring
+    // pre-Phase-3 echo behavior.
+    expect(src).toMatch(/originatingConnectionId\?\s*:\s*string\s*\|\s*null/);
+  });
+
+  it("uses the async resolveShipstationV2EchoSkip in the v2 push branch (not the sync helper)", () => {
+    // The async resolver is what consults connection_echo_overrides. If a
+    // refactor swaps it back to the sync `shouldEchoSkipShipstationV2`,
+    // per-connection overrides become dead code.
+    expect(src).toMatch(/resolveShipstationV2EchoSkip\s*\(/);
+  });
+
+  it("plumbs originatingConnectionId into the resolver call", () => {
+    // Defensive: the resolver must receive the connection_id, otherwise the
+    // override row lookup is impossible.
+    expect(src).toMatch(/resolveShipstationV2EchoSkip\([^)]*originatingConnectionId/);
   });
 });

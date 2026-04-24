@@ -90,9 +90,92 @@ const SHIPSTATION_V2_ECHO_SOURCES: ReadonlySet<InventorySource> = new Set<Invent
   "bandcamp",
 ]);
 
+/**
+ * Direct-v2 sources (`shipstation`, `reconcile`) NEVER override echo skip —
+ * v2 itself wrote the value, so pushing back is the literal echo loop Rule
+ * #65 prevents. Per-connection overrides only matter for storefront-driven
+ * sources where SS Inventory Sync is the mirror author.
+ */
+const ECHO_OVERRIDABLE_SOURCES: ReadonlySet<InventorySource> = new Set<InventorySource>([
+  "shopify",
+  "squarespace",
+  "woocommerce",
+  "bandcamp",
+]);
+
+/**
+ * Synchronous echo-skip decision (legacy callers / tests). Use the async
+ * variant `resolveShipstationV2EchoSkip()` when an originating connection_id
+ * is available — that path consults `connection_echo_overrides` (Phase 3
+ * D4) and returns `false` for connections that have completed cutover-direct.
+ */
 export function shouldEchoSkipShipstationV2(source: InventorySource | undefined): boolean {
   if (!source) return false;
   return SHIPSTATION_V2_ECHO_SOURCES.has(source);
+}
+
+interface EchoOverrideLookup {
+  // Postgrest-shaped client. Typed as `unknown` because both
+  // SupabaseServiceRoleClient and the test mocks satisfy this shape; we
+  // only call .from().select().eq().eq().eq().limit().
+  // biome-ignore lint/suspicious/noExplicitAny: minimal supabase contract surface
+  from: (table: string) => any;
+}
+
+/**
+ * Phase 3 D4 — connection-aware echo skip resolver.
+ *
+ * Returns `true` when the v2 push should be suppressed (default Rule #65
+ * behavior for storefront-driven events), `false` when the originating
+ * connection has an active `exclude_from_v2_echo` override (cutover-direct
+ * complete; SS Inventory Sync no longer mirrors this connection so v2 must
+ * receive the push).
+ *
+ * Direct-v2 sources (`shipstation`, `reconcile`) always echo-skip regardless
+ * of any per-connection override — those are v2's own writes and pushing
+ * them back would still be the Rule #65 echo loop.
+ *
+ * The lookup is intentionally per-call (no in-process cache). Override rows
+ * are operator-flipped at cutover-direct time and we want the new state to
+ * take effect on the next fanout invocation, not at the cache TTL boundary.
+ * Each call is one indexed read on `connection_echo_overrides` — cheap.
+ */
+export async function resolveShipstationV2EchoSkip(
+  source: InventorySource | undefined,
+  originatingConnectionId: string | null | undefined,
+  supabase: EchoOverrideLookup,
+): Promise<boolean> {
+  if (!source) return false;
+  if (!SHIPSTATION_V2_ECHO_SOURCES.has(source)) return false;
+  // Source qualifies for echo skip. If it's not in the overridable set
+  // (i.e. shipstation / reconcile — direct v2 writes), no override can
+  // change that — return true.
+  if (!ECHO_OVERRIDABLE_SOURCES.has(source)) return true;
+  // No connection_id means we can't look up an override; fall back to the
+  // static set (echo skip remains in force). This is the safe default for
+  // legacy call sites that haven't been updated to plumb the connection_id
+  // yet — they still get the pre-Phase-3 behavior.
+  if (!originatingConnectionId) return true;
+
+  try {
+    const { data } = await supabase
+      .from("connection_echo_overrides")
+      .select("id")
+      .eq("connection_id", originatingConnectionId)
+      .eq("override_type", "exclude_from_v2_echo")
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (data) return false;
+  } catch (err) {
+    // A query failure should NOT silently flip the echo skip off — that
+    // would re-introduce double-decrement. Log and fail closed.
+    Sentry.captureException(err, {
+      tags: { fanout_target: "shipstation_v2", subsystem: "echo_override_lookup" },
+      extra: { originatingConnectionId, source },
+    });
+  }
+  return true;
 }
 
 export interface FanoutResult {
@@ -125,6 +208,16 @@ export async function fanoutInventoryChange(
   delta?: number,
   correlationId?: string,
   source?: InventorySource,
+  /**
+   * Phase 3 D4 — originating client_store_connections.id when the inventory
+   * event came from a storefront webhook. Plumbed through from
+   * recordInventoryChange so the per-connection echo override
+   * (`connection_echo_overrides`) can flip echo-skip OFF for connections
+   * that have completed cutover-direct. NULL/undefined for non-storefront
+   * sources (shipstation, reconcile, manual, etc.) — those use the static
+   * echo set unchanged.
+   */
+  originatingConnectionId?: string | null,
 ): Promise<FanoutResult> {
   return Sentry.startSpan(
     {
@@ -136,6 +229,7 @@ export async function fanoutInventoryChange(
         "fanout.delta": delta ?? 0,
         "fanout.correlation_id": correlationId ?? "",
         "fanout.source": source ?? "",
+        "fanout.originating_connection_id": originatingConnectionId ?? "",
       },
     },
     async (span) => {
@@ -329,11 +423,16 @@ export async function fanoutInventoryChange(
       // Per-location semantics rewrite is the deferred WS3 §3f task — gated
       // on the §15.3 probe. Sticky `has_per_location_data` flag is the pivot
       // key for that future rewrite; this SKU-total path is the interim.
+      const echoSkip = await resolveShipstationV2EchoSkip(
+        source,
+        originatingConnectionId,
+        supabase,
+      );
       if (
         variant &&
         delta != null &&
         delta !== 0 &&
-        !shouldEchoSkipShipstationV2(source) &&
+        !echoSkip &&
         guard.shouldFanout("shipstation", effectiveCorrelationId)
       ) {
         try {

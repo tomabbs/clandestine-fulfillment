@@ -45,6 +45,30 @@ export type ReviewStatus = "open" | "in_progress" | "resolved" | "suppressed";
 
 export type ConnectionStatus = "pending" | "active" | "disabled_auth_failure" | "error";
 
+/**
+ * Phase 3 D1 — Direct-Shopify cutover state machine.
+ *
+ * ORTHOGONAL to `do_not_fanout`. Truth table in plan §9.4 D1; invalid
+ * combinations rejected at the DB by `client_store_connections_cutover_dormancy_check`.
+ *
+ *  - legacy: pre-cutover. Either dormant (do_not_fanout=true) or active legacy
+ *    fanout. SS Inventory Sync owns mirroring.
+ *  - shadow: we push directly AND SS still mirrors. Every push event also
+ *    writes to `connection_shadow_log` for 7-day comparison.
+ *  - direct: cutover complete. The connection's storefront type is removed
+ *    from `SHIPSTATION_V2_ECHO_SOURCES` via a row in `connection_echo_overrides`;
+ *    SS becomes label-only for this connection.
+ */
+export type CutoverState = "legacy" | "shadow" | "direct";
+
+/**
+ * Phase 3 D4 — per-connection override of the static
+ * `SHIPSTATION_V2_ECHO_SOURCES` set in `inventory-fanout.ts`.
+ * Today only one type is supported; future override types extend this enum
+ * + the DB CHECK constraint together.
+ */
+export type ConnectionEchoOverrideType = "exclude_from_v2_echo";
+
 export type IntegrationHealthState =
   | "healthy"
   | "delayed"
@@ -631,8 +655,57 @@ export interface ClientStoreConnection {
   // Plaintext today; column name is forward-compatible with the deferred
   // encryption-at-rest work (slug `client-store-credentials-at-rest-encryption`).
   shopify_app_client_secret_encrypted: string | null;
+  // Phase 3 D1 — cutover state machine. See `CutoverState` for semantics.
+  cutover_state: CutoverState;
+  cutover_started_at: string | null;
+  cutover_completed_at: string | null;
+  shadow_mode_log_id: string | null;
+  // Phase 3 D2 — per-connection override of the default 60s shadow-mode
+  // comparison window. NULL = use default. Bounded 30..600 at the DB.
+  shadow_window_tolerance_seconds: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Phase 3 D2 — `connection_shadow_log` row. The "what we'd push" half is
+ * persisted synchronously by the shadow-mode write hook; the "what SS
+ * actually pushed" half is filled in by the 60s-delayed
+ * `shadow-mode-comparison` Trigger task. `match` and `drift_units` are
+ * therefore both nullable — they become non-null only after the comparison
+ * task runs.
+ */
+export interface ConnectionShadowLog {
+  id: string;
+  workspace_id: string;
+  connection_id: string;
+  correlation_id: string;
+  sku: string;
+  pushed_quantity: number;
+  pushed_at: string;
+  ss_observed_quantity: number | null;
+  observed_at: string | null;
+  match: boolean | null;
+  drift_units: number | null;
+  cutover_state_at_push: CutoverState;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+/**
+ * Phase 3 D4 — per-connection echo override row. Presence of an active
+ * row with `override_type='exclude_from_v2_echo'` means the connection's
+ * storefront events fanout to v2 even though they would otherwise be in
+ * the static echo-skip set.
+ */
+export interface ConnectionEchoOverride {
+  id: string;
+  connection_id: string;
+  override_type: ConnectionEchoOverrideType;
+  created_by: string | null;
+  reason: string | null;
+  created_at: string;
+  is_active: boolean;
 }
 
 export interface ClientStoreSkuMapping {

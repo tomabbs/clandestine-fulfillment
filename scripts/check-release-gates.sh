@@ -127,6 +127,12 @@ else
     "client_store_connections|webhook_subscriptions_audit_at"
     "webhook_events|dedup_key"
     "megaplan_spot_check_runs|shopify_direct_available"
+    # Phase 3 Pass 1 §9.4 D1 — cutover state machine columns (C.2.1).
+    "client_store_connections|cutover_state"
+    "client_store_connections|cutover_started_at"
+    "client_store_connections|cutover_completed_at"
+    "client_store_connections|shadow_mode_log_id"
+    "client_store_connections|shadow_window_tolerance_seconds"
   )
   ALL_COLS_OK=1
   for entry in "${REQUIRED_COLUMNS[@]}"; do
@@ -134,12 +140,41 @@ else
     column="${entry#*|}"
     found=$(psql "$DATABASE_URL" -tAc "select 1 from information_schema.columns where table_name='${table}' and column_name='${column}' limit 1" 2>/dev/null || echo "")
     if [[ "$found" != "1" ]]; then
-      emit_fail "schema" "missing column ${table}.${column} (apply 20260423000002_finish_plan_columns.sql)"
+      emit_fail "schema" "missing column ${table}.${column} (apply 20260423000002_finish_plan_columns.sql or 20260424000002_connection_cutover_state.sql)"
       ALL_COLS_OK=0
     fi
   done
   if [[ "$ALL_COLS_OK" == "1" ]]; then
-    emit_pass "schema" "all 7 finish-line columns present"
+    emit_pass "schema" "all 12 finish-line + cutover columns present"
+  fi
+
+  # ─── Phase 3 Pass 1 §9.4 D2/D4 — cutover ledger tables (C.2.2) ───────────
+  REQUIRED_TABLES=(
+    "connection_shadow_log"
+    "connection_echo_overrides"
+  )
+  ALL_TBLS_OK=1
+  for tbl in "${REQUIRED_TABLES[@]}"; do
+    found=$(psql "$DATABASE_URL" -tAc "select 1 from information_schema.tables where table_schema='public' and table_name='${tbl}' limit 1" 2>/dev/null || echo "")
+    if [[ "$found" != "1" ]]; then
+      emit_fail "C.2.2" "missing table ${tbl} (apply 20260424000002_connection_cutover_state.sql)"
+      ALL_TBLS_OK=0
+    fi
+  done
+  if [[ "$ALL_TBLS_OK" == "1" ]]; then
+    emit_pass "C.2.2" "cutover ledger tables present (connection_shadow_log, connection_echo_overrides)"
+  fi
+
+  # ─── Phase 3 Pass 1 §9.4 D1 — cutover dormancy CHECK constraint (C.2.4) ──
+  # The truth-table invariant `(cutover_state IN ('shadow','direct') AND
+  # do_not_fanout=true)` is rejected at the DB. Verify the constraint is
+  # present and matches the expected name; a renamed constraint would skip
+  # this gate silently otherwise.
+  CONSTRAINT_FOUND=$(psql "$DATABASE_URL" -tAc "select 1 from pg_constraint where conname='client_store_connections_cutover_dormancy_check' limit 1" 2>/dev/null || echo "")
+  if [[ "$CONSTRAINT_FOUND" == "1" ]]; then
+    emit_pass "C.2.4" "cutover dormancy CHECK constraint present"
+  else
+    emit_fail "C.2.4" "missing constraint client_store_connections_cutover_dormancy_check (apply 20260424000002_connection_cutover_state.sql)"
   fi
 fi
 
