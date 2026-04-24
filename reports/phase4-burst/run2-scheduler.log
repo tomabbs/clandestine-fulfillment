@@ -1,0 +1,54 @@
+[2026-04-24T11:43:13Z] scheduler started, target=2026-04-24T16:00:00Z
+[2026-04-24T11:43:13Z] sleeping 15407 seconds (~4h 16m)
+[2026-04-24T16:01:31Z] firing burst run #2…
+npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+[dotenv@17.3.1] injecting env (37) from .env.local -- tip: ⚙️  write to custom object with { processEnv: myObject }
+Phase 4 Sub-pass A — webhook ingress burst-test harness
+────────────────────────────────────────────────────────────────────────
+  mode               : APPLY (live writes to prod webhook)
+  scale              : full
+  burst mode         : sustained
+  concurrency        : 50
+  duration           : 60 s
+  warmup delay       : 30000 ms (forces lambda cold-start before run)
+  target URL         : https://cpanel.clandestinedistro.com/api/webhooks/client-store?connection_id=93225922-357f-4607-a5a4-2c1ad3a9beac&platform=shopify
+  connection.cutover : legacy (do_not_fanout=true)
+  run_id             : 2026-04-24T16-01-34-343Z-run2
+────────────────────────────────────────────────────────────────────────
+
+Sleeping 30000ms to give Vercel lambdas time to spin down (force cold-start)…
+Firing burst…
+
+Burst complete.
+  wall clock         : 61.60 s
+  samples            : 2799
+  ok / error         : 624 / 2175
+  status breakdown   : {"200":624,"503":2175}
+
+Latency — all samples:
+  min=157 mean=1092 p50=275 p75=382 p90=1557 p95=8874 p99=9345 max=11915 (ms)
+Latency — cold-start proxy (n=50):
+  min=685 mean=1594 p50=1568 p75=1632 p95=1817 max=2656 (ms)
+
+F-7 verdict:
+  cold-start p95 < 800 ms (F-7)        : FAIL (1817 ms)
+  pipeline p99 < 5000 ms (Shopify cap) : FAIL (9345 ms)
+
+Report written: reports/phase4-burst/2026-04-24T16-01-34-343Z-run2.json
+
+Next:
+  - HOLD ≥ 24h, then rerun with --label=run2 to capture Run #2 of the X-1 gate.
+  - Optional: cleanup test rows via DELETE FROM webhook_events WHERE external_webhook_id LIKE 'phase4-burst-2026-04-24T16-01-34-343Z-run2-%'
+[2026-04-24T16:03:06Z] burst exited code=0
+[2026-04-24T16:03:06Z] firing cleanup (label=run2)…
+npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+[dotenv@17.3.1] injecting env (37) from .env.local -- tip: ⚙️  suppress all logs with { quiet: true }
+Phase 4 burst-test cleanup
+  match pattern : external_webhook_id LIKE 'phase4-burst-%-run2-%'
+  rows matched  : 2799
+  mode          : APPLY (will DELETE)
+  status breakdown : {"enqueue_failed":1000}
+
+Deleted 2799 rows.
+[2026-04-24T16:03:10Z] cleanup exited code=0
+[2026-04-24T16:03:10Z] scheduler done; report at reports/phase4-burst/*-run2.json
