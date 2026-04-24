@@ -66,18 +66,13 @@ export async function routeInboundEmail({
       /a message from bandcamp/i.test(subjectLower) || /on behalf of/i.test(subjectLower);
 
     if (isBandcampOrder) {
-      try {
-        await tasks.trigger("bandcamp-sale-poll", {});
-        await supabase
-          .from("webhook_events")
-          .update({ status: "processed", topic: "bandcamp_order" })
-          .eq("id", webhookEventId);
-      } catch (err) {
-        Sentry.captureException(err, {
-          tags: { route: "resend-inbound", failure: "bandcamp_poll_trigger_failed" },
-        });
-      }
-      return { status: "bandcamp_order_poll_triggered" };
+      const dispatch = await dispatchBandcampOrderPoll({
+        supabase,
+        workspaceId,
+        webhookEventId,
+        email,
+      });
+      return { status: dispatch.status };
     }
 
     if (isBandcampNewRelease) {
@@ -189,6 +184,230 @@ export async function routeInboundEmail({
     .update({ status: "review_queued", topic: "support_email_unmatched" })
     .eq("id", webhookEventId);
   return { status: "review_queued" };
+}
+
+/**
+ * Phase 2 §9.3 D1 — recipient-driven Bandcamp order dispatch.
+ *
+ * Tries to map the inbound email to a SPECIFIC `bandcamp_connections` row
+ * via `inbound_forwarding_address`, in this priority:
+ *
+ *   1. Exact recipient match against `bandcamp_connections.inbound_forwarding_address`
+ *      (case-insensitive). One match → enqueue
+ *      `bandcamp-sale-poll-per-connection` (one Bandcamp API call). Multiple
+ *      matches → ambiguous (operator config error) → fall back to global poll.
+ *   2. No match → fall back to the global `bandcamp-sale-poll` cron (the
+ *      legacy behaviour). Operator should configure the missing forwarding
+ *      address via the audit script.
+ *
+ * Each branch records a `bandcamp.email_per_connection` sensor reading so
+ * the Channels page (and any release-gate alarm) can monitor what fraction
+ * of inbound order emails are landing on the cheap per-connection path vs
+ * the expensive N-way fallback.
+ *
+ * The webhook_events row gets a `topic` of `bandcamp_order_per_connection`
+ * (matched) or `bandcamp_order_global_fallback` (unmatched / ambiguous) so
+ * forensics on the events table is one query without joining sensor_readings.
+ */
+async function dispatchBandcampOrderPoll({
+  supabase,
+  workspaceId,
+  webhookEventId,
+  email,
+}: {
+  supabase: ReturnType<typeof createServiceRoleClient>;
+  workspaceId: string;
+  webhookEventId: string;
+  email: FetchedInboundEmail;
+}): Promise<{ status: string }> {
+  // De-dup + lowercase recipients across `to` and `cc`. `envelopeTo` is
+  // intentionally not consulted — operators forward FROM their Workspace
+  // mailbox, so the envelope-to is the forwarding inbox (e.g.
+  // orders@clandestinedistro.com) which would falsely match every connection
+  // if its alias happened to be the same. The header `to`/`cc` arrays come
+  // from the recovered RFC822 message, which preserves the original
+  // recipient (e.g. orders+truepanther@…).
+  const recipients = Array.from(
+    new Set(
+      [...email.to, ...email.cc]
+        .map((addr) => extractEmailAddress(addr))
+        .filter((addr): addr is string => Boolean(addr)),
+    ),
+  );
+
+  let matches: Array<{
+    id: string;
+    workspace_id: string;
+    band_id: number;
+    inbound_forwarding_address: string | null;
+  }> = [];
+
+  if (recipients.length > 0) {
+    // `lower(inbound_forwarding_address)` index covers this exact predicate
+    // (see migration 20260427000002). PostgREST `.in('column', [...])` is
+    // case-sensitive, so we lowercase both sides — recipients are already
+    // lowercased by extractEmailAddress, and the column is normalized by
+    // the audit script before insert.
+    const { data, error } = await supabase
+      .from("bandcamp_connections")
+      .select("id, workspace_id, band_id, inbound_forwarding_address")
+      .eq("is_active", true)
+      .in(
+        "inbound_forwarding_address",
+        recipients.map((r) => r.toLowerCase()),
+      );
+    if (error) {
+      Sentry.captureException(error, {
+        tags: { route: "resend-inbound", failure: "bandcamp_connection_lookup_failed" },
+        extra: { webhookEventId, recipients },
+      });
+    }
+    matches = data ?? [];
+  }
+
+  if (matches.length === 1) {
+    const match = matches[0];
+    try {
+      await tasks.trigger(
+        "bandcamp-sale-poll-per-connection",
+        {
+          workspaceId: match.workspace_id,
+          connectionId: match.id,
+          triggeredByWebhookEventId: webhookEventId,
+          recipient: match.inbound_forwarding_address ?? null,
+        },
+        {
+          // Belt-and-braces: the route handler's webhook_events INSERT ON
+          // CONFLICT already drops duplicate Resend deliveries, but if a
+          // Trigger.dev replay ever re-fires this side, the per-connection
+          // task should not double-poll for the same email.
+          idempotencyKey: `bandcamp-per-connection:${match.id}:${webhookEventId}`,
+          idempotencyKeyTTL: "10m",
+        },
+      );
+      await supabase
+        .from("webhook_events")
+        .update({ status: "processed", topic: "bandcamp_order_per_connection" })
+        .eq("id", webhookEventId);
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: {
+          route: "resend-inbound",
+          failure: "bandcamp_per_connection_trigger_failed",
+        },
+        extra: { webhookEventId, connectionId: match.id },
+      });
+      // Do NOT fall back to the global poll here — the route handler's
+      // outer try/catch will mark the event `routing_error` and the replay
+      // job will re-run after the fix lands. Falling back silently would
+      // mask Trigger.dev outages from the operator.
+      throw err;
+    }
+
+    await recordEmailPerConnectionSensor(supabase, match.workspace_id, {
+      outcome: "recipient_match",
+      connection_id: match.id,
+      band_id: match.band_id,
+      recipient: match.inbound_forwarding_address ?? null,
+      candidate_count: 1,
+      webhook_event_id: webhookEventId,
+    });
+
+    return { status: "bandcamp_order_per_connection_dispatched" };
+  }
+
+  // Zero matches OR multiple matches → fall back to the global poll. We
+  // record the outcome separately so the sensor distinguishes "operator
+  // hasn't configured this band yet" (no_match) from "two connections share
+  // an inbox alias" (ambiguous, real config bug).
+  const fallbackOutcome = matches.length === 0 ? "no_match_fallback" : "ambiguous_fallback";
+
+  try {
+    await tasks.trigger("bandcamp-sale-poll", {});
+    await supabase
+      .from("webhook_events")
+      .update({ status: "processed", topic: "bandcamp_order_global_fallback" })
+      .eq("id", webhookEventId);
+  } catch (err) {
+    Sentry.captureException(err, {
+      tags: { route: "resend-inbound", failure: "bandcamp_poll_trigger_failed" },
+      extra: { webhookEventId, fallbackOutcome },
+    });
+    // Same reasoning as the per-connection branch — surface the failure to
+    // the route handler so the event is marked routing_error for replay.
+    throw err;
+  }
+
+  await recordEmailPerConnectionSensor(supabase, workspaceId, {
+    outcome: fallbackOutcome,
+    candidate_count: matches.length,
+    candidate_ids: matches.map((m) => m.id),
+    recipients,
+    webhook_event_id: webhookEventId,
+  });
+
+  return {
+    status:
+      matches.length === 0
+        ? "bandcamp_order_global_fallback_no_match"
+        : "bandcamp_order_global_fallback_ambiguous",
+  };
+}
+
+interface EmailPerConnectionSensorValue {
+  outcome: "recipient_match" | "no_match_fallback" | "ambiguous_fallback";
+  candidate_count: number;
+  webhook_event_id: string;
+  connection_id?: string;
+  band_id?: number;
+  recipient?: string | null;
+  candidate_ids?: string[];
+  recipients?: string[];
+}
+
+async function recordEmailPerConnectionSensor(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  value: EmailPerConnectionSensorValue,
+): Promise<void> {
+  // sensor_readings is a thin event log here — the sensor-check task does
+  // NOT also synthesize this reading on a schedule (there's nothing to
+  // poll for; the value is event-driven). Channels page aggregates by
+  // `sensor_name='bandcamp.email_per_connection'` over the last hour
+  // (matched / total) for the operator badge.
+  //
+  // Status mapping:
+  //   recipient_match   → healthy   (cheap path worked)
+  //   no_match_fallback → warning   (operator action: configure inbound address)
+  //   ambiguous_fallback→ warning   (operator action: deduplicate alias)
+  // We deliberately do NOT raise to `critical` for either fallback — both
+  // are correct (the global poll still discovers the sale), just expensive.
+  const status = value.outcome === "recipient_match" ? "healthy" : "warning";
+  const message =
+    value.outcome === "recipient_match"
+      ? `Routed via inbound alias ${value.recipient ?? "(unknown)"} → connection ${value.connection_id}`
+      : value.outcome === "no_match_fallback"
+        ? `No bandcamp_connections.inbound_forwarding_address matched recipients=${(
+            value.recipients ?? []
+          ).join(", ")} — fell back to global poll`
+        : `Ambiguous match: ${value.candidate_count} bandcamp_connections share recipients=${(
+            value.recipients ?? []
+          ).join(", ")} — fell back to global poll`;
+
+  const { error } = await supabase.from("sensor_readings").insert({
+    workspace_id: workspaceId,
+    sensor_name: "bandcamp.email_per_connection",
+    status,
+    value,
+    message,
+  });
+  if (error) {
+    // Sensor failure is never fatal — log and move on.
+    Sentry.captureException(error, {
+      tags: { route: "resend-inbound", failure: "sensor_insert_failed" },
+      extra: { workspaceId, value },
+    });
+  }
 }
 
 function extractEmailAddress(from: string): string {

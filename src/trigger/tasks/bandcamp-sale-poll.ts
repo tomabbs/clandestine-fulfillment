@@ -1,18 +1,35 @@
 /**
- * Bandcamp sale poll — cron every 5 minutes.
+ * Bandcamp sale poll — cron every 5 minutes (cross-tenant safety net).
+ *
+ * Phase 2 §9.3 D3 NOTE: real-time, recipient-driven dispatch happens via
+ * `bandcamp-sale-poll-per-connection` (fired by the resend-inbound router
+ * when an order email matches a `bandcamp_connections.inbound_forwarding_address`).
+ * This cron remains as the global drift safety net for:
+ *   * Connections without a configured `inbound_forwarding_address`.
+ *   * Order emails whose recipient lookup is ambiguous (multiple matches)
+ *     or matches no connection (forwarder misconfigured, new band not
+ *     registered yet, etc.).
+ *   * Quiet periods where no email arrived but Bandcamp itself reports a
+ *     new sale (e.g. operator manually marked an order, fan refunded).
+ *
+ * Per-connection body lives in `src/trigger/lib/bandcamp-sale-poll-runner.ts`
+ * so both the cron and event-driven paths share an identical contract:
+ *   - Same `bandcamp-sale:{band_id}:{package_id}:{newSold}` correlation id.
+ *   - Same post-sale fanout (bandcamp-inventory-push, multi-store-inventory-push,
+ *     triggerBundleFanout).
+ *   - Same Rule #65 echo-skip rationale for ShipStation v2.
  *
  * Rule #9: Uses bandcampQueue (serialized with all other Bandcamp API tasks).
- * Rule #20: Inventory changes go through recordInventoryChange().
+ * Rule #20: Inventory changes go through recordInventoryChange() (inside the runner).
  * Rule #7: Uses createServiceRoleClient().
  */
 
-import { schedules, tasks } from "@trigger.dev/sdk";
-import { getMerchDetails, refreshBandcampToken } from "@/lib/clients/bandcamp";
+import { schedules } from "@trigger.dev/sdk";
+import { refreshBandcampToken } from "@/lib/clients/bandcamp";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
-import { triggerBundleFanout } from "@/lib/server/bundles";
-import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { bandcampQueue } from "@/trigger/lib/bandcamp-queue";
+import { pollOneBandcampConnection } from "@/trigger/lib/bandcamp-sale-poll-runner";
 
 export const bandcampSalePollTask = schedules.task({
   id: "bandcamp-sale-poll",
@@ -38,123 +55,16 @@ export const bandcampSalePollTask = schedules.task({
       const accessToken = await refreshBandcampToken(workspaceId);
 
       for (const connection of connections) {
-        try {
-          const merchItems = await getMerchDetails(connection.band_id, accessToken);
-
-          for (const item of merchItems) {
-            if (!item.sku || item.quantity_sold == null) continue;
-
-            // Look up mapping
-            const { data: mapping } = await supabase
-              .from("bandcamp_product_mappings")
-              .select("id, variant_id, last_quantity_sold")
-              .eq("workspace_id", workspaceId)
-              .eq("bandcamp_item_id", item.package_id)
-              .single();
-
-            if (!mapping) continue;
-
-            const lastSold = mapping.last_quantity_sold ?? 0;
-            const newSold = item.quantity_sold;
-
-            if (newSold > lastSold) {
-              const delta = -(newSold - lastSold); // Negative — items were sold
-
-              // Get variant SKU
-              const { data: variant } = await supabase
-                .from("warehouse_product_variants")
-                .select("sku")
-                .eq("id", mapping.variant_id)
-                .single();
-
-              if (variant) {
-                // Stable correlation ID for idempotency
-                const correlationId = `bandcamp-sale:${connection.band_id}:${item.package_id}:${newSold}`;
-
-                const result = await recordInventoryChange({
-                  workspaceId,
-                  sku: variant.sku,
-                  delta,
-                  source: "bandcamp",
-                  correlationId,
-                  metadata: {
-                    band_id: connection.band_id,
-                    bandcamp_item_id: item.package_id,
-                    previous_quantity_sold: lastSold,
-                    new_quantity_sold: newSold,
-                    run_id: ctx.run.id,
-                  },
-                });
-
-                // Trigger immediate push to all channels after a sale —
-                // don't wait for the next cron cycle (push tasks are idempotent).
-                //
-                // ShipStation v2 is INTENTIONALLY OMITTED here (2026-04-13
-                // second-pass audit). With ShipStation Inventory Sync active
-                // for every connected storefront — including Bandcamp via
-                // `warehouse_shipstation_stores` — SS imports the Bandcamp
-                // order and decrements v2 natively before this poll fires.
-                // Enqueuing `shipstation-v2-decrement` here would double
-                // decrement v2, which SS would then push back to Bandcamp,
-                // re-emitting the deduction (Rule #65 echo loop).
-                //
-                // The v2 leg is also echo-skipped inside `fanoutInventoryChange`
-                // for `source === 'bandcamp'` — both layers agree. If the
-                // operator ever needs the explicit decrement back (e.g. SS
-                // Inventory Sync is disabled per-workspace), re-enable here
-                // AND remove `'bandcamp'` from `SHIPSTATION_V2_ECHO_SOURCES`
-                // in `src/lib/server/inventory-fanout.ts` together —
-                // never one without the other.
-                //
-                // The Phase 5 reconcile sensor remains the safety net: it
-                // catches v2 ↔ DB drift if SS Inventory Sync ever misses an
-                // import.
-                if (result.success && !result.alreadyProcessed) {
-                  await Promise.allSettled([
-                    tasks.trigger("bandcamp-inventory-push", {}),
-                    tasks.trigger("multi-store-inventory-push", {}),
-                  ]).catch(() => {
-                    /* non-critical — cron covers it */
-                  });
-
-                  await triggerBundleFanout({
-                    variantId: mapping.variant_id,
-                    soldQuantity: Math.abs(delta),
-                    workspaceId,
-                    correlationBase: correlationId,
-                  });
-                }
-
-                salesDetected++;
-              }
-
-              // Update last_quantity_sold
-              await supabase
-                .from("bandcamp_product_mappings")
-                .update({
-                  last_quantity_sold: newSold,
-                  last_synced_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", mapping.id);
-            }
-          }
-
-          // Update connection last_synced_at
-          await supabase
-            .from("bandcamp_connections")
-            .update({
-              last_synced_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", connection.id);
-        } catch (error) {
-          errors++;
-          console.error(
-            `[bandcamp-sale-poll] Failed for band ${connection.band_id}:`,
-            error instanceof Error ? error.message : error,
-          );
-        }
+        const result = await pollOneBandcampConnection({
+          supabase,
+          workspaceId,
+          connectionId: connection.id,
+          bandId: connection.band_id,
+          accessToken,
+          runId: ctx.run.id,
+        });
+        salesDetected += result.salesDetected;
+        errors += result.errors;
       }
 
       await supabase.from("channel_sync_log").insert({

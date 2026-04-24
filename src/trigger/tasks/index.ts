@@ -17,6 +17,11 @@ export {
 } from "./bandcamp-order-sync";
 export { bandcampPushOnSkuTask } from "./bandcamp-push-on-sku";
 export { bandcampSalePollTask } from "./bandcamp-sale-poll";
+// Phase 2 §9.3 D3 — event-driven per-connection sale poll. Fired by
+// `routeInboundEmail()` when an order email's recipient address matches
+// exactly one `bandcamp_connections.inbound_forwarding_address`. Pinned to
+// `bandcampQueue` so it serializes against the cron `bandcamp-sale-poll`.
+export { bandcampSalePollPerConnectionTask } from "./bandcamp-sale-poll-per-connection";
 export { bandcampShippingVerifyTask } from "./bandcamp-shipping-verify";
 export { bandcampScrapePageTask, bandcampSyncSchedule, bandcampSyncTask } from "./bandcamp-sync";
 // Phase 9.1 — bulk label buy orchestrator + nightly print_batch_jobs purge.

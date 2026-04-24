@@ -136,6 +136,31 @@ function makeFakeSupabase(
         })),
       };
     }
+    if (table === "bandcamp_connections") {
+      // Phase 2 §9.3 D1 — the Bandcamp order branch now does a per-
+      // connection lookup before deciding to fire per-connection vs
+      // global poll. Default to "no rows" so these legacy fixtures
+      // exercise the no_match_fallback path (same outcome as before
+      // the per-connection routing existed).
+      return {
+        select: vi.fn().mockImplementation(() => ({
+          eq: vi.fn().mockImplementation(() => ({
+            in: vi.fn().mockResolvedValue({ data: [], error: null }),
+          })),
+        })),
+      };
+    }
+    if (table === "sensor_readings") {
+      // Phase 2 §9.3 D1 — emitted by dispatchBandcampOrderPoll. Tests
+      // that don't explicitly assert on the sensor reading just need a
+      // no-op insert.
+      return {
+        insert: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+          inserts.push({ table, payload });
+          return Promise.resolve({ error: null });
+        }),
+      };
+    }
     return {};
   });
 
@@ -179,7 +204,10 @@ describe("routeInboundEmail", () => {
     mockTrigger.mockResolvedValue({ id: "run_1" });
   });
 
-  it("routes a Bandcamp order email by sender, fires bandcamp-sale-poll, and stamps webhook_events processed", async () => {
+  it("routes a Bandcamp order email by sender, falls back to global bandcamp-sale-poll when no inbound_forwarding_address matches, and stamps webhook_events with the global_fallback topic", async () => {
+    // Phase 2 §9.3 D1 — without a configured inbound_forwarding_address
+    // for the recipient, the router falls back to the legacy global poll
+    // (correctness preserved, just the expensive path).
     const { supabase, updates } = makeFakeSupabase();
     const result = await routeInboundEmail({
       supabase,
@@ -187,10 +215,13 @@ describe("routeInboundEmail", () => {
       webhookEventId: "evt-1",
       email: makeEmail(),
     });
-    expect(result.status).toBe("bandcamp_order_poll_triggered");
+    expect(result.status).toBe("bandcamp_order_global_fallback_no_match");
     expect(mockTrigger).toHaveBeenCalledWith("bandcamp-sale-poll", {});
     const evtUpdate = updates.find((u) => u.table === "webhook_events" && u.id === "evt-1");
-    expect(evtUpdate?.payload).toMatchObject({ status: "processed", topic: "bandcamp_order" });
+    expect(evtUpdate?.payload).toMatchObject({
+      status: "processed",
+      topic: "bandcamp_order_global_fallback",
+    });
   });
 
   it("R-4: detects Bandcamp by subject even when forwarder rewrites realFrom (the production failure mode)", async () => {
@@ -208,8 +239,8 @@ describe("routeInboundEmail", () => {
         subject: "Bam! Another order for True Panther",
       }),
     });
-    expect(result.status).toBe("bandcamp_order_poll_triggered");
-    expect(mockTrigger).toHaveBeenCalled();
+    expect(result.status).toBe("bandcamp_order_global_fallback_no_match");
+    expect(mockTrigger).toHaveBeenCalledWith("bandcamp-sale-poll", {});
   });
 
   it("Bandcamp 'Cha-ching!' order subjects route to the order poll branch too", async () => {
@@ -220,7 +251,7 @@ describe("routeInboundEmail", () => {
       webhookEventId: "evt-3",
       email: makeEmail({ subject: "Cha-ching! 1 sale on Bandcamp" }),
     });
-    expect(result.status).toBe("bandcamp_order_poll_triggered");
+    expect(result.status).toBe("bandcamp_order_global_fallback_no_match");
   });
 
   it("Bandcamp new-release announcements are dismissed (no support conversation, no poll)", async () => {
