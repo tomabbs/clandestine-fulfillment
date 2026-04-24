@@ -71,6 +71,7 @@
 import { logger, task } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
+import { recordShadowPush } from "@/lib/server/connection-shadow-log";
 import {
   computeEffectiveSellable,
   type EffectiveSellableChannel,
@@ -488,6 +489,31 @@ export const clientStorePushOnSkuTask = task({
             })
             .eq("id", mapping.id);
 
+          // Phase 3 Pass 2 — shadow-mode write hook. Fires only when the
+          // connection is currently in `cutover_state='shadow'`. The helper
+          // is internally guarded (returns `skipped_not_shadow` for
+          // legacy/direct) but we short-circuit here too so we don't
+          // pay the function-call cost on the hot legacy/direct path.
+          if (conn.cutover_state === "shadow") {
+            await recordShadowPush({
+              supabase,
+              workspaceId,
+              connectionId: conn.id,
+              sku,
+              correlationId,
+              pushedQuantity: result.finalNewQuantity,
+              cutoverStateAtPush: "shadow",
+              shadowWindowToleranceSeconds: conn.shadow_window_tolerance_seconds,
+              metadata: {
+                platform: "shopify",
+                push_path: "cas",
+                attempts: result.attempts.length,
+                ledger_id: claim.id,
+                reason,
+              },
+            });
+          }
+
           return {
             status: "ok",
             connectionId,
@@ -562,6 +588,29 @@ export const clientStorePushOnSkuTask = task({
         pushed_quantity: pushedQuantity,
         ok: true,
       });
+
+      // Phase 3 Pass 2 — shadow-mode write hook (legacy dispatcher branch).
+      // Squarespace + WooCommerce are absolute-set "last write wins" so
+      // the shadow comparison still matters: SS Inventory Sync mirrors
+      // those pushes into v2, and the comparison confirms they converge.
+      if (conn.cutover_state === "shadow") {
+        await recordShadowPush({
+          supabase,
+          workspaceId,
+          connectionId: conn.id,
+          sku,
+          correlationId,
+          pushedQuantity,
+          cutoverStateAtPush: "shadow",
+          shadowWindowToleranceSeconds: conn.shadow_window_tolerance_seconds,
+          metadata: {
+            platform: conn.platform,
+            push_path: "legacy_dispatcher",
+            ledger_id: claim.id,
+            reason,
+          },
+        });
+      }
 
       return {
         status: "ok",

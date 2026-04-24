@@ -146,17 +146,56 @@ via `bash scripts/check-release-gates.sh`.
 |---|---|---|
 | C.2.1 | `client_store_connections.cutover_state` column present (`text`, `NOT NULL DEFAULT 'legacy'`), constrained to `legacy | shadow | direct`, with audit columns `cutover_started_at`, `cutover_completed_at`, `shadow_mode_log_id`, `shadow_window_tolerance_seconds`. | Schema probe in `scripts/check-release-gates.sh` (`information_schema.columns`); `pnpm vitest run tests/unit/lib/server/client-store-fanout-gate.test.ts` covers the legacy/shadow/direct branches and the unrecognized-value defensive deny. |
 | C.2.2 | `connection_shadow_log` table exists with the columns needed by the Pass 2 comparison hook (`workspace_id`, `connection_id`, `correlation_id`, `sku`, `pushed_quantity`, `pushed_at`, `ss_observed_quantity`, `observed_at`, `match`, `drift_units`, `cutover_state_at_push`, `metadata`). | Schema probe in `scripts/check-release-gates.sh`; the table is the primary substrate for Pass 2 D3 diagnostics — without it the wizard cannot render the 7-day match-rate. |
-| C.2.3 | `connection_shadow_log` rows are retained ≥30 days (drift artifact retention). | _Pass 2 follow-up._ Implemented via the `prune-shadow-log` Trigger task (to be added in Pass 2). Until then this gate is recorded as `INFO` and does not block. |
-| C.2.4 | `connection_echo_overrides` table exists with a partial unique index that prevents two active rows for the same `(connection_id, override_type)` pair. | Schema probe in `scripts/check-release-gates.sh`; the partial unique index `uq_connection_echo_overrides_active` enforces the invariant. |
-| C.2.5 | The DB CHECK constraint `client_store_connections_cutover_dormancy_check` rejects `(cutover_state IN ('shadow','direct'), do_not_fanout=true)` so a mid-cutover row cannot be silently disabled out from under the wizard. | Schema probe in `scripts/check-release-gates.sh`; `pnpm vitest run tests/unit/actions/store-connections.test.ts` covers the actionable-error branch in `disableStoreConnection`. |
-| C.2.6 | The same constraint also blocks `(cutover_state='shadow', do_not_fanout=true)` (rephrasing of C.2.5 — kept separate so the cutover runbook can cite the shadow-specific failure mode). | Same probe; assertions in the disable-action test file cover both `shadow` and `direct`. |
-| C.2.7 | `shadow_window_tolerance_seconds` is bounded between 30 and 600 by the DB CHECK `client_store_connections_shadow_window_check`. | _Pass 2 follow-up._ Schema constraint exists today (Pass 1 migration); release-gate assertion will be added when Pass 2 wires the column into the wizard. |
+| C.2.3 | Drift artifact retention scaffolding present — partial index `idx_connection_shadow_log_retention` on `connection_shadow_log (created_at) WHERE match IS NOT NULL OR observed_at IS NOT NULL` makes the future `prune-shadow-log` sweep index-only. | Schema probe in `scripts/check-release-gates.sh` (Pass 2 D6, migration `20260427000003_connection_echo_overrides_metadata.sql`). |
+| C.2.4 | The DB CHECK constraint `client_store_connections_cutover_dormancy_check` rejects `(cutover_state IN ('shadow','direct'), do_not_fanout=true)` so a mid-cutover row cannot be silently disabled out from under the wizard. | Schema probe in `scripts/check-release-gates.sh`; `pnpm vitest run tests/unit/actions/store-connections.test.ts` covers the actionable-error branch in `disableStoreConnection`. |
+| C.2.5 | `connection_echo_overrides` table exists with a partial unique index that prevents two active rows for the same `(connection_id, override_type)` pair. | Schema probe in `scripts/check-release-gates.sh`; the partial unique index `uq_connection_echo_overrides_active` enforces the invariant. |
+| C.2.6 | `connection_echo_overrides.metadata jsonb NOT NULL` column present so `runConnectionCutover()` can persist the diagnostics snapshot + operator id + force reason for forensic replay. | Schema probe in `scripts/check-release-gates.sh` (Pass 2 D4 + D6, migration `20260427000003_connection_echo_overrides_metadata.sql`). |
+| C.2.7 | `shadow_window_tolerance_seconds` is bounded between 30 and 600 by the DB CHECK `client_store_connections_shadow_window_check` so an operator cannot set a 1-second window that races SS Inventory Sync mirror latency. | Schema probe in `scripts/check-release-gates.sh`; the wizard input also clamps to 30..600. |
 
 Phase 3 Pass 1 deliverables (D1, partial D4, partial D6) are GA-safe today
 because all changes are additive: the DB defaults every existing row to
 `cutover_state='legacy'`, the gate treats `'legacy'` exactly as before, and
 no fanout call site changes behavior unless an operator explicitly inserts a
-`connection_echo_overrides` row (which Pass 2 will gate behind the wizard).
+`connection_echo_overrides` row (which Pass 2 gates behind the wizard).
+
+**Phase 3 Pass 2 (D2 / D3 / D4 / D5 / D6 — added 2026-04-27)** completes the
+operator surface:
+
+* The shadow-mode write hook (`recordShadowPush()`, called from
+  `client-store-push-on-sku` whenever `conn.cutover_state === 'shadow'`)
+  inserts a row into `connection_shadow_log` and enqueues a delayed
+  `shadow-mode-comparison` Trigger task. The comparison task re-reads
+  ShipStation v2 inventory after the per-connection
+  `shadow_window_tolerance_seconds` window and persists `match` +
+  `drift_units` back to the originating row. Skip cascades (no v2
+  defaults, v2 read failed, etc.) write a structured `metadata.skip_reason`
+  so the diagnostics surface can bucket them.
+* `getCutoverDiagnostics(connectionId)` returns 7-day rolling counters
+  (resolved, matched, drifted, unresolved, comparison_skipped, mean +
+  max |drift|), recent drift samples (cap 25), the
+  `comparison_skip_breakdown`, and the gate evaluation (`eligible`,
+  `gate_reason`). Required match rate is 99.5% across ≥ 50 resolved
+  comparisons.
+* `runConnectionCutover(connectionId, { force, forceReason })` enforces
+  three gates in order: (1) connection must be in `shadow`, (2)
+  diagnostics must be `eligible` (bypassable with `force=true` +
+  `forceReason ≥ 8 chars`), (3) no `external_sync_events` with
+  `status='in_flight'` for this connection's sync system within the last
+  5 minutes. On pass it inserts `connection_echo_overrides` row FIRST
+  (audit row carries the diagnostics snapshot + operator id + force
+  reason in `metadata`), then flips `client_store_connections.cutover_state`
+  to `'direct'`. Order matters: a crash between the two writes leaves
+  the connection in `shadow` with an active override — safe (still in
+  shadow logging mode) and auto-recoverable.
+* `rollbackConnectionCutover(connectionId, { reason })` deactivates any
+  active `connection_echo_overrides` rows (`is_active=false`) and reverts
+  `cutover_state='legacy'`. Idempotent on already-legacy.
+* The wizard at `/admin/settings/connection-cutover` exposes the picker,
+  diagnostics panel, and three transition buttons. The "Cutover to
+  direct" button is disabled unless `gate.eligible` is true OR the
+  operator has checked "Force" and supplied a reason ≥ 8 chars. The
+  rollback always requires a reason ≥ 8 chars (Zod-validated). Sidebar
+  link added under Settings.
 
 ---
 

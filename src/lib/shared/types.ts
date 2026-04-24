@@ -706,6 +706,10 @@ export interface ConnectionEchoOverride {
   reason: string | null;
   created_at: string;
   is_active: boolean;
+  /** Phase 3 Pass 2 D4: structured diagnostics snapshot at runConnectionCutover()
+   *  time (counters, gate, window) + initiator user id + force_reason when applicable.
+   *  Migration `20260427000003_connection_echo_overrides_metadata.sql`. */
+  metadata: Record<string, unknown>;
 }
 
 export interface ClientStoreSkuMapping {

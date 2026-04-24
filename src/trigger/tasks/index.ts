@@ -69,6 +69,13 @@ export { sendTrackingEmailTask } from "./send-tracking-email";
 // shipment whose status warranted an email but no notification_sends row exists.
 export { sendTrackingEmailReconCronTask } from "./send-tracking-email-recon";
 export { sensorCheckTask } from "./sensor-check";
+// Phase 3 Pass 2 — shadow-mode comparison task. Fired with a delay by
+//   recordShadowPush() when a connection is in cutover_state='shadow'.
+//   Reads ShipStation v2 inventory and persists match/drift back to the
+//   originating connection_shadow_log row. Pinned to shipstationQueue
+//   (concurrencyLimit: 1) so it shares the v2 60 req/min budget with seed,
+//   reconcile, SHIP_NOTIFY, and the focused adjust task.
+export { shadowModeComparisonTask } from "./shadow-mode-comparison";
 // Phase 5 — tiered ShipStation v2 ↔ DB reconcile sensor.
 //          Three schedules (hot 5m / warm 30m / cold 6h) call the same
 //          inner runner. Drift thresholds: |drift|<=1 silent fix, 2-5

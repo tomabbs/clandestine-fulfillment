@@ -87,6 +87,7 @@ const SETTINGS_ITEMS = [
   { title: "ShipStation Export", href: "/admin/settings/shipstation-export" },
   { title: "Health", href: "/admin/settings/health" },
   { title: "Mega-plan verification", href: "/admin/settings/megaplan-verification" },
+  { title: "Direct-Shopify cutover", href: "/admin/settings/connection-cutover" },
 ] as const;
 
 export function AdminSidebar() {

@@ -176,6 +176,42 @@ else
   else
     emit_fail "C.2.4" "missing constraint client_store_connections_cutover_dormancy_check (apply 20260424000002_connection_cutover_state.sql)"
   fi
+
+  # ─── Phase 3 Pass 2 §9.4 D6 — drift artifact retention scaffolding (C.2.3) ──
+  # Pass 1 declared 90-day retention in the table comment but the index
+  # that makes a `DELETE WHERE created_at < ...` cheap belongs in the
+  # schema. Pass 2 ships it via 20260427000003. Verify the partial index
+  # is present so the future retention sweep is index-only.
+  RETENTION_INDEX_FOUND=$(psql "$DATABASE_URL" -tAc "select 1 from pg_indexes where schemaname='public' and indexname='idx_connection_shadow_log_retention' limit 1" 2>/dev/null || echo "")
+  if [[ "$RETENTION_INDEX_FOUND" == "1" ]]; then
+    emit_pass "C.2.3" "connection_shadow_log retention index present"
+  else
+    emit_fail "C.2.3" "missing index idx_connection_shadow_log_retention (apply 20260427000003_connection_echo_overrides_metadata.sql)"
+  fi
+
+  # ─── Phase 3 Pass 2 §9.4 D6 — connection_echo_overrides.metadata (audit) ────
+  # runConnectionCutover() writes the diagnostics snapshot to metadata so
+  # forensics can replay "why did we flip this connection at this time?"
+  # Without the column the cutover Server Action throws on insert.
+  METADATA_FOUND=$(psql "$DATABASE_URL" -tAc "select 1 from information_schema.columns where table_name='connection_echo_overrides' and column_name='metadata' limit 1" 2>/dev/null || echo "")
+  if [[ "$METADATA_FOUND" == "1" ]]; then
+    emit_pass "C.2.6" "connection_echo_overrides.metadata column present"
+  else
+    emit_fail "C.2.6" "missing column connection_echo_overrides.metadata (apply 20260427000003_connection_echo_overrides_metadata.sql)"
+  fi
+
+  # ─── Phase 3 Pass 2 §9.4 D6 — shadow_window_tolerance bounds (C.2.7) ───────
+  # The CHECK constraint `client_store_connections_shadow_window_check` was
+  # added in Pass 1; this gate just confirms the constraint name is still
+  # present (a future migration that drops it would silently let an
+  # operator set a 1-second window that races SS Inventory Sync mirror
+  # latency). Mirror the C.2.4 pattern: check `pg_constraint.conname`.
+  WINDOW_CONSTRAINT_FOUND=$(psql "$DATABASE_URL" -tAc "select 1 from pg_constraint where conname='client_store_connections_shadow_window_check' limit 1" 2>/dev/null || echo "")
+  if [[ "$WINDOW_CONSTRAINT_FOUND" == "1" ]]; then
+    emit_pass "C.2.7" "shadow_window_tolerance_seconds CHECK constraint present (30..600s bound)"
+  else
+    emit_fail "C.2.7" "missing constraint client_store_connections_shadow_window_check (apply 20260424000002_connection_cutover_state.sql)"
+  fi
 fi
 
 # ─── Org-constraint gate (P9 — merge_organizations_txn coverage) ─────────────
