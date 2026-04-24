@@ -50,3 +50,30 @@ export type UserRole = StaffRole | ClientRole;
  * pinned separately if/when we adopt Storefront API surfaces).
  */
 export const SHOPIFY_CLIENT_API_VERSION = "2026-04";
+
+// Phase 3 Pass 2 — per-connection cutover gate constants.
+//
+// These previously lived in `src/actions/connection-cutover.ts` but Next.js
+// 14 forbids non-async exports from `"use server"` files (the build fails
+// with `Only async functions are allowed to be exported in a "use server"
+// file`). Moved here per Rule #58 (single owner per concern); the action
+// file and the test now both import from this module.
+//
+// MIN_SAMPLE_COUNT_FOR_CUTOVER: minimum number of resolved
+// (`observed_at IS NOT NULL`) shadow comparisons in the last 7 days before
+// `runConnectionCutover` will accept a match-rate gate. Below this, the
+// operator sees `eligible: false` with `gate_reason: 'insufficient_samples'`
+// even if the match-rate is 100%.
+export const MIN_SAMPLE_COUNT_FOR_CUTOVER = 50;
+
+// REQUIRED_MATCH_RATE: required match rate over the rolling 7-day window.
+// 0.995 = 1 drift event per 200 comparisons. Plan §9.4 D2 calibrates this
+// against historical SS Inventory Sync mirror jitter (peak 0.4% drift
+// events at sustained load).
+export const REQUIRED_MATCH_RATE = 0.995;
+
+// POLICY_HEALTH_DRIFT_SAMPLE_LIMIT: cap on `driftSkusSampled` returned by
+// `getConnectionPolicyHealth` — operator badge tooltip, not a report.
+// Previously lived in `src/actions/shopify-policy.ts`; same Next.js 14
+// `"use server"` non-async-export rule forced the relocation.
+export const POLICY_HEALTH_DRIFT_SAMPLE_LIMIT = 5;

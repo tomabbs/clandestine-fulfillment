@@ -37,10 +37,8 @@ vi.mock("@/lib/server/supabase-server", () => ({
 vi.mock("@trigger.dev/sdk", () => ({ tasks: { trigger: vi.fn() } }));
 vi.mock("@/trigger/tasks/shopify-policy-audit", () => ({ auditShopifyConnection: vi.fn() }));
 
-import {
-  getConnectionPolicyHealth,
-  POLICY_HEALTH_DRIFT_SAMPLE_LIMIT,
-} from "@/actions/shopify-policy";
+import { getConnectionPolicyHealth } from "@/actions/shopify-policy";
+import { POLICY_HEALTH_DRIFT_SAMPLE_LIMIT } from "@/lib/shared/constants";
 
 const STAFF_AUTH = {
   supabase: { from: vi.fn() },

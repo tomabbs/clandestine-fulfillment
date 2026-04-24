@@ -34,6 +34,7 @@ import {
   deriveConnectionPolicyHealth,
 } from "@/lib/server/channels-policy-health";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import { POLICY_HEALTH_DRIFT_SAMPLE_LIMIT } from "@/lib/shared/constants";
 import {
   auditShopifyConnection,
   type PolicyAuditConnectionReport,
@@ -140,11 +141,10 @@ export type GetConnectionPolicyHealthResult = ConnectionPolicyHealthResult & {
   connectionId: string;
 };
 
-/**
- * Cap on `driftSkusSampled` size — operator badge tooltip, not a report.
- * Keeping this in code (not env) so the test pins the contract.
- */
-export const POLICY_HEALTH_DRIFT_SAMPLE_LIMIT = 5;
+// POLICY_HEALTH_DRIFT_SAMPLE_LIMIT moved to src/lib/shared/constants.ts —
+// Next.js 14 forbids non-async exports from `"use server"` files. The test
+// file (tests/unit/actions/get-connection-policy-health.test.ts) now imports
+// from constants.ts directly.
 
 export async function getConnectionPolicyHealth(
   input: GetConnectionPolicyHealthInput,

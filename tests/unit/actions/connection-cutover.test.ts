@@ -28,12 +28,11 @@ vi.mock("@/lib/server/supabase-server", () => ({
 
 import {
   getCutoverDiagnostics,
-  MIN_SAMPLE_COUNT_FOR_CUTOVER,
-  REQUIRED_MATCH_RATE,
   rollbackConnectionCutover,
   runConnectionCutover,
   startConnectionShadowMode,
 } from "@/actions/connection-cutover";
+import { MIN_SAMPLE_COUNT_FOR_CUTOVER, REQUIRED_MATCH_RATE } from "@/lib/shared/constants";
 import type { CutoverState } from "@/lib/shared/types";
 
 interface ConnRow {

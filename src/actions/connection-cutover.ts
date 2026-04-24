@@ -23,23 +23,15 @@
 import { z } from "zod/v4";
 import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+// Constants previously lived inline here but Next.js 14 forbids non-async
+// exports from `"use server"` files — moved to src/lib/shared/constants.ts.
+// Re-importing under the same names keeps every existing in-file reference
+// (and the connection-cutover.test.ts re-export path) working unchanged.
+import {
+  MIN_SAMPLE_COUNT_FOR_CUTOVER,
+  REQUIRED_MATCH_RATE,
+} from "@/lib/shared/constants";
 import type { ClientStoreConnection, ConnectionShadowLog, CutoverState } from "@/lib/shared/types";
-
-/**
- * Minimum number of resolved (`observed_at IS NOT NULL`) shadow comparisons
- * required in the last 7 days before `runConnectionCutover` will accept a
- * match-rate gate. Below this, the operator sees `eligible: false` with
- * `gate_reason: 'insufficient_samples'` even if the match-rate is 100%.
- */
-export const MIN_SAMPLE_COUNT_FOR_CUTOVER = 50;
-
-/**
- * Required match rate over the rolling 7-day window. 0.995 = 1 drift event
- * per 200 comparisons. Plan §9.4 D2 calibrates this against historical
- * SS Inventory Sync mirror jitter (peak 0.4% drift events at sustained
- * load).
- */
-export const REQUIRED_MATCH_RATE = 0.995;
 
 const SHADOW_WINDOW_DAYS = 7;
 
