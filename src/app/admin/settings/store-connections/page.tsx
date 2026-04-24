@@ -12,12 +12,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
-import { getUserContext } from "@/actions/auth";
-import { getOrganizationsForWorkspace } from "@/actions/bandcamp";
 import {
   type ConnectionFilters,
   createStoreConnection,
   disableStoreConnection,
+  getStoreConnectionOrganizations,
   getStoreConnections,
   testStoreConnection,
 } from "@/actions/store-connections";
@@ -74,13 +73,6 @@ export default function StoreConnectionsPage() {
     storeUrl: "",
   });
 
-  const { data: ctx, error: ctxError } = useAppQuery({
-    queryKey: ["user-context"],
-    queryFn: () => getUserContext(),
-    tier: CACHE_TIERS.STABLE,
-  });
-  const workspaceId = ctx?.workspaceId ?? "";
-
   const filters: ConnectionFilters = {
     ...(platformFilter && { platform: platformFilter }),
     ...(statusFilter && { status: statusFilter }),
@@ -97,10 +89,10 @@ export default function StoreConnectionsPage() {
   });
 
   const { data: orgs } = useAppQuery({
-    queryKey: ["organizations", workspaceId],
-    queryFn: () => getOrganizationsForWorkspace(workspaceId),
+    queryKey: ["store-connection-organizations"],
+    queryFn: () => getStoreConnectionOrganizations(),
     tier: CACHE_TIERS.STABLE,
-    enabled: !!workspaceId && showAddDialog,
+    enabled: showAddDialog,
   });
 
   const testMutation = useAppMutation({
@@ -143,14 +135,14 @@ export default function StoreConnectionsPage() {
   }
 
   const canCreate = newConn.orgId && newConn.platform && newConn.storeUrl.startsWith("http");
-  const pageError = connectionsError ?? ctxError;
+  const pageError = connectionsError;
   const pageErrorMessage = pageError instanceof Error ? pageError.message : "Unknown error";
 
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Store Connections</h1>
-        <Button onClick={() => setShowAddDialog(true)} disabled={!workspaceId}>
+        <Button onClick={() => setShowAddDialog(true)}>
           <Plus className="h-4 w-4 mr-1" /> Add Connection
         </Button>
       </div>

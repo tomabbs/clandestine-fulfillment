@@ -78,6 +78,7 @@ import {
   autoDiscoverShopifySkus,
   createStoreConnection,
   disableStoreConnection,
+  getStoreConnectionOrganizations,
   getSkuMappings,
   getStoreConnections,
   reactivateClientStoreConnection,
@@ -232,6 +233,31 @@ describe("store-connections server actions", () => {
       expect(workspaceEq).toHaveBeenCalledWith("workspace_id", "ws-1");
       expect(platformEq).toHaveBeenCalledWith("platform", "shopify");
       expect(statusEq).toHaveBeenCalledWith("connection_status", "pending");
+    });
+  });
+
+  describe("getStoreConnectionOrganizations", () => {
+    it("returns organizations for the authenticated workspace", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            order: vi.fn().mockResolvedValue({
+              data: [
+                { id: "org-1", name: "True Panther" },
+                { id: "org-2", name: "Northern Spy Records" },
+              ],
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      const result = await getStoreConnectionOrganizations();
+
+      expect(result).toEqual([
+        { id: "org-1", name: "True Panther" },
+        { id: "org-2", name: "Northern Spy Records" },
+      ]);
     });
   });
 

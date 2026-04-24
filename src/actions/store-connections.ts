@@ -116,6 +116,21 @@ export async function getStoreConnections(rawFilters?: ConnectionFilters): Promi
   };
 }
 
+export async function getStoreConnectionOrganizations(): Promise<Array<{ id: string; name: string }>> {
+  const auth = await requireAuth();
+  const serviceClient = createServiceRoleClient();
+
+  const { data, error } = await serviceClient
+    .from("organizations")
+    .select("id, name")
+    .eq("workspace_id", auth.userRecord.workspace_id)
+    .order("name", { ascending: true });
+
+  if (error) throw new Error(`Failed to fetch organizations: ${error.message}`);
+
+  return (data ?? []) as Array<{ id: string; name: string }>;
+}
+
 /**
  * Create a new pending store connection.
  */
