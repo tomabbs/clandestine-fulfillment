@@ -27,10 +27,7 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 // exports from `"use server"` files — moved to src/lib/shared/constants.ts.
 // Re-importing under the same names keeps every existing in-file reference
 // (and the connection-cutover.test.ts re-export path) working unchanged.
-import {
-  MIN_SAMPLE_COUNT_FOR_CUTOVER,
-  REQUIRED_MATCH_RATE,
-} from "@/lib/shared/constants";
+import { MIN_SAMPLE_COUNT_FOR_CUTOVER, REQUIRED_MATCH_RATE } from "@/lib/shared/constants";
 import type { ClientStoreConnection, ConnectionShadowLog, CutoverState } from "@/lib/shared/types";
 
 const SHADOW_WINDOW_DAYS = 7;
