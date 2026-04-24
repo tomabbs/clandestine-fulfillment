@@ -62,6 +62,30 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `triggerSensorCheck`, `triggerTagCleanup`
 - Admin page: `/admin/catalog/bundles` — bundle management
 
+### Per-Channel Safety Stock (Phase 5 §9.6 D2 — 2026-04-24)
+
+- File: `src/actions/safety-stock.ts` (single-owner per Rule #58 — every safety_stock write goes through here)
+- Companion test: `tests/unit/actions/safety-stock.test.ts` (21 cases per Rule #6)
+- Shared helpers:
+  - `src/lib/shared/safety-stock-csv.ts` — minimal RFC 4180 parser kept outside `"use server"` so it can be a sync export.
+  - `src/lib/shared/constants.ts` — `INTERNAL_SAFETY_STOCK_CHANNELS = ["bandcamp", "clandestine_shopify"]`, `SAFETY_STOCK_MAX_BULK_EDITS = 200` (Rule #41), `SAFETY_STOCK_MAX_VALUE = 32_767` (smallint cap), `SAFETY_STOCK_REASON_MAX_LENGTH = 500`.
+- Schema:
+  - Storefronts: `client_store_sku_mappings.safety_stock` smallint (CHECK >= 0), `preorder_whitelist` boolean, `last_inventory_policy` text, `last_policy_check_at` timestamptz.
+  - Internal channels: `warehouse_safety_stock_per_channel(workspace_id, variant_id, channel, safety_stock, notes, updated_by)` — sparse table; rows reverting to safety_stock=0 are DELETED to keep the §9.6 push helper hot path lean.
+  - Audit log: `warehouse_safety_stock_audit_log` (migration `20260427000004_safety_stock_audit_log.sql`) — append-only, `(channel_kind ∈ {storefront,internal} XOR connection_id|channel_name)` constraint, `prev_/new_safety_stock`, `prev_/new_preorder_whitelist`, `reason`, `source ∈ {ui_inline, ui_bulk, ui_csv, system}`, `changed_by`, `changed_at`. Staff-only RLS.
+- Server Actions (all staff-only via `requireStaffContext`):
+  - `listSafetyStockChannels({})` → `SafetyStockChannelSummary[]` — storefront connections + internal channels with `policyDriftCount` (storefront mappings where `last_inventory_policy='CONTINUE' AND preorder_whitelist=false`).
+  - `listSafetyStockEntries({ channel, page, pageSize, search?, onlyWithSafetyStock? })` → paginated entries joining variant + inventory + last-edit timestamp from the audit log.
+  - `updateSafetyStockBulk({ channel, edits[≤200], reason?, source })` → per-SKU outcomes (`applied | skipped_no_change | error`); writes one audit row per applied/deleted edit. Best-effort: row 73 with a renamed SKU does NOT poison rows 1-72 / 74-200. Internal-channel calls IGNORE `newPreorderWhitelist` (lives only on storefront mapping).
+  - `previewSafetyStockCsv({ channel, csv })` → `CsvPreviewResult` with create/update/delete/no_op/error classification per row; SKU-not-found is surfaced as `error` rather than rejected.
+  - `commitSafetyStockCsv({ channel, edits, reason? })` → delegates to `updateSafetyStockBulk` with `source='ui_csv'`.
+  - `listSafetyStockAuditLog({ page?, pageSize?, channelKind?, connectionId?, channelName?, sku? })` → workspace-scoped, newest first; rejects contradictory filters at the Zod boundary.
+- Admin page: `/admin/settings/safety-stock` — channel picker (drift badge per storefront) + paginated editable grid (inline numeric input, dirty-row highlight, batch save) + per-row Sheet drawer (preorder_whitelist switch + reason textarea + per-SKU audit history) + modal CSV import (file picker / paste textarea → preview rows with classification badges → commit) + workspace-wide audit Sheet with channel + SKU filters. Sidebar entry under Settings between Carrier Mapping and Feature Flags.
+- Critical invariants:
+  - Rule #20 — this file is a POLICY editor; it NEVER calls `recordInventoryChange()`, never touches `available` / `committed_quantity` / Redis. `safety_stock` reduces *push* values via `effective_sellable`, not the underlying ledger.
+  - Rule #54 — every Server Action is bounded ≤200 edits/call. Operators must split larger CSV imports client-side.
+  - Audit rows are written by the Server Action (NOT a DB trigger) because the trigger cannot see `reason` + `source`.
+
 ### Clients + Users + Organizations
 
 - Files:
