@@ -117,28 +117,34 @@ describe("evaluateEffectiveSellable — pure formula", () => {
     expect(result.safetyStock).toBe(10);
   });
 
-  it("clamps to 0 when committed_quantity exceeds available - safety", () => {
+  it("clamps to 0 when committed_quantity exceeds available - safety (gate ON)", () => {
     const result = evaluateEffectiveSellable(
       "bandcamp",
       snap({
         level: { available: 10, safety_stock: 2, committed_quantity: 100 },
+        workspaceAtpCommittedActive: true,
       }),
     );
     expect(result.effectiveSellable).toBe(0);
     expect(result.committedQuantity).toBe(100);
+    expect(result.committedSubtracted).toBe(100);
+    expect(result.committedActive).toBe(true);
     expect(result.committedSource).toBe("level_counter");
   });
 
-  it("subtracts committed_quantity when present (Phase 5 D1 path)", () => {
+  it("subtracts committed_quantity when present AND gate flipped ON (Phase 5 D1.b active)", () => {
     const result = evaluateEffectiveSellable(
       "client_store_shopify",
       snap({
         level: { available: 20, safety_stock: 2, committed_quantity: 5 },
         connectionMappingSafety: 0,
+        workspaceAtpCommittedActive: true,
       }),
     );
     expect(result.effectiveSellable).toBe(15);
     expect(result.committedQuantity).toBe(5);
+    expect(result.committedSubtracted).toBe(5);
+    expect(result.committedActive).toBe(true);
     expect(result.committedSource).toBe("level_counter");
     expect(result.safetyStock).toBe(0);
     expect(result.safetySource).toBe("connection_mapping");
@@ -153,7 +159,62 @@ describe("evaluateEffectiveSellable — pure formula", () => {
     );
     expect(result.committedQuantity).toBe(0);
     expect(result.committedSource).toBe("absent_phase5_pending");
+    expect(result.committedActive).toBe(false);
+    expect(result.committedSubtracted).toBe(0);
     expect(result.effectiveSellable).toBe(8);
+  });
+
+  it("Phase 5 §9.6 D1.b GATE OFF (default) — committed counter is READ + REPORTED but NOT subtracted, push value preserves decrement-at-create math exactly", () => {
+    const result = evaluateEffectiveSellable(
+      "bandcamp",
+      snap({
+        level: { available: 10, safety_stock: 2, committed_quantity: 5 },
+        // workspaceAtpCommittedActive omitted → defaults to false
+      }),
+    );
+    // Math: 10 - 0 (committed not subtracted) - 2 (safety) = 8
+    // NOT 10 - 5 - 2 = 3 (which would be the gate-ON value)
+    expect(result.effectiveSellable).toBe(8);
+    expect(result.committedQuantity).toBe(5); // counter is reported
+    expect(result.committedSource).toBe("level_counter");
+    expect(result.committedActive).toBe(false); // gate OFF
+    expect(result.committedSubtracted).toBe(0); // not subtracted
+  });
+
+  it("Phase 5 §9.6 D1.b GATE OFF with explicit false — same as omitted (audit-only)", () => {
+    const result = evaluateEffectiveSellable(
+      "client_store_shopify",
+      snap({
+        level: { available: 50, safety_stock: 0, committed_quantity: 12 },
+        connectionMappingSafety: 0,
+        workspaceAtpCommittedActive: false,
+      }),
+    );
+    expect(result.effectiveSellable).toBe(50);
+    expect(result.committedQuantity).toBe(12);
+    expect(result.committedActive).toBe(false);
+    expect(result.committedSubtracted).toBe(0);
+  });
+
+  it("gate flip changes the push value but NOT the reported counter — proves audit telemetry is consistent", () => {
+    const baseSnap = snap({
+      level: { available: 30, safety_stock: 4, committed_quantity: 7 },
+    });
+    const off = evaluateEffectiveSellable("bandcamp", {
+      ...baseSnap,
+      workspaceAtpCommittedActive: false,
+    });
+    const on = evaluateEffectiveSellable("bandcamp", {
+      ...baseSnap,
+      workspaceAtpCommittedActive: true,
+    });
+    expect(off.effectiveSellable).toBe(26); // 30 - 0 - 4
+    expect(on.effectiveSellable).toBe(19); // 30 - 7 - 4
+    expect(off.committedQuantity).toBe(7);
+    expect(on.committedQuantity).toBe(7);
+    expect(off.committedSource).toBe(on.committedSource);
+    expect(off.committedActive).toBe(false);
+    expect(on.committedActive).toBe(true);
   });
 
   it("returns reason='unknown_channel' for typos and never silently flushes inventory", () => {

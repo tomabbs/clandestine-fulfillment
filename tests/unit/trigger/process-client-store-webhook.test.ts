@@ -27,6 +27,8 @@ const {
   mockStashEntityId,
   mockMarkStaleDropped,
   mockWriteLastSeenAt,
+  mockCommitOrderItems,
+  mockReleaseOrderItems,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockTrigger: vi.fn().mockResolvedValue({ id: "run-1" }),
@@ -45,6 +47,12 @@ const {
   mockStashEntityId: vi.fn().mockResolvedValue(undefined),
   mockMarkStaleDropped: vi.fn().mockResolvedValue(undefined),
   mockWriteLastSeenAt: vi.fn().mockResolvedValue(undefined),
+  // Phase 5 §9.6 D1.b — handleOrderCreated calls commitOrderItems and
+  // handleOrderCancelled calls releaseOrderItems. Default to success
+  // so existing tests don't regress; the new tests at the bottom of
+  // this file exercise the actual call shapes.
+  mockCommitOrderItems: vi.fn().mockResolvedValue({ inserted: 0, alreadyOpen: [] }),
+  mockReleaseOrderItems: vi.fn().mockResolvedValue({ released: 0 }),
 }));
 
 vi.mock("@/lib/server/supabase-server", () => ({
@@ -59,6 +67,11 @@ vi.mock("@trigger.dev/sdk", () => ({
 
 vi.mock("@/lib/server/record-inventory-change", () => ({
   recordInventoryChange: mockRecordInventoryChange,
+}));
+
+vi.mock("@/lib/server/inventory-commitments", () => ({
+  commitOrderItems: mockCommitOrderItems,
+  releaseOrderItems: mockReleaseOrderItems,
 }));
 
 vi.mock("@/lib/server/bundles", () => ({
@@ -313,6 +326,10 @@ beforeEach(() => {
   patchWarehouseOrderItemsListByOrder();
 
   mockTrigger.mockClear();
+  mockCommitOrderItems.mockReset();
+  mockCommitOrderItems.mockResolvedValue({ inserted: 0, alreadyOpen: [] });
+  mockReleaseOrderItems.mockReset();
+  mockReleaseOrderItems.mockResolvedValue({ released: 0 });
   mockRecordInventoryChange.mockReset();
   mockRecordInventoryChange.mockResolvedValue({
     success: true,
@@ -1263,6 +1280,155 @@ describe("topic dispatcher", () => {
       processed: false,
       reason: "unknown_topic",
       topic: "themes/publish",
+    });
+  });
+});
+
+// ──────────────── Phase 5 §9.6 D1.b — commit/release wire-up ───────────────────
+//
+// Asserts that handleOrderCreated opens a commit per (workspace_id,
+// orderId, sku) with `source='order'` and that handleOrderCancelled
+// releases every open commit for the order. The actual ledger writes
+// are mocked via @/lib/server/inventory-commitments — these tests pin
+// the CALL CONTRACT so the wire-up cannot drift.
+//
+// Failure-isolation behavior (commit/release errors land sensor rows
+// without failing the handler) is covered by manual production smoke
+// tests + the underlying inventory-commitments unit tests; not
+// re-asserted here to avoid mocking sensor_readings inserts.
+
+describe("Phase 5 §9.6 D1.b — commit/release wire-up", () => {
+  it("handleOrderCreated → commitOrderItems with workspaceId + orderId + items[] (source='order' implied)", async () => {
+    seedConnection();
+    state.skuMappings.push(
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "REMOTE-CMT-A",
+        variant_id: "var-A",
+        warehouse_product_variants: { sku: "WH-CMT-A" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "REMOTE-CMT-B",
+        variant_id: "var-B",
+        warehouse_product_variants: { sku: "WH-CMT-B" },
+      },
+    );
+
+    // Patch the mock so warehouse_orders.insert returns the new order
+    // id (the default mock for unknown tables returns {}). Mirror the
+    // pattern the F-1 fulfilled_quantity test uses.
+    const previousImpl = mockFrom.getMockImplementation();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "warehouse_orders") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                single: async () => ({ data: null, error: null }),
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+          }),
+          insert: () => ({
+            select: () => ({
+              single: async () => ({ data: { id: "wh-order-cmt-new" }, error: null }),
+            }),
+          }),
+          update: () => ({
+            eq: async () => ({ data: null, error: null }),
+          }),
+        };
+      }
+      if (table === "warehouse_order_items") {
+        return {
+          insert: async () => ({ data: null, error: null }),
+        };
+      }
+      return previousImpl ? previousImpl(table) : {};
+    });
+
+    const eventId = "evt-commit-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-cmt-1",
+          line_items: [
+            { id: 401, sku: "REMOTE-CMT-A", quantity: 2 },
+            { id: 402, sku: "REMOTE-CMT-B", quantity: 5 },
+          ],
+        },
+      },
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockCommitOrderItems).toHaveBeenCalledTimes(1);
+    const callArg = mockCommitOrderItems.mock.calls[0][0];
+    expect(callArg.workspaceId).toBe(WORKSPACE_ID);
+    expect(callArg.orderId).toBe("wh-order-cmt-new");
+    // items[] use REMOTE skus (the SKU on the warehouse_order_items
+    // row at insert time before mapping resolution); the underlying
+    // commitInventory aggregates and forwards. The wire-up contract
+    // is just "pass items + orderId".
+    expect(callArg.items).toEqual([
+      { sku: "REMOTE-CMT-A", qty: 2 },
+      { sku: "REMOTE-CMT-B", qty: 5 },
+    ]);
+    expect(callArg.metadata).toMatchObject({
+      platform: "shopify",
+      connection_id: CONNECTION_ID,
+      remote_order_id: "shopify-order-cmt-1",
+      webhook_event_id: eventId,
+    });
+  });
+
+  it("handleOrderCancelled → releaseOrderItems with workspaceId + orderId + reason='order_cancelled' (source='order' implied)", async () => {
+    seedConnection();
+    state.warehouseOrders.push({
+      id: "wh-order-rel-1",
+      workspace_id: WORKSPACE_ID,
+      external_order_id: "shopify-order-rel-1",
+      org_id: ORG_ID,
+      fulfillment_status: null,
+    });
+    state.warehouseOrderItems.push({
+      id: "item-rel-1",
+      order_id: "wh-order-rel-1",
+      workspace_id: WORKSPACE_ID,
+      sku: "WH-REL-A",
+      quantity: 3,
+      fulfilled_quantity: 0,
+      shopify_line_item_id: "601",
+    });
+
+    const eventId = "evt-release-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/cancelled",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-rel-1",
+          line_items: [{ id: 601, fulfillment_status: null }],
+        },
+      },
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockReleaseOrderItems).toHaveBeenCalledTimes(1);
+    expect(mockReleaseOrderItems).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      orderId: "wh-order-rel-1",
+      reason: "order_cancelled",
     });
   });
 });

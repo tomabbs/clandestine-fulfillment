@@ -18,6 +18,7 @@
 
 import { logger, task } from "@trigger.dev/sdk";
 import OAuth from "oauth-1.0a";
+import { releaseOrderItems } from "@/lib/server/inventory-commitments";
 import {
   fetchFulfillmentOrdersForOrder,
   runFulfillmentCreateMutation,
@@ -173,6 +174,51 @@ export const markPlatformFulfilledTask = task({
         .from("warehouse_orders")
         .update({ platform_fulfillment_status: "confirmed", updated_at: new Date().toISOString() })
         .eq("id", order_id);
+
+      // Phase 5 §9.6 D1.b — release every open commit for this
+      // order. Fulfillment confirmation = stock has physically left
+      // the building, so the commit has resolved (the underlying
+      // `available` decrement happened at orders/create per the
+      // existing semantic; this just clears the audit ledger row).
+      //
+      // While `workspaces.atp_committed_active` is FALSE (the default
+      // per migration 20260424000005), this release has no effect on
+      // the push formula — it just keeps the ledger clean for the
+      // daily counter↔ledger recon task.
+      //
+      // Failure isolation: a release failure must NEVER mark the
+      // platform as un-fulfilled. The platform side already
+      // confirmed; a stale ledger row will surface in recon as drift
+      // but is recoverable (manual release via admin UI in Phase 5
+      // D3+).
+      try {
+        const releaseResult = await releaseOrderItems({
+          workspaceId: order.workspace_id as string,
+          orderId: order_id,
+          reason: `platform_fulfilled:${order.source}`,
+        });
+        if (releaseResult.released > 0) {
+          logger.info("releaseOrderItems(fulfill) released commits", {
+            order_id,
+            platform: order.source,
+            released: releaseResult.released,
+          });
+        }
+      } catch (relErr) {
+        const msg = relErr instanceof Error ? relErr.message : String(relErr);
+        logger.error("releaseOrderItems(fulfill) failed", {
+          order_id,
+          platform: order.source,
+          error: msg,
+        });
+        await supabase.from("sensor_readings").insert({
+          workspace_id: order.workspace_id,
+          sensor_name: "inv.commit_ledger_release_failed",
+          status: "warning",
+          message: `releaseOrderItems(fulfill) failed for order ${order_id}: ${msg.slice(0, 200)}`,
+          value: { order_id, platform: order.source, error: msg, kind: "fulfill" },
+        });
+      }
 
       return { success: true, platform: order.source };
     } catch (err) {

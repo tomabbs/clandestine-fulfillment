@@ -9,6 +9,7 @@
 import { task, tasks } from "@trigger.dev/sdk";
 import { triggerBundleFanout } from "@/lib/server/bundles";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
+import { commitOrderItems, releaseOrderItems } from "@/lib/server/inventory-commitments";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import {
@@ -435,6 +436,56 @@ async function handleOrderCreated(
       };
     });
     await supabase.from("warehouse_order_items").insert(items);
+
+    // Phase 5 §9.6 D1.b — open one inventory_commitments row per
+    // (workspace_id, source='order', source_id=newOrder.id, sku).
+    // The push formula `MAX(0, available - committed - safety)`
+    // ignores this column UNTIL `workspaces.atp_committed_active` is
+    // flipped per workspace (default FALSE — see migration
+    // 20260424000005). Until then this is an audit-only ledger:
+    // visible in the recon task + the megaplan spot-check, no
+    // production behavior change.
+    //
+    // Idempotency: commitOrderItems uses ON CONFLICT DO NOTHING on
+    // the partial unique index (workspace_id, source, source_id, sku)
+    // WHERE released_at IS NULL, so retried Shopify deliveries (up to
+    // ~24 retries over 48h per the Shopify webhook contract) cannot
+    // double-commit.
+    //
+    // Failure isolation: ledger insert errors must NEVER fail the
+    // order ingestion. Inventory has already decremented via
+    // recordInventoryChange above; a missing audit row will surface
+    // in the daily counter↔ledger recon task as drift but will not
+    // delay the order. Wrapped in try/catch + sensor row.
+    try {
+      const commitItems = items.map((it) => ({ sku: it.sku, qty: it.quantity }));
+      const commitResult = await commitOrderItems({
+        workspaceId,
+        orderId: newOrder.id,
+        items: commitItems,
+        metadata: {
+          platform,
+          connection_id: connectionId ?? null,
+          remote_order_id: remoteOrderId,
+          webhook_event_id: event.id,
+        },
+      });
+      if (commitResult.alreadyOpen.length > 0) {
+        console.info(
+          `[process-client-store-webhook] commitOrderItems: ${commitResult.inserted} new, ${commitResult.alreadyOpen.length} already-open (retry)`,
+        );
+      }
+    } catch (commitErr) {
+      const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+      console.error("[process-client-store-webhook] commitOrderItems failed:", msg);
+      await supabase.from("sensor_readings").insert({
+        workspace_id: workspaceId,
+        sensor_name: "inv.commit_ledger_write_failed",
+        status: "warning",
+        message: `commitOrderItems failed for order ${newOrder.id}: ${msg.slice(0, 200)}`,
+        value: { order_id: newOrder.id, platform, error: msg },
+      });
+    }
 
     // Decrement warehouse inventory for each line item.
     // This loop is NOT atomic — partial failures are recorded in warehouse_review_queue.
@@ -977,6 +1028,41 @@ async function handleOrderCancelled(
     .from("warehouse_orders")
     .update({ fulfillment_status: "cancelled", updated_at: new Date().toISOString() })
     .eq("id", order.id);
+
+  // Phase 5 §9.6 D1.b — release every open commit for this order. We
+  // release ALL skus (no `skus` filter) because cancel terminates the
+  // entire order, regardless of partial-fulfillment state. Lines that
+  // were already fulfilled and recorded skipped_already_fulfilled
+  // above may not have an open commit (they were released by
+  // mark-platform-fulfilled), in which case this releases 0 rows for
+  // that SKU and is a safe no-op.
+  //
+  // Idempotency: a retried orders/cancelled webhook hits this branch
+  // a second time. The first call flipped released_at; the second
+  // call's UPDATE WHERE released_at IS NULL matches 0 rows. Released
+  // count is 0, no double-decrement of committed_quantity.
+  try {
+    const releaseResult = await releaseOrderItems({
+      workspaceId,
+      orderId: order.id,
+      reason: "order_cancelled",
+    });
+    if (releaseResult.released > 0) {
+      console.info(
+        `[process-client-store-webhook] releaseOrderItems(cancel): released ${releaseResult.released} commits for order ${order.id}`,
+      );
+    }
+  } catch (relErr) {
+    const msg = relErr instanceof Error ? relErr.message : String(relErr);
+    console.error("[process-client-store-webhook] releaseOrderItems(cancel) failed:", msg);
+    await supabase.from("sensor_readings").insert({
+      workspace_id: workspaceId,
+      sensor_name: "inv.commit_ledger_release_failed",
+      status: "warning",
+      message: `releaseOrderItems(cancel) failed for order ${order.id}: ${msg.slice(0, 200)}`,
+      value: { order_id: order.id, platform, error: msg, kind: "cancel" },
+    });
+  }
 
   // Surface any errored rows to the review queue.
   const failures = recreditResults.filter((r) => r.status === "error");

@@ -15,10 +15,19 @@
  *                    by recordInventoryChange + reconcile sensors only.
  *   - `committed`  : Phase 5 §9.6 D1 column (inventory_commitments ledger
  *                    + denormalized counter on warehouse_inventory_levels).
- *                    Phase 5 has not landed yet — we read the counter if it
- *                    exists, otherwise 0. Documented in the
- *                    `committedQuantity` source field on the result so
- *                    consumers can tell the value is provisional.
+ *                    Phase 5 §9.6 D1.b gate: the workspace flag
+ *                    `workspaces.atp_committed_active` (default FALSE,
+ *                    migration 20260424000005) controls whether this term
+ *                    is subtracted from the formula. While the flag is
+ *                    OFF, the counter is READ + REPORTED in the result
+ *                    (`committedQuantity` + `committedSource='level_counter'`)
+ *                    but `committedSubtracted` is 0, so the push value is
+ *                    `MAX(0, available - safety_stock)` — preserves the
+ *                    existing decrement-at-orders/create semantic exactly.
+ *                    Flip this flag per-workspace ONLY after the §9.6
+ *                    D1.b.1 decrement-at-fulfillment refactor lands; doing
+ *                    it earlier silently double-counts open-order qty and
+ *                    underpushes inventory across every channel.
  *   - `safety_stock[channel]` : per-channel reserve in ABSOLUTE units.
  *                    Resolution order (first hit wins):
  *                      1. client_store_sku_mappings.safety_stock for the
@@ -108,10 +117,23 @@ export interface EffectiveSellableResult {
   /** Phase 5 committed quantity; 0 until §9.6 D1 ships. */
   committedQuantity: number;
   committedSource: EffectiveSellableCommittedSource;
+  /**
+   * Phase 5 §9.6 D1.b — TRUE iff `workspaces.atp_committed_active` is on
+   * for this workspace. While FALSE, `committedQuantity` is reported but
+   * NOT subtracted from the push formula (see `committedSubtracted`).
+   */
+  committedActive: boolean;
+  /**
+   * Phase 5 §9.6 D1.b — units actually subtracted from `available` in the
+   * push formula. Equals `committedQuantity` when `committedActive=true`,
+   * otherwise 0. Lets push paths log/observe the gating decision per row
+   * without re-computing it.
+   */
+  committedSubtracted: number;
   /** Resolved per-channel safety stock in absolute units. */
   safetyStock: number;
   safetySource: EffectiveSellableSafetySource;
-  /** Final value to PUSH = MAX(0, available - committed - safety_stock). */
+  /** Final value to PUSH = MAX(0, available - committedSubtracted - safety_stock). */
   effectiveSellable: number;
   /**
    * Diagnostic — explains short-circuit cases. `null` when the formula
@@ -135,6 +157,12 @@ export interface EffectiveSellableSnapshot {
   connectionMappingSafety?: number | null;
   perChannelSafety?: number | null;
   workspaceDefaultSafety?: number | null;
+  /**
+   * Phase 5 §9.6 D1.b gate. When TRUE the helper subtracts
+   * `committed_quantity` from the push formula; when FALSE (default) the
+   * counter is read + reported but not subtracted. See file-level docs.
+   */
+  workspaceAtpCommittedActive?: boolean;
 }
 
 /**
@@ -150,6 +178,8 @@ export function evaluateEffectiveSellable(
       available: 0,
       committedQuantity: 0,
       committedSource: "absent_phase5_pending",
+      committedActive: false,
+      committedSubtracted: 0,
       safetyStock: 0,
       safetySource: "fallback_zero",
       effectiveSellable: 0,
@@ -163,6 +193,8 @@ export function evaluateEffectiveSellable(
       available: 0,
       committedQuantity: 0,
       committedSource: "absent_phase5_pending",
+      committedActive: false,
+      committedSubtracted: 0,
       safetyStock: 0,
       safetySource: "fallback_zero",
       effectiveSellable: 0,
@@ -178,14 +210,25 @@ export function evaluateEffectiveSellable(
   const committedSource: EffectiveSellableCommittedSource =
     typeof counter === "number" ? "level_counter" : "absent_phase5_pending";
 
+  // Phase 5 §9.6 D1.b — gate committed-quantity subtraction behind the
+  // workspace flag. Default OFF (workspaceAtpCommittedActive===undefined
+  // or false) preserves the existing decrement-at-orders/create math
+  // exactly: committedSubtracted=0 → effectiveSellable = available - safety.
+  // Flip to TRUE only after the §9.6 D1.b.1 decrement-at-fulfillment
+  // refactor lands per workspace.
+  const committedActive = snapshot.workspaceAtpCommittedActive === true;
+  const committedSubtracted = committedActive ? committedQuantity : 0;
+
   const { value: safetyStock, source: safetySource } = resolveSafetyStock(channel, snapshot);
 
-  const effectiveSellable = Math.max(0, available - committedQuantity - safetyStock);
+  const effectiveSellable = Math.max(0, available - committedSubtracted - safetyStock);
 
   return {
     available,
     committedQuantity,
     committedSource,
+    committedActive,
+    committedSubtracted,
     safetyStock,
     safetySource,
     effectiveSellable,
@@ -259,12 +302,16 @@ export async function computeEffectiveSellable(
     });
   }
 
-  // Phase 5 D1 has not landed yet — `committed_quantity` may not exist as
-  // a column. Fall through gracefully via the optional chain on the
-  // snapshot read.
+  // Phase 5 §9.6 D1 (migration 20260424000004) added `committed_quantity`
+  // to warehouse_inventory_levels — denormalized counter kept in
+  // lockstep with the inventory_commitments ledger by the
+  // sync_committed_quantity() trigger. Always read alongside available
+  // and safety_stock so the push formula
+  //   MAX(0, available - committed - safety_stock[channel])
+  // sees a transactionally-consistent snapshot.
   const { data: level } = await supabase
     .from("warehouse_inventory_levels")
-    .select("available, safety_stock")
+    .select("available, safety_stock, committed_quantity")
     .eq("variant_id", variant.id)
     .maybeSingle();
 
@@ -295,9 +342,12 @@ export async function computeEffectiveSellable(
     }
   }
 
+  // Phase 5 §9.6 D1.b — fold the per-workspace ATP gate flag into the
+  // same SELECT we already do for default_safety_stock. Free read; no
+  // extra DB roundtrip.
   const { data: ws } = await supabase
     .from("workspaces")
-    .select("default_safety_stock")
+    .select("default_safety_stock, atp_committed_active")
     .eq("id", workspaceId)
     .maybeSingle();
 
@@ -308,6 +358,7 @@ export async function computeEffectiveSellable(
     perChannelSafety,
     workspaceDefaultSafety:
       typeof ws?.default_safety_stock === "number" ? ws.default_safety_stock : null,
+    workspaceAtpCommittedActive: ws?.atp_committed_active === true,
   });
 }
 
