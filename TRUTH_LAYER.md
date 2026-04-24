@@ -30,6 +30,7 @@ If any required file is missing or stale for the requested scope, return `BLOCKE
 - Every new read path must follow `docs/system_map/CACHE_ARCHITECTURE.md` (tier class, scope-safe keying, invalidation-first freshness).
 - Server-side auth context comes from `requireAuth()` and validated role checks.
 - Workspace-scoped admin reads must derive tenant scope on the server from `requireAuth()` rather than trusting a client-cached workspace id for the primary row filter.
+- Admin query surfaces must not collapse auth/query failures into the same empty-state copy used for true zero-row results.
 - Org/workspace sensitive writes are protected by RLS or service-role actions with explicit authorization checks.
 - Trigger.dev handles background and asynchronous workflows; debugging must include related tasks.
 - Webhook handlers must preserve idempotency and bounded retries.

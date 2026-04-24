@@ -74,7 +74,7 @@ export default function StoreConnectionsPage() {
     storeUrl: "",
   });
 
-  const { data: ctx } = useAppQuery({
+  const { data: ctx, error: ctxError } = useAppQuery({
     queryKey: ["user-context"],
     queryFn: () => getUserContext(),
     tier: CACHE_TIERS.STABLE,
@@ -86,7 +86,11 @@ export default function StoreConnectionsPage() {
     ...(statusFilter && { status: statusFilter }),
   };
 
-  const { data, isLoading } = useAppQuery({
+  const {
+    data,
+    isLoading,
+    error: connectionsError,
+  } = useAppQuery({
     queryKey: queryKeys.storeConnections.list(JSON.stringify(filters)),
     queryFn: () => getStoreConnections(filters),
     tier: CACHE_TIERS.SESSION,
@@ -139,6 +143,8 @@ export default function StoreConnectionsPage() {
   }
 
   const canCreate = newConn.orgId && newConn.platform && newConn.storeUrl.startsWith("http");
+  const pageError = connectionsError ?? ctxError;
+  const pageErrorMessage = pageError instanceof Error ? pageError.message : "Unknown error";
 
   return (
     <div className="p-6 space-y-4">
@@ -187,6 +193,16 @@ export default function StoreConnectionsPage() {
       {isLoading ? (
         <div className="flex justify-center py-8 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
+        </div>
+      ) : pageError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <div className="flex items-start gap-2 text-destructive">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">Failed to load store connections.</p>
+              <p className="mt-1 break-words text-destructive/90">{pageErrorMessage}</p>
+            </div>
+          </div>
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-8 text-center text-muted-foreground">
