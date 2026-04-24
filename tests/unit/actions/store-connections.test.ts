@@ -90,6 +90,11 @@ import { requireAuth } from "@/lib/server/auth-context";
 describe("store-connections server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFrom.mockReset();
+    mockServiceFrom.mockReset();
+    mockIterateAllVariants.mockReset();
+    mockGetInventoryLevelsAtLocation.mockReset();
+    mockEstimateOrderVolume.mockReset();
     vi.mocked(requireAuth).mockResolvedValue({
       supabase: { from: mockFrom } as never,
       authUserId: "auth-1",
@@ -146,51 +151,25 @@ describe("store-connections server actions", () => {
 
   describe("getStoreConnections", () => {
     it("returns connections grouped with org name and mapping count", async () => {
-      // Main connections query
+      mockServiceFrom.mockReset();
+      // First call: connections query
+      const connectionsEq = vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: "conn-1",
+            org_id: "org-1",
+            platform: "shopify",
+            store_url: "https://shop.example.com",
+            connection_status: "active",
+            organizations: { name: "Test Label" },
+          },
+        ],
+        error: null,
+      });
       mockServiceFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
           order: vi.fn().mockReturnValue({
-            eq: undefined,
-          }),
-        }),
-      });
-
-      // Simplify: mock the full chain
-      const mockQuery = {
-        select: vi.fn(),
-      };
-      mockQuery.select.mockReturnValue({
-        order: vi.fn().mockResolvedValue({
-          data: [
-            {
-              id: "conn-1",
-              org_id: "org-1",
-              platform: "shopify",
-              store_url: "https://shop.example.com",
-              connection_status: "active",
-              organizations: { name: "Test Label" },
-            },
-          ],
-          error: null,
-        }),
-      });
-
-      mockServiceFrom.mockReset();
-      // First call: connections query
-      mockServiceFrom.mockReturnValueOnce({
-        select: vi.fn().mockReturnValue({
-          order: vi.fn().mockResolvedValue({
-            data: [
-              {
-                id: "conn-1",
-                org_id: "org-1",
-                platform: "shopify",
-                store_url: "https://shop.example.com",
-                connection_status: "active",
-                organizations: { name: "Test Label" },
-              },
-            ],
-            error: null,
+            eq: connectionsEq,
           }),
         }),
       });
@@ -211,6 +190,48 @@ describe("store-connections server actions", () => {
       expect(result.connections).toHaveLength(1);
       expect(result.connections[0].org_name).toBe("Test Label");
       expect(result.connections[0].sku_mapping_count).toBe(2);
+      expect(connectionsEq).toHaveBeenCalledWith("workspace_id", "ws-1");
+    });
+
+    it("ignores client-supplied workspace filters and uses the auth workspace", async () => {
+      const statusEq = vi.fn().mockResolvedValue({
+        data: [],
+        error: null,
+      });
+      const platformEq = vi.fn().mockReturnValue({
+        eq: statusEq,
+      });
+      const workspaceEq = vi.fn().mockReturnValue({
+        eq: platformEq,
+      });
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          order: vi.fn().mockReturnValue({
+            eq: workspaceEq,
+          }),
+        }),
+      });
+
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          in: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
+        }),
+      });
+
+      await getStoreConnections({
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        platform: "shopify",
+        status: "pending",
+      });
+
+      expect(workspaceEq).toHaveBeenCalledWith("workspace_id", "ws-1");
+      expect(platformEq).toHaveBeenCalledWith("platform", "shopify");
+      expect(statusEq).toHaveBeenCalledWith("connection_status", "pending");
     });
   });
 

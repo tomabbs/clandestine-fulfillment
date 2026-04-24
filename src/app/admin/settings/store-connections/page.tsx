@@ -82,7 +82,6 @@ export default function StoreConnectionsPage() {
   const workspaceId = ctx?.workspaceId ?? "";
 
   const filters: ConnectionFilters = {
-    ...(workspaceId && { workspaceId }),
     ...(platformFilter && { platform: platformFilter }),
     ...(statusFilter && { status: statusFilter }),
   };

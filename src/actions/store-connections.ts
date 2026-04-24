@@ -63,16 +63,18 @@ const updateConnectionSchema = z.object({
 export async function getStoreConnections(rawFilters?: ConnectionFilters): Promise<{
   connections: Array<ClientStoreConnection & { org_name: string; sku_mapping_count: number }>;
 }> {
-  await requireAuth();
+  const auth = await requireAuth();
   const filters = connectionFiltersSchema.parse(rawFilters ?? {});
   const serviceClient = createServiceRoleClient();
 
+  // Scope to the authenticated user's workspace server-side so UI callers do
+  // not depend on a client-cached workspace id to see the right rows.
   let query = serviceClient
     .from("client_store_connections")
     .select("*, organizations!inner(name)")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .eq("workspace_id", auth.userRecord.workspace_id);
 
-  if (filters.workspaceId) query = query.eq("workspace_id", filters.workspaceId);
   if (filters.orgId) query = query.eq("org_id", filters.orgId);
   if (filters.platform) query = query.eq("platform", filters.platform);
   if (filters.status) query = query.eq("connection_status", filters.status);
