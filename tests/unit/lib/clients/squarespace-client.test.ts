@@ -4,11 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-import { adjustInventory, getInventory, getOrders } from "@/lib/clients/squarespace-client";
+import {
+  adjustInventory,
+  getInventory,
+  getOrders,
+  getProductsByIds,
+  listCatalogItems,
+  listProductsPage,
+} from "@/lib/clients/squarespace-client";
 
 describe("squarespace-client", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
@@ -33,16 +41,40 @@ describe("squarespace-client", () => {
       const result = await getInventory(apiKey, storeUrl);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://mystore.squarespace.com/api/1.0/commerce/inventory",
+        "https://api.squarespace.com/1.0/commerce/inventory",
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: "Bearer test-api-key",
+            "User-Agent": "clandestine-fulfillment/1.0",
           }),
         }),
       );
       expect(result).toHaveLength(2);
       expect(result[0].sku).toBe("SKU-001");
       expect(result[0].quantity).toBe(10);
+    });
+
+    it("paginates inventory until nextPageCursor is exhausted", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            inventory: [{ variantId: "v1", sku: "SKU-001", quantity: 10 }],
+            pagination: { hasNextPage: true, nextPageCursor: "cursor-1" },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            inventory: [{ variantId: "v2", sku: "SKU-002", quantity: 5 }],
+            pagination: { hasNextPage: false, nextPageCursor: null },
+          }),
+        });
+
+      const result = await getInventory(apiKey, storeUrl);
+
+      expect(result).toHaveLength(2);
+      expect((mockFetch.mock.calls[1]?.[0] as string) ?? "").toContain("cursor=cursor-1");
     });
 
     it("throws on non-OK response", async () => {
@@ -66,7 +98,7 @@ describe("squarespace-client", () => {
       await adjustInventory(apiKey, storeUrl, "var-1", 5, "idem-key-123");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://mystore.squarespace.com/api/1.0/commerce/inventory/adjustments",
+        "https://api.squarespace.com/1.0/commerce/inventory/adjustments",
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
@@ -147,6 +179,106 @@ describe("squarespace-client", () => {
 
       const url = mockFetch.mock.calls[0][0] as string;
       expect(url).toContain("cursor=abc123");
+    });
+  });
+
+  describe("product catalog readers", () => {
+    it("lists products from the v2 commerce endpoint", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          products: [{ id: "p1", name: "Test LP", type: "PHYSICAL", url: "https://store/item" }],
+          pagination: { hasNextPage: false, nextPageCursor: null },
+        }),
+      });
+
+      const result = await listProductsPage(apiKey);
+
+      expect(result.products).toHaveLength(1);
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.squarespace.com/v2/commerce/products",
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-api-key",
+            "User-Agent": "clandestine-fulfillment/1.0",
+          }),
+        }),
+      );
+    });
+
+    it("fetches product details by product ids", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          products: [
+            {
+              id: "p1",
+              name: "Test LP",
+              type: "PHYSICAL",
+              url: "https://store/item",
+              variants: [{ id: "v1", sku: "LP-001", stock: { quantity: 8, unlimited: false } }],
+            },
+          ],
+        }),
+      });
+
+      const result = await getProductsByIds(apiKey, ["p1"]);
+
+      expect(result[0]?.variants[0]?.sku).toBe("LP-001");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.squarespace.com/v2/commerce/products/p1",
+        expect.anything(),
+      );
+    });
+
+    it("builds a flat catalog from product pages plus detail batches", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            products: [
+              { id: "p1", name: "Test Shirt", type: "PHYSICAL", url: "https://store/shirt" },
+            ],
+            pagination: { hasNextPage: false, nextPageCursor: null },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            products: [
+              {
+                id: "p1",
+                name: "Test Shirt",
+                type: "PHYSICAL",
+                url: "https://store/shirt",
+                variants: [
+                  {
+                    id: "v1",
+                    sku: "SHIRT-L",
+                    stock: { quantity: 4, unlimited: false },
+                    attributes: { Size: "Large" },
+                  },
+                ],
+              },
+            ],
+          }),
+        });
+
+      const items = await listCatalogItems(apiKey);
+
+      expect(items).toEqual([
+        {
+          productId: "p1",
+          variantId: "v1",
+          productName: "Test Shirt",
+          variantName: "Test Shirt - Large",
+          sku: "SHIRT-L",
+          quantity: 4,
+          unlimited: false,
+          productUrl: "https://store/shirt",
+          productType: "PHYSICAL",
+        },
+      ]);
     });
   });
 });

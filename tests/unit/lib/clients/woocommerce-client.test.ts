@@ -5,11 +5,18 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 import type { WooCommerceCredentials } from "@/lib/clients/woocommerce-client";
-import { getOrders, getProductBySku, updateStockQuantity } from "@/lib/clients/woocommerce-client";
+import {
+  getOrders,
+  getProductBySku,
+  listCatalogItems,
+  listProductsPage,
+  updateStockQuantity,
+} from "@/lib/clients/woocommerce-client";
 
 describe("woocommerce-client", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
@@ -44,7 +51,7 @@ describe("woocommerce-client", () => {
       const result = await getProductBySku(credentials, "LP-001");
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://shop.example.com/wp-json/wc/v3/products?sku=LP-001",
+        "https://shop.example.com/wp-json/wc/v3/products?page=1&per_page=20&search=LP-001",
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: expectedAuthHeader,
@@ -53,6 +60,7 @@ describe("woocommerce-client", () => {
       );
       expect(result).not.toBeNull();
       expect(result?.id).toBe(42);
+      expect(result?.productId).toBe(42);
       expect(result?.stock_quantity).toBe(15);
     });
 
@@ -64,6 +72,53 @@ describe("woocommerce-client", () => {
 
       const result = await getProductBySku(credentials, "NONEXISTENT");
       expect(result).toBeNull();
+    });
+
+    it("finds variation SKUs under variable products", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [
+            {
+              id: 42,
+              name: "Test Shirt",
+              sku: "",
+              type: "variable",
+              variations: [84],
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [
+            {
+              id: 84,
+              sku: "SHIRT-BLACK-L",
+              stock_quantity: 4,
+              stock_status: "instock",
+              manage_stock: true,
+              price: "30.00",
+              attributes: [{ name: "Size", option: "Large" }],
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [],
+        });
+
+      const result = await getProductBySku(credentials, "SHIRT-BLACK-L");
+
+      expect(result).toMatchObject({
+        productId: 42,
+        variationId: 84,
+        sku: "SHIRT-BLACK-L",
+      });
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        "https://shop.example.com/wp-json/wc/v3/products/42/variations?page=1&per_page=20",
+        expect.anything(),
+      );
     });
 
     it("throws on non-OK response", async () => {
@@ -126,6 +181,99 @@ describe("woocommerce-client", () => {
       // Rule #44: absolute quantity, stock_quantity is the value sent
       expect(body.stock_quantity).toBe(0);
       expect(body).not.toHaveProperty("delta");
+    });
+
+    it("updates a variation endpoint when variationId is provided", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 84,
+          sku: "SHIRT-BLACK-L",
+          stock_quantity: 9,
+          stock_status: "instock",
+          manage_stock: true,
+          price: "30.00",
+          attributes: [{ name: "Size", option: "Large" }],
+        }),
+      });
+
+      await updateStockQuantity(credentials, 42, 9, 84);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://shop.example.com/wp-json/wc/v3/products/42/variations/84",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ stock_quantity: 9, manage_stock: true }),
+        }),
+      );
+    });
+  });
+
+  describe("catalog readers", () => {
+    it("lists a catalog page with the safe page size", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      });
+
+      await listProductsPage(credentials, { perPage: 100, page: 2 });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://shop.example.com/wp-json/wc/v3/products?page=2&per_page=20",
+        expect.anything(),
+      );
+    });
+
+    it("lists products and variable-product variations together", async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [
+            {
+              id: 1,
+              name: "LP One",
+              sku: "LP-001",
+              stock_quantity: 5,
+              stock_status: "instock",
+              manage_stock: true,
+              price: "25.00",
+            },
+            {
+              id: 2,
+              name: "Test Shirt",
+              sku: "",
+              type: "variable",
+              variations: [21, 22],
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [
+            {
+              id: 21,
+              sku: "SHIRT-S",
+              stock_quantity: 3,
+              stock_status: "instock",
+              manage_stock: true,
+              price: "30.00",
+              attributes: [{ name: "Size", option: "Small" }],
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [],
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [],
+        });
+
+      const items = await listCatalogItems(credentials);
+
+      expect(items.map((item) => item.sku)).toEqual(["LP-001", "SHIRT-S"]);
+      expect(items[1]).toMatchObject({ productId: 2, variationId: 21 });
     });
   });
 

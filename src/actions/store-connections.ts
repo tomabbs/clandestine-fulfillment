@@ -23,7 +23,6 @@ import { createServiceRoleClient } from "@/lib/server/supabase-server";
 // from the shared constant so a single bump touches every per-client surface.
 import { SHOPIFY_CLIENT_API_VERSION as SHOPIFY_API_VERSION } from "@/lib/shared/constants";
 import { env } from "@/lib/shared/env";
-import { SHOPIFY_REQUIRED_WEBHOOK_TOPICS_REST } from "@/lib/shared/shopify-webhook-topics";
 import type {
   ClientStoreConnection,
   ClientStoreSkuMapping,
@@ -115,7 +114,9 @@ export async function getStoreConnections(rawFilters?: ConnectionFilters): Promi
   };
 }
 
-export async function getStoreConnectionOrganizations(): Promise<Array<{ id: string; name: string }>> {
+export async function getStoreConnectionOrganizations(): Promise<
+  Array<{ id: string; name: string }>
+> {
   const auth = await requireAuth();
   const serviceClient = createServiceRoleClient();
 
@@ -358,16 +359,16 @@ export async function testStoreConnection(
     switch (conn.platform) {
       case "squarespace": {
         if (!conn.api_key) throw new Error("Missing API key");
-        const { getInventory } = await import("@/lib/clients/squarespace-client");
-        await getInventory(conn.api_key, conn.store_url);
+        const { listProductsPage } = await import("@/lib/clients/squarespace-client");
+        await listProductsPage(conn.api_key);
         break;
       }
       case "woocommerce": {
         if (!conn.api_key || !conn.api_secret) throw new Error("Missing credentials");
-        const { getOrders } = await import("@/lib/clients/woocommerce-client");
-        await getOrders(
+        const { listProductsPage } = await import("@/lib/clients/woocommerce-client");
+        await listProductsPage(
           { consumerKey: conn.api_key, consumerSecret: conn.api_secret, siteUrl: conn.store_url },
-          { perPage: 1 },
+          { perPage: 20 },
         );
         break;
       }
@@ -475,47 +476,29 @@ export async function autoDiscoverSkus(
   switch (conn.platform) {
     case "squarespace": {
       if (!conn.api_key) throw new Error("Missing API key");
-      const { getInventory } = await import("@/lib/clients/squarespace-client");
-      const inventory = await getInventory(conn.api_key, conn.store_url);
-      remoteSkus = inventory
-        .filter((i) => i.sku)
-        .map((i) => ({
-          sku: i.sku as string,
-          remoteProductId: i.variantId,
-          remoteVariantId: i.variantId,
-        }));
+      const { listCatalogItems } = await import("@/lib/clients/squarespace-client");
+      const items = await listCatalogItems(conn.api_key);
+      remoteSkus = items.map((item) => ({
+        sku: item.sku,
+        remoteProductId: item.productId,
+        remoteVariantId: item.variantId,
+      }));
       break;
     }
     case "woocommerce": {
       if (!conn.api_key || !conn.api_secret) throw new Error("Missing credentials");
-      // WooCommerce doesn't have a bulk "get all products" with SKU easily,
-      // so we fetch paginated products
       const credentials = {
         consumerKey: conn.api_key,
         consumerSecret: conn.api_secret,
         siteUrl: conn.store_url,
       };
-      // Fetch first page of products (limited to prevent timeout — Rule #41)
-      const res = await fetch(
-        `${conn.store_url.replace(/\/$/, "")}/wp-json/wc/v3/products?per_page=100`,
-        {
-          headers: {
-            Authorization: `Basic ${Buffer.from(`${credentials.consumerKey}:${credentials.consumerSecret}`).toString("base64")}`,
-          },
-        },
-      );
-      if (!res.ok) throw new Error(`WooCommerce fetch error: ${res.status}`);
-      const products = (await res.json()) as Array<{
-        id: number;
-        sku: string;
-      }>;
-      remoteSkus = products
-        .filter((p) => p.sku)
-        .map((p) => ({
-          sku: p.sku,
-          remoteProductId: String(p.id),
-          remoteVariantId: null,
-        }));
+      const { listCatalogItems } = await import("@/lib/clients/woocommerce-client");
+      const items = await listCatalogItems(credentials);
+      remoteSkus = items.map((item) => ({
+        sku: item.sku,
+        remoteProductId: String(item.productId),
+        remoteVariantId: item.variationId ? String(item.variationId) : null,
+      }));
       break;
     }
     case "shopify": {

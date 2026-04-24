@@ -406,17 +406,22 @@ function createWooCommerceSync(
       // Use mapping if available, otherwise look up by SKU
       const mapping = skuMappings?.get(sku);
       let productId: number;
+      let variationId: number | null = null;
 
-      if (mapping?.remoteProductId) {
+      if (mapping?.remoteProductId && mapping.remoteVariantId) {
+        productId = Number(mapping.remoteProductId);
+        variationId = Number(mapping.remoteVariantId);
+      } else if (mapping?.remoteProductId) {
         productId = Number(mapping.remoteProductId);
       } else {
         const product = await getProductBySku(credentials, sku);
         if (!product) throw new Error(`SKU ${sku} not found in WooCommerce`);
-        productId = product.id;
+        productId = product.productId;
+        variationId = product.variationId;
       }
 
       // Rule #44: absolute quantity, not delta
-      await updateStockQuantity(credentials, productId, quantity);
+      await updateStockQuantity(credentials, productId, quantity, variationId);
     },
 
     async getRemoteQuantity(sku) {
