@@ -723,8 +723,68 @@ export interface ClientStoreSkuMapping {
   last_pushed_quantity: number | null;
   last_pushed_at: string | null;
   is_active: boolean;
+  // Phase 5 §9.6 D1 — per-channel safety stock (smallint, CHECK >= 0).
+  // Migration 20260424000001_per_channel_safety_stock.sql. Reduces effective
+  // sellable before push (see src/lib/server/effective-sellable.ts).
+  safety_stock: number;
+  // Phase 5 §9.6 D2 — per-SKU exemption from the daily shopify-policy-audit
+  // DENY check. SKUs with preorder_whitelist=true may legitimately have
+  // inventoryPolicy=CONTINUE on Shopify (so customers can backorder).
+  preorder_whitelist: boolean;
+  // Phase 5 §9.6 D2 — last observed Shopify variant inventoryPolicy
+  // (DENY|CONTINUE). NULL = never audited. Updated by shopify-policy-audit.
+  last_inventory_policy: string | null;
+  // Phase 5 §9.6 D2 — wall-clock of the last shopify-policy-audit
+  // observation. NULL = never audited.
+  last_policy_check_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Phase 5 §9.6 D1 — per-(workspace, variant, channel) safety stock for
+ * NON-storefront channels. Storefront channels live on
+ * `client_store_sku_mappings.safety_stock` (one row per connection-SKU).
+ * `channel` is open-enum text — known values today: `bandcamp`,
+ * `clandestine_shopify`. The §9.6 push helper enforces the canonical set
+ * at read time. Migration `20260424000001_per_channel_safety_stock.sql`.
+ */
+export interface WarehouseSafetyStockPerChannel {
+  id: string;
+  workspace_id: string;
+  variant_id: string;
+  channel: string;
+  safety_stock: number;
+  notes: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Phase 5 §9.6 D2 — append-only audit trail for every safety_stock or
+ * preorder_whitelist edit made through the admin Safety Stock workspace.
+ * Migration `20260427000004_safety_stock_audit_log.sql`. Staff-only RLS.
+ */
+export type SafetyStockAuditChannelKind = "storefront" | "internal";
+export type SafetyStockAuditSource = "ui_inline" | "ui_bulk" | "ui_csv" | "system";
+
+export interface WarehouseSafetyStockAuditLog {
+  id: string;
+  workspace_id: string;
+  channel_kind: SafetyStockAuditChannelKind;
+  connection_id: string | null;
+  channel_name: string | null;
+  variant_id: string | null;
+  sku: string;
+  prev_safety_stock: number | null;
+  new_safety_stock: number;
+  prev_preorder_whitelist: boolean | null;
+  new_preorder_whitelist: boolean | null;
+  reason: string | null;
+  source: SafetyStockAuditSource;
+  changed_by: string | null;
+  changed_at: string;
 }
 
 // === Operational ===

@@ -77,3 +77,36 @@ export const REQUIRED_MATCH_RATE = 0.995;
 // Previously lived in `src/actions/shopify-policy.ts`; same Next.js 14
 // `"use server"` non-async-export rule forced the relocation.
 export const POLICY_HEALTH_DRIFT_SAMPLE_LIMIT = 5;
+
+// Phase 5 §9.6 D2 — Safety Stock workspace constants. Moved here from
+// src/actions/safety-stock.ts because Next.js 14 forbids non-async
+// exports from `"use server"` files (see commit f72f752 — same fix
+// applied earlier to MIN_SAMPLE_COUNT_FOR_CUTOVER and friends).
+
+/** Known internal safety-stock channels. The `effective-sellable` push
+ *  helper enforces this set at read time; this list mirrors it so the
+ *  UI picker stays in sync without a second source of truth. New
+ *  channels added here MUST also be wired into `effective-sellable.ts`
+ *  and the §9.6 push helpers. */
+export const INTERNAL_SAFETY_STOCK_CHANNELS = ["bandcamp", "clandestine_shopify"] as const;
+export type InternalSafetyStockChannel = (typeof INTERNAL_SAFETY_STOCK_CHANNELS)[number];
+
+/** Cap on the number of edits a single bulk-update or CSV-commit can
+ *  apply. Mirrors Rule #41 (Server Actions stay bounded; >200 edits
+ *  should be split client-side or fired as a Trigger task). 200 SKUs
+ *  * (1 update + 1 audit insert) ≈ 400 PostgREST round trips ≈ <30s
+ *  comfortably. */
+export const SAFETY_STOCK_MAX_BULK_EDITS = 200;
+
+/** Smallint column upper bound enforced by Postgres on both source
+ *  tables (client_store_sku_mappings.safety_stock,
+ *  warehouse_safety_stock_per_channel.safety_stock). Keeping the
+ *  app-layer guard tight surfaces typos like "10000000" before they
+ *  hit the DB and trigger a confusing 22003 numeric_value_out_of_range
+ *  error. */
+export const SAFETY_STOCK_MAX_VALUE = 32_767;
+
+/** Reason field length cap on safety_stock edits. Matches the `text`
+ *  column comment-level intent — the DB itself does not enforce this
+ *  so future longer notes don't require a migration cycle. */
+export const SAFETY_STOCK_REASON_MAX_LENGTH = 500;
