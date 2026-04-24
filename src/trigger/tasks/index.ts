@@ -49,6 +49,13 @@ export { clientStorePushOnSkuTask } from "./client-store-push-on-sku";
 export { easypostRegisterTrackerTask } from "./easypost-register-tracker";
 export { inboundCheckinComplete } from "./inbound-checkin-complete";
 export { inboundProductCreate } from "./inbound-product-create";
+// Phase 5 §9.6 D1.c — daily counter↔ledger reconciliation for the
+// inventory commitments substrate (migration 20260424000004). Runs
+// 04:15 UTC, surfaces drift as warehouse_review_queue items + a
+// sensor_readings summary row. Independent of
+// `workspaces.atp_committed_active` — recon ALWAYS runs because
+// trigger correctness is independent of consumer-side math.
+export { inventoryCommittedCounterReconTask } from "./inventory-committed-counter-recon";
 export { monthlyBillingTask } from "./monthly-billing";
 export { multiStoreInventoryPushTask } from "./multi-store-inventory-push";
 export { pirateShipImportTask } from "./pirate-ship-import";
