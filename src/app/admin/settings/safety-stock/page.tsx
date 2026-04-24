@@ -677,6 +677,13 @@ function SafetyStockInput({
     setLocal(String(value));
   }, [value]);
 
+  function stageIfValid(raw: string) {
+    const n = clampSafetyStockInput(raw);
+    if (n !== null && n !== value) {
+      onCommit(n);
+    }
+  }
+
   function commit() {
     const n = clampSafetyStockInput(local);
     if (n === null) {
@@ -685,13 +692,20 @@ function SafetyStockInput({
       toast.error(`Safety stock must be 0–${SAFETY_STOCK_MAX_VALUE}`);
       return;
     }
+    setLocal(String(n));
     if (n !== value) onCommit(n);
   }
 
   return (
     <Input
       value={local}
-      onChange={(e) => setLocal(e.target.value)}
+      onChange={(e) => {
+        const next = e.target.value;
+        setLocal(next);
+        // Stage valid edits immediately so the page-level Save button
+        // reflects dirty state even before the field blurs.
+        stageIfValid(next);
+      }}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
