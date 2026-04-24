@@ -122,8 +122,15 @@ function mockTables(opts: {
 }
 
 const ACTIVE_CONN: Conn = { id: CONN_ID, platform: "shopify", connection_status: "active" };
-const NOW = "2026-04-22T12:00:00.000Z";
-const FRESH_AUDIT = "2026-04-22T06:00:00.000Z"; // 6h ago — within 48h window
+// Time anchors are computed relative to wall-clock at module load, NOT
+// hardcoded ISO strings. Hardcoded timestamps decay past the 48h
+// freshness boundary as real-time rolls forward (caused the
+// "whitelisted CONTINUE + DENY mix → state='healthy'" assertion to flip
+// to 'delayed' in CI on 2026-04-24, ~56h after the prior anchor of
+// 2026-04-22T06:00Z). 6h ago is comfortably inside the 48h window for
+// every test that injects FRESH_AUDIT as the simulated last_policy_check_at.
+const NOW = new Date().toISOString();
+const FRESH_AUDIT = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
 
 describe("getConnectionPolicyHealth", () => {
   beforeEach(() => {
