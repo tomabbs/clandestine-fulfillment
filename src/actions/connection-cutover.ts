@@ -358,8 +358,14 @@ const runConnectionCutoverInputSchema = z.object({
    *  it. Use for fire-drills / recovery scenarios where the gate is wrong
    *  for known reasons. */
   force: z.boolean().optional(),
-  forceReason: z.string().min(8).max(500).nullable().optional(),
+  /** Free-form audit string. The 8-char-minimum check lives in the action
+   *  body (paired with `force=true`) rather than in the schema so that the
+   *  empty/missing case returns a structured `blocked.force_missing_reason`
+   *  result instead of throwing a ZodError at the boundary. */
+  forceReason: z.string().max(500).nullable().optional(),
 });
+
+const FORCE_REASON_MIN_LENGTH = 8;
 
 const rollbackConnectionCutoverInputSchema = z.object({
   connectionId: z.string().uuid(),
@@ -510,7 +516,7 @@ export async function runConnectionCutover(
   const input = runConnectionCutoverInputSchema.parse(rawInput);
   const { connectionId, force, forceReason } = input;
 
-  if (force === true && (!forceReason || forceReason.trim().length === 0)) {
+  if (force === true && (!forceReason || forceReason.trim().length < FORCE_REASON_MIN_LENGTH)) {
     return {
       status: "blocked",
       connectionId,

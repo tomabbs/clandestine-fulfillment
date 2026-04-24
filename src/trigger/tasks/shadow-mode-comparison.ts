@@ -74,176 +74,186 @@ export type ShadowModeComparisonResult =
       reason: string;
     };
 
+/**
+ * Pure runner — extracted so the unit suite can call the task body directly
+ * without depending on Trigger.dev's `task<...>().run` private surface (the
+ * `Task<>` generic does not expose `.run` on the public type — exporting the
+ * runner separately keeps tests independent of SDK internals).
+ */
+export async function runShadowModeComparison(
+  payload: ShadowModeComparisonPayload,
+): Promise<ShadowModeComparisonResult> {
+  const { shadowLogId, workspaceId, sku, pushedQuantity } = payload;
+
+  const supabase = createServiceRoleClient();
+
+  // 1) re-read the shadow log row. Defensive: bail if it disappeared
+  //    (e.g. retention pruning ran, operator manually deleted, etc.).
+  const { data: logRow, error: logErr } = await supabase
+    .from("connection_shadow_log")
+    .select("id, match, observed_at, metadata")
+    .eq("id", shadowLogId)
+    .maybeSingle();
+
+  if (logErr || !logRow) {
+    logger.warn("[shadow-mode-comparison] shadow log row missing", {
+      shadowLogId,
+      sku,
+      error: logErr?.message,
+    });
+    return {
+      status: "skipped_log_missing",
+      shadowLogId,
+      sku,
+      reason: logErr?.message ?? "row_not_found",
+    };
+  }
+
+  if (logRow.match !== null || logRow.observed_at !== null) {
+    // Duplicate fire — typically the same row was already compared
+    // either by an operator-issued re-run or by Trigger.dev retrying
+    // a task that succeeded mid-write. Idempotent skip.
+    logger.info("[shadow-mode-comparison] already compared — skipping", {
+      shadowLogId,
+      sku,
+    });
+    return {
+      status: "skipped_already_compared",
+      shadowLogId,
+      sku,
+      reason: "match_or_observed_at_set",
+    };
+  }
+
+  // 2) load workspace v2 defaults. Same skip semantics as
+  //    shipstation-v2-adjust-on-sku.
+  const { data: ws } = await supabase
+    .from("workspaces")
+    .select("shipstation_v2_inventory_warehouse_id, shipstation_v2_inventory_location_id")
+    .eq("id", workspaceId)
+    .single();
+
+  const warehouseId = ws?.shipstation_v2_inventory_warehouse_id ?? null;
+  const locationId = ws?.shipstation_v2_inventory_location_id ?? null;
+
+  if (!warehouseId || !locationId) {
+    // v2 not configured for this workspace — record the comparison as
+    // skipped so the operator dashboard shows "shadow mode running but
+    // no v2 to compare against". Diagnostics will surface this as a
+    // setup gap.
+    const observedAt = new Date().toISOString();
+    await supabase
+      .from("connection_shadow_log")
+      .update({
+        observed_at: observedAt,
+        match: null,
+        drift_units: null,
+        metadata: {
+          ...((logRow.metadata as Record<string, unknown> | null) ?? {}),
+          skip_reason: "no_v2_defaults",
+        },
+      })
+      .eq("id", shadowLogId);
+
+    logger.info("[shadow-mode-comparison] workspace v2 defaults missing", {
+      shadowLogId,
+      workspaceId,
+      sku,
+    });
+    return {
+      status: "skipped_no_v2_defaults",
+      shadowLogId,
+      sku,
+      reason: "shipstation_v2_inventory_warehouse_id_or_location_id_missing",
+    };
+  }
+
+  // 3) read v2 state. listInventory returns no row for SKUs at 0
+  //    (Phase 0 §4.2.3) — treat absent as 0.
+  let observedQuantity = 0;
+  try {
+    const records = await listInventory({
+      skus: [sku],
+      inventory_warehouse_id: warehouseId,
+      inventory_location_id: locationId,
+    });
+    if (records.length > 0) {
+      const r = records[0];
+      // v2 reports `available` (sellable, post-allocation). Mirror the
+      // inventory-fanout / reconcile sensor by using the same field —
+      // we want to compare apples to apples with what we pushed.
+      observedQuantity = typeof r.available === "number" ? r.available : 0;
+    }
+  } catch (err) {
+    // v2 read failed. Persist the failure so the row is not orphaned;
+    // the row stays at match=null, but observed_at is set so the
+    // unresolved-row sweep doesn't re-enqueue indefinitely. Return
+    // `skipped_error` so the operator can see something failed.
+    const observedAt = new Date().toISOString();
+    await supabase
+      .from("connection_shadow_log")
+      .update({
+        observed_at: observedAt,
+        match: null,
+        drift_units: null,
+        metadata: {
+          ...((logRow.metadata as Record<string, unknown> | null) ?? {}),
+          skip_reason: "v2_read_failed",
+          v2_error: err instanceof Error ? err.message : String(err),
+        },
+      })
+      .eq("id", shadowLogId);
+
+    logger.error("[shadow-mode-comparison] v2 read failed", {
+      shadowLogId,
+      sku,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return {
+      status: "skipped_error",
+      shadowLogId,
+      sku,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const driftUnits = observedQuantity - pushedQuantity;
+  const match = driftUnits === 0;
+  const observedAt = new Date().toISOString();
+
+  await supabase
+    .from("connection_shadow_log")
+    .update({
+      ss_observed_quantity: observedQuantity,
+      observed_at: observedAt,
+      match,
+      drift_units: driftUnits,
+    })
+    .eq("id", shadowLogId);
+
+  logger.info("[shadow-mode-comparison] comparison persisted", {
+    shadowLogId,
+    sku,
+    pushedQuantity,
+    observedQuantity,
+    driftUnits,
+    match,
+  });
+
+  return {
+    status: "compared",
+    shadowLogId,
+    sku,
+    pushedQuantity,
+    observedQuantity,
+    match,
+    driftUnits,
+  };
+}
+
 export const shadowModeComparisonTask = task({
   id: "shadow-mode-comparison",
   queue: shipstationQueue,
   maxDuration: 60,
-  run: async (payload: ShadowModeComparisonPayload): Promise<ShadowModeComparisonResult> => {
-    const { shadowLogId, workspaceId, sku, pushedQuantity } = payload;
-
-    const supabase = createServiceRoleClient();
-
-    // 1) re-read the shadow log row. Defensive: bail if it disappeared
-    //    (e.g. retention pruning ran, operator manually deleted, etc.).
-    const { data: logRow, error: logErr } = await supabase
-      .from("connection_shadow_log")
-      .select("id, match, observed_at, metadata")
-      .eq("id", shadowLogId)
-      .maybeSingle();
-
-    if (logErr || !logRow) {
-      logger.warn("[shadow-mode-comparison] shadow log row missing", {
-        shadowLogId,
-        sku,
-        error: logErr?.message,
-      });
-      return {
-        status: "skipped_log_missing",
-        shadowLogId,
-        sku,
-        reason: logErr?.message ?? "row_not_found",
-      };
-    }
-
-    if (logRow.match !== null || logRow.observed_at !== null) {
-      // Duplicate fire — typically the same row was already compared
-      // either by an operator-issued re-run or by Trigger.dev retrying
-      // a task that succeeded mid-write. Idempotent skip.
-      logger.info("[shadow-mode-comparison] already compared — skipping", {
-        shadowLogId,
-        sku,
-      });
-      return {
-        status: "skipped_already_compared",
-        shadowLogId,
-        sku,
-        reason: "match_or_observed_at_set",
-      };
-    }
-
-    // 2) load workspace v2 defaults. Same skip semantics as
-    //    shipstation-v2-adjust-on-sku.
-    const { data: ws } = await supabase
-      .from("workspaces")
-      .select("shipstation_v2_inventory_warehouse_id, shipstation_v2_inventory_location_id")
-      .eq("id", workspaceId)
-      .single();
-
-    const warehouseId = ws?.shipstation_v2_inventory_warehouse_id ?? null;
-    const locationId = ws?.shipstation_v2_inventory_location_id ?? null;
-
-    if (!warehouseId || !locationId) {
-      // v2 not configured for this workspace — record the comparison as
-      // skipped so the operator dashboard shows "shadow mode running but
-      // no v2 to compare against". Diagnostics will surface this as a
-      // setup gap.
-      const observedAt = new Date().toISOString();
-      await supabase
-        .from("connection_shadow_log")
-        .update({
-          observed_at: observedAt,
-          match: null,
-          drift_units: null,
-          metadata: {
-            ...((logRow.metadata as Record<string, unknown> | null) ?? {}),
-            skip_reason: "no_v2_defaults",
-          },
-        })
-        .eq("id", shadowLogId);
-
-      logger.info("[shadow-mode-comparison] workspace v2 defaults missing", {
-        shadowLogId,
-        workspaceId,
-        sku,
-      });
-      return {
-        status: "skipped_no_v2_defaults",
-        shadowLogId,
-        sku,
-        reason: "shipstation_v2_inventory_warehouse_id_or_location_id_missing",
-      };
-    }
-
-    // 3) read v2 state. listInventory returns no row for SKUs at 0
-    //    (Phase 0 §4.2.3) — treat absent as 0.
-    let observedQuantity = 0;
-    try {
-      const records = await listInventory({
-        skus: [sku],
-        inventory_warehouse_id: warehouseId,
-        inventory_location_id: locationId,
-      });
-      if (records.length > 0) {
-        const r = records[0];
-        // v2 reports `available` (sellable, post-allocation). Mirror the
-        // inventory-fanout / reconcile sensor by using the same field —
-        // we want to compare apples to apples with what we pushed.
-        observedQuantity = typeof r.available === "number" ? r.available : 0;
-      }
-    } catch (err) {
-      // v2 read failed. Persist the failure so the row is not orphaned;
-      // the row stays at match=null, but observed_at is set so the
-      // unresolved-row sweep doesn't re-enqueue indefinitely. Return
-      // `skipped_error` so the operator can see something failed.
-      const observedAt = new Date().toISOString();
-      await supabase
-        .from("connection_shadow_log")
-        .update({
-          observed_at: observedAt,
-          match: null,
-          drift_units: null,
-          metadata: {
-            ...((logRow.metadata as Record<string, unknown> | null) ?? {}),
-            skip_reason: "v2_read_failed",
-            v2_error: err instanceof Error ? err.message : String(err),
-          },
-        })
-        .eq("id", shadowLogId);
-
-      logger.error("[shadow-mode-comparison] v2 read failed", {
-        shadowLogId,
-        sku,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return {
-        status: "skipped_error",
-        shadowLogId,
-        sku,
-        reason: err instanceof Error ? err.message : String(err),
-      };
-    }
-
-    const driftUnits = observedQuantity - pushedQuantity;
-    const match = driftUnits === 0;
-    const observedAt = new Date().toISOString();
-
-    await supabase
-      .from("connection_shadow_log")
-      .update({
-        ss_observed_quantity: observedQuantity,
-        observed_at: observedAt,
-        match,
-        drift_units: driftUnits,
-      })
-      .eq("id", shadowLogId);
-
-    logger.info("[shadow-mode-comparison] comparison persisted", {
-      shadowLogId,
-      sku,
-      pushedQuantity,
-      observedQuantity,
-      driftUnits,
-      match,
-    });
-
-    return {
-      status: "compared",
-      shadowLogId,
-      sku,
-      pushedQuantity,
-      observedQuantity,
-      match,
-      driftUnits,
-    };
-  },
+  run: runShadowModeComparison,
 });

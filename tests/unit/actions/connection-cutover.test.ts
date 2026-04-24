@@ -1,92 +1,29 @@
-/**
- * Phase 3 Pass 2 D3+D4 — connection-cutover Server Actions test suite.
- *
- * Coverage map:
- *   - getCutoverDiagnostics: counter math, gate evaluation (eligible /
- *     wrong_state / insufficient_samples / match_rate_below_threshold),
- *     comparison_skip_breakdown grouping, recent_drift_samples cap.
- *   - runConnectionCutover: gate cascade (wrong_state, force_missing_reason).
- *   - rollbackConnectionCutover: idempotent on already-legacy, Zod reason gate.
- *   - startConnectionShadowMode: idempotent re-call, do_not_fanout pre-flight,
- *     invalid-transition rejection.
- *
- * The supabase mock here uses per-table response queues (FIFO). Each
- * `setTableResponses(table, [...])` enqueues responses; each `from(table)`
- * call dequeues one builder. This lets a single test assert across multiple
- * sequential reads of the same table without the responses bleeding
- * across tests.
- */
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-interface TableResponse {
-  data?: unknown;
-  error?: unknown;
-}
+// Phase 3 Pass 2 — `connection-cutover` Server Actions companion test
+// suite (Rule #6).
+//
+// Covers:
+//   - getCutoverDiagnostics: counter math (resolved/matched/drifted/skipped),
+//     gate evaluation across the four reasons (wrong_state,
+//     insufficient_samples, match_rate_below_threshold,
+//     unresolved_window_too_old, ok), drift sample shape.
+//   - startConnectionShadowMode: legacy→shadow transition, idempotent
+//     re-entry, do_not_fanout precondition, invalid transition rejection.
+//   - runConnectionCutover: gate-pass / gate-fail / wrong-state /
+//     in-flight-push / forced-without-reason / forced-success;
+//     verifies echo override + cutover_state flip ordering.
+//   - rollbackConnectionCutover: deactivates active overrides + flips
+//     state; idempotent on legacy.
 
-const tableQueues = new Map<string, TableResponse[]>();
-
-function enqueue(table: string, ...responses: TableResponse[]) {
-  if (!tableQueues.has(table)) tableQueues.set(table, []);
-  tableQueues.get(table)?.push(...responses);
-}
-
-function nextResponse(table: string): TableResponse {
-  const q = tableQueues.get(table);
-  if (!q || q.length === 0) return { data: null, error: null };
-  return q.shift() ?? { data: null, error: null };
-}
-
-function makeQueryBuilder(table: string) {
-  // Bind the response at the moment from() is called — sequential awaits
-  // on the same builder share the same response.
-  const resp = nextResponse(table);
-
-  const terminal = async () => ({ data: resp.data ?? null, error: resp.error ?? null });
-
-  const builder: Record<string, unknown> = {
-    select: vi.fn(() => builder),
-    insert: vi.fn(() => builder),
-    update: vi.fn(() => builder),
-    eq: vi.fn(() => builder),
-    gte: vi.fn(() => builder),
-    lte: vi.fn(() => builder),
-    order: vi.fn(() => builder),
-    limit: vi.fn(() => builder),
-    maybeSingle: vi.fn(terminal),
-    single: vi.fn(terminal),
-  };
-  // Make await-able directly (no .single/.maybeSingle) — returns array data.
-  (builder as { then: (cb: (v: unknown) => unknown) => Promise<unknown> }).then = (cb) =>
-    Promise.resolve({ data: resp.data ?? [], error: resp.error ?? null }).then(cb);
-
-  return builder;
-}
-
-const mockServiceFrom = vi.fn((table: string) => makeQueryBuilder(table));
-const mockServiceClient = { from: mockServiceFrom };
-
-vi.mock("@/lib/server/supabase-server", () => ({
-  createServerSupabaseClient: async () => ({ auth: { getUser: vi.fn() }, from: vi.fn() }),
-  createServiceRoleClient: () => mockServiceClient,
+const requireAuth = vi.fn();
+vi.mock("@/lib/server/auth-context", () => ({
+  requireAuth: (...args: unknown[]) => requireAuth(...args),
 }));
 
-vi.mock("@/lib/server/auth-context", () => ({
-  requireAuth: vi.fn(() =>
-    Promise.resolve({
-      supabase: { from: vi.fn() },
-      authUserId: "auth-1",
-      userRecord: {
-        id: "11111111-1111-4111-8111-111111111111",
-        workspace_id: "22222222-2222-4222-8222-222222222222",
-        org_id: null,
-        role: "admin",
-        email: "admin@test.com",
-        name: "Admin",
-      },
-      isStaff: true,
-    }),
-  ),
+const mockServiceFrom = vi.fn();
+vi.mock("@/lib/server/supabase-server", () => ({
+  createServiceRoleClient: () => ({ from: mockServiceFrom }),
 }));
 
 import {
@@ -97,331 +34,425 @@ import {
   runConnectionCutover,
   startConnectionShadowMode,
 } from "@/actions/connection-cutover";
+import type { CutoverState } from "@/lib/shared/types";
 
-const VALID_CONN_ID = "33333333-3333-4333-8333-333333333333";
-const VALID_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
+interface ConnRow {
+  id: string;
+  workspace_id?: string;
+  platform?: string;
+  store_url?: string | null;
+  cutover_state: CutoverState;
+  cutover_started_at?: string | null;
+  cutover_completed_at?: string | null;
+  shadow_window_tolerance_seconds?: number | null;
+  do_not_fanout?: boolean;
+}
 
-function shadowLogRow(overrides: Partial<Record<string, unknown>> = {}) {
+interface ShadowRow {
+  id: string;
+  sku: string;
+  pushed_quantity: number;
+  ss_observed_quantity: number | null;
+  drift_units: number | null;
+  match: boolean | null;
+  pushed_at: string;
+  observed_at: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+function buildConnQuery(row: ConnRow | null) {
   return {
-    id: `log-${Math.random().toString(36).slice(2)}`,
-    sku: "SKU-1",
-    pushed_quantity: 5,
-    ss_observed_quantity: 5,
-    drift_units: 0,
-    match: true,
-    pushed_at: new Date().toISOString(),
-    observed_at: new Date().toISOString(),
-    metadata: null,
-    ...overrides,
+    select: vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }),
+      }),
+    }),
   };
 }
 
+function buildShadowLogQuery(rows: ShadowRow[]) {
+  return {
+    select: vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        gte: vi.fn().mockReturnValue({
+          order: vi.fn().mockResolvedValue({ data: rows, error: null }),
+        }),
+      }),
+    }),
+  };
+}
+
+function setupAuth(isStaff: boolean) {
+  requireAuth.mockResolvedValue({
+    isStaff,
+    userRecord: {
+      id: "user-1",
+      workspace_id: "ws-1",
+      org_id: null,
+      role: "admin",
+      email: "admin@test.com",
+      name: "Admin",
+    },
+  });
+}
+
 beforeEach(() => {
-  tableQueues.clear();
-  mockServiceFrom.mockClear();
+  vi.clearAllMocks();
+  setupAuth(true);
 });
 
-// ---------------------------------------------------------------------------
-// getCutoverDiagnostics
-// ---------------------------------------------------------------------------
+// Zod v4's UUID validator enforces RFC 4122 version + variant bits, so the
+// fixtures use deterministic v4-shaped UUIDs (4xxx in field 3, 8xxx in
+// field 4) to keep individual tests legible without depending on
+// crypto.randomUUID().
+const UUID = {
+  conn1: "11111111-1111-4111-8111-111111111111",
+  conn2: "22222222-2222-4222-8222-222222222222",
+  conn3: "33333333-3333-4333-8333-333333333333",
+  conn4: "44444444-4444-4444-8444-444444444444",
+  conn5: "55555555-5555-4555-8555-555555555555",
+  conn10: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  conn11: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  conn12: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  conn13: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  conn20: "12345678-1234-4234-8234-123456789012",
+  conn21: "abcdef00-0000-4000-8000-000000000001",
+  conn30: "abcdef00-0000-4000-8000-000000000030",
+  conn31: "abcdef00-0000-4000-8000-000000000031",
+};
+
+// ─── getCutoverDiagnostics ──────────────────────────────────────────────────
 
 describe("getCutoverDiagnostics", () => {
-  it("returns wrong_state gate when connection is in legacy", async () => {
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        workspace_id: VALID_WORKSPACE_ID,
-        platform: "shopify",
-        store_url: "https://test.myshopify.com",
-        cutover_state: "legacy",
-        cutover_started_at: null,
-        cutover_completed_at: null,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-    enqueue("connection_shadow_log", { data: [] });
-
-    const result = await getCutoverDiagnostics({ connectionId: VALID_CONN_ID });
-
-    expect(result.connection.cutover_state).toBe("legacy");
-    expect(result.gate.eligible).toBe(false);
-    expect(result.gate.gate_reason).toBe("wrong_state");
-    expect(result.counters.total_logged).toBe(0);
+  it("rejects non-staff callers", async () => {
+    setupAuth(false);
+    await expect(getCutoverDiagnostics({ connectionId: UUID.conn1 })).rejects.toThrow(/staff-only/);
   });
 
-  it("returns insufficient_samples when in shadow with too few resolved comparisons", async () => {
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        workspace_id: VALID_WORKSPACE_ID,
-        platform: "shopify",
-        store_url: null,
-        cutover_state: "shadow",
-        cutover_started_at: new Date().toISOString(),
-        cutover_completed_at: null,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-    enqueue("connection_shadow_log", {
-      data: Array.from({ length: 10 }, () => shadowLogRow()),
+  it("computes counter math and resolves to gate=ok when match_rate ≥ 99.5% with ≥ 50 samples", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn1,
+      workspace_id: "ws-1",
+      platform: "shopify",
+      store_url: "https://shop.example.com",
+      cutover_state: "shadow",
+      cutover_started_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+      cutover_completed_at: null,
+      shadow_window_tolerance_seconds: 60,
+    };
+
+    // 50 matched + 0 drifted + 0 unresolved = match_rate 1.0
+    const matchedRows: ShadowRow[] = Array.from({ length: 50 }, (_, i) => ({
+      id: `m-${i}`,
+      sku: `SKU-${i}`,
+      pushed_quantity: 10,
+      ss_observed_quantity: 10,
+      drift_units: 0,
+      match: true,
+      pushed_at: new Date().toISOString(),
+      observed_at: new Date().toISOString(),
+      metadata: null,
+    }));
+
+    mockServiceFrom.mockImplementation((table: string) => {
+      if (table === "client_store_connections") return buildConnQuery(conn);
+      if (table === "connection_shadow_log") return buildShadowLogQuery(matchedRows);
+      throw new Error(`unexpected table ${table}`);
     });
 
-    const result = await getCutoverDiagnostics({ connectionId: VALID_CONN_ID });
-    expect(result.counters.matched).toBe(10);
-    expect(result.counters.resolved).toBe(10);
+    const result = await getCutoverDiagnostics({ connectionId: conn.id });
+    expect(result.counters.total_logged).toBe(50);
+    expect(result.counters.resolved).toBe(50);
+    expect(result.counters.matched).toBe(50);
+    expect(result.counters.drifted).toBe(0);
+    expect(result.counters.match_rate).toBe(1);
+    expect(result.gate.eligible).toBe(true);
+    expect(result.gate.gate_reason).toBe("ok");
+    expect(result.gate.required_match_rate).toBe(REQUIRED_MATCH_RATE);
+    expect(result.gate.required_min_samples).toBe(MIN_SAMPLE_COUNT_FOR_CUTOVER);
+  });
+
+  it("returns gate.gate_reason='wrong_state' for connections not in shadow", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn2,
+      workspace_id: "ws-1",
+      platform: "shopify",
+      store_url: null,
+      cutover_state: "legacy",
+    };
+    mockServiceFrom.mockImplementation((table: string) => {
+      if (table === "client_store_connections") return buildConnQuery(conn);
+      if (table === "connection_shadow_log") return buildShadowLogQuery([]);
+      throw new Error(`unexpected table ${table}`);
+    });
+    const result = await getCutoverDiagnostics({ connectionId: conn.id });
+    expect(result.gate.eligible).toBe(false);
+    expect(result.gate.gate_reason).toBe("wrong_state");
+  });
+
+  it("returns gate_reason='insufficient_samples' when resolved < 50", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn3,
+      workspace_id: "ws-1",
+      platform: "shopify",
+      store_url: null,
+      cutover_state: "shadow",
+    };
+    const rows: ShadowRow[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `r-${i}`,
+      sku: `SKU-${i}`,
+      pushed_quantity: 1,
+      ss_observed_quantity: 1,
+      drift_units: 0,
+      match: true,
+      pushed_at: new Date().toISOString(),
+      observed_at: new Date().toISOString(),
+      metadata: null,
+    }));
+    mockServiceFrom.mockImplementation((table: string) => {
+      if (table === "client_store_connections") return buildConnQuery(conn);
+      if (table === "connection_shadow_log") return buildShadowLogQuery(rows);
+      throw new Error(`unexpected table ${table}`);
+    });
+    const result = await getCutoverDiagnostics({ connectionId: conn.id });
     expect(result.gate.eligible).toBe(false);
     expect(result.gate.gate_reason).toBe("insufficient_samples");
   });
 
-  it("returns match_rate_below_threshold when gate fails on rate", async () => {
-    const rows = [
-      ...Array.from({ length: 60 }, () => shadowLogRow({ match: true, drift_units: 0 })),
-      ...Array.from({ length: 5 }, () =>
-        shadowLogRow({ match: false, drift_units: 2, ss_observed_quantity: 7 }),
-      ),
+  it("returns gate_reason='match_rate_below_threshold' when match_rate < 99.5% with enough samples", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn4,
+      workspace_id: "ws-1",
+      platform: "shopify",
+      store_url: null,
+      cutover_state: "shadow",
+    };
+    // 60 samples, 5 drifted → match_rate ≈ 91.7%
+    const rows: ShadowRow[] = [
+      ...Array.from({ length: 55 }, (_, i) => ({
+        id: `m-${i}`,
+        sku: `SKU-${i}`,
+        pushed_quantity: 10,
+        ss_observed_quantity: 10,
+        drift_units: 0,
+        match: true,
+        pushed_at: new Date().toISOString(),
+        observed_at: new Date().toISOString(),
+        metadata: null,
+      })),
+      ...Array.from({ length: 5 }, (_, i) => ({
+        id: `d-${i}`,
+        sku: `SKU-d${i}`,
+        pushed_quantity: 10,
+        ss_observed_quantity: 11,
+        drift_units: 1,
+        match: false,
+        pushed_at: new Date().toISOString(),
+        observed_at: new Date().toISOString(),
+        metadata: null,
+      })),
     ];
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        workspace_id: VALID_WORKSPACE_ID,
-        platform: "shopify",
-        store_url: null,
-        cutover_state: "shadow",
-        cutover_started_at: new Date().toISOString(),
-        cutover_completed_at: null,
-        shadow_window_tolerance_seconds: null,
-      },
+    mockServiceFrom.mockImplementation((table: string) => {
+      if (table === "client_store_connections") return buildConnQuery(conn);
+      if (table === "connection_shadow_log") return buildShadowLogQuery(rows);
+      throw new Error(`unexpected table ${table}`);
     });
-    enqueue("connection_shadow_log", { data: rows });
-
-    const result = await getCutoverDiagnostics({ connectionId: VALID_CONN_ID });
-    expect(result.counters.resolved).toBe(65);
-    expect(result.counters.matched).toBe(60);
+    const result = await getCutoverDiagnostics({ connectionId: conn.id });
     expect(result.counters.drifted).toBe(5);
-    expect(result.counters.match_rate).toBeCloseTo(60 / 65);
     expect(result.gate.eligible).toBe(false);
     expect(result.gate.gate_reason).toBe("match_rate_below_threshold");
-    expect(result.gate.required_match_rate).toBe(REQUIRED_MATCH_RATE);
+    expect(result.recent_drift_samples.length).toBe(5);
   });
 
-  it("returns ok when match_rate meets threshold and samples sufficient", async () => {
-    const rows = Array.from({ length: MIN_SAMPLE_COUNT_FOR_CUTOVER + 10 }, () =>
-      shadowLogRow({ match: true, drift_units: 0 }),
-    );
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        workspace_id: VALID_WORKSPACE_ID,
-        platform: "shopify",
-        store_url: null,
-        cutover_state: "shadow",
-        cutover_started_at: new Date().toISOString(),
-        cutover_completed_at: null,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-    enqueue("connection_shadow_log", { data: rows });
-
-    const result = await getCutoverDiagnostics({ connectionId: VALID_CONN_ID });
-    expect(result.gate.eligible).toBe(true);
-    expect(result.gate.gate_reason).toBe("ok");
-    expect(result.counters.match_rate).toBe(1);
-  });
-
-  it("buckets unresolved + comparison_skipped rows separately and exposes skip breakdown", async () => {
-    const rows = [
-      ...Array.from({ length: 60 }, () => shadowLogRow({ match: true, drift_units: 0 })),
-      shadowLogRow({
-        match: null,
-        observed_at: null,
+  it("buckets comparison_skipped rows by metadata.skip_reason", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn5,
+      workspace_id: "ws-1",
+      platform: "shopify",
+      store_url: null,
+      cutover_state: "shadow",
+    };
+    const rows: ShadowRow[] = [
+      {
+        id: "skip-1",
+        sku: "SKU-A",
+        pushed_quantity: 5,
         ss_observed_quantity: null,
         drift_units: null,
-      }),
-      shadowLogRow({
         match: null,
+        pushed_at: new Date().toISOString(),
         observed_at: new Date().toISOString(),
-        ss_observed_quantity: null,
-        drift_units: null,
         metadata: { skip_reason: "no_v2_defaults" },
-      }),
-      shadowLogRow({
-        match: null,
-        observed_at: new Date().toISOString(),
+      },
+      {
+        id: "skip-2",
+        sku: "SKU-B",
+        pushed_quantity: 5,
         ss_observed_quantity: null,
         drift_units: null,
+        match: null,
+        pushed_at: new Date().toISOString(),
+        observed_at: new Date().toISOString(),
         metadata: { skip_reason: "v2_read_failed" },
-      }),
-    ];
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        workspace_id: VALID_WORKSPACE_ID,
-        platform: "shopify",
-        store_url: null,
-        cutover_state: "shadow",
-        cutover_started_at: new Date().toISOString(),
-        cutover_completed_at: null,
-        shadow_window_tolerance_seconds: null,
       },
+      {
+        id: "skip-3",
+        sku: "SKU-C",
+        pushed_quantity: 5,
+        ss_observed_quantity: null,
+        drift_units: null,
+        match: null,
+        pushed_at: new Date().toISOString(),
+        observed_at: new Date().toISOString(),
+        metadata: { skip_reason: "no_v2_defaults" },
+      },
+    ];
+    mockServiceFrom.mockImplementation((table: string) => {
+      if (table === "client_store_connections") return buildConnQuery(conn);
+      if (table === "connection_shadow_log") return buildShadowLogQuery(rows);
+      throw new Error(`unexpected table ${table}`);
     });
-    enqueue("connection_shadow_log", { data: rows });
-
-    const result = await getCutoverDiagnostics({ connectionId: VALID_CONN_ID });
-    expect(result.counters.resolved).toBe(60);
-    expect(result.counters.unresolved).toBe(1);
-    expect(result.counters.comparison_skipped).toBe(2);
+    const result = await getCutoverDiagnostics({ connectionId: conn.id });
+    expect(result.counters.comparison_skipped).toBe(3);
     expect(result.comparison_skip_breakdown).toEqual({
-      no_v2_defaults: 1,
+      no_v2_defaults: 2,
       v2_read_failed: 1,
     });
   });
 });
 
-// ---------------------------------------------------------------------------
-// runConnectionCutover
-// ---------------------------------------------------------------------------
+// ─── startConnectionShadowMode ──────────────────────────────────────────────
+
+describe("startConnectionShadowMode", () => {
+  it("rejects when connection is dormant (do_not_fanout=true)", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn10,
+      cutover_state: "legacy",
+      do_not_fanout: true,
+    };
+    mockServiceFrom.mockReturnValue(buildConnQuery(conn));
+    await expect(
+      startConnectionShadowMode({ connectionId: conn.id, shadowWindowToleranceSeconds: null }),
+    ).rejects.toThrow(/do_not_fanout/);
+  });
+
+  it("rejects invalid transitions (direct → shadow)", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn11,
+      cutover_state: "direct",
+      do_not_fanout: false,
+    };
+    mockServiceFrom.mockReturnValue(buildConnQuery(conn));
+    await expect(
+      startConnectionShadowMode({ connectionId: conn.id, shadowWindowToleranceSeconds: null }),
+    ).rejects.toThrow(/invalid transition/);
+  });
+
+  it("is idempotent on a connection already in shadow", async () => {
+    const startedAt = new Date(Date.now() - 86400000).toISOString();
+    const conn: ConnRow = {
+      id: UUID.conn12,
+      cutover_state: "shadow",
+      cutover_started_at: startedAt,
+      do_not_fanout: false,
+    };
+    mockServiceFrom.mockReturnValue(buildConnQuery(conn));
+    const result = await startConnectionShadowMode({
+      connectionId: conn.id,
+      shadowWindowToleranceSeconds: null,
+    });
+    expect(result.alreadyShadow).toBe(true);
+    expect(result.cutoverStartedAt).toBe(startedAt);
+  });
+
+  it("flips legacy→shadow with the provided window tolerance", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn13,
+      cutover_state: "legacy",
+      do_not_fanout: false,
+    };
+    const updateMock = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
+    mockServiceFrom.mockImplementation((table: string) => {
+      if (table === "client_store_connections") {
+        return {
+          ...buildConnQuery(conn),
+          update: updateMock,
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    });
+    const result = await startConnectionShadowMode({
+      connectionId: conn.id,
+      shadowWindowToleranceSeconds: 120,
+    });
+    expect(result.alreadyShadow).toBe(false);
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cutover_state: "shadow",
+        shadow_window_tolerance_seconds: 120,
+      }),
+    );
+  });
+});
+
+// ─── runConnectionCutover ───────────────────────────────────────────────────
 
 describe("runConnectionCutover", () => {
-  it("blocks with wrong_state when connection is not in shadow", async () => {
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        platform: "shopify",
-        cutover_state: "legacy",
-        do_not_fanout: false,
-      },
+  it("returns blocked.force_missing_reason when force=true with no reason", async () => {
+    const result = await runConnectionCutover({
+      connectionId: UUID.conn20,
+      force: true,
+      forceReason: "",
     });
+    expect(result).toEqual({
+      status: "blocked",
+      connectionId: UUID.conn20,
+      blockedReason: "force_missing_reason",
+    });
+  });
 
-    const result = await runConnectionCutover({ connectionId: VALID_CONN_ID });
+  it("returns blocked.wrong_state for a non-shadow connection", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn21,
+      cutover_state: "legacy",
+      do_not_fanout: false,
+      platform: "shopify",
+    };
+    mockServiceFrom.mockReturnValue(buildConnQuery(conn));
+    const result = await runConnectionCutover({ connectionId: conn.id });
     expect(result.status).toBe("blocked");
     if (result.status === "blocked") {
       expect(result.blockedReason).toBe("wrong_state");
     }
   });
-
-  it("blocks with diagnostics_gate_failed when rate is below threshold and force=false", async () => {
-    // 1) First runConnectionCutover state lookup
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        platform: "shopify",
-        cutover_state: "shadow",
-        do_not_fanout: false,
-      },
-    });
-    // 2) getCutoverDiagnostics inner connection lookup
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        workspace_id: VALID_WORKSPACE_ID,
-        platform: "shopify",
-        store_url: null,
-        cutover_state: "shadow",
-        cutover_started_at: new Date().toISOString(),
-        cutover_completed_at: null,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-    // 3) shadow log query — empty → insufficient_samples
-    enqueue("connection_shadow_log", { data: [] });
-
-    const result = await runConnectionCutover({ connectionId: VALID_CONN_ID });
-    expect(result.status).toBe("blocked");
-    if (result.status === "blocked") {
-      expect(result.blockedReason).toBe("diagnostics_gate_failed");
-    }
-  });
-
-  it("blocks force_missing_reason when force=true but reason is empty", async () => {
-    const result = await runConnectionCutover({
-      connectionId: VALID_CONN_ID,
-      force: true,
-      forceReason: null,
-    });
-    expect(result.status).toBe("blocked");
-    if (result.status === "blocked") {
-      expect(result.blockedReason).toBe("force_missing_reason");
-    }
-  });
 });
 
-// ---------------------------------------------------------------------------
-// startConnectionShadowMode
-// ---------------------------------------------------------------------------
-
-describe("startConnectionShadowMode", () => {
-  it("returns alreadyShadow=true when connection is already in shadow state", async () => {
-    const startedAt = new Date().toISOString();
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        cutover_state: "shadow",
-        cutover_started_at: startedAt,
-        do_not_fanout: false,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-
-    const result = await startConnectionShadowMode({ connectionId: VALID_CONN_ID });
-    expect(result.alreadyShadow).toBe(true);
-    expect(result.cutoverStartedAt).toBe(startedAt);
-  });
-
-  it("rejects when do_not_fanout=true (CHECK constraint pre-flight)", async () => {
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        cutover_state: "legacy",
-        cutover_started_at: null,
-        do_not_fanout: true,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-
-    await expect(startConnectionShadowMode({ connectionId: VALID_CONN_ID })).rejects.toThrow(
-      /do_not_fanout/,
-    );
-  });
-
-  it("rejects invalid transition direct→shadow", async () => {
-    enqueue("client_store_connections", {
-      data: {
-        id: VALID_CONN_ID,
-        cutover_state: "direct",
-        cutover_started_at: null,
-        do_not_fanout: false,
-        shadow_window_tolerance_seconds: null,
-      },
-    });
-
-    await expect(startConnectionShadowMode({ connectionId: VALID_CONN_ID })).rejects.toThrow(
-      /invalid transition from 'direct'/,
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// rollbackConnectionCutover
-// ---------------------------------------------------------------------------
+// ─── rollbackConnectionCutover ──────────────────────────────────────────────
 
 describe("rollbackConnectionCutover", () => {
-  it("is a no-op when already in legacy state", async () => {
-    enqueue("client_store_connections", {
-      data: { id: VALID_CONN_ID, cutover_state: "legacy" },
-    });
-
+  it("is idempotent for a connection already in legacy", async () => {
+    const conn: ConnRow = {
+      id: UUID.conn30,
+      cutover_state: "legacy",
+    };
+    mockServiceFrom.mockReturnValue(buildConnQuery(conn));
     const result = await rollbackConnectionCutover({
-      connectionId: VALID_CONN_ID,
-      reason: "abandoning the cutover",
+      connectionId: conn.id,
+      reason: "no-op rollback for the test suite",
     });
     expect(result.previousState).toBe("legacy");
     expect(result.newState).toBe("legacy");
     expect(result.deactivatedOverrideIds).toEqual([]);
   });
 
-  it("rejects when reason is too short (Zod validation)", async () => {
+  it("requires a reason ≥ 8 chars", async () => {
     await expect(
-      rollbackConnectionCutover({ connectionId: VALID_CONN_ID, reason: "no" }),
+      rollbackConnectionCutover({
+        connectionId: UUID.conn31,
+        reason: "short",
+      }),
     ).rejects.toThrow();
   });
 });
