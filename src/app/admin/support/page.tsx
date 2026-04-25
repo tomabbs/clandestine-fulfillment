@@ -79,7 +79,7 @@ const QUEUES: Array<{
   { key: "sla_breached", label: "Breached", summaryKey: "slaBreached" },
   { key: "unassigned", label: "Unassigned", summaryKey: "unassigned" },
   { key: "snoozed", label: "Snoozed", summaryKey: "snoozed" },
-  { key: "resolved", label: "Resolved", summaryKey: "resolvedToday" },
+  { key: "resolved", label: "Resolved", summaryKey: "resolvedTotal" },
 ];
 
 const DRAFT_PREFIX = "support-admin-draft:";
@@ -95,7 +95,12 @@ export default function AdminSupportPage() {
     if (conversationId) setSelectedConversationId(conversationId);
   }, []);
 
-  const { data: summary } = useAppQuery({
+  const {
+    data: summary,
+    isLoading: summaryLoading,
+    isError: summaryIsError,
+    error: summaryError,
+  } = useAppQuery({
     queryKey: queryKeys.support.summary(),
     queryFn: getSupportInboxSummary,
     tier: CACHE_TIERS.REALTIME,
@@ -116,7 +121,17 @@ export default function AdminSupportPage() {
         </Button>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-7">
+        <SummaryCard
+          label="Tickets"
+          value={summary?.totalConversations ?? 0}
+          loading={summaryLoading}
+        />
+        <SummaryCard
+          label="Messages"
+          value={summary?.totalMessages ?? 0}
+          loading={summaryLoading}
+        />
         <SummaryCard label="Breach soon" value={summary?.slaBreachSoon ?? 0} tone="warning" />
         <SummaryCard label="Breached" value={summary?.slaBreached ?? 0} tone="danger" />
         <SummaryCard label="On track" value={summary?.onTrack ?? 0} />
@@ -126,6 +141,20 @@ export default function AdminSupportPage() {
           value={summary?.failedDeliveries ?? 0}
           tone="danger"
         />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {summaryIsError ? (
+          <span className="rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1 text-destructive">
+            Support DB read failed: {(summaryError as Error).message}
+          </span>
+        ) : summary ? (
+          <span className="rounded-md border bg-muted/30 px-2 py-1">
+            Loaded from DB {formatLoadedAt(summary.loadedAt)} · latest message{" "}
+            {summary.latestMessageAt ? formatLoadedAt(summary.latestMessageAt) : "not found"}
+          </span>
+        ) : (
+          <span className="rounded-md border bg-muted/30 px-2 py-1">Reading support tables...</span>
+        )}
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(280px,380px)_1fr] overflow-hidden rounded-lg border">
@@ -181,10 +210,12 @@ export default function AdminSupportPage() {
 function SummaryCard({
   label,
   value,
+  loading = false,
   tone = "default",
 }: {
   label: string;
   value: number;
+  loading?: boolean;
   tone?: "default" | "warning" | "danger";
 }) {
   const toneClass =
@@ -192,7 +223,7 @@ function SummaryCard({
   return (
     <div className="rounded-lg border bg-background p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${toneClass}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-semibold ${toneClass}`}>{loading ? "..." : value}</p>
     </div>
   );
 }
@@ -246,6 +277,13 @@ function ConversationList({
                 <p className="mt-1 text-xs text-muted-foreground">
                   {conversation.org_name ?? "Unknown org"}
                 </p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {conversation.message_count ?? 0}{" "}
+                  {(conversation.message_count ?? 0) === 1 ? "message" : "messages"}
+                  {conversation.last_message_at
+                    ? ` · latest ${formatLoadedAt(conversation.last_message_at)}`
+                    : ""}
+                </p>
                 <div className="mt-2 flex flex-wrap gap-1">
                   <Badge>{supportStatusLabel(conversation.status)}</Badge>
                   <Badge>{conversation.priority}</Badge>
@@ -266,6 +304,17 @@ function ConversationList({
       </ScrollArea>
     </section>
   );
+}
+
+function formatLoadedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function ConversationDetail({ conversationId }: { conversationId: string }) {

@@ -38,6 +38,7 @@ type SupportConversationListItem = SupportConversation & {
   assigned_name?: string | null;
   last_message_at?: string;
   last_message_preview?: string;
+  message_count?: number;
   unread_count?: number;
   counterpart_last_seen_at?: string | null;
   queue_flags?: ReturnType<typeof getSupportQueueFlags>;
@@ -163,14 +164,15 @@ export async function getConversations(
   if (error) throw new Error(`Failed to fetch conversations: ${error.message}`);
 
   const conversationIds = (data ?? []).map((c: { id: string }) => c.id);
-  const lastMessages = await fetchLastMessages(auth.supabase, conversationIds);
+  const messageStats = await fetchMessageStats(auth.supabase, conversationIds);
   const now = new Date();
 
   let conversations = (data ?? []).map((c: Record<string, unknown>) => {
     const org = c.organizations as { name: string } | null;
     const assignedUser = c.assigned_user as { name: string } | null;
     const conversation = c as unknown as SupportConversation;
-    const lastMsg = lastMessages[conversation.id];
+    const stats = messageStats[conversation.id];
+    const lastMsg = stats?.lastMessage;
     const readAt = auth.isStaff
       ? conversation.staff_last_read_at
       : conversation.client_last_read_at;
@@ -188,6 +190,7 @@ export async function getConversations(
       assigned_name: assignedUser?.name ?? null,
       last_message_at: lastMsg?.created_at,
       last_message_preview: lastMsg?.body?.slice(0, 160),
+      message_count: stats?.count ?? 0,
       unread_count: unreadCount,
       counterpart_last_seen_at: auth.isStaff
         ? conversation.client_last_read_at
@@ -201,6 +204,11 @@ export async function getConversations(
       conversationMatchesQueue(conversation, parsed.queue as SupportQueueType, auth.user.id, now),
     );
   }
+  conversations.sort((a, b) => {
+    const aTime = new Date(a.last_message_at ?? a.updated_at).getTime();
+    const bTime = new Date(b.last_message_at ?? b.updated_at).getTime();
+    return bTime - aTime;
+  });
 
   return { conversations, total: parsed.queue ? conversations.length : (count ?? 0) };
 }
@@ -215,14 +223,24 @@ export async function getSupportInboxSummary(): Promise<{
   slaBreached: number;
   snoozed: number;
   onTrack: number;
+  resolvedTotal: number;
   resolvedToday: number;
   failedDeliveries: number;
+  totalConversations: number;
+  totalMessages: number;
+  latestMessageAt: string | null;
+  loadedAt: string;
 }> {
   const auth = await getAuthContext();
-  const { data, error } = await auth.supabase
+  const {
+    data,
+    count: conversationCount,
+    error,
+  } = await auth.supabase
     .from("support_conversations")
     .select(
       "id, status, assigned_to, category, priority, snoozed_until, next_response_due_at, sla_paused, resolved_at, updated_at",
+      { count: "exact" },
     )
     .eq("workspace_id", auth.workspaceId);
 
@@ -240,8 +258,13 @@ export async function getSupportInboxSummary(): Promise<{
     slaBreached: 0,
     snoozed: 0,
     onTrack: 0,
+    resolvedTotal: 0,
     resolvedToday: 0,
     failedDeliveries: 0,
+    totalConversations: conversationCount ?? (data ?? []).length,
+    totalMessages: 0,
+    latestMessageAt: null as string | null,
+    loadedAt: new Date().toISOString(),
   };
 
   for (const row of data ?? []) {
@@ -255,6 +278,7 @@ export async function getSupportInboxSummary(): Promise<{
     if (flags.slaBreached) summary.slaBreached++;
     if (flags.snoozed) summary.snoozed++;
     if (flags.onTrack) summary.onTrack++;
+    if (flags.resolved) summary.resolvedTotal++;
     const resolvedAt = (row as { resolved_at?: string | null }).resolved_at;
     if (resolvedAt && new Date(resolvedAt) >= todayStart) summary.resolvedToday++;
   }
@@ -265,6 +289,22 @@ export async function getSupportInboxSummary(): Promise<{
     .eq("workspace_id", auth.workspaceId)
     .eq("status", "failed");
   summary.failedDeliveries = count ?? 0;
+
+  const {
+    data: latestMessages,
+    count: totalMessages,
+    error: messageCountError,
+  } = await auth.supabase
+    .from("support_messages")
+    .select("created_at", { count: "exact" })
+    .eq("workspace_id", auth.workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (messageCountError) {
+    throw new Error(`Failed to fetch support message count: ${messageCountError.message}`);
+  }
+  summary.totalMessages = totalMessages ?? 0;
+  summary.latestMessageAt = latestMessages?.[0]?.created_at ?? null;
 
   return summary;
 }
@@ -1100,11 +1140,21 @@ async function fetchDeliveries(
   return (data ?? []) as SupportMessageDelivery[];
 }
 
-async function fetchLastMessages(
+async function fetchMessageStats(
   supabase: Awaited<ReturnType<typeof getAuthContext>>["supabase"],
   conversationIds: string[],
 ): Promise<
-  Record<string, { body: string; created_at: string; sender_type: SupportMessage["sender_type"] }>
+  Record<
+    string,
+    {
+      count: number;
+      lastMessage?: {
+        body: string;
+        created_at: string;
+        sender_type: SupportMessage["sender_type"];
+      };
+    }
+  >
 > {
   if (conversationIds.length === 0) return {};
   const { data: messages } = await supabase
@@ -1113,20 +1163,30 @@ async function fetchLastMessages(
     .in("conversation_id", conversationIds)
     .order("created_at", { ascending: false });
 
-  const lastMessages: Record<
+  const stats: Record<
     string,
-    { body: string; created_at: string; sender_type: SupportMessage["sender_type"] }
+    {
+      count: number;
+      lastMessage?: {
+        body: string;
+        created_at: string;
+        sender_type: SupportMessage["sender_type"];
+      };
+    }
   > = {};
   for (const msg of messages ?? []) {
-    if (!lastMessages[msg.conversation_id]) {
-      lastMessages[msg.conversation_id] = {
+    const conversationStats = stats[msg.conversation_id] ?? { count: 0 };
+    conversationStats.count += 1;
+    if (!conversationStats.lastMessage) {
+      conversationStats.lastMessage = {
         body: msg.body,
         created_at: msg.created_at,
         sender_type: (msg.sender_type as SupportMessage["sender_type"]) ?? "system",
       };
     }
+    stats[msg.conversation_id] = conversationStats;
   }
-  return lastMessages;
+  return stats;
 }
 
 async function recordSupportEvent(

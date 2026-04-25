@@ -240,6 +240,17 @@ describe("support queue helpers", () => {
     );
     expect(flags.slaBreached).toBe(false);
   });
+
+  it("counts resolved queues from status even when resolved_at is missing", () => {
+    const resolvedConversation = {
+      ...baseConversation,
+      status: "resolved" as const,
+      assigned_to: null,
+    };
+
+    expect(getSupportQueueFlags(resolvedConversation, "user-1").resolved).toBe(true);
+    expect(conversationMatchesQueue(resolvedConversation, "resolved", "user-1")).toBe(true);
+  });
 });
 
 describe("support SLA and delivery helpers", () => {
