@@ -227,8 +227,6 @@ export const bandcampInventoryPushTask = schedules.task({
 
             const inv = inventoryByVariant.get(mapping.variant_id);
             const rawAvailable = inv?.available ?? 0;
-            const effectiveSafety = inv?.safetyStock ?? workspaceSafetyStock;
-
             let effectiveAvailable = rawAvailable;
             if (bundlesEnabled) {
               const components = bundleMap.get(mapping.variant_id);

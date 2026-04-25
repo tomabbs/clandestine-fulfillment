@@ -119,8 +119,8 @@ export const rampHaltCriteriaSensorTask = schedules.task({
         severity: result.action.kind === "halt_and_page" ? "critical" : "high",
         title:
           result.action.kind === "halt_and_page"
-            ? "RAMP HALTED + PAGE: " + result.action.reason
-            : "RAMP HALTED: " + result.action.reason,
+            ? `RAMP HALTED + PAGE: ${result.action.reason}`
+            : `RAMP HALTED: ${result.action.reason}`,
         description: JSON.stringify(
           {
             sensor_run: sensorRunId,

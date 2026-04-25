@@ -396,6 +396,7 @@ export const bandcampScrapePageTask = task({
         .from("bandcamp_product_mappings")
         .update(mappingUpdate)
         .eq("id", payload.mappingId);
+      if (updateErr) throw updateErr;
 
       // Inline reconciliation: auto-resolve open review queue items for this mapping
       const { data: resolved } = await supabase

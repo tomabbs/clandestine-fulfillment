@@ -784,7 +784,8 @@ export async function collectionAddProducts(
 const collectionCache = new Map<string, string>();
 
 export async function findOrCreateCollection(vendorName: string): Promise<string> {
-  if (collectionCache.has(vendorName)) return collectionCache.get(vendorName)!;
+  const cachedCollectionId = collectionCache.get(vendorName);
+  if (cachedCollectionId) return cachedCollectionId;
 
   const escaped = vendorName.replace(/'/g, "\\\\'");
   const data = await shopifyGraphQL<{

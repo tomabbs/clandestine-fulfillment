@@ -111,10 +111,11 @@ export function BulkBuyLabelsModal({
   // Poll batch progress while a batch is in flight.
   useEffect(() => {
     if (!batchId) return;
+    const activeBatchId = batchId;
     let active = true;
     async function tick() {
       try {
-        const p = await getPrintBatchProgress({ batchId: batchId! });
+        const p = await getPrintBatchProgress({ batchId: activeBatchId });
         if (!active) return;
         setBatchStatus({
           status: p.status,
@@ -127,7 +128,7 @@ export function BulkBuyLabelsModal({
           p.status === "failed"
         ) {
           // Navigate to print batch page on terminal status.
-          router.push(`/admin/orders/print-batch/${batchId}`);
+          router.push(`/admin/orders/print-batch/${activeBatchId}`);
           onCompleted();
         }
       } catch (err) {
@@ -237,10 +238,14 @@ export function BulkBuyLabelsModal({
                           className="w-full rounded border px-2 py-1 text-xs"
                           value={st?.selectedId ?? ""}
                           onChange={(e) =>
-                            setRateState((s) => ({
-                              ...s,
-                              [id]: { ...s[id]!, selectedId: e.target.value },
-                            }))
+                            setRateState((s) => {
+                              const existing = s[id];
+                              if (!existing) return s;
+                              return {
+                                ...s,
+                                [id]: { ...existing, selectedId: e.target.value },
+                              };
+                            })
                           }
                         >
                           {st?.options.map((r) => (

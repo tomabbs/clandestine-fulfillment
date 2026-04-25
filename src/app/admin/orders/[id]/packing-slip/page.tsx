@@ -186,7 +186,7 @@ export default async function PackingSlipPage({ params }: RouteParams) {
                 <td>
                   {/* Phase 11.1 — album thumbnail when BC mapping has one. */}
                   {it.image_url && (
-                    // biome-ignore lint/a11y/useAltText: print-only context
+                    // biome-ignore lint/performance/noImgElement: print-only document markup
                     <img className="item-thumb" src={it.image_url} alt="" />
                   )}
                 </td>

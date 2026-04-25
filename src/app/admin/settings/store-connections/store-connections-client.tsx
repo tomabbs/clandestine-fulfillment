@@ -4,19 +4,19 @@ import {
   Activity,
   CheckCircle2,
   Globe,
-  ShieldAlert,
-  XCircle,
   Plug,
   Plus,
   Search,
+  ShieldAlert,
+  XCircle,
 } from "lucide-react";
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import {
   createStoreConnection,
   disableStoreConnection,
-  testStoreConnection,
   type getStoreConnections,
+  testStoreConnection,
 } from "@/actions/store-connections";
 import { ConfigureShopifyAppDialog } from "@/components/admin/configure-shopify-app-dialog";
 import { BlockList } from "@/components/shared/block-list";
@@ -228,7 +228,9 @@ export function StoreConnectionsClient({
                   />
                   <ConnectionMetric
                     label="Last poll"
-                    value={conn.last_poll_at ? new Date(conn.last_poll_at).toLocaleString() : "Never"}
+                    value={
+                      conn.last_poll_at ? new Date(conn.last_poll_at).toLocaleString() : "Never"
+                    }
                   />
                   <ConnectionMetric
                     label="Last error"

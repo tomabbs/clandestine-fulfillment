@@ -48,7 +48,7 @@ export function ScanToVerifyModal({ items, onClose, onAllVerified }: ScanToVerif
     return m;
   }, [items]);
 
-  const remainingBySku = useMemo(() => {
+  const _remainingBySku = useMemo(() => {
     const m = new Map<string, number>();
     for (const [sku, expected] of expectedBySku) {
       m.set(sku, expected - (scannedCounts[sku] ?? 0));

@@ -9,7 +9,7 @@
 // src/app/admin/orders/_components/OrdersCockpit.tsx instead.
 "use client";
 
-import { Check, CheckCircle, Copy, ExternalLink, Loader2, Package } from "lucide-react";
+import { Check, CheckCircle, Copy, Package } from "lucide-react";
 import { useState } from "react";
 import { getOrderDetail, getOrders, getTrackingEvents } from "@/actions/orders";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
+import { useAppQuery } from "@/lib/hooks/use-app-query";
 import { useListPaginationPreference } from "@/lib/hooks/use-list-pagination-preference";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";

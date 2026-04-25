@@ -268,7 +268,10 @@ describe("shipstation-mark-shipped (Phase 4.3)", () => {
 
   it("low-confidence mapping → blocked_by_low_confidence error", async () => {
     seedHappyPath();
-    dbState.carrierMap[0]!.block_auto_writeback = true;
+    const mapping = dbState.carrierMap[0];
+    expect(mapping).toBeDefined();
+    if (!mapping) throw new Error("expected carrier-map fixture");
+    mapping.block_auto_writeback = true;
     const r = await run({ warehouse_shipment_id: "ship_1" });
     expect(r.ok).toBe(false);
     expect(r.error).toContain("blocked_by_low_confidence");

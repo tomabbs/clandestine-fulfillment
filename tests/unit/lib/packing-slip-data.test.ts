@@ -66,7 +66,9 @@ function makeMockClient() {
         let rs = tables[table] ?? [];
         rs = rs.filter((r) => eqs.every(([col, val]) => r[col] === val));
         if (inCol && inVals) {
-          rs = rs.filter((r) => inVals!.includes(r[inCol!]));
+          const filterCol = inCol;
+          const filterVals = inVals;
+          rs = rs.filter((r) => filterVals.includes(r[filterCol]));
         }
         if (_orderCol) {
           const col = _orderCol;

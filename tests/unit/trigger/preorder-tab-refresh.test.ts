@@ -41,7 +41,9 @@ function makeMockClient() {
         if (!_or) return rows;
         // Tiny .or() parser — handles "preorder_state.eq.preorder,preorder_state.eq.ready".
         const clauses = _or.split(",").map((c) => c.split("."));
-        return rows.filter((r) => clauses.some(([col, _op, val]) => r[col!] === val));
+        return rows.filter((r) =>
+          clauses.some(([col, _op, val]) => Boolean(col) && r[col] === val),
+        );
       };
 
       const builder: Record<string, unknown> = {

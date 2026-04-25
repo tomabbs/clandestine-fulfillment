@@ -266,7 +266,10 @@ describe("createInventoryLocation", () => {
       name: "A-12-3",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) throw new Error("expected fetch call");
+    const [url, init] = firstCall;
     expect(String(url)).toContain("/v2/inventory_locations");
     expect((init as RequestInit).method).toBe("POST");
     const body = JSON.parse((init as RequestInit).body as string);
@@ -311,7 +314,10 @@ describe("updateInventoryLocation", () => {
     );
     const result = await updateInventoryLocation("loc_abc", { name: "A-12-3-renamed" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) throw new Error("expected fetch call");
+    const [url, init] = firstCall;
     expect(String(url)).toContain("/v2/inventory_locations/loc_abc");
     expect((init as RequestInit).method).toBe("PUT");
     const body = JSON.parse((init as RequestInit).body as string);
@@ -335,7 +341,10 @@ describe("deleteInventoryLocation", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
     await deleteInventoryLocation("loc_abc");
-    const [url, init] = fetchMock.mock.calls[0]!;
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) throw new Error("expected fetch call");
+    const [url, init] = firstCall;
     expect(String(url)).toContain("/v2/inventory_locations/loc_abc");
     expect((init as RequestInit).method).toBe("DELETE");
   });

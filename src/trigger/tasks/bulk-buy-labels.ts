@@ -61,7 +61,7 @@ export const bulkBuyLabelsTask = task({
   maxDuration: 1800, // 30 min wall-clock cap for a hard-cap-200 batch
   run: async (payload: BulkBuyLabelsPayload): Promise<BulkBuyLabelsResult> => {
     const supabase = createServiceRoleClient();
-    const { batchId, workspaceId, buys } = payload;
+    const { batchId, buys } = payload;
 
     await supabase
       .from("print_batch_jobs")

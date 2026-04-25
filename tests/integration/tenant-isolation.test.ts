@@ -65,20 +65,23 @@ describeOrSkip("tenant isolation (RLS)", () => {
       .insert({ workspace_id: wsA, name: "Org A", slug: `org-a-${stamp}` })
       .select("id")
       .single();
-    orgA = orgRowA.data!.id;
+    if (!orgRowA.data?.id) throw new Error("failed to create org A");
+    orgA = orgRowA.data.id;
     const orgRowB = await service
       .from("organizations")
       .insert({ workspace_id: wsB, name: "Org B", slug: `org-b-${stamp}` })
       .select("id")
       .single();
-    orgB = orgRowB.data!.id;
+    if (!orgRowB.data?.id) throw new Error("failed to create org B");
+    orgB = orgRowB.data.id;
 
     const authA = await service.auth.admin.createUser({
       email: `tt-a-${stamp}@clandestinetest.invalid`,
       password: `pass-${stamp}`,
       email_confirm: true,
     });
-    userAuthA = authA.data.user!.id;
+    if (!authA.data.user?.id) throw new Error("failed to create auth user A");
+    userAuthA = authA.data.user.id;
 
     const authB = await service.auth.admin.createUser({
       email: `tt-b-${stamp}@clandestinetest.invalid`,
@@ -97,12 +100,15 @@ describeOrSkip("tenant isolation (RLS)", () => {
       })
       .select("id")
       .single();
-    userA = userInsertA.data!.id;
+    if (!userInsertA.data?.id) throw new Error("failed to create user A");
+    userA = userInsertA.data.id;
+
+    if (!authB.data.user?.id) throw new Error("failed to create auth user B");
 
     const userInsertB = await service
       .from("users")
       .insert({
-        auth_user_id: authB.data.user!.id,
+        auth_user_id: authB.data.user.id,
         email: `tt-b-${stamp}@clandestinetest.invalid`,
         role: "client",
         workspace_id: wsB,
@@ -110,7 +116,8 @@ describeOrSkip("tenant isolation (RLS)", () => {
       })
       .select("id")
       .single();
-    userB = userInsertB.data!.id;
+    if (!userInsertB.data?.id) throw new Error("failed to create user B");
+    userB = userInsertB.data.id;
 
     await service.from("warehouse_products").insert([
       { workspace_id: wsA, org_id: orgA, name: "A-product", sku_prefix: `A-${stamp}` },
@@ -125,8 +132,11 @@ describeOrSkip("tenant isolation (RLS)", () => {
 
   it("anon-key user signed in as workspace A cannot read workspace B's organizations", async () => {
     const anon = createClient(url as string, anonKey as string);
+    const userLookupA = await service.auth.admin.getUserById(userAuthA);
+    const userEmailA = userLookupA.data.user?.email;
+    if (!userEmailA) throw new Error("expected auth user email for workspace A");
     const { error: signInErr } = await anon.auth.signInWithPassword({
-      email: (await service.auth.admin.getUserById(userAuthA)).data.user!.email!,
+      email: userEmailA,
       password: process.env.INTEGRATION_TEST_USER_PASSWORD ?? "wrong",
     });
     if (signInErr) {

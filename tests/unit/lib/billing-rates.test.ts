@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getEffectiveRate } from "@/lib/shared/billing-rates";
+
+type EffectiveRateClient = Parameters<typeof getEffectiveRate>[0];
 
 function createMockSupabase(
   defaultRule: Record<string, unknown> | null,
@@ -28,7 +30,7 @@ describe("getEffectiveRate", () => {
   it("returns null when no default rule exists", async () => {
     const supabase = createMockSupabase(null, null);
     const result = await getEffectiveRate(
-      supabase as any,
+      supabase as unknown as EffectiveRateClient,
       "ws-1",
       "org-1",
       "storage",
@@ -40,7 +42,7 @@ describe("getEffectiveRate", () => {
   it("returns default rate when no override exists", async () => {
     const supabase = createMockSupabase({ id: "rule-1", amount: 0.25, rule_name: "Storage" }, null);
     const result = await getEffectiveRate(
-      supabase as any,
+      supabase as unknown as EffectiveRateClient,
       "ws-1",
       "org-1",
       "storage",
@@ -55,7 +57,7 @@ describe("getEffectiveRate", () => {
       { override_amount: 0.1 },
     );
     const result = await getEffectiveRate(
-      supabase as any,
+      supabase as unknown as EffectiveRateClient,
       "ws-1",
       "org-1",
       "storage",
@@ -70,7 +72,7 @@ describe("getEffectiveRate", () => {
       null,
     );
     const result = await getEffectiveRate(
-      supabase as any,
+      supabase as unknown as EffectiveRateClient,
       "ws-1",
       "org-1",
       "per_shipment",

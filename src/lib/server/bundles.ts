@@ -64,7 +64,8 @@ export async function isBundleVariant(
   variantId: string,
   cache?: Map<string, boolean>,
 ): Promise<boolean> {
-  if (cache?.has(variantId)) return cache.get(variantId)!;
+  const cached = cache?.get(variantId);
+  if (typeof cached === "boolean") return cached;
   const supabase = createServiceRoleClient();
   const { data } = await supabase
     .from("bundle_components")

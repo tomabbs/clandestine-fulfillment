@@ -106,6 +106,64 @@ export function isInventoryNotActiveAtLocationError(httpStatus: number, body: st
   );
 }
 
+export async function activateShopifyInventoryAtLocation(input: {
+  connection: ClientStoreConnection;
+  inventoryItemId: number;
+  locationId: number;
+  sku?: string | null;
+}): Promise<void> {
+  if (!input.connection.api_key) throw new Error("Shopify connection missing api_key");
+  const baseUrl = input.connection.store_url.replace(/\/$/, "");
+  const res = await fetch(
+    `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/inventory_levels/connect.json`,
+    {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": input.connection.api_key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        location_id: input.locationId,
+        inventory_item_id: input.inventoryItemId,
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(
+      `Shopify inventoryActivate (REST connect) failed: HTTP ${res.status} — ${body}`,
+    );
+  }
+
+  if (input.sku) {
+    try {
+      const { createServiceRoleClient } = await import("@/lib/server/supabase-server");
+      const supabase = createServiceRoleClient();
+      const correlationId = `inv-activate:${input.connection.id}:${input.locationId}:${input.inventoryItemId}:${Date.now()}`;
+      await supabase.from("warehouse_inventory_activity").insert({
+        workspace_id: input.connection.workspace_id,
+        sku: input.sku,
+        delta: 0,
+        source: "inventory_activate",
+        correlation_id: correlationId,
+        metadata: {
+          connection_id: input.connection.id,
+          platform: input.connection.platform,
+          shopify_inventory_item_id: String(input.inventoryItemId),
+          shopify_location_id: String(input.locationId),
+          activated_at: new Date().toISOString(),
+        },
+      });
+    } catch (err) {
+      console.warn(
+        `[ShopifySync] inventory_activate audit row insert failed (non-fatal):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+}
+
 function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
   const apiKey = connection.api_key;
   if (!apiKey) throw new Error("Shopify connection missing api_key");
@@ -146,75 +204,6 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
     const level = inventory_levels[0];
     if (!level) return null;
     return { locationId: level.location_id, available: level.available };
-  }
-
-  /**
-   * HRD-26 — connect (activate) an inventory_item at a Shopify location.
-   * Uses the REST `inventory_levels/connect.json` endpoint, which is the
-   * REST analogue of the GraphQL `inventoryActivate` mutation. Returning
-   * the level allows the caller to immediately retry `set.json`.
-   */
-  async function connectInventoryAtLocation(
-    inventoryItemId: number,
-    locationId: number,
-  ): Promise<void> {
-    const res = await fetch(
-      `${baseUrl}/admin/api/${SHOPIFY_CLIENT_API_VERSION}/inventory_levels/connect.json`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          location_id: locationId,
-          inventory_item_id: inventoryItemId,
-        }),
-      },
-    );
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(
-        `Shopify inventoryActivate (REST connect) failed: HTTP ${res.status} — ${body}`,
-      );
-    }
-  }
-
-  /**
-   * HRD-26 — log an `inventory_activate` audit row so admins can grep for
-   * "this SKU was activated at this location at this timestamp" without
-   * joining external_sync_events. delta = 0 by definition (the row records
-   * a structural change, not an inventory adjustment). The
-   * source enum was extended in migration 20260422000001 to admit
-   * 'inventory_activate'. Best-effort — duplicate (sku, correlation_id) is
-   * the dedup key and re-attempts swallow the conflict.
-   */
-  async function logInventoryActivateAudit(
-    sku: string,
-    inventoryItemId: number,
-    locationId: number,
-  ): Promise<void> {
-    try {
-      const { createServiceRoleClient } = await import("@/lib/server/supabase-server");
-      const supabase = createServiceRoleClient();
-      const correlationId = `inv-activate:${connection.id}:${locationId}:${inventoryItemId}:${Date.now()}`;
-      await supabase.from("warehouse_inventory_activity").insert({
-        workspace_id: connection.workspace_id,
-        sku,
-        delta: 0,
-        source: "inventory_activate",
-        correlation_id: correlationId,
-        metadata: {
-          connection_id: connection.id,
-          platform: connection.platform,
-          shopify_inventory_item_id: String(inventoryItemId),
-          shopify_location_id: String(locationId),
-          activated_at: new Date().toISOString(),
-        },
-      });
-    } catch (err) {
-      console.warn(
-        `[ShopifySync] inventory_activate audit row insert failed (non-fatal):`,
-        err instanceof Error ? err.message : err,
-      );
-    }
   }
 
   return {
@@ -272,8 +261,12 @@ function createShopifySync(connection: ClientStoreConnection): StoreSyncClient {
       // item was originally created at).
       if (isInventoryNotActiveAtLocationError(first.status, first.body)) {
         try {
-          await connectInventoryAtLocation(variant.inventoryItemId, targetLocationId);
-          await logInventoryActivateAudit(sku, variant.inventoryItemId, targetLocationId);
+          await activateShopifyInventoryAtLocation({
+            connection,
+            inventoryItemId: variant.inventoryItemId,
+            locationId: targetLocationId,
+            sku,
+          });
         } catch (activateErr) {
           throw new Error(
             `Shopify inventory set failed (location not active) and inventoryActivate also failed: HTTP ${first.status} — ${first.body}; activateErr=${activateErr instanceof Error ? activateErr.message : String(activateErr)}`,

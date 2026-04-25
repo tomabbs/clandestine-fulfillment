@@ -99,7 +99,11 @@ export function selectFulfillmentOrder(args: {
   }
 
   if (actionable.length === 1) {
-    return { kind: "selected", fulfillmentOrder: actionable[0]!, ambiguous: false };
+    const onlyActionable = actionable[0];
+    if (!onlyActionable) {
+      return { kind: "none_match", reason: "no_actionable_status" };
+    }
+    return { kind: "selected", fulfillmentOrder: onlyActionable, ambiguous: false };
   }
 
   // Multiple actionable FOs (e.g. multi-location split). Prefer the one whose
@@ -120,9 +124,13 @@ export function selectFulfillmentOrder(args: {
   }
 
   if (candidates.length === 1) {
+    const onlyCandidate = candidates[0];
+    if (!onlyCandidate) {
+      return { kind: "none_match", reason: "no_sku_coverage" };
+    }
     return {
       kind: "selected",
-      fulfillmentOrder: candidates[0]!,
+      fulfillmentOrder: onlyCandidate,
       ambiguous: covering.length === 0,
     };
   }
@@ -130,9 +138,13 @@ export function selectFulfillmentOrder(args: {
   // Still ambiguous → pick lexicographically smallest GID (= oldest by
   // Shopify's monotonically-increasing id space).
   const sorted = [...candidates].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const oldest = sorted[0];
+  if (!oldest) {
+    return { kind: "none_match", reason: "no_sku_coverage" };
+  }
   return {
     kind: "selected",
-    fulfillmentOrder: sorted[0]!,
+    fulfillmentOrder: oldest,
     ambiguous: true,
     tieBreakerReason: "oldest_id",
   };

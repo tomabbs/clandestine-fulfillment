@@ -47,7 +47,7 @@ import { tasks } from "@trigger.dev/sdk";
 import { z } from "zod/v4";
 import { requireStaff } from "@/lib/server/auth-context";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
-import { createServerSupabaseClient, createServiceRoleClient } from "@/lib/server/supabase-server";
+import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ShipstationV2AdjustOnSkuPayload } from "@/trigger/tasks/shipstation-v2-adjust-on-sku";
 
 // ─────────────────────────────────────────────────────────────────────────────

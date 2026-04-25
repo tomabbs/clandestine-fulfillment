@@ -638,7 +638,7 @@ describe("batchBuildFormatCostMaps — title-based fallback", () => {
     const result = await batchBuildFormatCostMaps("ws-1", ["SQ6720646"], supabase, {
       SQ6720646: "Joy Guidry - AMEN LP",
     });
-    expect(result.variantFormatMap["SQ6720646"]).toBe("LP");
+    expect(result.variantFormatMap.SQ6720646).toBe("LP");
     expect(result.unknownSkus).not.toContain("SQ6720646");
   });
 
@@ -650,7 +650,7 @@ describe("batchBuildFormatCostMaps — title-based fallback", () => {
     const result = await batchBuildFormatCostMaps("ws-1", ["SQ4004064"], supabase, {
       SQ4004064: "Joy Guidry - AMEN",
     });
-    expect(result.variantFormatMap["SQ4004064"]).toBe("LP");
+    expect(result.variantFormatMap.SQ4004064).toBe("LP");
     expect(result.unknownSkus).not.toContain("SQ4004064");
   });
 
@@ -659,7 +659,7 @@ describe("batchBuildFormatCostMaps — title-based fallback", () => {
     const result = await batchBuildFormatCostMaps("ws-1", ["SQ9999999"], supabase, {
       SQ9999999: null,
     });
-    expect(result.variantFormatMap["SQ9999999"]).toBeUndefined();
+    expect(result.variantFormatMap.SQ9999999).toBeUndefined();
     expect(result.unknownSkus).toContain("SQ9999999");
   });
 
@@ -682,7 +682,7 @@ describe("batchBuildFormatCostMaps — title-based fallback", () => {
     const result = await batchBuildFormatCostMaps("ws-1", ["SQ0000001"], supabase, {
       SQ0000001: "Some Great LP",
     });
-    expect(result.variantFormatMap["SQ0000001"]).toBe("LP");
+    expect(result.variantFormatMap.SQ0000001).toBe("LP");
   });
 
   it("end-to-end: Squarespace SKU with LP title resolves full costs (not $0)", async () => {
@@ -696,6 +696,6 @@ describe("batchBuildFormatCostMaps — title-based fallback", () => {
     expect(result.partial).toBe(false);
     expect(result.materials).toBeCloseTo(1.32);
     expect(result.pickPack).toBeCloseTo(2.0);
-    expect(result.skuFormatMap["SQ6720646"]).toBe("LP");
+    expect(result.skuFormatMap.SQ6720646).toBe("LP");
   });
 });

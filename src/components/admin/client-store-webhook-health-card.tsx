@@ -50,8 +50,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
-import { SHOPIFY_REQUIRED_WEBHOOK_TOPICS_REST } from "@/lib/shared/shopify-webhook-topics";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+import { SHOPIFY_REQUIRED_WEBHOOK_TOPICS_REST } from "@/lib/shared/shopify-webhook-topics";
 import type { IntegrationHealthState } from "@/lib/shared/types";
 
 function badgeVariant(state: WebhookHealthState) {
