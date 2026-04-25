@@ -104,6 +104,14 @@ export function FeatureFlagsForm({ initialFlags }: Props) {
       />
 
       <BoolField
+        label="SKU matching enabled"
+        helpText="Staff-only alias review workspace at /admin/settings/sku-matching. Default FALSE during rollout."
+        value={flags.sku_matching_enabled ?? false}
+        onChange={(v) => setKey("sku_matching_enabled", v)}
+        disabled={pending}
+      />
+
+      <BoolField
         label="Staff diagnostics (legacy CreateLabelPanel)"
         helpText="Phase 6.3. Default FALSE. Flip TRUE to re-enable the legacy /admin/orders-legacy CreateLabelPanel during rollback windows."
         value={flags.staff_diagnostics ?? false}

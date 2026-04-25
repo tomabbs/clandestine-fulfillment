@@ -41,6 +41,7 @@ export const workspaceFlagsSchema = z
     easypost_buy_enabled: z.boolean().optional(),
     staff_diagnostics: z.boolean().optional(),
     v1_features_enabled: z.boolean().optional(),
+    sku_matching_enabled: z.boolean().optional(),
     email_send_strategy: z.enum(["off", "shadow", "unified_resend", "ss_for_all"]).optional(),
     shadow_recipients: z.array(z.string().email()).optional(),
     bandcamp_skip_ss_email: z.boolean().optional(),
@@ -84,6 +85,8 @@ export interface WorkspaceFlags {
    * the bulk-tag/bulk-hold UI; the rest of the cockpit keeps working.
    */
   v1_features_enabled?: boolean;
+  /** Staff-only SKU alias review workspace at /admin/settings/sku-matching. */
+  sku_matching_enabled?: boolean;
   /**
    * Phase 12 — workspace-level mode flag. Replaced the Phase 10 hybrid /
    * ss_for_all / resend_for_all set with this 4-mode enum.
