@@ -1564,6 +1564,21 @@ function TrackingCell({ order }: { order: CockpitOrder }) {
         <Truck className="h-3 w-3" />
         {s.tracking_number ? truncateTracking(s.tracking_number) : "track"}
       </a>
+      {s.public_track_token && (
+        // Slice 4 — "View as customer" link. Lets staff jump from the
+        // cockpit row to the public /track/[token] page so they see the
+        // exact branded surface a customer sees in the email.
+        <a
+          href={`/track/${s.public_track_token}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[10px] text-purple-600 hover:underline font-medium uppercase tracking-wide"
+          title="Open public customer-facing tracking page"
+        >
+          View as customer
+        </a>
+      )}
       <span
         className={`text-[10px] px-1.5 py-0.5 rounded ${
           hasError

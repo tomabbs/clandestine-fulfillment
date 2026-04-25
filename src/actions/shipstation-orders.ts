@@ -87,6 +87,13 @@ export interface CockpitOrderShipment {
   shipstation_writeback_error: string | null;
   /** SS-returned tracking URL when present (lives in label_data.shipstation_tracking_url). */
   shipstation_tracking_url: string | null;
+  /**
+   * Slice 4 — token for the public /track/[token] page. Used by the
+   * cockpit to render a "View as customer" link next to the carrier
+   * tracking link, so staff can see exactly what the customer sees.
+   * Nullable for legacy shipments printed before the token rollout.
+   */
+  public_track_token: string | null;
 }
 
 export interface CockpitOrder {
@@ -391,7 +398,7 @@ export async function getShipStationOrdersDb(
       .select(
         `id, shipstation_order_id, tracking_number, carrier, service, ship_date, label_source,
          shipstation_marked_shipped_at, shipstation_writeback_path, shipstation_writeback_error,
-         label_data`,
+         label_data, public_track_token`,
       )
       .in("shipstation_order_id", ssIdsForShipmentLookup)
       .eq("label_source", "easypost")
@@ -415,6 +422,7 @@ export async function getShipStationOrdersDb(
         shipstation_writeback_path: s.shipstation_writeback_path as "v2" | "v1" | null,
         shipstation_writeback_error: s.shipstation_writeback_error,
         shipstation_tracking_url: trackingUrl,
+        public_track_token: (s as { public_track_token?: string | null }).public_track_token ?? null,
       });
     }
   }
