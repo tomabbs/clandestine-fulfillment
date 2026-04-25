@@ -154,8 +154,12 @@ export async function* iterateAllVariants(
     productId: string;
     productTitle: string;
     productStatus: string;
+    productType: string | null;
     variantId: string;
+    variantTitle: string | null;
     sku: string | null;
+    barcode: string | null;
+    price: number | null;
     inventoryItemId: string | null;
     inventoryTracked: boolean | null;
   }>
@@ -171,11 +175,15 @@ export async function* iterateAllVariants(
             id
             title
             status
+            productType
             variants(first: 100) {
               edges {
                 node {
                   id
+                  title
                   sku
+                  barcode
+                  price
                   inventoryItem {
                     id
                     tracked
@@ -197,11 +205,15 @@ export async function* iterateAllVariants(
           id: string;
           title: string;
           status: string;
+          productType: string | null;
           variants: {
             edges: Array<{
               node: {
                 id: string;
+                title: string | null;
                 sku: string | null;
+                barcode: string | null;
+                price: string | null;
                 inventoryItem: { id: string; tracked: boolean | null } | null;
               };
             }>;
@@ -222,8 +234,12 @@ export async function* iterateAllVariants(
       productId: string;
       productTitle: string;
       productStatus: string;
+      productType: string | null;
       variantId: string;
+      variantTitle: string | null;
       sku: string | null;
+      barcode: string | null;
+      price: number | null;
       inventoryItemId: string | null;
       inventoryTracked: boolean | null;
     }> = [];
@@ -234,8 +250,15 @@ export async function* iterateAllVariants(
           productId: product.id,
           productTitle: product.title,
           productStatus: product.status,
+          productType: product.productType ?? null,
           variantId: variant.id,
+          variantTitle: variant.title?.trim() || null,
           sku: variant.sku?.trim() || null,
+          barcode: variant.barcode?.trim() || null,
+          price:
+            variant.price != null && !Number.isNaN(Number(variant.price))
+              ? Number(variant.price)
+              : null,
           inventoryItemId: variant.inventoryItem?.id ?? null,
           inventoryTracked: variant.inventoryItem?.tracked ?? null,
         });

@@ -1,5 +1,6 @@
 version: 1
-updated_at: 2026-04-27  # WooCommerce + Squarespace connection review is now catalog-aware. On `/admin/settings/store-connections`, the Test action validates those platforms with real catalog reads instead of shallow order/inventory checks, and the legacy non-Shopify auto-discovery path now scans full Woo/Squarespace catalogs (including Woo variations and Squarespace v2 product variants) so operators can prepare mappings with materially better coverage. Prior update preserved below.
+updated_at: 2026-04-25  # Support Inbox 2.0 journey live. Staff now work `/admin/support` as a triage inbox with computed queues, SLA health, assignment/category/priority/snooze/resolution controls, client context, internal notes, saved replies, duplicate candidate review, and delivery failure visibility. Portal + launcher copy now use client-friendly next-action language, and the launcher keeps granular Realtime scoped to the active detail thread. Prior update preserved below.
+prior_update: 2026-04-27  # WooCommerce + Squarespace connection review is now catalog-aware. On `/admin/settings/store-connections`, the Test action validates those platforms with real catalog reads instead of shallow order/inventory checks, and the legacy non-Shopify auto-discovery path now scans full Woo/Squarespace catalogs (including Woo variations and Squarespace v2 product variants) so operators can prepare mappings with materially better coverage. Prior update preserved below.
 prior_update: 2026-04-27  # Store Connections admin bootstrap now resolves entirely inside the server request scope. `/admin/settings/store-connections/page.tsx` server-loads both the connection list and org picker data, then hands them to a client child for filters/dialogs/actions. Operator-visible effect: the page no longer issues client-side read actions during initial render, so the post-Shopify-callback "Server Components render" failure path is removed while create/test/disable still refresh the screen via `router.refresh()`. Prior update preserved below.
 
 prior_update: 2026-04-27  # Store Connections admin diagnostics hardening: `/admin/settings/store-connections` now renders a visible error alert when `getUserContext()` or `getStoreConnections()` fails instead of reusing the zero-row empty state. Operator-visible effect: real auth/query failures now surface as actionable page errors rather than the misleading "No store connections found" copy.
@@ -58,9 +59,13 @@ journeys:
       - create and reply paths return readable errors
       - role/org access enforced
       - floating launcher shows unread support state in admin and portal
+      - staff inbox queues derive from canonical fields rather than persisted queue names
+      - reply sends are retry-safe by clientMutationId and hard-block stale replies unless explicitly sent anyway
       - presence indicators reflect online availability in list/detail views
+      - staff can assign, set category/priority, snooze, add internal notes, use saved replies, resolve, and review duplicate candidates
+      - delivery failures are visible through support_message_deliveries and retryable from staff actions
       - app/email thread continuity preserved through resend inbound routing
-      - escalation automation avoids reminder spam during active sessions
+      - escalation automation respects SLA pause/snooze state and avoids reminder spam during active sessions
 
   - id: client_inbound_submission
     area: portal_inbound

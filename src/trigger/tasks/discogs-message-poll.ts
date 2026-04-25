@@ -96,6 +96,11 @@ async function runMessagePoll(): Promise<{
                 subject: `Discogs order ${order.external_order_id} — ${order.customer_name ?? msg.from.username}`,
                 status: "open",
                 priority: "normal",
+                source_channel: "discogs",
+                category: "discogs_buyer",
+                external_order_id: order.external_order_id,
+                external_thread_id: order.external_order_id,
+                external_customer_handle: msg.from.username,
               })
               .select("id")
               .single();
@@ -122,6 +127,9 @@ async function runMessagePoll(): Promise<{
               workspace_id: workspaceId,
               sender_type: "client",
               source: "app",
+              source_channel: "discogs",
+              direction: "inbound",
+              external_message_id: messageHash,
               delivered_via_email: false,
               body: `[Discogs: @${msg.from.username}]\n\n${msg.message}`,
             })

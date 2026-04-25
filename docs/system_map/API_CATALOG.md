@@ -226,7 +226,8 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - Key exports:
   - `getPortalDashboard`, `getSalesData`, `getPortalSettings`, `updateNotificationPreferences`
   - portal stores: `getMyStoreConnections`, `getWooCommerceAuthUrl`, `deleteStoreConnection`
-  - support: `getConversations`, `getConversationDetail`, `getSupportViewerContext`, `createConversation`, `sendMessage`, `markConversationRead`, `resolveConversation`, `assignConversation`, `suggestSupportReply`
+  - support: `getConversations`, `getSupportInboxSummary`, `getConversationDetail`, `getSupportViewerContext`, `createConversation`, `sendMessage`, `markConversationRead`, `resolveConversation`, `reopenConversation`, `assignConversation`, `updateConversationTriage`, `snoozeConversation`, `addInternalNote`, `listSavedReplies`, `createSavedReply`, `listSupportAssignees`, `getSupportClientContext`, `getDuplicateCandidates`, `markDuplicateCandidateReviewed`, `retrySupportDelivery`, `suggestSupportReply`
+  - Support Inbox 2.0 boundary notes (2026-04-25): `getConversations({ queue })` computes queue membership from canonical fields; `sendMessage` accepts `clientMutationId`, `lastSeenMessageId`, and `forceSendAfterCollision` for retry-safe idempotency + hard collision protection; staff replies insert `support_message_deliveries` before Trigger dispatch. Client/admin surfaces use scoped `queryKeys.support.*` invalidation; only active conversation detail panes maintain granular Realtime message subscriptions.
 
 ### Discogs Master Catalog (Admin)
 

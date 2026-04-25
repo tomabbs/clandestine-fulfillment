@@ -215,7 +215,7 @@ Pass criteria:
 
 Required flows:
 1. Client invite user from admin client settings
-2. Portal support create + reply
+2. Portal support create + reply, plus staff Support Inbox reply from `/admin/support` with collision-safe draft preservation and visible delivery status
 3. Portal inbound submit
 4. One core admin operational page load (`/admin/inventory` or `/admin/inbound`)
 5. Support omnichannel checks:

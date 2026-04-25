@@ -20,6 +20,7 @@ import { useAppMutation, useAppQuery } from "@/lib/hooks/use-app-query";
 import { useSupportPresence } from "@/lib/hooks/use-support-presence";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
+import { clientSupportStatusLabel } from "@/lib/shared/support-taxonomy";
 
 export default function PortalSupportPage() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -51,7 +52,9 @@ export default function PortalSupportPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Support</h1>
-          <p className="text-muted-foreground text-sm mt-1">Get help from our team</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Ask a question, reply to the team, and see what happens next.
+          </p>
         </div>
         <Button onClick={() => setShowNewConversation(true)}>
           <Plus className="h-4 w-4 mr-2" />
@@ -110,8 +113,8 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
     return (
       <div className="text-center py-12 text-muted-foreground">
         <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-        <p>No conversations yet</p>
-        <p className="text-sm mt-1">Start a new conversation to get help.</p>
+        <p>No support requests yet</p>
+        <p className="text-sm mt-1">Start a conversation and we will keep the thread here.</p>
       </div>
     );
   }
@@ -140,6 +143,9 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
                 <span className="font-medium truncate block">{conv.subject}</span>
                 <div className="flex items-center gap-2 mt-0.5">
                   <StatusBadge status={conv.status} />
+                  <span className="text-xs text-muted-foreground">
+                    {clientNextStep(conv.status)}
+                  </span>
                   {(conv.unread_count ?? 0) > 0 && (
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
                       {conv.unread_count} new
@@ -172,7 +178,7 @@ function StatusBadge({ status }: { status: string }) {
 
   return (
     <span className={`text-xs px-1.5 py-0.5 rounded ${styles[status] ?? ""}`}>
-      {status.replace(/_/g, " ")}
+      {clientSupportStatusLabel(status)}
     </span>
   );
 }
@@ -274,7 +280,7 @@ function ConversationDetail({
           <div className="text-sm text-muted-foreground">
             <StatusBadge status={conversation.status} />
             <span className="ml-2">
-              {counts.staff > 0 ? "Support active now" : "Support currently offline"}
+              {counts.staff > 0 ? "Support active now" : "Support will reply here and by email"}
             </span>
             {conversation.staff_last_read_at && (
               <span className="ml-2">
@@ -315,7 +321,7 @@ function ConversationDetail({
       {conversation.status !== "resolved" && conversation.status !== "closed" && (
         <div className="flex gap-2 pt-4 border-t">
           <Textarea
-            placeholder="Type your reply..."
+            placeholder="Reply to support..."
             value={replyBody}
             onChange={(e) => setReplyBody(e.target.value)}
             className="min-h-[80px]"
@@ -403,7 +409,7 @@ function NewConversationForm({
             onClick={() => createMutation.mutate()}
             disabled={!subject.trim() || !body.trim() || createMutation.isPending}
           >
-            Send
+            Start conversation
           </Button>
         </div>
         {createMutation.error && (
@@ -423,4 +429,19 @@ function formatTimeSince(date: Date): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function clientNextStep(status: string): string {
+  switch (status) {
+    case "waiting_on_staff":
+      return "We need to reply next";
+    case "waiting_on_client":
+      return "We are waiting on your reply";
+    case "resolved":
+      return "This is resolved";
+    case "closed":
+      return "This is closed";
+    default:
+      return "Open request";
+  }
 }

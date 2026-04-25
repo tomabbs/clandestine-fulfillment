@@ -49,3 +49,38 @@ export function formatRelativeTimeShort(iso: string): string {
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
 }
+
+/**
+ * Normalize a SKU for cross-system identity comparison.
+ * Preserve internal separators, but collapse surrounding whitespace and casing.
+ */
+export function normalizeSku(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ").toUpperCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * Normalize a barcode / UPC / GTIN to digits-only form.
+ */
+export function normalizeBarcode(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\D+/g, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * Normalize product text for equality / fuzzy-lite comparisons.
+ * This is intentionally conservative: punctuation and casing are removed,
+ * but token order is preserved so title-only similarity never becomes
+ * deterministic identity.
+ */
+export function normalizeProductText(value: string | null | undefined): string {
+  if (typeof value !== "string") return "";
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}

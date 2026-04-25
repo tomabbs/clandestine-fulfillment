@@ -1,7 +1,7 @@
 "use client";
 
 import { createBrowserClient } from "@supabase/ssr";
-import { MessageSquare, Minimize2, Plus, Send } from "lucide-react";
+import { ArrowLeft, MessageSquare, Minimize2, Plus, Send } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -61,7 +61,7 @@ export function SupportLauncher({
   } = useAppQuery({
     queryKey: queryKeys.support.conversations({ launcher: true }),
     queryFn: () => getConversations({ page: 1, pageSize: 8 }),
-    tier: CACHE_TIERS.REALTIME,
+    tier: CACHE_TIERS.SESSION,
   });
   const { data: detail, refetch: refetchDetail } = useAppQuery({
     queryKey: queryKeys.support.messages(selectedConversationId ?? "launcher-none"),
@@ -104,36 +104,40 @@ export function SupportLauncher({
   }, [open, unreadCount]);
 
   useEffect(() => {
+    if (!open) return;
+    const id = window.setInterval(() => {
+      void refetchConversations();
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [open, refetchConversations]);
+
+  useEffect(() => {
+    if (!open || !selectedConversationId) return;
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
     );
-    const convChannel = supabase
-      .channel(`support:launcher:conversations:${viewer?.userId ?? "anon"}`)
+    const msgChannel = supabase
+      .channel(`support:launcher:message-detail:${selectedConversationId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "support_conversations" },
+        {
+          event: "*",
+          schema: "public",
+          table: "support_messages",
+          filter: `conversation_id=eq.${selectedConversationId}`,
+        },
         () => {
           void refetchConversations();
+          void markConversationRead(selectedConversationId);
+          void refetchDetail();
         },
       )
       .subscribe();
-    const msgChannel = supabase
-      .channel(`support:launcher:messages:${viewer?.userId ?? "anon"}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "support_messages" }, () => {
-        void refetchConversations();
-        if (selectedConversationId) {
-          void markConversationRead(selectedConversationId);
-          void refetchDetail();
-        }
-      })
-      .subscribe();
-
     return () => {
-      supabase.removeChannel(convChannel);
       supabase.removeChannel(msgChannel);
     };
-  }, [refetchConversations, refetchDetail, selectedConversationId, viewer?.userId]);
+  }, [open, refetchConversations, refetchDetail, selectedConversationId]);
 
   const sendMutation = useAppMutation({
     mutationFn: async (body: string) => {
@@ -199,7 +203,7 @@ export function SupportLauncher({
       </button>
 
       {open && (
-        <div className="fixed right-5 bottom-20 z-40 h-[min(640px,70vh)] w-[min(420px,94vw)] rounded-xl border bg-background shadow-2xl">
+        <div className="fixed right-2 bottom-16 z-40 h-[min(640px,82vh)] w-[min(520px,calc(100vw-1rem))] rounded-xl border bg-background shadow-2xl sm:right-5 sm:bottom-20">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <div>
               <p className="text-sm font-semibold">Support chat</p>
@@ -232,8 +236,10 @@ export function SupportLauncher({
             </div>
           )}
 
-          <div className="grid h-[calc(100%-49px)] grid-cols-[44%_56%]">
-            <div className="border-r">
+          <div className="grid h-[calc(100%-49px)] grid-cols-1 sm:grid-cols-[42%_58%]">
+            <div
+              className={`border-r ${selectedConversationId || showNewConversationForm ? "hidden sm:block" : ""}`}
+            >
               <div className="flex items-center justify-between px-2 py-2">
                 <p className="text-xs text-muted-foreground">
                   {viewer?.role === "staff"
@@ -289,9 +295,22 @@ export function SupportLauncher({
               </ScrollArea>
             </div>
 
-            <div className="flex h-full flex-col">
+            <div
+              className={`flex h-full flex-col ${
+                !selectedConversationId && !showNewConversationForm ? "hidden sm:flex" : ""
+              }`}
+            >
               {showNewConversationForm && viewer?.role === "client" ? (
                 <div className="flex h-full flex-col gap-2 p-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-fit px-2 sm:hidden"
+                    onClick={() => setShowNewConversationForm(false)}
+                  >
+                    <ArrowLeft className="mr-1 h-4 w-4" />
+                    Back
+                  </Button>
                   <Input
                     placeholder="Subject"
                     value={newSubject}
@@ -330,6 +349,17 @@ export function SupportLauncher({
                 </div>
               ) : selectedConversationId && detail ? (
                 <>
+                  <div className="flex items-center gap-2 border-b px-3 py-2 sm:hidden">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setSelectedConversationId(null)}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <p className="truncate text-xs font-medium">{detail.conversation.subject}</p>
+                  </div>
                   <ScrollArea className="h-full px-3 py-2">
                     <div className="space-y-2">
                       {detail.messages.map((msg) => (

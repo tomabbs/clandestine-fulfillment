@@ -30,7 +30,7 @@ for `createServiceRoleClient`. Test files are excluded by the script.
 - `src/lib/server/supabase-server.ts` — defines `createServiceRoleClient()`.
   This is the only file that imports `SUPABASE_SERVICE_ROLE_KEY` directly.
 
-### B. Trigger.dev tasks — Rule #7 mandates service-role here (60 files)
+### B. Trigger.dev tasks — Rule #7 mandates service-role here (61 files)
 
 Trigger tasks run with no user session and must bypass RLS. Every task in
 this list operates against `workspace_id`-scoped data — RLS would deny all
@@ -93,6 +93,7 @@ operations because the task has no authenticated `auth.uid()`.
 - `src/trigger/tasks/sku-sync-audit.ts` — SKU drift audit cron.
 - `src/trigger/tasks/storage-calc.ts` — storage fee compute.
 - `src/trigger/tasks/support-escalation.ts` — support escalation cron.
+- `src/trigger/tasks/support-message-delivery.ts` — support delivery ledger sends + retry recovery.
 - `src/trigger/tasks/tag-cleanup-backfill.ts` — admin-triggered tag cleanup.
 - `src/trigger/tasks/weekly-backup-verify.ts` — Tier 1 #8 backup probe.
 

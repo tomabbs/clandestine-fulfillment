@@ -15,6 +15,12 @@ vi.mock("@/lib/clients/resend-client", () => ({
   sendSupportEmail: vi.fn(async () => ({ messageId: "msg_123" })),
 }));
 
+vi.mock("@trigger.dev/sdk", () => ({
+  tasks: {
+    trigger: vi.fn(async () => ({ id: "run-1" })),
+  },
+}));
+
 describe("support action envelopes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -45,37 +51,12 @@ describe("support action envelopes", () => {
     }
   });
 
-  it("createConversation returns success envelope when inserts work", async () => {
-    mockRequireAuth.mockResolvedValue({
-      supabase: {},
-      userRecord: { id: "u1", org_id: "org-1", workspace_id: "ws-1", role: "client" },
-      isStaff: false,
-    });
-
-    const from = vi.fn((table: string) => {
-      if (table === "support_conversations") {
-        return {
-          insert: vi.fn().mockReturnValue({
-            select: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({ data: { id: "conv-1" }, error: null }),
-            }),
-          }),
-        };
-      }
-      if (table === "support_messages") {
-        return {
-          insert: vi.fn().mockResolvedValue({ error: null }),
-        };
-      }
-      return {};
-    });
-    mockCreateServiceRoleClient.mockReturnValue({ from });
-
-    const { createConversation } = await import("../../../src/actions/support");
-    const result = await createConversation({ subject: "Need help", body: "Details" });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.conversationId).toBe("conv-1");
+  it("sendMessage returns structured validation error on bad input", async () => {
+    const { sendMessage } = await import("../../../src/actions/support");
+    const result = await sendMessage({ conversationId: "not-a-uuid", body: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toContain("valid message");
     }
   });
 });

@@ -25,7 +25,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 
 | Task ID | File | Schedule |
 |---|---|---|
-| `support-escalation` | `src/trigger/tasks/support-escalation.ts` | `*/5 * * * *` |
+| `support-escalation` | `src/trigger/tasks/support-escalation.ts` | `*/5 * * * *` — **Support Inbox 2.0 (2026-04-25):** SLA-policy-aware reminder loop. Skips `sla_paused=true` and snoozed tickets, alerts staff before `next_response_due_at` / `resolution_due_at`, marks `sla_breached_at` after breach, writes `support_conversation_events`, and keeps the existing bounded client reminder path for `waiting_on_client`. SLA pause/resume duration is DB-trigger owned (`support_sla_pause_on_status_change`), not recalculated in the task. |
+| `support-delivery-recovery` | `src/trigger/tasks/support-message-delivery.ts` | `*/5 * * * *` — retries failed `support_message_deliveries` rows where `attempt_count < 5` and `next_retry_at <= now()`, then re-fires `support-message-delivery` by `messageId`. |
 | `shopify-sync` | `src/trigger/tasks/shopify-sync.ts` | `*/15 * * * *` |
 | `shopify-order-sync` | `src/trigger/tasks/shopify-order-sync.ts` | `*/30 * * * *` |
 | `bandcamp-sale-poll` | `src/trigger/tasks/bandcamp-sale-poll.ts` | `*/5 * * * *` — **2026-04-13 second-pass audit:** explicit `tasks.trigger("shipstation-v2-decrement", …)` was REMOVED from the post-sale fanout. ShipStation Inventory Sync (active for the native Bandcamp store integration registered in `warehouse_shipstation_stores`) imports the Bandcamp order and decrements v2 natively before this poll fires; the explicit enqueue would double-decrement (Rule #65 echo loop). The companion echo skip lives in `SHIPSTATION_V2_ECHO_SOURCES` inside `src/lib/server/inventory-fanout.ts` for `source='bandcamp'` — both layers MUST be reverted together if SS Inventory Sync is ever disabled per-workspace. Static-source regression guard: `tests/unit/trigger/bandcamp-sale-poll-no-v2-enqueue.test.ts` (extended Phase 2 to also scan `bandcamp-sale-poll-per-connection.ts` and the shared runner). The post-sale fanout still enqueues `bandcamp-inventory-push` and `multi-store-inventory-push`, plus `triggerBundleFanout` for bundle parents. **Phase 2 (2026-04-21):** body refactored to delegate to the shared `pollOneBandcampConnection()` runner (`src/trigger/lib/bandcamp-sale-poll-runner.ts`) so this cron stays in lock-step with the new event-driven `bandcamp-sale-poll-per-connection` task on idempotency contract, post-sale fanout, and v2-skip rationale. Cron remains the safety net for connections without populated `inbound_forwarding_address` and for any inbound email Resend drops. |
@@ -99,7 +100,8 @@ Canonical Trigger.dev task map for planning/build/audit.
 | `mark-mailorder-fulfilled` | `src/trigger/tasks/mark-mailorder-fulfilled.ts` | `create-shipping-label` |
 | `discogs-catalog-match` | `src/trigger/tasks/discogs-catalog-match.ts` | `src/actions/discogs-admin.ts` |
 | `discogs-initial-listing` | `src/trigger/tasks/discogs-initial-listing.ts` | `src/actions/discogs-admin.ts` (confirmMapping) |
-| `discogs-message-send` | `src/trigger/tasks/discogs-message-send.ts` | Support UI / staff |
+| `discogs-message-send` | `src/trigger/tasks/discogs-message-send.ts` | `support-message-delivery` for Discogs-originated support conversations; preserved for manual/staff callers. |
+| `support-message-delivery` | `src/trigger/tasks/support-message-delivery.ts` | `src/actions/support.ts::sendMessage` after `support_message_deliveries` rows are inserted. Processes pending/failed delivery rows by `messageId`, sends email via Resend or delegates Discogs sends to `discogs-message-send`, updates provider IDs/status/error fields, and writes delivery events for timeline/dead-letter visibility. |
 | `catalog-stats-refresh-demand` | `src/trigger/tasks/catalog-stats-refresh.ts` | Staff admin UI (on-demand) |
 | `bandcamp-sales-backfill` | `src/trigger/tasks/bandcamp-sales-backfill.ts` | Staff admin UI (on-demand); self-triggers in yearly chunks (DEPRECATED — use scripts/run-sales-backfill.mjs). Pinned to `bandcampQueue` for defense-in-depth (Phase 0.0 hotfix 2026-04-13) even though the body now only logs and returns. |
 | `bundle-component-fanout` | `src/trigger/tasks/bundle-component-fanout.ts` | `bandcamp-sale-poll` (when bundle variant sold) |
@@ -122,8 +124,9 @@ Canonical Trigger.dev task map for planning/build/audit.
 - **Catalog/release readiness:** `bandcamp-sync`, `bandcamp-scrape-page`, `preorder-setup`, `preorder-fulfillment`
 - **Billing/storage:** `monthly-billing`, `storage-calc`
 - **Scraper observability:** `sensor-check` now includes `bandcamp.merch_sync_log_stale`, `bandcamp.scraper_review_open`, `bandcamp.scrape_block_rate`, `bundle.component_unavailable` sensors from `channel_sync_log` + `warehouse_review_queue`. Index: `idx_channel_sync_log_sensor` on `(workspace_id, sync_type, created_at DESC) WHERE status = 'completed'`. `bandcamp-scrape-page` logs per-scrape outcome (HTTP status, retryAfterSeconds) to `channel_sync_log` sync_type `scrape_page`.
-- **Support/reliability:** `support-escalation`, `sensor-check`, `tag-cleanup-backfill`
-  - `support-escalation` uses conversation status + read markers (`staff_last_read_at`, `client_last_read_at`) and cooldown timestamps (`last_staff_escalated_at`, `last_client_reminded_at`) to prevent reminder spam during active chat sessions
+- **Support/reliability:** `support-escalation`, `support-message-delivery`, `support-delivery-recovery`, `sensor-check`, `tag-cleanup-backfill`
+  - `support-escalation` uses SLA deadline fields + pause/snooze state and cooldown timestamps to prevent reminder spam during active chat sessions.
+  - `support-message-delivery` and `support-delivery-recovery` make outbound email/Discogs sends retryable and visible through `support_message_deliveries` instead of direct fire-and-forget sends from Server Actions.
 - **OAuth hygiene:** `oauth-state-cleanup`
 
 ## Design Notes

@@ -105,6 +105,10 @@ export type ConversationStatus =
   | "resolved"
   | "closed";
 
+export type SupportSourceChannel = "app" | "email" | "discogs" | "bandcamp_fan" | "system";
+export type SupportDeliveryChannel = "app" | "email" | "discogs" | "bandcamp" | "system";
+export type SupportMessageDirection = "inbound" | "outbound" | "internal";
+
 export type StorePlatform = "shopify" | "woocommerce" | "squarespace" | "bigcommerce" | "discogs";
 
 // === Core ===
@@ -600,6 +604,27 @@ export interface SupportConversation {
   staff_last_read_at: string | null;
   last_staff_escalated_at: string | null;
   last_client_reminded_at: string | null;
+  source_channel: SupportSourceChannel;
+  category: string | null;
+  tags: string[];
+  snoozed_until: string | null;
+  first_response_due_at: string | null;
+  first_responded_at: string | null;
+  next_response_due_at: string | null;
+  resolution_due_at: string | null;
+  sla_policy_id: string | null;
+  sla_breached_at: string | null;
+  sla_paused: boolean;
+  sla_paused_at: string | null;
+  sla_pause_reason: string | null;
+  sla_accumulated_pause_duration: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_code: string | null;
+  resolution_summary: string | null;
+  external_thread_id: string | null;
+  external_order_id: string | null;
+  external_customer_handle: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -611,11 +636,35 @@ export interface SupportMessage {
   sender_id: string | null;
   sender_type: "staff" | "client" | "system";
   source: "app" | "email";
+  source_channel: SupportSourceChannel | null;
+  direction: SupportMessageDirection | null;
+  external_message_id: string | null;
+  client_mutation_id: string | null;
   delivered_via_email: boolean;
   body: string;
   email_message_id: string | null;
   attachments: Record<string, unknown>[];
   created_at: string;
+}
+
+export interface SupportMessageDelivery {
+  id: string;
+  workspace_id: string;
+  conversation_id: string;
+  message_id: string;
+  channel: SupportDeliveryChannel;
+  recipient: string | null;
+  provider: string | null;
+  provider_message_id: string | null;
+  provider_thread_id: string | null;
+  status: "pending" | "queued" | "sent" | "delivered" | "failed" | "skipped";
+  attempt_count: number;
+  last_attempt_at: string | null;
+  next_retry_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SupportEmailMapping {

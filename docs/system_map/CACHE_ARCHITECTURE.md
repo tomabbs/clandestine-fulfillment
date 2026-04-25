@@ -109,6 +109,7 @@ TTL is never the primary consistency mechanism.
   - fast only for hot data
   - slowed/paused on hidden tabs or constrained conditions
 - Prefer push/realtime invalidation for high-churn entities when practical.
+- Support Inbox 2.0 exception/scoping rule (2026-04-25): only the active conversation detail pane subscribes to granular `support_messages` Realtime changes with a `conversation_id` filter. Queue/list surfaces and the floating launcher use mutation invalidation, focus refresh, or bounded polling; they MUST NOT subscribe broadly to all support messages or all support conversations.
 
 ## Shared Server Cache Rules
 

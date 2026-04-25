@@ -123,6 +123,10 @@ export { shopifyPolicyFixTask } from "./shopify-policy-fix";
 export { shopifySyncTask } from "./shopify-sync";
 export { storageCalcTask } from "./storage-calc";
 export { supportEscalationTask } from "./support-escalation";
+export {
+  supportDeliveryRecoveryTask,
+  supportMessageDeliveryTask,
+} from "./support-message-delivery";
 // Phase 10.5 prep — daily parity check between AfterShip and EasyPost trackers.
 // Diagnostic only; gates the eventual AfterShip sunset.
 export { trackerParitySensorTask } from "./tracker-parity-sensor";

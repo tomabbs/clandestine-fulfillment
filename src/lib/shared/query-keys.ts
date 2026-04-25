@@ -37,6 +37,12 @@ export const queryKeys = {
     conversations: (filters?: Record<string, unknown>) =>
       ["support", "conversations", filters] as const,
     messages: (conversationId: string) => ["support", "messages", conversationId] as const,
+    summary: () => ["support", "summary"] as const,
+    clientContext: (conversationId: string) =>
+      ["support", "client-context", conversationId] as const,
+    assignees: () => ["support", "assignees"] as const,
+    savedReplies: () => ["support", "saved-replies"] as const,
+    duplicates: (conversationId: string) => ["support", "duplicates", conversationId] as const,
     viewerContext: () => ["support", "viewer-context"] as const,
   },
   auth: {
