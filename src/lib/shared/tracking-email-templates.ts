@@ -1,4 +1,4 @@
-// Phase 12 — Customer-facing email templates.
+// Phase 12 / Slice 3 — Customer-facing email templates.
 //
 // Inline HTML builder pattern (matches the existing sendPortalInviteEmail
 // in resend-client.ts). Avoids adding React Email as a new dependency.
@@ -6,8 +6,11 @@
 // back gracefully on plain-text-only mail clients.
 //
 // Branding rules:
-//   - Org name + brand color from organizations row
-//   - Tracking URL is OUR /track/[token] page (always)
+//   - Org name + brand color from organizations row, sanitized through
+//     sanitizeBrandColor + sanitizeImageUrl so a malformed branding row
+//     can't smuggle CSS / `javascript:` into the rendered email.
+//   - Tracking URL is OUR /track/[token] page (always); the URL is
+//     re-validated as https-only here as well — defense in depth.
 //   - Footer always carries the support contact
 //   - Plain-text alt is auto-derived for accessibility + spam-score
 //
@@ -16,6 +19,8 @@
 //   - 0-1 Out-for-Delivery per shipment (only if carrier emits it)
 //   - 1 Delivered per shipment
 //   - 0-1 Exception (only on real failure modes)
+
+import { sanitizeBrandColor, sanitizeImageUrl } from "@/lib/shared/public-track-token";
 
 export interface OrgBranding {
   org_name: string;
@@ -64,9 +69,33 @@ function escapeAttr(value: string): string {
   return escapeHtml(value);
 }
 
+/**
+ * Slice 3 — defense-in-depth https-only tracking URL guard.
+ *
+ * The send-tracking-email task already builds the URL from
+ * `buildPublicTrackUrl(token, env.NEXT_PUBLIC_APP_URL)`, which is itself
+ * https in every environment. But if a future writer accidentally hands
+ * us a `javascript:` URL we want it stripped to "#" before it lands in
+ * an `<a href>` or the plain-text body.
+ */
+function safeTrackingUrl(value: string): string {
+  try {
+    const u = new URL(value);
+    if (u.protocol === "https:" || u.protocol === "http:") return value;
+  } catch {
+    // ignore
+  }
+  return "#";
+}
+
 /** Common chrome wrapping every template body. */
 function shell(opts: { org: OrgBranding; preheader: string; bodyHtml: string }): string {
-  const brand = opts.org.brand_color ?? BRAND_COLOR_FALLBACK;
+  // Slice 3 — every branding field is sanitized at render time, not by the
+  // caller. This means a sloppy caller (or a future regression that loads
+  // the org row directly into `OrgBranding` without sanitizing) still
+  // produces a safe email. Cost is minor — sanitizers are pure string ops.
+  const brand = sanitizeBrandColor(opts.org.brand_color, BRAND_COLOR_FALLBACK);
+  const safeLogoUrl = sanitizeImageUrl(opts.org.logo_url ?? null);
   const support = opts.org.support_email ?? "";
   const supportLine = support
     ? `Questions? Reply to <a href="mailto:${escapeAttr(support)}">${escapeHtml(support)}</a>.`
@@ -78,8 +107,8 @@ function shell(opts: { org: OrgBranding; preheader: string; bodyHtml: string }):
   // resend_suppressions list manually.
   const optOutAddress = support || "support@clandestinedistro.com";
   const optOutLine = `Don't want shipping updates from us? <a href="mailto:${escapeAttr(optOutAddress)}?subject=Unsubscribe%20from%20shipping%20updates">Email us to opt out</a>.`;
-  const logoBlock = opts.org.logo_url
-    ? `<img src="${escapeAttr(opts.org.logo_url)}" alt="${escapeAttr(opts.org.org_name)}" style="max-height:40px;max-width:200px;display:block;margin-bottom:8px"/>`
+  const logoBlock = safeLogoUrl
+    ? `<img src="${escapeAttr(safeLogoUrl)}" alt="${escapeAttr(opts.org.org_name)}" style="max-height:40px;max-width:200px;display:block;margin-bottom:8px"/>`
     : `<div style="font-size:18px;font-weight:600;color:${escapeAttr(brand)}">${escapeHtml(opts.org.org_name)}</div>`;
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -142,6 +171,7 @@ export function renderShipmentConfirmation(ctx: TemplateContext): RenderedEmail 
   const subject = ctx.item_summary
     ? `Your ${ctx.item_summary} is on the way`
     : `Order ${ctx.order_number} shipped`;
+  const trackingUrl = safeTrackingUrl(ctx.tracking_url);
   const html = shell({
     org: ctx.org,
     preheader: `Order ${ctx.order_number} is on the way`,
@@ -149,7 +179,7 @@ export function renderShipmentConfirmation(ctx: TemplateContext): RenderedEmail 
       <p style="margin:0 0 8px 0">${greeting},</p>
       <p style="margin:0 0 16px 0">${itemLine}</p>
       ${carrierLine ? `<p style="margin:0 0 18px 0" class="small">${carrierLine}</p>` : ""}
-      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(ctx.tracking_url)}">Track your order</a></p>
+      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(trackingUrl)}">Track your order</a></p>
       <p class="small">Order ${escapeHtml(ctx.order_number)}</p>
     `,
   });
@@ -167,7 +197,7 @@ export function renderShipmentConfirmation(ctx: TemplateContext): RenderedEmail 
     ]
       .filter(Boolean)
       .join("\n\n"),
-    trackingUrl: ctx.tracking_url,
+    trackingUrl,
   });
   return { subject, html, text };
 }
@@ -181,20 +211,21 @@ export function renderOutForDelivery(ctx: TemplateContext): RenderedEmail {
   const subject = ctx.item_summary
     ? `Out for delivery: ${ctx.item_summary}`
     : `Order ${ctx.order_number} is out for delivery`;
+  const trackingUrl = safeTrackingUrl(ctx.tracking_url);
   const html = shell({
     org: ctx.org,
     preheader: "Arriving today",
     bodyHtml: `
       <p style="margin:0 0 8px 0">${greeting},</p>
       <p style="margin:0 0 16px 0">${ctx.item_summary ? `Your <strong>${escapeHtml(ctx.item_summary)}</strong> is` : "Your order is"} <span class="accent"><strong>out for delivery today</strong></span>.</p>
-      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(ctx.tracking_url)}">Track your order</a></p>
+      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(trackingUrl)}">Track your order</a></p>
       <p class="small">Order ${escapeHtml(ctx.order_number)}</p>
     `,
   });
   const text = textBlock({
     org: ctx.org,
     bodyText: `${ctx.item_summary ? `Your ${ctx.item_summary}` : "Your order"} is out for delivery today.\nOrder ${ctx.order_number}`,
-    trackingUrl: ctx.tracking_url,
+    trackingUrl,
   });
   return { subject, html, text };
 }
@@ -209,25 +240,45 @@ export function renderDelivered(ctx: TemplateContext): RenderedEmail {
     ? `Delivered: ${ctx.item_summary}`
     : `Order ${ctx.order_number} delivered`;
   const dateLine = ctx.event_date
-    ? `Delivered ${new Date(ctx.event_date).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}.`
+    ? `Delivered ${formatDeliveredDate(ctx.event_date)}.`
     : "Delivered.";
+  const trackingUrl = safeTrackingUrl(ctx.tracking_url);
   const html = shell({
     org: ctx.org,
     preheader: "Delivered",
     bodyHtml: `
       <p style="margin:0 0 8px 0">${greeting},</p>
-      <p style="margin:0 0 16px 0"><span class="accent"><strong>${dateLine}</strong></span></p>
+      <p style="margin:0 0 16px 0"><span class="accent"><strong>${escapeHtml(dateLine)}</strong></span></p>
       <p style="margin:0 0 16px 0">${ctx.item_summary ? `Your <strong>${escapeHtml(ctx.item_summary)}</strong> has arrived.` : "Your order has arrived."} Hope it's exactly what you wanted.</p>
-      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(ctx.tracking_url)}">View order</a></p>
+      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(trackingUrl)}">View order</a></p>
       <p class="small">Order ${escapeHtml(ctx.order_number)}</p>
     `,
   });
   const text = textBlock({
     org: ctx.org,
     bodyText: `${dateLine}\n${ctx.item_summary ? `Your ${ctx.item_summary} has arrived.` : "Your order has arrived."}\n\nOrder ${ctx.order_number}`,
-    trackingUrl: ctx.tracking_url,
+    trackingUrl,
   });
   return { subject, html, text };
+}
+
+/**
+ * Slice 3 — guard against malformed `event_date` strings (a corrupt EP
+ * payload could feed us "garbage" or "Invalid Date"). Falls back to the
+ * raw string we were given so we at least don't render "Invalid Date".
+ */
+function formatDeliveredDate(value: string): string {
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+  } catch {
+    return value;
+  }
 }
 
 // ── Template 4: Exception ─────────────────────────────────────────────────
@@ -236,34 +287,61 @@ export function renderException(ctx: TemplateContext): RenderedEmail {
   const greeting = ctx.customer_name
     ? `Hi ${escapeHtml(ctx.customer_name.split(" ")[0])}`
     : "Hi there";
-  const detail = ctx.exception_message
-    ? `<p class="small">Carrier message: ${escapeHtml(ctx.exception_message)}</p>`
+  // Slice 3 hardening: only include the carrier message when it's
+  // useful — non-empty AND >2 chars (filters out "" / "-" / "?" that
+  // some carriers emit). Truncate at 240 chars so a verbose / hostile
+  // carrier message can't blow out the email layout.
+  const carrierMessage = sanitizeCarrierMessage(ctx.exception_message);
+  const detail = carrierMessage
+    ? `<p class="small">Carrier message: ${escapeHtml(carrierMessage)}</p>`
     : "";
   const subject = `Update on order ${ctx.order_number}`;
+  const trackingUrl = safeTrackingUrl(ctx.tracking_url);
+  // Slice 3 copy update — previous "We're looking into it now" overpromised
+  // internal action when in many exception flows (return_to_sender, address
+  // unknown) the customer needs to act. New copy is honest about the carrier
+  // signal and points the customer at the tracking page for next steps,
+  // without committing to staff doing anything we can't actually guarantee.
   const html = shell({
     org: ctx.org,
     preheader: "Update on your order",
     bodyHtml: `
       <p style="margin:0 0 8px 0">${greeting},</p>
-      <p style="margin:0 0 16px 0">We're seeing an issue with delivery for order <strong>${escapeHtml(ctx.order_number)}</strong>${ctx.item_summary ? ` (${escapeHtml(ctx.item_summary)})` : ""}. We're looking into it now.</p>
+      <p style="margin:0 0 16px 0">The carrier flagged a delivery issue with order <strong>${escapeHtml(ctx.order_number)}</strong>${ctx.item_summary ? ` (${escapeHtml(ctx.item_summary)})` : ""}.</p>
       ${detail}
-      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(ctx.tracking_url)}">View tracking details</a></p>
-      <p class="small">No action needed from you yet — we'll follow up if anything changes.</p>
+      <p style="margin:0 0 22px 0"><a class="btn" href="${escapeAttr(trackingUrl)}">View tracking details</a></p>
+      <p class="small">If you need help, reply to this email and we'll dig in.</p>
     `,
   });
   const text = textBlock({
     org: ctx.org,
     bodyText: [
       `${ctx.customer_name?.split(" ")[0] ?? "Hi"},`,
-      `We're seeing an issue with delivery for order ${ctx.order_number}${ctx.item_summary ? ` (${ctx.item_summary})` : ""}. We're looking into it now.`,
-      ctx.exception_message ? `Carrier message: ${ctx.exception_message}` : "",
-      "No action needed from you yet — we'll follow up if anything changes.",
+      `The carrier flagged a delivery issue with order ${ctx.order_number}${ctx.item_summary ? ` (${ctx.item_summary})` : ""}.`,
+      carrierMessage ? `Carrier message: ${carrierMessage}` : "",
+      "If you need help, reply to this email and we'll dig in.",
     ]
       .filter(Boolean)
       .join("\n\n"),
-    trackingUrl: ctx.tracking_url,
+    trackingUrl,
   });
   return { subject, html, text };
+}
+
+/**
+ * Slice 3 — carrier message normalizer.
+ *
+ * Returns null for empty / single-char / obviously-noise messages so the
+ * email body doesn't include "Carrier message: -" or "Carrier message: ?".
+ * Truncates at 240 chars (UI fits, screen-readers don't drone, layout
+ * doesn't blow up on a hostile carrier blob).
+ */
+function sanitizeCarrierMessage(value: string | null | undefined): string | null {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.length < 3) return null;
+  if (trimmed.length > 240) return `${trimmed.slice(0, 237)}...`;
+  return trimmed;
 }
 
 /**

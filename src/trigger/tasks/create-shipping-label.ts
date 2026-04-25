@@ -580,6 +580,15 @@ export const createShippingLabelTask = task({
         label_source: "easypost",
         easypost_shipment_id: purchased.id,
         selected_rate_signature: rateSignature,
+        // Slice 3 — public-safe destination columns. NEVER persist street1/
+        // street2/zip/email/phone here; the chk_destination_city_no_street
+        // CHECK constraint enforces the city sub-rule. The /track/[token]
+        // public page reads ONLY these three columns (not label_data) so a
+        // future regression that spreads `toAddress` into the public surface
+        // becomes a CHECK violation rather than a quiet PII leak.
+        destination_city: toAddress.city ?? null,
+        destination_state: toAddress.state ?? null,
+        destination_country: toAddress.country ?? null,
         label_data: {
           easypost_shipment_id: purchased.id,
           label_url: purchased.postage_label.label_url,

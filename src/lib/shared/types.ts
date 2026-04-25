@@ -768,10 +768,19 @@ export interface ClientStoreSkuMapping {
   variant_id: string;
   remote_product_id: string | null;
   remote_variant_id: string | null;
+  remote_inventory_item_id: string | null;
   remote_sku: string | null;
   last_pushed_quantity: number | null;
   last_pushed_at: string | null;
   is_active: boolean;
+  match_method: string | null;
+  match_confidence: string | null;
+  matched_at: string | null;
+  matched_by: string | null;
+  deactivated_at: string | null;
+  deactivated_by: string | null;
+  deactivation_reason: string | null;
+  candidate_fingerprint: string | null;
   // Phase 5 §9.6 D1 — per-channel safety stock (smallint, CHECK >= 0).
   // Migration 20260424000001_per_channel_safety_stock.sql. Reduces effective
   // sellable before push (see src/lib/server/effective-sellable.ts).
@@ -788,6 +797,30 @@ export interface ClientStoreSkuMapping {
   last_policy_check_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface SkuMappingEvent {
+  id: string;
+  workspace_id: string;
+  mapping_id: string | null;
+  connection_id: string;
+  variant_id: string;
+  canonical_sku: string | null;
+  remote_sku: string | null;
+  remote_product_id: string | null;
+  remote_variant_id: string | null;
+  remote_inventory_item_id: string | null;
+  event_type: string;
+  match_method: string | null;
+  match_confidence: string | null;
+  match_reasons: string[] | null;
+  candidate_snapshot: Record<string, unknown> | null;
+  candidate_fingerprint: string | null;
+  actor_id: string | null;
+  actor_role: string | null;
+  notes: string | null;
+  deactivation_reason: string | null;
+  created_at: string;
 }
 
 /**

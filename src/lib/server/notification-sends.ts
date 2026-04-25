@@ -1,30 +1,64 @@
-// Phase 12 — notification_sends audit helpers.
+// Phase 12 / Slice 2 — notification_sends audit + idempotency helpers.
 //
-// The single source of truth for "did we send this email?" Powers the
-// reconciliation cron + the admin troubleshooting view + the dedup contract.
+// THE single source of truth for "did we send this email?" Powers:
+//   - the reconciliation cron
+//   - the admin troubleshooting view (Slice 4)
+//   - the dedup contract for send-tracking-email
 //
 // Idempotency contract (THREE layers, belt-and-suspenders):
-//   1. checkAlreadySent() — application-level lookup before send
-//   2. recordSend()       — INSERT; UNIQUE constraint on (shipment_id,
-//                            trigger_status) for status='sent' AND for
-//                            status='shadow' enforces exactly-once at DB level
-//   3. EP webhook dedup   — webhook_events.external_webhook_id (existing)
+//   1. findPriorActiveSend()  — application-level lookup before send
+//   2. recordSend(status='pending') — INSERT a pending row BEFORE calling
+//      Resend. The widened partial unique index (Slice 2 migration) on
+//      (shipment_id, trigger_status) WHERE status IN active_set guarantees
+//      exactly-one active row per logical send. A second concurrent task
+//      attempt collides on this index and is told the existing row's id.
+//   3. Resend's `Idempotency-Key` header (passed via the SDK options
+//      object) — defense-in-depth at the provider so even if our DB
+//      record vanishes, Resend collapses retries.
 //
-// A duplicate send requires ALL THREE to fail simultaneously, which is
-// effectively impossible.
+// Slice 2 expands the recordSend recovery path: the partial unique index
+// now covers EVERY active status (pending / sent / delivered / etc.), so
+// recordSend recovers from 23505 for any of them — not just sent/shadow.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type NotificationTriggerStatus = "shipped" | "out_for_delivery" | "delivered" | "exception";
 
 export type NotificationSendStatus =
+  | "pending"
   | "sent"
-  | "failed"
+  | "delivered"
+  | "delivery_delayed"
   | "bounced"
   | "complained"
   | "suppressed"
+  | "provider_suppressed"
+  | "provider_failed"
+  // Legacy alias for provider_failed; Slice 2 migration retains it in the
+  // CHECK constraint for backward compatibility with pre-existing rows.
+  | "failed"
   | "skipped"
-  | "shadow";
+  | "shadow"
+  | "cancelled";
+
+/** Statuses considered "active" (count toward the dedup partial unique index). */
+export const ACTIVE_NOTIFICATION_STATUSES: ReadonlySet<NotificationSendStatus> = new Set([
+  "pending",
+  "sent",
+  "delivered",
+  "delivery_delayed",
+  "bounced",
+  "complained",
+  "provider_suppressed",
+  "shadow",
+]);
+
+/** Statuses considered terminal-success/terminal-failure (no more transitions expected). */
+export const STICKY_TERMINAL_STATUSES: ReadonlySet<NotificationSendStatus> = new Set([
+  "bounced",
+  "complained",
+  "cancelled",
+]);
 
 export interface NotificationSendRow {
   id: string;
@@ -38,14 +72,46 @@ export interface NotificationSendRow {
   resend_message_id: string | null;
   error: string | null;
   shadow_intended_recipient: string | null;
-  sent_at: string;
+  idempotency_key: string | null;
+  pending_at: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  delivery_delayed_at: string | null;
+  bounced_at: string | null;
+  complained_at: string | null;
+  provider_failed_at: string | null;
+  provider_suppressed_at: string | null;
+  cancelled_at: string | null;
+  attempt_count: number;
+  last_attempt_at: string | null;
+  next_retry_at: string | null;
 }
 
 /**
- * Returns the prior "sent" or "shadow" row for this (shipment, trigger), if
- * any. Used by send-tracking-email as the application-layer dedup gate.
- * The DB UNIQUE indexes on the same fields catch races; this check just
- * skips an unnecessary Resend call.
+ * Returns the prior active row for this (shipment, trigger), if any. The
+ * "active" set is shared with the partial unique index — see
+ * ACTIVE_NOTIFICATION_STATUSES.
+ */
+export async function findPriorActiveSend(
+  supabase: SupabaseClient,
+  input: { shipmentId: string; triggerStatus: NotificationTriggerStatus },
+): Promise<NotificationSendRow | null> {
+  const { data } = await supabase
+    .from("notification_sends")
+    .select("*")
+    .eq("shipment_id", input.shipmentId)
+    .eq("trigger_status", input.triggerStatus)
+    .in("status", Array.from(ACTIVE_NOTIFICATION_STATUSES))
+    .order("pending_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as NotificationSendRow | null) ?? null;
+}
+
+/**
+ * Pre-Slice-2 helper: returns the prior 'sent' or 'shadow' row. Retained
+ * because reconciliation tasks still want the strict "successful send"
+ * lookup. Implemented in terms of findPriorActiveSend filter narrowing.
  */
 export async function findPriorSuccessfulSend(
   supabase: SupabaseClient,
@@ -56,9 +122,42 @@ export async function findPriorSuccessfulSend(
     .select("*")
     .eq("shipment_id", input.shipmentId)
     .eq("trigger_status", input.triggerStatus)
-    .in("status", ["sent", "shadow"])
-    .order("sent_at", { ascending: false })
+    .in("status", ["sent", "shadow", "delivered"])
+    .order("pending_at", { ascending: false })
     .limit(1)
+    .maybeSingle();
+  return (data as NotificationSendRow | null) ?? null;
+}
+
+/**
+ * Look up notification_sends by Resend message id. The webhook handler
+ * uses this to find the rollup row to transition.
+ */
+export async function findNotificationSendByMessageId(
+  supabase: SupabaseClient,
+  messageId: string,
+): Promise<NotificationSendRow | null> {
+  const { data } = await supabase
+    .from("notification_sends")
+    .select("*")
+    .eq("resend_message_id", messageId)
+    .maybeSingle();
+  return (data as NotificationSendRow | null) ?? null;
+}
+
+/**
+ * Look up notification_sends by idempotency_key. The send-tracking-email
+ * task uses this AFTER a 23505 collision to find the row that won the
+ * race.
+ */
+export async function findNotificationSendByIdempotencyKey(
+  supabase: SupabaseClient,
+  key: string,
+): Promise<NotificationSendRow | null> {
+  const { data } = await supabase
+    .from("notification_sends")
+    .select("*")
+    .eq("idempotency_key", key)
     .maybeSingle();
   return (data as NotificationSendRow | null) ?? null;
 }
@@ -66,10 +165,11 @@ export async function findPriorSuccessfulSend(
 /**
  * Insert a notification_sends row. Returns the persisted row on success.
  *
- * If the DB UNIQUE constraint trips (race with another task instance), this
- * function does NOT throw — it returns the existing winning row so the
- * caller can treat it as success. This is the "DB belt" of the
- * three-layer dedup contract.
+ * On 23505 unique violation:
+ *   - If `idempotency_key` was supplied, fetch the existing row by key.
+ *   - Else fall back to the (shipment, trigger) active-row lookup.
+ *
+ * This is the "DB belt" of the three-layer dedup contract.
  */
 export async function recordSend(
   supabase: SupabaseClient,
@@ -81,9 +181,15 @@ export async function recordSend(
     templateId: string;
     recipient: string;
     status: NotificationSendStatus;
+    idempotencyKey?: string | null;
     resendMessageId?: string | null;
     error?: string | null;
     shadowIntendedRecipient?: string | null;
+    sentAt?: string | null;
+    deliveredAt?: string | null;
+    attemptCount?: number;
+    lastAttemptAt?: string | null;
+    nextRetryAt?: string | null;
   },
 ): Promise<NotificationSendRow> {
   const row = {
@@ -94,9 +200,15 @@ export async function recordSend(
     template_id: input.templateId,
     recipient: input.recipient,
     status: input.status,
+    idempotency_key: input.idempotencyKey ?? null,
     resend_message_id: input.resendMessageId ?? null,
     error: input.error ?? null,
     shadow_intended_recipient: input.shadowIntendedRecipient ?? null,
+    sent_at: input.sentAt ?? (input.status === "sent" ? new Date().toISOString() : null),
+    delivered_at: input.deliveredAt ?? null,
+    attempt_count: input.attemptCount ?? 0,
+    last_attempt_at: input.lastAttemptAt ?? null,
+    next_retry_at: input.nextRetryAt ?? null,
   };
   const { data, error } = await supabase
     .from("notification_sends")
@@ -104,10 +216,13 @@ export async function recordSend(
     .select("*")
     .maybeSingle();
   if (error) {
-    // Postgres unique violation = 23505. Either the partial unique index
-    // for 'sent' or for 'shadow' tripped. Fetch the winner.
-    if (error.code === "23505" && (input.status === "sent" || input.status === "shadow")) {
-      const winner = await findPriorSuccessfulSend(supabase, {
+    if (error.code === "23505") {
+      // Recover whichever row already won the race.
+      if (input.idempotencyKey) {
+        const winner = await findNotificationSendByIdempotencyKey(supabase, input.idempotencyKey);
+        if (winner) return winner;
+      }
+      const winner = await findPriorActiveSend(supabase, {
         shipmentId: input.shipmentId,
         triggerStatus: input.triggerStatus,
       });
@@ -117,6 +232,52 @@ export async function recordSend(
   }
   if (!data) throw new Error("recordSend returned no row");
   return data as NotificationSendRow;
+}
+
+/**
+ * Update bookkeeping fields on a pending row mid-retry. Does NOT change
+ * status — that always goes through update_notification_status_safe.
+ */
+export async function bumpAttemptBookkeeping(
+  supabase: SupabaseClient,
+  input: {
+    notificationSendId: string;
+    attemptCount: number;
+    lastAttemptAt: string;
+    nextRetryAt?: string | null;
+    error?: string | null;
+  },
+): Promise<void> {
+  const { error } = await supabase
+    .from("notification_sends")
+    .update({
+      attempt_count: input.attemptCount,
+      last_attempt_at: input.lastAttemptAt,
+      next_retry_at: input.nextRetryAt ?? null,
+      error: input.error ?? null,
+    })
+    .eq("id", input.notificationSendId);
+  if (error) {
+    throw new Error(`bumpAttemptBookkeeping failed: ${error.message}`);
+  }
+}
+
+/**
+ * Set the resend_message_id on a row WITHOUT changing status. Used by
+ * send-tracking-email when the Resend response arrives but we want to
+ * defer the status transition to update_notification_status_safe.
+ */
+export async function stampResendMessageId(
+  supabase: SupabaseClient,
+  input: { notificationSendId: string; resendMessageId: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from("notification_sends")
+    .update({ resend_message_id: input.resendMessageId })
+    .eq("id", input.notificationSendId);
+  if (error) {
+    throw new Error(`stampResendMessageId failed: ${error.message}`);
+  }
 }
 
 /**
@@ -137,35 +298,6 @@ export async function isRecipientSuppressed(
     .limit(1)
     .maybeSingle();
   return !!data;
-}
-
-/**
- * Record a Resend webhook outcome (bounce, complaint, etc.) onto the
- * matching notification_sends row. Used by the Resend webhook handler.
- * Returns true when a row was updated.
- */
-export async function updateSendOutcomeByMessageId(
-  supabase: SupabaseClient,
-  input: {
-    resendMessageId: string;
-    newStatus: NotificationSendStatus;
-    error?: string | null;
-  },
-): Promise<boolean> {
-  const { error, count } = await supabase
-    .from("notification_sends")
-    .update(
-      {
-        status: input.newStatus,
-        error: input.error ?? null,
-      },
-      { count: "exact" },
-    )
-    .eq("resend_message_id", input.resendMessageId);
-  if (error) {
-    throw new Error(`updateSendOutcomeByMessageId failed: ${error.message}`);
-  }
-  return (count ?? 0) > 0;
 }
 
 /**
@@ -190,7 +322,24 @@ export async function suppressRecipient(
     source_message_id: input.sourceMessageId ?? null,
   });
   if (error && error.code !== "23505") {
-    // 23505 = duplicate key (already suppressed) — idempotent success
     throw new Error(`suppressRecipient failed: ${error.message}`);
   }
+}
+
+/**
+ * @deprecated Use updateNotificationStatusSafe in
+ * src/lib/server/notification-status.ts. Kept as a thin shim so any
+ * pre-Slice-2 caller compiles; throws if called.
+ */
+export async function updateSendOutcomeByMessageId(
+  _supabase: SupabaseClient,
+  _input: {
+    resendMessageId: string;
+    newStatus: NotificationSendStatus;
+    error?: string | null;
+  },
+): Promise<boolean> {
+  throw new Error(
+    "updateSendOutcomeByMessageId is retired in Slice 2; use updateNotificationStatusSafe (src/lib/server/notification-status.ts).",
+  );
 }

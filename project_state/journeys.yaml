@@ -1,5 +1,6 @@
 version: 1
-updated_at: 2026-04-25  # Support Inbox DB evidence patch: `/admin/support` now shows total ticket/message counts, latest-message timestamp, DB loaded timestamp, and per-thread message counts. Resolved queue badges now count resolved tickets by queue membership (`status='resolved'`) instead of `resolved_at`-today, so imported support rows no longer appear in the list with a zero queue badge. Prior update preserved below.
+updated_at: 2026-04-25  # SKU matching review journey live. Staff open `/admin/settings/sku-matching`, pick one client-store connection at a time, inspect canonical warehouse variants beside ranked Shopify / WooCommerce / Squarespace candidates, review existing SKU-conflict overlays plus Discogs identity context, and confirm alias-style matches without rewriting remote SKUs. The review drawer enforces fingerprint-based stale-review protection and surfaces Shopify readiness (`default_location_id`, `remote_inventory_item_id`, stocked-at-default-location) before an accepted alias is treated as operational; non-ready Shopify rows can be activated at the default location from the same drawer. Weekly telemetry now summarizes workspace-load latency, preview/accept ratios, and conflict growth into `sensor_readings`, with review-queue escalation when rollout safety regresses. Prior update preserved below.
+prior_update: 2026-04-25  # Support Inbox DB evidence patch: `/admin/support` now shows total ticket/message counts, latest-message timestamp, DB loaded timestamp, and per-thread message counts. Resolved queue badges now count resolved tickets by queue membership (`status='resolved'`) instead of `resolved_at`-today, so imported support rows no longer appear in the list with a zero queue badge. Prior update preserved below.
 prior_update: 2026-04-25  # Support Inbox 2.0 journey live. Staff now work `/admin/support` as a triage inbox with computed queues, SLA health, assignment/category/priority/snooze/resolution controls, client context, internal notes, saved replies, duplicate candidate review, and delivery failure visibility. Portal + launcher copy now use client-friendly next-action language, and the launcher keeps granular Realtime scoped to the active detail thread. Prior update preserved below.
 prior_update: 2026-04-27  # WooCommerce + Squarespace connection review is now catalog-aware. On `/admin/settings/store-connections`, the Test action validates those platforms with real catalog reads instead of shallow order/inventory checks, and the legacy non-Shopify auto-discovery path now scans full Woo/Squarespace catalogs (including Woo variations and Squarespace v2 product variants) so operators can prepare mappings with materially better coverage. Prior update preserved below.
 prior_update: 2026-04-27  # Store Connections admin bootstrap now resolves entirely inside the server request scope. `/admin/settings/store-connections/page.tsx` server-loads both the connection list and org picker data, then hands them to a client child for filters/dialogs/actions. Operator-visible effect: the page no longer issues client-side read actions during initial render, so the post-Shopify-callback "Server Components render" failure path is removed while create/test/disable still refresh the screen via `router.refresh()`. Prior update preserved below.
@@ -29,6 +30,23 @@ prior_update: 2026-04-20  # Inventory-master backfill (operator scripts, no new 
 prior_update: 2026-04-18  # Saturday Workstream 3 (2026-04-18): added inventory_count_session + warehouse_locations_source_of_truth journeys (per-SKU count sessions with fanout suppression + cycle_count delta on completion; one-way mirror of warehouse_locations to ShipStation v2 via inline create + bulk-create-locations Trigger task; inline locator typeahead inside the existing /admin/inventory expanded-row detail). Saturday Workstream 2 (2026-04-18): added manual_inventory_count_entry journey (bulk table editor at /admin/inventory/manual-count, ShipStation v2 sibling task, hard-block + review queue on negative counts). Saturday Workstream 1 (Phase 6 closeout): added megaplan_verification journey.
 
 journeys:
+  - id: sku_matching_review
+    area: admin_settings
+    paths:
+      - src/app/admin/settings/sku-matching/page.tsx
+      - src/app/admin/settings/sku-matching/sku-matching-client.tsx
+      - src/actions/sku-matching.ts
+      - src/lib/server/sku-matching.ts
+      - src/lib/clients/store-sync-client.ts
+      - src/actions/sku-conflicts.ts
+    status: green
+    checks:
+      - page boot is connection-scoped and server-rendered, not client-bootstrap query driven
+      - staff can review canonical rows, matched rows, remote-only rows, and duplicate/conflict overlays one connection at a time
+      - accepted matches persist through persist_sku_match RPC and leave an append-only sku_mapping_events audit trail
+      - preview drawer blocks stale approvals when the candidate fingerprint changes
+      - Shopify rows surface readiness before approval and can activate inventory at the selected default location without changing quantity
+
   - id: staff_client_invite
     area: admin_clients
     paths:
@@ -256,6 +274,53 @@ journeys:
       - task configured with retry: { maxAttempts: 1 } — file errors are not transient
       - ctx.run.id stored in final errors JSONB update for traceability
       - Tier 3 alias insert sets order_id: null, mailorder_id: null explicitly (satisfies chk_shipment_not_both_orders)
+
+  - id: customer_tracking_and_notification
+    area: shipping
+    paths:
+      - src/app/api/webhooks/easypost/route.ts
+      - src/app/api/webhooks/resend/route.ts
+      - src/app/api/webhooks/aftership/route.ts
+      - src/app/track/[token]/page.tsx
+      - src/app/admin/operations/notifications/page.tsx
+      - src/lib/server/easypost-webhook-signature.ts
+      - src/lib/server/resend-webhook-signature.ts
+      - src/lib/server/notification-status.ts
+      - src/lib/server/notification-sends.ts
+      - src/lib/server/notification-provider-events.ts
+      - src/lib/server/public-track-token.ts
+      - src/lib/shared/tracking-email-templates.ts
+      - src/trigger/tasks/easypost-register-tracker.ts
+      - src/trigger/tasks/send-tracking-email.ts
+      - src/trigger/tasks/notification-failure-sensor.ts
+      - src/trigger/tasks/unified-shipping-sensors.ts
+      - src/actions/notification-operations.ts
+      - scripts/check-notification-status-writes.sh
+      - scripts/check-webhook-secrets.ts
+      - docs/RELEASE_SLICES_TRACKING_NOTIFICATION.md
+    status: green
+    checks:
+      - EasyPost webhook verifies HMAC v1 (`x-hmac-signature`) AND v2 (`x-easypost-hmac-signature` / `easypost-hmac-signature`) on raw body via verifyEasyPostSignature
+      - Dual-secret rotation honored on both EasyPost and Resend webhooks (current + previous env vars)
+      - Production fails closed when webhook secret is unset; dev allows shadow mode and logs `signature_failed` to webhook_events
+      - Dedup pathway uses interpretDedupError (duplicate→200, transient→503 retry, unknown→503+Sentry); never silently absorbs PG errors
+      - notification_sends has partial unique index on (workspace_id, shipment_id, kind, idempotency_key); preflight script blocks migration on duplicate rows
+      - All status writes for notification_sends.status and warehouse_shipments.easypost_tracker_status route through src/lib/server/notification-status.ts; CI grep guard enforces
+      - State-machine RPCs `update_notification_status_safe` and `update_shipment_tracking_status_safe` enforce sticky terminals + out-of-order rejection
+      - Resend send path uses Resend SDK idempotencyKey; provider events appended to notification_provider_events with normalized workspace_id + shipment_id columns
+      - send-tracking-email inserts pending notification_sends row BEFORE Resend call so a process crash recovers via notification-failure-sensor (no phantom missing email)
+      - Resend `email.suppressed` event maps to `provider_suppressed` and calls suppressRecipient with type='manual'
+      - Operator actions (retryStuckNotification, cancelStuckNotification) route through applyOperatorNotificationAction; audit row written to notification_operator_events (FK → public.users)
+      - Public tracking page PII-allowlisted via pickPublicDestination + PublicTrackingShipment types (only name/city/state/country/postal_code; never street1/street2/phone/email)
+      - Brand color and image URL sanitized via sanitizeBrandColor / sanitizeImageUrl in tracking email template
+      - Carrier deeplinks generated via buildCarrierTrackingUrl (no third-party redirect risk)
+      - /admin/operations/notifications surfaces 24h status counts incl. provider_failed/delivered/cancelled, suppression count, last sensor run, currently-stuck rows
+      - Per-shipment audit drilldown joins notification_sends + notification_provider_events (normalized shipment_id, NOT JSON path) + notification_operator_events
+      - View as customer link to /track/[token] on every admin shipment surface (Shipping log, Order detail, Operations notifications)
+      - Sensors filter by created_at (not sent_at — provider_failed rows can have NULL sent_at) and count both legacy (sent/failed) and new (delivered/provider_failed) statuses for backward compatibility
+      - tracking.status_drift_24h sensor monitors aftership/easypost parity during the dual-mode sunset window (aftership route is intentionally unguarded by the status-writes CI guard)
+      - 194 unit/integration tests passing across signature verification, route handlers, provider event idempotency, send helpers, status wrapper, operator actions, public page render, CI guards
+      - Release manifest split into 4 sequential PRs: docs/RELEASE_SLICES_TRACKING_NOTIFICATION.md (security/ledger → idempotency/state machine → tracking persistence/page hardening → ops visibility)
 
   - id: shipstation_poll
     area: shipping

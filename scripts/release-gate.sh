@@ -46,6 +46,7 @@ run_cmd "Unit/contract test suite" pnpm test
 run_cmd "Next build" pnpm build
 run_cmd "Inventory guard" bash scripts/ci-inventory-guard.sh
 run_cmd "Webhook dedup guard" bash scripts/ci-webhook-dedup-guard.sh
+run_cmd "Notification status writes guard" bash scripts/check-notification-status-writes.sh
 run_cmd "Client store fanout-gate guard" bash scripts/check-fanout-gate.sh
 run_cmd "ShipStation v2 inventory batch guard" bash scripts/check-v2-inventory-batch.sh
 run_cmd "InventorySource ↔ DB CHECK sync guard" npx tsx scripts/check-source-union-sync.ts

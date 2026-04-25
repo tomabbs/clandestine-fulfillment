@@ -1,4 +1,4 @@
-// Phase 12 — Public branded customer tracking page (`/track/[token]`).
+// Phase 12 / Slice 3 — Public branded customer tracking page.
 //
 // Server-rendered, no auth, no client JS for the static parts. The token
 // in the URL is the auth — random 22-char base64url, 128 bits of entropy,
@@ -9,9 +9,22 @@
 // tracker number, the carrier name, the events, and the org branding. NO
 // street address, NO email, NO phone, NO payment fields, NO buyer_note.
 //
+// Slice 3 hardening:
+//   - The render half (`PublicTrackingPageBody`) takes ONLY a
+//     `PublicTrackingShipment` allowlist object — TypeScript blocks the
+//     full row at the boundary, so a future "spread the row" regression
+//     becomes a type error rather than a quiet PII leak.
+//   - Destination is read from the new first-class
+//     `destination_{city,state,country}` columns, with a label_data
+//     fallback ONLY during the backfill window. PII-safe by construction.
+//   - Carrier link prefers EasyPost's branded tracker URL when present,
+//     falls back to the carrier site, returns null for unknown carriers.
+//   - Brand color and logo URL are sanitized (#rrggbb only; https-only
+//     image URL) so a malformed branding row can't smuggle CSS or
+//     `javascript:` into the inline <style> / <img>.
+//
 // 404 (not 500) on unknown token. Failed lookups also emit a sensor row
-// for enumeration detection (rate-limited per IP would go in middleware
-// or a sensor-only counter; today we just count).
+// for enumeration detection.
 
 import {
   AlertTriangle,
@@ -24,44 +37,20 @@ import {
 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
+import {
+  buildCarrierTrackingUrl,
+  formatPublicDestination,
+  pickPublicDestination,
+  sanitizeBrandColor,
+  sanitizeImageUrl,
+} from "@/lib/shared/public-track-token";
+import type { PublicTrackingEvent, PublicTrackingShipment } from "./types";
 
-// Disable static caching — every request is a fresh DB read (low traffic).
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 interface PageProps {
   params: { token: string };
-}
-
-interface ShipmentRow {
-  id: string;
-  workspace_id: string;
-  org_id: string | null;
-  tracking_number: string | null;
-  carrier: string | null;
-  service: string | null;
-  status: string | null;
-  ship_date: string | null;
-  delivery_date: string | null;
-  label_data: Record<string, unknown> | null;
-  shipstation_order_id: string | null;
-  order_id: string | null;
-  mailorder_id: string | null;
-}
-
-interface TrackingEventRow {
-  id: string;
-  status: string | null;
-  description: string | null;
-  location: string | null;
-  event_time: string | null;
-}
-
-interface OrgBranding {
-  name: string | null;
-  brand_color: string | null;
-  logo_url: string | null;
-  support_email: string | null;
 }
 
 const STATUS_CONFIG: Record<string, { icon: typeof Package; color: string; label: string }> = {
@@ -87,35 +76,6 @@ function getStatusConfig(status: string | null | undefined) {
   );
 }
 
-function pickPublicCity(labelData: Record<string, unknown> | null): string {
-  // Pull the destination "City, State, Country" from EasyPost label_data.
-  // (warehouse_shipments has no dedicated ship_to column — destination
-  // lives on the source order or, conveniently for our purposes, inside
-  // the EasyPost shipment object stored in label_data.)
-  if (!labelData || typeof labelData !== "object") return "";
-  const ep = labelData as Record<string, unknown>;
-  const ship = (ep.shipment ?? ep) as Record<string, unknown>;
-  const to = ship.to_address as Record<string, unknown> | undefined;
-  if (!to) return "";
-  const city = typeof to.city === "string" ? to.city : "";
-  const state = typeof to.state === "string" ? to.state : "";
-  const country = typeof to.country === "string" ? to.country : "";
-  return [city, state, country].filter(Boolean).join(", ");
-}
-
-function buildCarrierUrl(carrier: string | null, tracking: string | null): string | null {
-  if (!carrier || !tracking) return null;
-  const c = carrier.toLowerCase();
-  if (c.includes("usps"))
-    return `https://tools.usps.com/go/TrackConfirmAction?qtc_tLabels1=${tracking}`;
-  if (c.includes("ups")) return `https://www.ups.com/track?tracknum=${tracking}`;
-  if (c.includes("fedex")) return `https://www.fedex.com/fedextrack/?trknbr=${tracking}`;
-  if (c.includes("dhl"))
-    return `https://www.dhl.com/us-en/home/tracking.html?tracking-id=${tracking}`;
-  if (c.includes("asendia")) return `https://tracking.asendiausa.com/tracking/${tracking}`;
-  return null;
-}
-
 export default async function PublicTrackPage({ params }: PageProps) {
   const supabase = createServiceRoleClient();
 
@@ -127,14 +87,15 @@ export default async function PublicTrackPage({ params }: PageProps) {
     .select(
       `id, workspace_id, org_id, tracking_number, carrier, service, status,
        ship_date, delivery_date, label_data, shipstation_order_id,
-       order_id, mailorder_id`,
+       order_id, mailorder_id,
+       destination_city, destination_state, destination_country,
+       easypost_tracker_id, easypost_tracker_public_url, easypost_tracker_status,
+       last_tracking_status_detail, last_tracking_status_updated_at`,
     )
     .eq("public_track_token", params.token)
     .maybeSingle();
 
   if (!rawShipment) {
-    // Sensor for enumeration tracking — single insert per failed lookup,
-    // workspace_id NULL since we have no shipment context.
     await supabase.from("sensor_readings").insert({
       sensor_name: "tracking.public_page_lookup_miss",
       status: "warning",
@@ -144,76 +105,117 @@ export default async function PublicTrackPage({ params }: PageProps) {
     notFound();
   }
 
-  const shipment = rawShipment as ShipmentRow;
+  const orgId = (rawShipment as { org_id: string | null }).org_id;
 
-  // Org branding — null org → fall back to Clandestine.
-  let branding: OrgBranding = {
-    name: "Clandestine Distribution",
-    brand_color: "#111827",
-    logo_url: null,
-    support_email: "support@clandestinedistro.com",
+  type OrgBrandRow = {
+    name?: string | null;
+    brand_color?: string | null;
+    logo_url?: string | null;
+    support_email?: string | null;
   };
-  if (shipment.org_id) {
+  let orgRow: OrgBrandRow | null = null;
+  if (orgId) {
     const { data: org } = await supabase
       .from("organizations")
       .select("name, brand_color, logo_url, support_email")
-      .eq("id", shipment.org_id)
+      .eq("id", orgId)
       .maybeSingle();
-    if (org) {
-      branding = {
-        name: (org.name as string | null) ?? branding.name,
-        brand_color: (org.brand_color as string | null) ?? branding.brand_color,
-        logo_url: (org.logo_url as string | null) ?? null,
-        support_email: (org.support_email as string | null) ?? branding.support_email,
-      };
-    }
+    orgRow = (org as OrgBrandRow | null) ?? null;
   }
 
   // Tracking events.
   const { data: rawEvents } = await supabase
     .from("warehouse_tracking_events")
     .select("id, status, description, location, event_time")
-    .eq("shipment_id", shipment.id)
+    .eq("shipment_id", (rawShipment as { id: string }).id)
     .order("event_time", { ascending: false })
     .limit(100);
-  const events = (rawEvents ?? []) as TrackingEventRow[];
 
   // Order number for display.
   let orderNumber: string | null = null;
-  if (shipment.shipstation_order_id) {
+  const ssId = (rawShipment as { shipstation_order_id: string | null }).shipstation_order_id;
+  const orderId = (rawShipment as { order_id: string | null }).order_id;
+  const mailorderId = (rawShipment as { mailorder_id: string | null }).mailorder_id;
+  if (ssId) {
     const { data: ssOrder } = await supabase
       .from("shipstation_orders")
       .select("order_number")
-      .eq("id", shipment.shipstation_order_id)
+      .eq("id", ssId)
       .maybeSingle();
     orderNumber = (ssOrder?.order_number as string | null) ?? null;
-  } else if (shipment.order_id) {
+  } else if (orderId) {
     const { data: o } = await supabase
       .from("warehouse_orders")
       .select("order_number")
-      .eq("id", shipment.order_id)
+      .eq("id", orderId)
       .maybeSingle();
     orderNumber = (o?.order_number as string | null) ?? null;
-  } else if (shipment.mailorder_id) {
+  } else if (mailorderId) {
     const { data: o } = await supabase
       .from("mailorder_orders")
       .select("order_number")
-      .eq("id", shipment.mailorder_id)
+      .eq("id", mailorderId)
       .maybeSingle();
     orderNumber = (o?.order_number as string | null) ?? null;
   }
 
-  const currentStatusConfig = getStatusConfig(shipment.status);
+  // ── Construct the allowlist surface — PII review happens HERE ──────────
+  // The render layer below sees ONLY this object. New fields require an
+  // explicit add to PublicTrackingShipment + PII review.
+  const view: PublicTrackingShipment = {
+    carrier: (rawShipment as { carrier: string | null }).carrier,
+    tracking_number: (rawShipment as { tracking_number: string | null }).tracking_number,
+    status:
+      (rawShipment as { easypost_tracker_status: string | null }).easypost_tracker_status ??
+      (rawShipment as { status: string | null }).status,
+    tracking_status_detail: (rawShipment as { last_tracking_status_detail: string | null })
+      .last_tracking_status_detail,
+    ship_date: (rawShipment as { ship_date: string | null }).ship_date,
+    delivery_date: (rawShipment as { delivery_date: string | null }).delivery_date,
+    destination: pickPublicDestination(rawShipment as Parameters<typeof pickPublicDestination>[0]),
+    events: ((rawEvents ?? []) as PublicTrackingEvent[]).map((e) => ({
+      id: e.id,
+      status: e.status,
+      description: e.description,
+      location: e.location,
+      event_time: e.event_time,
+    })),
+    carrier_tracking_url: buildCarrierTrackingUrl(
+      (rawShipment as { carrier: string | null }).carrier,
+      (rawShipment as { tracking_number: string | null }).tracking_number,
+      (rawShipment as { easypost_tracker_public_url: string | null }).easypost_tracker_public_url,
+    ),
+    easypost_public_url: sanitizeImageUrl(
+      // sanitizeImageUrl is overloaded for "is this an https URL"; reuse it
+      // here so a corrupt EP payload can't smuggle javascript:/data:.
+      (rawShipment as { easypost_tracker_public_url: string | null }).easypost_tracker_public_url ??
+        null,
+    ),
+    order_number: orderNumber,
+    org: {
+      name: orgRow?.name ?? "Clandestine Distribution",
+      brand_color: sanitizeBrandColor(orgRow?.brand_color ?? null, "#111827"),
+      logo_url: sanitizeImageUrl(orgRow?.logo_url ?? null),
+      support_email: orgRow?.support_email ?? "support@clandestinedistro.com",
+    },
+  };
+
+  return <PublicTrackingPageBody view={view} />;
+}
+
+// ── Render layer — only the allowlist type is in scope ────────────────────
+
+function PublicTrackingPageBody({ view }: { view: PublicTrackingShipment }) {
+  const currentStatusConfig = getStatusConfig(view.status);
   const StatusIcon = currentStatusConfig.icon;
-  const carrierUrl = buildCarrierUrl(shipment.carrier, shipment.tracking_number);
-  const publicCity = pickPublicCity(shipment.label_data);
-  const brand = branding.brand_color ?? "#111827";
+  const destinationLine = formatPublicDestination(view.destination);
+  const brand = view.org.brand_color;
 
   return (
     <html lang="en">
       <head>
         <title>
-          Tracking — {orderNumber ?? "Order"} · {branding.name ?? "Clandestine Distribution"}
+          Tracking — {view.order_number ?? "Order"} · {view.org.name}
         </title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="robots" content="noindex,nofollow" />
@@ -250,6 +252,8 @@ export default async function PublicTrackPage({ params }: PageProps) {
           .te-loc { color: #6b7280; font-size: 12px; margin-top: 4px; display: flex; align-items: center; gap: 4px; }
           .te-time { color: #9ca3af; font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
           .empty { color: #9ca3af; font-size: 14px; padding: 24px 0; text-align: center; }
+          .secondary-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #6b7280; text-decoration: none; margin-top: 6px; }
+          .secondary-link:hover { color: ${brand}; }
           .footer { text-align: center; font-size: 12px; color: #6b7280; padding: 16px 0 32px 0; }
           .footer a { color: ${brand}; text-decoration: none; }
           .blue-600 { color: #2563eb; }
@@ -264,15 +268,15 @@ export default async function PublicTrackPage({ params }: PageProps) {
         <div className="wrap">
           <div className="card">
             <div>
-              {branding.logo_url ? (
-                // biome-ignore lint/a11y/useAltText: alt provided
-                <img className="header-logo" src={branding.logo_url} alt={branding.name ?? ""} />
+              {view.org.logo_url ? (
+                // biome-ignore lint/performance/noImgElement: email-like tracking page preserves raw markup
+                <img className="header-logo" src={view.org.logo_url} alt={view.org.name} />
               ) : (
-                <h1 className="org-name">{branding.name ?? "Clandestine Distribution"}</h1>
+                <h1 className="org-name">{view.org.name}</h1>
               )}
               <p className="order-meta">
-                {orderNumber ? `Order ${orderNumber}` : "Order"}
-                {shipment.ship_date ? ` · shipped ${formatDate(shipment.ship_date)}` : ""}
+                {view.order_number ? `Order ${view.order_number}` : "Order"}
+                {view.ship_date ? ` · shipped ${formatDate(view.ship_date)}` : ""}
               </p>
             </div>
 
@@ -284,7 +288,10 @@ export default async function PublicTrackPage({ params }: PageProps) {
               />
               <div>
                 <div className="status-text">{currentStatusConfig.label}</div>
-                {publicCity && (
+                {view.tracking_status_detail && (
+                  <div className="status-sub">{view.tracking_status_detail}</div>
+                )}
+                {destinationLine && (
                   <div className="status-sub">
                     <MapPin
                       size={11}
@@ -294,39 +301,51 @@ export default async function PublicTrackPage({ params }: PageProps) {
                         marginRight: 2,
                       }}
                     />
-                    {publicCity}
+                    {destinationLine}
                   </div>
                 )}
-                {shipment.delivery_date && shipment.status === "delivered" && (
-                  <div className="status-sub">Delivered {formatDate(shipment.delivery_date)}</div>
+                {view.delivery_date && view.status === "delivered" && (
+                  <div className="status-sub">Delivered {formatDate(view.delivery_date)}</div>
                 )}
               </div>
             </div>
 
             {/* Carrier + tracking number */}
             <div className="meta-grid">
-              {shipment.carrier && (
+              {view.carrier && (
                 <div>
                   <div className="label">Carrier</div>
-                  <div className="value">{shipment.carrier}</div>
+                  <div className="value">{view.carrier}</div>
                 </div>
               )}
-              {shipment.tracking_number && (
+              {view.tracking_number && (
                 <div>
                   <div className="label">Tracking</div>
                   <div className="value" style={{ fontFamily: "monospace", fontSize: "12px" }}>
-                    {carrierUrl ? (
-                      <a href={carrierUrl} target="_blank" rel="noopener noreferrer">
-                        {shipment.tracking_number}
+                    {view.carrier_tracking_url ? (
+                      <a href={view.carrier_tracking_url} target="_blank" rel="noopener noreferrer">
+                        {view.tracking_number}
                         <ExternalLink
                           size={11}
                           style={{ display: "inline", marginLeft: 4, verticalAlign: "middle" }}
                         />
                       </a>
                     ) : (
-                      shipment.tracking_number
+                      view.tracking_number
                     )}
                   </div>
+                  {view.easypost_public_url &&
+                    view.easypost_public_url !== view.carrier_tracking_url && (
+                      <a
+                        className="secondary-link"
+                        href={view.easypost_public_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Carrier tracking details
+                        <ExternalLink size={11} />
+                      </a>
+                    )}
                 </div>
               )}
             </div>
@@ -334,13 +353,11 @@ export default async function PublicTrackPage({ params }: PageProps) {
 
           <div className="card">
             <h2>Tracking Timeline</h2>
-            {events.length === 0 ? (
-              <p className="empty">
-                Tracking events will appear here once the carrier scans your package.
-              </p>
+            {view.events.length === 0 ? (
+              <p className="empty">{getEmptyStateCopy(view.status)}</p>
             ) : (
               <ul className="timeline">
-                {events.map((e) => {
+                {view.events.map((e) => {
                   const cfg = getStatusConfig(e.status);
                   return (
                     <li key={e.id}>
@@ -368,17 +385,31 @@ export default async function PublicTrackPage({ params }: PageProps) {
 
           <div className="footer">
             Questions?{" "}
-            {branding.support_email ? (
-              <a href={`mailto:${branding.support_email}`}>{branding.support_email}</a>
+            {view.org.support_email ? (
+              <a href={`mailto:${view.org.support_email}`}>{view.org.support_email}</a>
             ) : (
               "Contact us through your order receipt."
             )}
-            <div style={{ marginTop: 6 }}>{branding.name ?? "Clandestine Distribution"}</div>
+            <div style={{ marginTop: 6 }}>{view.org.name}</div>
           </div>
         </div>
       </body>
     </html>
   );
+}
+
+function getEmptyStateCopy(status: string | null): string {
+  switch (status) {
+    case "pre_transit":
+    case "label_created":
+      return "Your label is printed. The carrier will scan your package once it's picked up — events will appear here as soon as that happens.";
+    case "exception":
+    case "delivery_failed":
+    case "return_to_sender":
+      return "There's an exception on this shipment. Reach out to support if you don't see an update soon.";
+    default:
+      return "Tracking events will appear here once the carrier scans your package.";
+  }
 }
 
 function formatDate(iso: string): string {
@@ -406,7 +437,6 @@ function formatDateTime(iso: string): string {
   }
 }
 
-// Map our color tokens to the inline CSS classes defined in <style>.
 function normalizeColorClass(token: string): string {
   if (token === "text-blue-600") return "blue-600";
   if (token === "text-green-600") return "green-600";

@@ -20,6 +20,8 @@
     "typecheck": "tsc --noEmit",
     "verify:cloud": "bash scripts/cloud-agent-verify.sh",
     "release:gate": "bash scripts/release-gate.sh",
+    "ops:check-webhook-secrets": "npx tsx scripts/check-webhook-secrets.ts",
+    "ops:check-notification-status-writes": "bash scripts/check-notification-status-writes.sh",
     "stress:all": "bash scripts/stress/run-all.sh",
     "stress:dry-run": "bash scripts/stress/run-all.sh --dry-run"
   },

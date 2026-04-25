@@ -49,18 +49,32 @@ const serverEnvSchema = z.object({
   // (prod vs sandbox). Default keeps the legacy hardcoded prod value so existing
   // deploys without the env var set don't break (Phase 0.5.3).
   EASYPOST_ASENDIA_CARRIER_ACCOUNT_ID: z.string().default("ca_0f7e073887204bd491a6230936baf754"),
-  // Phase 10.2 — EasyPost Webhook signing secret (for tracker.* events at
-  // /api/webhooks/easypost). REQUIRED in production; the route returns 500
-  // when unset, by design (mirrors the SHIPSTATION_WEBHOOK_SECRET pattern).
-  // EP uses HMAC-SHA256 with the raw request body. We prefer the v2 header
-  // (`x-hmac-signature-v2`) which adds timestamp validation; v1
-  // (`x-hmac-signature`) remains supported as a fallback for older webhook
-  // configs that haven't been migrated. Default empty so dev/test runs.
+  // Phase 10.2 / Slice 1 — EasyPost Webhook signing secret. REQUIRED in
+  // production: the route fails CLOSED (401) when unset. EP signs with
+  // HMAC-SHA256; we accept both the v2 (`x-timestamp` + `x-path` +
+  // `x-hmac-signature-v2`) and legacy v1 (`x-hmac-signature`) schemes —
+  // EP's official Python/Go SDKs still emit v1.
   EASYPOST_WEBHOOK_SECRET: z.string().default(""),
+  // Slice 1 — previous EasyPost webhook secret kept live during a
+  // rotation overlap window. When set, both the current and previous
+  // secrets are accepted by the verifier; the matching secret index is
+  // surfaced via Sentry tags so operators can confirm rotation
+  // adoption before retiring the previous secret.
+  EASYPOST_WEBHOOK_SECRET_PREVIOUS: z.string().default(""),
+  // Slice 1 — production fail-closed override. Defaults true; set
+  // explicitly to "false" only for incident-response playbooks where the
+  // operator needs to accept unsigned events temporarily. Local dev
+  // (`NODE_ENV !== 'production'`) ignores this and never fails closed
+  // when the secret is unset, to keep `pnpm dev` smoke-tests green.
+  EASYPOST_WEBHOOK_REQUIRE_SIGNATURE: z.string().default("true"),
   // Phase 12 — Resend webhook signing secret. REQUIRED in production.
   // Get from Resend dashboard → Webhooks → your endpoint. Format is
   // `whsec_<base64>` (Svix-compatible). Default empty so dev/test runs.
   RESEND_WEBHOOK_SECRET: z.string().default(""),
+  // Slice 1 — previous Resend webhook secret kept live during a rotation
+  // overlap window. Svix natively supports multi-signature `v1,*` headers,
+  // so when set this secret is appended to the verifier's accepted list.
+  RESEND_WEBHOOK_SECRET_PREVIOUS: z.string().default(""),
 
   // Shopify OAuth (client store connections — NOT main Clandestine Shopify)
   SHOPIFY_CLIENT_ID: z.string().default(""),
@@ -95,6 +109,12 @@ const serverEnvSchema = z.object({
   // Optional; if unset the daily-recon-summary task logs the report and skips
   // the email send so the cron never errors on a fresh environment.
   OPS_ALERT_EMAIL: z.string().email().optional(),
+
+  // Slice 4 ops visibility — optional Slack incoming-webhook URL used by
+  // notification-failure-sensor when signature failures spike. When unset,
+  // the sensor still emits a critical sensor reading + Sentry capture; the
+  // Slack post is purely an additional channel, never the primary signal.
+  SLACK_OPS_WEBHOOK_URL: z.string().url().optional(),
 
   // App
   NEXT_PUBLIC_APP_URL: z.string().url(),

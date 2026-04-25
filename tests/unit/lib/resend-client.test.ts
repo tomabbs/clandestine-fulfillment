@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { inboundEmailWebhookSchema, parseInboundWebhook } from "@/lib/clients/resend-client";
+import {
+  ResendSendError,
+  inboundEmailWebhookSchema,
+  parseInboundWebhook,
+  sanitizeTagValue,
+} from "@/lib/clients/resend-client";
 
 describe("parseInboundWebhook", () => {
   // Verbatim payload from https://resend.com/docs/webhooks/emails/received
@@ -116,5 +121,48 @@ describe("parseInboundWebhook", () => {
       data: { email_id: "abc", from: "x@y.com" },
     };
     expect(() => parseInboundWebhook(otherEvent)).not.toThrow();
+  });
+});
+
+// ── Slice 2: ResendSendError caller-contract surface ────────────────────
+describe("ResendSendError (Slice 2 — caller contract)", () => {
+  it("preserves kind / statusCode / providerMessage", () => {
+    const e = new ResendSendError("oops", "validation", 422, "bad recipient");
+    expect(e.name).toBe("ResendSendError");
+    expect(e.kind).toBe("validation");
+    expect(e.statusCode).toBe(422);
+    expect(e.providerMessage).toBe("bad recipient");
+    expect(e.message).toContain("oops");
+  });
+
+  it("each kind tag round-trips", () => {
+    for (const kind of ["validation", "idempotency", "rate_limited", "transient"] as const) {
+      const e = new ResendSendError("x", kind);
+      expect(e.kind).toBe(kind);
+    }
+  });
+});
+
+// ── Slice 2: sanitizeTagValue — Resend rejects out-of-charset tag values ──
+describe("sanitizeTagValue (Slice 2 — Resend tag charset)", () => {
+  it("passes through allowed chars [a-zA-Z0-9_-]", () => {
+    expect(sanitizeTagValue("kind")).toBe("kind");
+    expect(sanitizeTagValue("workspace_42")).toBe("workspace_42");
+    expect(sanitizeTagValue("with-dash")).toBe("with-dash");
+  });
+
+  it("collapses out-of-charset to underscores", () => {
+    expect(sanitizeTagValue("kind:tracking@email")).toBe("kind_tracking_email");
+    expect(sanitizeTagValue("client@example.com")).toBe("client_example.com".replace(".", "_"));
+    expect(sanitizeTagValue("héllo wörld")).toBe("h_llo_w_rld");
+  });
+
+  it("returns 'unspecified' for empty/missing input", () => {
+    expect(sanitizeTagValue("")).toBe("unspecified");
+  });
+
+  it("clamps to 256 chars", () => {
+    const out = sanitizeTagValue("a".repeat(1024));
+    expect(out.length).toBe(256);
   });
 });

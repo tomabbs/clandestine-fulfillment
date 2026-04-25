@@ -121,16 +121,28 @@ export const unifiedShippingSensorsTask = schedules.task({
 
       // ── 4. notification.send_failure_rate_24h ──────────────────────────
       // % failed / total send attempts (sent + failed) in last 24h.
+      // Uses created_at (always populated) instead of sent_at — slice 2
+      // dropped NOT NULL on sent_at, and provider_failed rows may never
+      // populate it (4xx terminal before any acknowledgement).
+      // Counts both legacy 'failed' and the slice-2 terminal
+      // 'provider_failed' as failures so the rate stays accurate after
+      // cutover. 'delivered' is a successful follow-on of 'sent' but is
+      // a distinct rollup — counting it as 'sent' would double-count;
+      // we only count rows whose terminal state is sent/shadow.
       try {
         const { data: counts } = await supabase
           .from("notification_sends")
           .select("status")
           .eq("workspace_id", workspaceId)
-          .gte("sent_at", since24hIso)
-          .in("status", ["sent", "failed", "shadow"]);
+          .gte("created_at", since24hIso)
+          .in("status", ["sent", "delivered", "failed", "provider_failed", "shadow"]);
         const sent =
-          counts?.filter((r) => r.status === "sent" || r.status === "shadow").length ?? 0;
-        const failed = counts?.filter((r) => r.status === "failed").length ?? 0;
+          counts?.filter(
+            (r) => r.status === "sent" || r.status === "delivered" || r.status === "shadow",
+          ).length ?? 0;
+        const failed =
+          counts?.filter((r) => r.status === "failed" || r.status === "provider_failed").length ??
+          0;
         const total = sent + failed;
         const rate = total === 0 ? 0 : failed / total;
         readings.push({
@@ -173,7 +185,7 @@ export const unifiedShippingSensorsTask = schedules.task({
           status: stale ? "warning" : "healthy",
           message: stale
             ? `last reconciliation_misses reading older than 25h (cron may be dead)`
-            : `last reading at ${lastRecon!.created_at}: ${lastRecon!.message}`,
+            : `last reading at ${lastRecon?.created_at}: ${lastRecon?.message}`,
           value: { stale, last_seen: lastRecon?.created_at ?? null },
         });
       } catch (err) {
@@ -183,14 +195,19 @@ export const unifiedShippingSensorsTask = schedules.task({
       }
 
       // ── 6. resend.bounce_rate_24h ──────────────────────────────────────
+      // Uses created_at (slice-2: sent_at can be NULL for pending rows;
+      // bounced rows always pass through 'sent' first so sent_at is set,
+      // but using created_at keeps the time-window definition consistent
+      // across all sensor queries).
       try {
         const { data: counts } = await supabase
           .from("notification_sends")
           .select("status")
           .eq("workspace_id", workspaceId)
-          .gte("sent_at", since24hIso)
-          .in("status", ["sent", "bounced"]);
-        const sent = counts?.filter((r) => r.status === "sent").length ?? 0;
+          .gte("created_at", since24hIso)
+          .in("status", ["sent", "delivered", "bounced"]);
+        const sent =
+          counts?.filter((r) => r.status === "sent" || r.status === "delivered").length ?? 0;
         const bounced = counts?.filter((r) => r.status === "bounced").length ?? 0;
         const total = sent + bounced;
         const rate = total === 0 ? 0 : bounced / total;
@@ -208,14 +225,16 @@ export const unifiedShippingSensorsTask = schedules.task({
       }
 
       // ── 7. resend.complaint_rate_24h ───────────────────────────────────
+      // Uses created_at (slice-2 consistency — see sensor #4).
       try {
         const { data: counts } = await supabase
           .from("notification_sends")
           .select("status")
           .eq("workspace_id", workspaceId)
-          .gte("sent_at", since24hIso)
-          .in("status", ["sent", "complained"]);
-        const sent = counts?.filter((r) => r.status === "sent").length ?? 0;
+          .gte("created_at", since24hIso)
+          .in("status", ["sent", "delivered", "complained"]);
+        const sent =
+          counts?.filter((r) => r.status === "sent" || r.status === "delivered").length ?? 0;
         const complained = counts?.filter((r) => r.status === "complained").length ?? 0;
         const total = sent + complained;
         const rate = total === 0 ? 0 : complained / total;
@@ -254,7 +273,7 @@ export const unifiedShippingSensorsTask = schedules.task({
           status: stale ? "warning" : "healthy",
           message: stale
             ? `last parity reading older than 25h (cron may be dead)`
-            : `last reading at ${lastParity!.created_at}`,
+            : `last reading at ${lastParity?.created_at}`,
           value: { stale, last_seen: lastParity?.created_at ?? null },
         });
       } catch (err) {

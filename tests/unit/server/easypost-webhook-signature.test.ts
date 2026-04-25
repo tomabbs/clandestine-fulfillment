@@ -1,163 +1,393 @@
-// Phase 10.2 — EasyPost webhook HMAC verification tests.
+// Phase 10.2 / Slice 1 — EasyPost webhook HMAC verification tests.
 //
-// Locks in:
-//  - v2 header parsing (`t=<ms>,s=<hex>`)
-//  - v2 timestamp tolerance (±5 min default)
-//  - v1 fallback on raw-body HMAC-SHA256 hex
-//  - constant-time comparison rejects single-bit mismatches
-//  - "fractional weight" precision regression (Reviewer 4 — EP Node SDK
-//    issue #467): signature MUST be over the raw bytes, not over a
-//    re-stringified parsed body. We verify by comparing two binary
-//    payloads that differ only in numeric formatting.
+// Locks in the actual EasyPost contracts (verified against the EasyPost
+// Python/Go SDKs and the EasyPost Support article on Webhook HMAC
+// Validation, 2026-04):
+//   v2: x-timestamp + x-path + x-hmac-signature-v2 ("hmac-sha256-hex=" prefix);
+//       string-to-sign = `${xTimestamp}${METHOD}${xPath}${rawBody}`;
+//       past tolerance 300s, future tolerance 30s.
+//   v1: x-hmac-signature ("hmac-sha256-hex=" prefix); raw-body HMAC; secret
+//       NFKD-normalized to mirror EP SDKs.
+//   Dual-secret rotation accepted (current + previous).
+//   Generic verifier outputs (timing-safe comparison, no oracle leakage).
+//   Fractional-weight regression (EP SDK #467) — bytes signed must be the
+//   bytes received.
 
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { parseV2Header, verifyEasypostSignature } from "@/lib/server/easypost-webhook-signature";
+import {
+  normalizePath,
+  verifyEasypostSignature,
+} from "@/lib/server/easypost-webhook-signature";
 
 const SECRET = "test-ep-secret";
+const PREVIOUS_SECRET = "test-ep-secret-previous";
+const PATH = "/api/webhooks/easypost";
 
-function signV1(body: Buffer): string {
-  return createHmac("sha256", SECRET).update(body).digest("hex");
+function nfkd(s: string): string {
+  return s.normalize("NFKD");
 }
 
-function signV2(body: Buffer, ts: number): string {
-  const signed = Buffer.concat([Buffer.from(`${ts}.`, "utf8"), body]);
-  const hex = createHmac("sha256", SECRET).update(signed).digest("hex");
-  return `t=${ts},s=${hex}`;
+function v1Header(body: Buffer, secret: string = SECRET): string {
+  const hex = createHmac("sha256", nfkd(secret)).update(body).digest("hex");
+  return `hmac-sha256-hex=${hex}`;
 }
 
-describe("parseV2Header (Phase 10.2)", () => {
-  it("parses well-formed t=,s= header", () => {
-    const out = parseV2Header("t=1700000000000,s=deadbeef");
-    expect(out).toEqual({ timestamp: 1700000000000, signatureHex: "deadbeef" });
+function v2Header(
+  body: Buffer,
+  xTimestamp: string,
+  method: string,
+  xPath: string,
+  secret: string = SECRET,
+): string {
+  const prefix = Buffer.from(`${xTimestamp}${method.toUpperCase()}${xPath}`, "utf8");
+  const signed = Buffer.concat([prefix, body]);
+  const hex = createHmac("sha256", nfkd(secret)).update(signed).digest("hex");
+  return `hmac-sha256-hex=${hex}`;
+}
+
+describe("normalizePath", () => {
+  it("strips trailing slash", () => {
+    expect(normalizePath("/api/webhooks/easypost/")).toBe("/api/webhooks/easypost");
   });
-  it("tolerates whitespace + key order", () => {
-    expect(parseV2Header(" s=abcdef , t=1234567890123 ")).toEqual({
-      timestamp: 1234567890123,
-      signatureHex: "abcdef",
-    });
+  it("strips query string", () => {
+    expect(normalizePath("/api/webhooks/easypost?foo=bar")).toBe("/api/webhooks/easypost");
   });
-  it("rejects missing parts", () => {
-    expect(parseV2Header("s=deadbeef")).toBeNull();
-    expect(parseV2Header("t=1700000000000")).toBeNull();
-  });
-  it("rejects non-hex signature", () => {
-    expect(parseV2Header("t=1700000000000,s=NOTHEX")).toBeNull();
+  it("returns root unchanged", () => {
+    expect(normalizePath("/")).toBe("/");
   });
 });
 
-describe("verifyEasypostSignature (Phase 10.2)", () => {
+describe("verifyEasypostSignature — v2 (current EasyPost spec)", () => {
   const body = Buffer.from(JSON.stringify({ result: { tracking_code: "1Z" } }), "utf8");
+  const now = Date.parse("2026-04-25T12:00:00Z");
+  const xTimestamp = "Sat, 25 Apr 2026 12:00:00 GMT";
 
-  it("v2 happy path passes", () => {
-    const now = Date.now();
+  it("happy path passes", () => {
     const r = verifyEasypostSignature({
       rawBody: body,
-      secret: SECRET,
-      v1Header: null,
-      v2Header: signV2(body, now),
+      secrets: SECRET,
+      xTimestamp,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
       now,
     });
     expect(r.valid).toBe(true);
+    expect(r.variant).toBe("v2");
+    expect(r.secretIndex).toBe(0);
     expect(r.timestamp).toBe(now);
   });
 
-  it("v2 outside tolerance fails (replay protection)", () => {
-    const now = Date.now();
-    const tooOld = now - 10 * 60 * 1000; // 10 min ago, > 5 min tolerance
+  it("rejects missing x-timestamp", () => {
     const r = verifyEasypostSignature({
       rawBody: body,
-      secret: SECRET,
-      v1Header: null,
-      v2Header: signV2(body, tooOld),
+      secrets: SECRET,
+      xTimestamp: null,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
       now,
     });
     expect(r.valid).toBe(false);
-    expect(r.reason).toBe("timestamp_outside_tolerance");
+    expect(r.reason).toBe("missing_x_timestamp");
   });
 
-  it("v2 within configurable tolerance still passes", () => {
-    const now = Date.now();
-    const tenMinAgo = now - 10 * 60 * 1000;
+  it("rejects missing x-path", () => {
     const r = verifyEasypostSignature({
       rawBody: body,
-      secret: SECRET,
-      v1Header: null,
-      v2Header: signV2(body, tenMinAgo),
+      secrets: SECRET,
+      xTimestamp,
+      xPath: null,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
       now,
-      toleranceMs: 15 * 60 * 1000,
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("missing_x_path");
+  });
+
+  it("rejects timestamp too old (>5min past)", () => {
+    const tooOld = "Sat, 25 Apr 2026 11:50:00 GMT"; // 10 min ago
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: tooOld,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, tooOld, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("timestamp_too_old");
+  });
+
+  it("rejects timestamp too far in future (>30s ahead)", () => {
+    const future = "Sat, 25 Apr 2026 12:01:00 GMT"; // 60s ahead
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: future,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, future, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("timestamp_too_future");
+  });
+
+  it("rejects path mismatch (HMAC may match but expected path differs)", () => {
+    const wrongPath = "/api/webhooks/spoofed";
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp,
+      xPath: wrongPath,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", wrongPath),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("path_mismatch");
+  });
+
+  it("tolerates trailing slash in x-path", () => {
+    const xPathWithSlash = `${PATH}/`;
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp,
+      xPath: xPathWithSlash,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", xPathWithSlash),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
     });
     expect(r.valid).toBe(true);
   });
 
-  it("v1 happy path passes when v2 absent", () => {
+  it("rejects v2 header without 'hmac-sha256-hex=' prefix", () => {
     const r = verifyEasypostSignature({
       rawBody: body,
-      secret: SECRET,
-      v1Header: signV1(body),
-      v2Header: null,
+      secrets: SECRET,
+      xTimestamp,
+      xPath: PATH,
+      xHmacSignatureV2: createHmac("sha256", SECRET).update(body).digest("hex"),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
     });
-    expect(r.valid).toBe(true);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("invalid_v2_signature_prefix");
   });
 
-  it("v1 mismatch rejected", () => {
+  it("rejects signature mismatch (single-bit altered body)", () => {
+    const altered = Buffer.from(JSON.stringify({ result: { tracking_code: "1Y" } }), "utf8");
     const r = verifyEasypostSignature({
-      rawBody: body,
-      secret: SECRET,
-      v1Header: signV1(Buffer.from("OTHER", "utf8")),
-      v2Header: null,
+      rawBody: altered,
+      secrets: SECRET,
+      xTimestamp,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
     });
     expect(r.valid).toBe(false);
     expect(r.reason).toBe("signature_mismatch");
   });
 
-  it("missing both headers rejected", () => {
+  it("dual-secret rotation: signature signed with previous secret accepted; secretIndex=1", () => {
     const r = verifyEasypostSignature({
       rawBody: body,
-      secret: SECRET,
-      v1Header: null,
-      v2Header: null,
+      secrets: [SECRET, PREVIOUS_SECRET],
+      xTimestamp,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", PATH, PREVIOUS_SECRET),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
+      now,
+    });
+    expect(r.valid).toBe(true);
+    expect(r.secretIndex).toBe(1);
+  });
+});
+
+describe("verifyEasypostSignature — v1 (legacy, still emitted by EP SDKs)", () => {
+  const body = Buffer.from(JSON.stringify({ result: { tracking_code: "1Z" } }), "utf8");
+
+  it("happy path passes (no v2 headers required)", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: v1Header(body),
+    });
+    expect(r.valid).toBe(true);
+    expect(r.variant).toBe("v1");
+  });
+
+  it("rejects v1 header without 'hmac-sha256-hex=' prefix (EP contract)", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: createHmac("sha256", SECRET).update(body).digest("hex"),
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("invalid_v1_signature_prefix");
+  });
+
+  it("rejects v1 mismatch", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: v1Header(Buffer.from("OTHER", "utf8")),
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("signature_mismatch");
+  });
+
+  it("v2 header preferred when both present (v1 ignored even on conflict)", () => {
+    const now = Date.parse("2026-04-25T12:00:00Z");
+    const xTimestamp = "Sat, 25 Apr 2026 12:00:00 GMT";
+    // v1 over WRONG body, v2 valid → result must be valid (v2 wins).
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp,
+      xPath: PATH,
+      xHmacSignatureV2: v2Header(body, xTimestamp, "POST", PATH),
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: v1Header(Buffer.from("OTHER", "utf8")),
+      now,
+    });
+    expect(r.valid).toBe(true);
+    expect(r.variant).toBe("v2");
+  });
+
+  it("v1 fallback can be disabled", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: v1Header(body),
+      allowV1Fallback: false,
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("no_signature");
+  });
+});
+
+describe("verifyEasypostSignature — error/edge cases", () => {
+  const body = Buffer.from(`{"x":1}`, "utf8");
+
+  it("rejects when no secrets supplied", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: "",
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: v1Header(body),
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("no_secrets");
+  });
+
+  it("array of empty strings = no_secrets", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: ["", ""],
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: v1Header(body),
+    });
+    expect(r.valid).toBe(false);
+    expect(r.reason).toBe("no_secrets");
+  });
+
+  it("missing both v1 and v2 headers → no_signature", () => {
+    const r = verifyEasypostSignature({
+      rawBody: body,
+      secrets: SECRET,
+      xTimestamp: null,
+      xPath: null,
+      xHmacSignatureV2: null,
+      method: "POST",
+      expectedPath: PATH,
+      xHmacSignature: null,
     });
     expect(r.valid).toBe(false);
     expect(r.reason).toBe("no_signature");
   });
 
-  it("missing secret rejected", () => {
-    const r = verifyEasypostSignature({
-      rawBody: body,
-      secret: "",
-      v1Header: signV1(body),
-      v2Header: null,
-    });
-    expect(r.valid).toBe(false);
-    expect(r.reason).toBe("no_secret");
-  });
-
   it("FRACTIONAL WEIGHT regression — bytes signed must be the bytes received (EP SDK #467)", () => {
-    // The actual prod incident: EP sends body with `"weight": 136.0` but
-    // the receiving Node SDK parses it as 136 then re-serializes as
-    // `"weight":136`, breaking HMAC. Our handler validates against the raw
-    // arrayBuffer BEFORE parsing, so this can't happen. Demonstrate by
-    // signing the fractional version and rejecting the integer version.
     const fractional = Buffer.from(`{"weight":136.0}`, "utf8");
     const integer = Buffer.from(`{"weight":136}`, "utf8");
-    const sigOverFractional = signV1(fractional);
-    // Same bytes → pass.
+    const sigOverFractional = v1Header(fractional);
     expect(
       verifyEasypostSignature({
         rawBody: fractional,
-        secret: SECRET,
-        v1Header: sigOverFractional,
-        v2Header: null,
+        secrets: SECRET,
+        xTimestamp: null,
+        xPath: null,
+        xHmacSignatureV2: null,
+        method: "POST",
+        expectedPath: PATH,
+        xHmacSignature: sigOverFractional,
       }).valid,
     ).toBe(true);
-    // Different bytes (re-stringified) → fail. Locks in the requirement.
     expect(
       verifyEasypostSignature({
         rawBody: integer,
-        secret: SECRET,
-        v1Header: sigOverFractional,
-        v2Header: null,
+        secrets: SECRET,
+        xTimestamp: null,
+        xPath: null,
+        xHmacSignatureV2: null,
+        method: "POST",
+        expectedPath: PATH,
+        xHmacSignature: sigOverFractional,
       }).valid,
     ).toBe(false);
   });

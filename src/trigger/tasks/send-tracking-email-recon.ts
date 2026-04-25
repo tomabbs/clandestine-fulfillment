@@ -49,7 +49,9 @@ export async function runReconciliation(): Promise<RunResult> {
   // doesn't trigger a customer email.
   const { data: shipments, error } = await supabase
     .from("warehouse_shipments")
-    .select("id, status, suppress_emails, shipstation_marked_shipped_at, delivery_date, updated_at")
+    .select(
+      "id, workspace_id, status, suppress_emails, shipstation_marked_shipped_at, delivery_date, updated_at",
+    )
     .gte("updated_at", sinceIso)
     .not("public_track_token", "is", null)
     .not("tracking_number", "is", null)
@@ -136,14 +138,31 @@ export async function runReconciliation(): Promise<RunResult> {
     }
   }
 
-  // Single sensor reading per run summarizing the gap.
-  const firstWs = (shipments[0]?.id as string) ?? null;
-  if (firstWs) {
+  // ── Per-workspace sensor readings ────────────────────────────────────────
+  // Pre-Slice-4 this task wrote a single sensor_readings row whose
+  // `workspace_id` field was set to a SHIPMENT id (a bug: workspace_id is FK
+  // to workspaces.id with NOT NULL). The row insert silently failed in
+  // production, leaving the recon sensor invisible on the Health page.
+  // We now group by workspace_id and write ONE summary per workspace.
+  const perWorkspace = aggregatePerWorkspace(
+    shipments.map((s) => ({
+      id: s.id as string,
+      workspace_id: (s.workspace_id as string | null) ?? null,
+    })),
+    missing,
+    refired,
+  );
+  for (const [workspaceId, summary] of perWorkspace.entries()) {
     await supabase.from("sensor_readings").insert({
+      workspace_id: workspaceId,
       sensor_name: "notification.reconciliation_misses",
-      status: missing.length > 0 ? "warning" : "healthy",
-      message: `Scanned ${shipments.length} shipments in last ${LOOKBACK_DAYS}d; ${missing.length} missing notification_sends rows; ${refired} re-fired.`,
-      value: { scanned: shipments.length, missing: missing.length, refired },
+      status: summary.missing > 0 ? "warning" : "healthy",
+      message: `Scanned ${summary.scanned} shipments in last ${LOOKBACK_DAYS}d; ${summary.missing} missing; ${summary.refired} re-fired.`,
+      value: {
+        scanned: summary.scanned,
+        missing: summary.missing,
+        refired: summary.refired,
+      },
     });
   }
 
@@ -153,4 +172,52 @@ export async function runReconciliation(): Promise<RunResult> {
     refired,
   });
   return { scanned: shipments.length, refired, missing: missing.length };
+}
+
+/**
+ * Per-workspace recon attribution helper. Exported for unit testing — the
+ * "shipment.id was being used as workspace_id" bug was invisible until we
+ * pinned this aggregation behind a pure function with explicit assertions.
+ *
+ * Inputs:
+ *   - shipments: the rows we scanned in the lookback window
+ *   - missing:   the (shipment_id, trigger_status) expectations that had no
+ *                matching notification_sends row
+ *   - refired:   the count of expectations actually re-fired this run
+ *                (can be < missing.length when MAX_REFIRE_PER_RUN clips)
+ *
+ * Output: Map keyed by workspace_id with { scanned, missing, refired }.
+ *   - workspace_id=null shipments are dropped (sensor_readings.workspace_id
+ *     is NOT NULL — see migration 20260424000001).
+ *   - refired is attributed proportionally by each workspace's share of
+ *     `missing`. Workspaces with missing=0 get refired=0.
+ */
+export function aggregatePerWorkspace(
+  shipments: Array<{ id: string; workspace_id: string | null }>,
+  missing: MissingExpectation[],
+  refired: number,
+): Map<string, { scanned: number; missing: number; refired: number }> {
+  const out = new Map<string, { scanned: number; missing: number; refired: number }>();
+  for (const s of shipments) {
+    if (!s.workspace_id) continue;
+    const cur = out.get(s.workspace_id) ?? { scanned: 0, missing: 0, refired: 0 };
+    cur.scanned += 1;
+    out.set(s.workspace_id, cur);
+  }
+  for (const m of missing) {
+    const ship = shipments.find((s) => s.id === m.shipment_id);
+    const ws = ship?.workspace_id ?? null;
+    if (!ws) continue;
+    const cur = out.get(ws) ?? { scanned: 0, missing: 0, refired: 0 };
+    cur.missing += 1;
+    out.set(ws, cur);
+  }
+  const totalMissing = missing.length;
+  if (totalMissing > 0) {
+    for (const [ws, cur] of out.entries()) {
+      cur.refired = Math.round((cur.missing / totalMissing) * refired);
+      out.set(ws, cur);
+    }
+  }
+  return out;
 }

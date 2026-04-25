@@ -11,10 +11,19 @@
 // Idempotency: EP `Tracker.create` is idempotent on (carrier, tracking_code)
 // within a 3-month window per EP docs — calling twice returns the existing
 // tracker rather than creating a duplicate. We also persist the tracker id
-// in label_data.easypost_tracker_id so subsequent runs short-circuit.
+// in `easypost_tracker_id` (Slice 3 first-class column) so subsequent runs
+// short-circuit. The `label_data.easypost_tracker_id` write is preserved
+// during the backfill window so older readers don't regress.
+//
+// Slice 3: tracker metadata is promoted from label_data JSONB to first-
+// class columns (easypost_tracker_id, easypost_tracker_public_url,
+// easypost_tracker_status). The status flip uses
+// updateShipmentTrackingStatusSafe() so the v3 sticky-terminal state
+// machine is enforced even on the very first registration call.
 
 import { logger, task } from "@trigger.dev/sdk";
 import { createTracker } from "@/lib/clients/easypost-client";
+import { updateShipmentTrackingStatusSafe } from "@/lib/server/notification-status";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 
 interface Payload {
@@ -36,7 +45,10 @@ export const easypostRegisterTrackerTask = task({
 
     const { data: shipment } = await supabase
       .from("warehouse_shipments")
-      .select("id, workspace_id, tracking_number, carrier, label_source, label_data")
+      .select(
+        `id, workspace_id, tracking_number, carrier, label_source, label_data,
+         easypost_tracker_id`,
+      )
       .eq("id", payload.shipment_id)
       .single();
 
@@ -47,9 +59,17 @@ export const easypostRegisterTrackerTask = task({
       return { registered: false, skipped: true, reason: "no_tracking_number" };
     }
 
+    // Slice 3 — prefer the first-class column; fall back to label_data.easypost_tracker_id
+    // for shipments registered before the Slice 3 backfill. The label_data
+    // copy continues to be written below so older readers don't regress.
     const labelData = (shipment.label_data ?? {}) as Record<string, unknown>;
     const existingTrackerId =
-      typeof labelData.easypost_tracker_id === "string" ? labelData.easypost_tracker_id : null;
+      (typeof shipment.easypost_tracker_id === "string"
+        ? (shipment.easypost_tracker_id as string)
+        : null) ??
+      (typeof labelData.easypost_tracker_id === "string"
+        ? (labelData.easypost_tracker_id as string)
+        : null);
     if (existingTrackerId) {
       // Idempotent short-circuit. Already registered.
       return { registered: true, trackerId: existingTrackerId, reason: "already_registered" };
@@ -61,9 +81,16 @@ export const easypostRegisterTrackerTask = task({
         carrier: (shipment.carrier as string | null) ?? undefined,
       });
 
+      // Slice 3 — promote the tracker metadata to first-class columns.
+      // We deliberately split the writes so that the SAFE RPC owns the
+      // status field (state machine + sticky terminals) while the plain
+      // update covers the side-fields (tracker id, public URL). The
+      // label_data copy is preserved for the backfill window only.
       await supabase
         .from("warehouse_shipments")
         .update({
+          easypost_tracker_id: tracker.id,
+          easypost_tracker_public_url: tracker.public_url ?? null,
           label_data: {
             ...labelData,
             easypost_tracker_id: tracker.id,
@@ -73,6 +100,27 @@ export const easypostRegisterTrackerTask = task({
           updated_at: new Date().toISOString(),
         })
         .eq("id", payload.shipment_id);
+
+      // Slice 3 — flip the tracker status through the state machine. Even
+      // on the very first registration call we want the sticky-terminal
+      // guard active: if EP comes back with `delivered` immediately (very
+      // common for re-registered trackers within the 3-month idempotency
+      // window) we want that to land as the canonical terminal state.
+      if (tracker.status) {
+        const verdict = await updateShipmentTrackingStatusSafe(supabase, {
+          shipmentId: payload.shipment_id,
+          newStatus: tracker.status,
+          statusDetail: null,
+          statusAt: null,
+        });
+        if (!verdict.applied && verdict.skippedReason !== "no_op_same_status") {
+          logger.warn("[easypost-register-tracker] state-machine skipped initial status", {
+            shipmentId: payload.shipment_id,
+            trackerStatus: tracker.status,
+            skippedReason: verdict.skippedReason,
+          });
+        }
+      }
 
       logger.log("[easypost-register-tracker] registered", {
         shipmentId: payload.shipment_id,

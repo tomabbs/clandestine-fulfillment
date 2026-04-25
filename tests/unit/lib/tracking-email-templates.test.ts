@@ -148,3 +148,88 @@ describe("Tracking email templates (Phase 12)", () => {
     }
   });
 });
+
+// ── Slice 3 hardening ────────────────────────────────────────────────────
+describe("Tracking email templates — Slice 3 hardening", () => {
+  it("rejects unsafe brand color (CSS injection) and falls back to safe default", () => {
+    const r = renderShipmentConfirmation({
+      ...FULL_CTX,
+      org: { ...FULL_CTX.org, brand_color: "expression(alert(1))" },
+    });
+    expect(r.html).not.toContain("expression(alert(1))");
+    // Falls back to the default brand color
+    expect(r.html).toContain(BRAND_COLOR_FALLBACK);
+  });
+
+  it("rejects javascript:/data: brand color", () => {
+    const r = renderShipmentConfirmation({
+      ...FULL_CTX,
+      org: { ...FULL_CTX.org, brand_color: "url(javascript:alert(1))" },
+    });
+    expect(r.html).not.toContain("javascript:alert");
+    expect(r.html).toContain(BRAND_COLOR_FALLBACK);
+  });
+
+  it("rejects non-https logo url", () => {
+    const r = renderShipmentConfirmation({
+      ...FULL_CTX,
+      org: { ...FULL_CTX.org, logo_url: "javascript:alert(1)" },
+    });
+    expect(r.html).not.toContain("javascript:alert");
+    // Logo block falls back to text rendering of org_name
+    expect(r.html).toContain("Band Beta Records");
+  });
+
+  it("rejects non-https http logo url", () => {
+    const r = renderShipmentConfirmation({
+      ...FULL_CTX,
+      org: { ...FULL_CTX.org, logo_url: "http://insecure.example.com/logo.png" },
+    });
+    // sanitizeImageUrl only allows https → http logo is dropped, falls back to text.
+    expect(r.html).not.toContain("http://insecure.example.com");
+  });
+
+  it("rejects unsafe tracking_url and falls back to '#'", () => {
+    const r = renderShipmentConfirmation({
+      ...FULL_CTX,
+      tracking_url: "javascript:alert(1)",
+    });
+    expect(r.html).not.toContain("javascript:alert(1)");
+    // Falls back to '#'
+    expect(r.html).toContain('href="#"');
+    expect(r.text).toContain("Track your order: #");
+  });
+
+  it("exception template skips tiny/noise carrier messages (Slice 3 sanitizeCarrierMessage)", () => {
+    for (const noise of ["", " ", "-", "?", "!"]) {
+      const r = renderException({ ...FULL_CTX, exception_message: noise });
+      expect(r.html).not.toContain("Carrier message:");
+    }
+  });
+
+  it("exception template truncates very long carrier messages", () => {
+    const long = `${"abc ".repeat(200)}END`;
+    const r = renderException({ ...FULL_CTX, exception_message: long });
+    expect(r.html).toContain("Carrier message:");
+    expect(r.html).toContain("...");
+    // Doesn't include the END marker (truncated before the end)
+    expect(r.html).not.toContain("END</p>");
+  });
+
+  it("exception template uses honest copy (no overpromise of staff action)", () => {
+    const r = renderException(FULL_CTX);
+    // Removed the v3 "We're looking into it now" overpromise.
+    expect(r.html).not.toContain("looking into it now");
+    expect(r.html).toContain("View tracking details");
+  });
+
+  it("supportLine renders an opt-out link in every template", () => {
+    for (const t of ["shipped", "out_for_delivery", "delivered", "exception"] as const) {
+      const r = renderForTrigger(t, FULL_CTX);
+      expect(r.html).toMatch(/Email us to opt out|Don't want shipping updates/);
+    }
+  });
+});
+
+// keep this constant in sync with tracking-email-templates.ts
+const BRAND_COLOR_FALLBACK = "#111827";

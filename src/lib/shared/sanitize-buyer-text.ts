@@ -11,9 +11,7 @@
 
 export const MAX_BUYER_TEXT_LEN = 800;
 
-const STRIP_RE =
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: targeted
-  /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\uFEFF]/g;
+const STRIP_RE = /[\u202A-\u202E\u2066-\u2069\u200B-\u200D\uFEFF]/g;
 
 export function sanitizeBuyerText(input: string | null | undefined): string {
   if (!input) return "";

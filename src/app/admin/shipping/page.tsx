@@ -24,6 +24,7 @@ import {
   getShipmentsSummary,
   setShipmentItemFormatOverride,
 } from "@/actions/shipping";
+import { ShipmentNotificationLog } from "@/components/admin/shipment-notification-log";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
 import { Badge } from "@/components/ui/badge";
@@ -462,8 +463,22 @@ function ShipmentTableRow({
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
                   className="text-blue-600 hover:text-blue-800 shrink-0"
+                  title="Open carrier tracking page"
                 >
                   <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              {(shipment as ShipmentRow & { public_track_token?: string | null })
+                .public_track_token && (
+                <a
+                  href={`/track/${(shipment as ShipmentRow & { public_track_token: string }).public_track_token}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-purple-600 hover:text-purple-800 shrink-0 text-[10px] font-medium uppercase tracking-wide"
+                  title="View public customer-facing tracking page"
+                >
+                  Customer
                 </a>
               )}
             </div>
@@ -792,41 +807,64 @@ function ShipmentExpandedDetail({
         </div>
       </div>
 
-      {/* Column 3: Tracking Timeline */}
-      <div>
-        <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-          Tracking Timeline
-        </h4>
-        {trackingEvents.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No tracking events yet.</p>
-        ) : (
-          <div className="relative pl-5 space-y-3">
-            <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
-            {trackingEvents.map((event, i) => (
-              <div key={event.id} className="relative">
-                <div
-                  className={`absolute -left-3 top-0.5 h-2.5 w-2.5 rounded-full border-2 ${
-                    i === trackingEvents.length - 1
-                      ? "border-green-500 bg-green-500"
-                      : "border-border bg-background"
-                  }`}
-                />
-                <div className="text-sm">
-                  <p className={i === trackingEvents.length - 1 ? "font-medium" : ""}>
-                    {event.status}
-                  </p>
-                  {event.description && (
-                    <p className="text-xs text-muted-foreground">{event.description}</p>
-                  )}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                    {event.location && <span>{event.location}</span>}
-                    {event.event_time && <span>{new Date(event.event_time).toLocaleString()}</span>}
-                  </div>
-                </div>
-              </div>
-            ))}
+      {/* Column 3: Tracking Timeline + Customer-facing tracking link + Notification audit */}
+      <div className="space-y-4">
+        {(shipment as { public_track_token?: string | null }).public_track_token && (
+          <div>
+            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+              Customer-facing tracking
+            </h4>
+            <a
+              href={`/track/${(shipment as { public_track_token: string }).public_track_token}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-600 underline text-sm inline-flex items-center gap-1"
+            >
+              <ExternalLink className="h-3 w-3" />
+              View as customer
+            </a>
           </div>
         )}
+
+        <ShipmentNotificationLog shipmentId={shipment.id} />
+
+        <div>
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Tracking Timeline
+          </h4>
+          {trackingEvents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No tracking events yet.</p>
+          ) : (
+            <div className="relative pl-5 space-y-3">
+              <div className="absolute left-2 top-1 bottom-1 w-px bg-border" />
+              {trackingEvents.map((event, i) => (
+                <div key={event.id} className="relative">
+                  <div
+                    className={`absolute -left-3 top-0.5 h-2.5 w-2.5 rounded-full border-2 ${
+                      i === trackingEvents.length - 1
+                        ? "border-green-500 bg-green-500"
+                        : "border-border bg-background"
+                    }`}
+                  />
+                  <div className="text-sm">
+                    <p className={i === trackingEvents.length - 1 ? "font-medium" : ""}>
+                      {event.status}
+                    </p>
+                    {event.description && (
+                      <p className="text-xs text-muted-foreground">{event.description}</p>
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                      {event.location && <span>{event.location}</span>}
+                      {event.event_time && (
+                        <span>{new Date(event.event_time).toLocaleString()}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

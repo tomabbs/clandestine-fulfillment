@@ -1,4 +1,14 @@
 ---
+- slug: tracking-notification-aftership-sunset
+  title: "Sunset /api/webhooks/aftership in favor of /api/webhooks/easypost (tracking-notification hardening v5)"
+  due_date: 2026-06-25
+  severity: medium
+  context: "Tracking-notification hardening v5 (2026-04-25) introduced /api/webhooks/easypost as the canonical tracking webhook with full HMAC v1+v2 verification (dual-secret rotation), `interpretDedupError`, append-only `notification_provider_events` ledger, and centralized status writes through `src/lib/server/notification-status.ts` (CI guard `scripts/check-notification-status-writes.sh`). The legacy /api/webhooks/aftership route is intentionally retained during a dual-mode window so the parity sensor `tracking.status_drift_24h` can verify both paths agree on `warehouse_shipments.easypost_tracker_status`. The aftership route still does a direct `warehouse_shipments.status` write that bypasses the wrapper — this is intentionally NOT flagged by the CI guard (which only protects `notification_sends.status` + `easypost_tracker_status`) so the legacy path can keep functioning during the sunset. Action at T+~60d: confirm `tracking.status_drift_24h` has reported zero divergence for ≥30 consecutive days; remove `src/app/api/webhooks/aftership/route.ts`, `src/trigger/tasks/aftership-register.ts`, and the AfterShip OAuth/credential surface; verify no production label-creation path enqueues `aftership-register` (only `easypost-register-tracker`). Ensure the `AFTERSHIP_*` env vars are removed from `pnpm ops:check-webhook-secrets`."
+- slug: tracking-notification-status-write-guard-expansion
+  title: "Expand check-notification-status-writes.sh to cover warehouse_shipments.status once aftership sunsets"
+  due_date: 2026-06-25
+  severity: low
+  context: "scripts/check-notification-status-writes.sh today guards direct writes to `notification_sends.status` and `warehouse_shipments.easypost_tracker_status` outside the central wrapper at `src/lib/server/notification-status.ts`. It does NOT guard the more general `warehouse_shipments.status` column, because `/api/webhooks/aftership/route.ts` still writes it directly during the dual-mode sunset window (see tracking-notification-aftership-sunset). After the aftership route is removed, expand the guard regex to include `warehouse_shipments.status` as well, and add `updateShipmentStatusSafe()` (or equivalent) wrapper if any non-tracking code paths legitimately need to write `warehouse_shipments.status` — the goal is one centralized writer per status column."
 - slug: phase5-d1b-bandcamp-commit-release
   title: "Phase 5 §9.6 D1.b extension — wire commit/release into Bandcamp + preorder + refund paths"
   due_date: 2026-05-22

@@ -97,31 +97,137 @@ export async function sendPortalInviteEmail(params: {
   return { messageId: data.id };
 }
 
-// Phase 12 — Customer-facing tracking email send.
-// Uses our shipping sender domain. Returns the Resend message id on success.
-export async function sendTrackingEmail(input: {
+// Phase 12 / Slice 2 — Customer-facing tracking email send.
+//
+// Uses our shipping sender domain. Returns the Resend message id on
+// success. Slice 2 additions:
+//   - `idempotencyKey` (preferred path): passed to Resend via the SDK's
+//     second-argument options object (NOT as an HTTP header — the Resend
+//     SDK accepts `idempotencyKey` as an explicit option and translates
+//     it to the right header server-side). Defense-in-depth alongside
+//     our own DB-first idempotency.
+//   - `replyTo`: pinned to the org support_email so a customer reply lands
+//     in our shared support inbox, not the no-reply shipping mailbox.
+//   - `tags`: arbitrary key/value pairs for Resend dashboard search. Tag
+//     values are sanitized to Resend's "ASCII letters/digits/_/-" rule
+//     before being sent (otherwise Resend rejects the whole send).
+//
+// Resend status code mapping (caller contract):
+//   - 2xx success → returns { messageId }
+//   - Throws `ResendSendError` whose `kind` is one of:
+//       "validation"   — 4xx (400/422). Bad recipient, template, etc.
+//                        Caller MUST NOT retry; mark notification_sends
+//                        as provider_failed.
+//       "idempotency"  — 409 conflict (Resend already accepted a send
+//                        with the same Idempotency-Key). Caller MUST
+//                        treat as final (provider_failed) — our DB
+//                        already has the winner row.
+//       "rate_limited" — 429. Caller MUST keep notification_sends in
+//                        pending and let Trigger.dev retry.
+//       "transient"    — 5xx, network errors, timeouts. Same handling
+//                        as rate_limited (pending + retry).
+export class ResendSendError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: "validation" | "idempotency" | "rate_limited" | "transient",
+    public readonly statusCode?: number,
+    public readonly providerMessage?: string,
+  ) {
+    super(message);
+    this.name = "ResendSendError";
+  }
+}
+
+interface SendTrackingEmailInput {
   to: string;
   fromName: string;
   subject: string;
   html: string;
   text: string;
-  /** Tag for Resend dashboard search. */
+  /** Resend deduplication key (defense-in-depth alongside our DB idempotency_key). */
+  idempotencyKey?: string;
+  /** Customer-reply destination — usually the org support_email. */
+  replyTo?: string;
+  /** Free-form tag set surfaced in the Resend dashboard search. */
+  tags?: Record<string, string>;
+  /** Legacy single-tag form. */
   tag?: string;
-}): Promise<{ messageId: string }> {
+}
+
+export async function sendTrackingEmail(
+  input: SendTrackingEmailInput,
+): Promise<{ messageId: string }> {
   const resend = getResendClient();
   const fromAddress = `${input.fromName} <shipping@clandestinedistro.com>`;
-  const { data, error } = await resend.emails.send({
-    from: fromAddress,
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-    text: input.text,
-    tags: input.tag ? [{ name: "kind", value: input.tag }] : undefined,
-  });
-  if (error || !data) {
-    throw new Error(`Resend tracking-email send failed: ${error?.message ?? "unknown"}`);
+
+  const tags: Array<{ name: string; value: string }> = [];
+  if (input.tag) tags.push({ name: "kind", value: sanitizeTagValue(input.tag) });
+  if (input.tags) {
+    for (const [name, value] of Object.entries(input.tags)) {
+      tags.push({ name: sanitizeTagValue(name), value: sanitizeTagValue(value) });
+    }
   }
-  return { messageId: data.id };
+
+  const sendOptions: { idempotencyKey?: string } = {};
+  if (input.idempotencyKey) sendOptions.idempotencyKey = input.idempotencyKey;
+
+  let response: Awaited<ReturnType<typeof resend.emails.send>>;
+  try {
+    response = await resend.emails.send(
+      {
+        from: fromAddress,
+        to: input.to,
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+        replyTo: input.replyTo,
+        tags: tags.length > 0 ? tags : undefined,
+      },
+      Object.keys(sendOptions).length > 0 ? sendOptions : undefined,
+    );
+  } catch (err) {
+    // Network errors / timeouts → transient
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new ResendSendError(`Resend SDK threw: ${msg}`, "transient");
+  }
+
+  const { data, error } = response;
+  if (data && !error) return { messageId: data.id };
+
+  const status = (error as unknown as { statusCode?: number })?.statusCode;
+  const providerMessage = error?.message ?? "unknown";
+  const kind = classifyResendError(status, providerMessage);
+  throw new ResendSendError(
+    `Resend tracking-email send failed (${kind}): ${providerMessage}`,
+    kind,
+    status,
+    providerMessage,
+  );
+}
+
+function classifyResendError(
+  status: number | undefined,
+  providerMessage: string,
+): "validation" | "idempotency" | "rate_limited" | "transient" {
+  if (status === 409) return "idempotency";
+  if (status === 429) return "rate_limited";
+  if (typeof status === "number" && status >= 500) return "transient";
+  if (typeof status === "number" && status >= 400) return "validation";
+  // No explicit status (network / SDK-level error) → transient.
+  if (/timeout|temporarily|unavailable/i.test(providerMessage)) return "transient";
+  return "transient";
+}
+
+/**
+ * Resend tag values must match `^[a-zA-Z0-9_-]+$`. We coerce arbitrary
+ * input to that shape — anything outside the allowed character set
+ * becomes `_`. Empty strings collapse to `unspecified` so we never send
+ * a zero-length tag (Resend rejects).
+ */
+export function sanitizeTagValue(value: string): string {
+  if (!value) return "unspecified";
+  const collapsed = value.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 256);
+  return collapsed.length > 0 ? collapsed : "unspecified";
 }
 
 // Resend `email.received` webhook event payload (verified against

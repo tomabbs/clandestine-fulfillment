@@ -1,35 +1,53 @@
-// Phase 12 — Unified customer-facing email pipeline.
+// Phase 12 / Slice 2 — Unified customer-facing email pipeline.
 //
 // ONE task with two entry points:
 //   1. post-label-purchase orchestrator → trigger_status: 'shipped'
 //   2. EP webhook tracker.updated      → trigger_status mapped from EP status
 //
-// Hardening (the "stop unneeded customer complaints" requirements):
-//   - Strategy gate: deriveNotificationStrategy must return
-//     sendUnifiedResendEmails=true. Otherwise skip + log.
-//   - Per-shipment kill switch: warehouse_shipments.suppress_emails
-//   - Recipient suppression: resend_suppressions table check
-//   - Dedup (3 layers):
-//       a) findPriorSuccessfulSend()                    — app check
-//       b) notification_sends UNIQUE partial index      — DB check
-//       c) EP webhook external_webhook_id dedup         — receiver check
-//   - Shadow mode: redirects every send to workspaceFlags.shadow_recipients
-//     while still recording the intended real recipient for audit reconciliation.
-//   - Always-record: every outcome (sent / failed / suppressed / skipped /
-//     shadow) writes a notification_sends row so the daily reconciliation
-//     cron can answer "did we send?" by SQL.
+// Slice 2 reorders the success path to the DB-first canonical idempotency
+// contract. The previous Phase 12 ordering was:
 //
-// On failure: throw → Trigger.dev retries (3 attempts default). Permanent
-// failures (4xx from Resend) are recorded as 'failed' and not retried.
+//     send-with-Resend → record-send(status='sent')
+//
+// which leaves a window where: (a) Resend accepts, (b) the task crashes
+// before the row is recorded, (c) Trigger.dev retries the task, (d) we send
+// again. The crash is rare in practice but inevitable at scale; Resend's
+// own idempotency key window is 24h so a 24h-delayed retry circumvents
+// even that. The Slice 2 ordering closes the window:
+//
+//   1. Pre-check (findPriorActiveSend) — skip if any active row already
+//      exists for (shipment_id, trigger_status). cancelled / provider_failed
+//      rows are intentionally NOT in the active set so operator-driven
+//      retries can re-enter the pipeline cleanly.
+//   2. Insert `pending` row via recordSend(). The widened partial unique
+//      index (Slice 2 migration) on (shipment_id, trigger_status) WHERE
+//      status IN active_set traps races at the DB layer; on 23505 the
+//      helper returns the winner row instead of throwing.
+//   3. Call Resend with `idempotencyKey = tracking-email/{shipment}/{trigger}`
+//      (defense-in-depth — Resend collapses re-sends with the same key
+//      within 24h).
+//   4. Transition status via updateNotificationStatusSafe():
+//        - 2xx: pending → sent (stamps sent_at + resend_message_id)
+//        - 4xx (validation): pending → provider_failed (TERMINAL — no retry)
+//        - 409 (provider idempotency): pending → provider_failed (TERMINAL —
+//          our DB has the winner; Resend rejected as duplicate)
+//        - 429 / 5xx / network (transient): KEEP pending, bump attempt
+//          bookkeeping, throw → Trigger.dev backoff retries on the SAME row.
+//
+// The other gates (strategy, suppress_emails, recipient suppression, no
+// recipient resolved) all short-circuit BEFORE the pending insert and
+// record their own terminal status (skipped / suppressed) directly.
 
 import { logger, task } from "@trigger.dev/sdk";
-import { sendTrackingEmail } from "@/lib/clients/resend-client";
+import { ResendSendError, sendTrackingEmail } from "@/lib/clients/resend-client";
 import {
-  findPriorSuccessfulSend,
+  bumpAttemptBookkeeping,
+  findPriorActiveSend,
   isRecipientSuppressed,
   type NotificationTriggerStatus,
   recordSend,
 } from "@/lib/server/notification-sends";
+import { updateNotificationStatusSafe } from "@/lib/server/notification-status";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getWorkspaceFlags } from "@/lib/server/workspace-flags";
 import { env } from "@/lib/shared/env";
@@ -63,6 +81,7 @@ interface TaskResult {
     | "skipped_suppressed_recipient"
     | "skipped_already_sent"
     | "skipped_no_recipient"
+    | "provider_failed"
     | "failed";
   notification_send_id?: string;
   resend_message_id?: string;
@@ -72,10 +91,27 @@ interface TaskResult {
 
 const PUBLIC_HOST_FALLBACK = "https://app.clandestinedistro.com";
 
+// Stable idempotency key per logical send. Survives Trigger.dev retries,
+// task code redeploys, and Resend's 24h provider window (DB row is canonical
+// beyond 24h). MUST be deterministic so concurrent attempts collide on the
+// notification_sends_idempotency_key_unique partial unique index.
+function buildIdempotencyKey(shipmentId: string, trigger: NotificationTriggerStatus): string {
+  return `tracking-email/${shipmentId}/${trigger}`;
+}
+
+// Backoff for transient errors (429 / 5xx). Trigger.dev re-runs the task
+// on throw; we set next_retry_at to make the operator UI show "retrying in
+// X minutes" rather than just "pending forever".
+function nextRetryDelayMs(attemptCount: number): number {
+  // 1 → 1m, 2 → 2m, 3 → 4m, 4 → 8m, 5+ → 16m
+  const minutes = Math.min(16, 2 ** Math.max(0, attemptCount - 1));
+  return minutes * 60_000;
+}
+
 export const sendTrackingEmailTask = task({
   id: "send-tracking-email",
   maxDuration: 30,
-  retry: { maxAttempts: 3 },
+  retry: { maxAttempts: 5 },
   run: async (payload: Payload): Promise<TaskResult> => {
     const supabase = createServiceRoleClient();
     const { shipment_id, trigger_status } = payload;
@@ -109,8 +145,10 @@ export const sendTrackingEmailTask = task({
       };
     }
 
+    const workspaceId = shipment.workspace_id as string;
+
     // ── 2. Strategy gate ─────────────────────────────────────────────────
-    const flags = await getWorkspaceFlags(shipment.workspace_id as string);
+    const flags = await getWorkspaceFlags(workspaceId);
     const channelInfo = await resolveChannel(supabase, shipment);
     const strategy = deriveNotificationStrategy({
       channel: channelInfo.channel,
@@ -127,7 +165,7 @@ export const sendTrackingEmailTask = task({
     // Audit row even when we skip — proves the cron checked, not lost.
     if (!strategy.sendUnifiedResendEmails) {
       const skipped = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
+        workspaceId,
         shipmentId: shipment_id,
         triggerStatus: trigger_status,
         templateId: trigger_status,
@@ -144,7 +182,7 @@ export const sendTrackingEmailTask = task({
     }
     if (shipment.suppress_emails) {
       const skipped = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
+        workspaceId,
         shipmentId: shipment_id,
         triggerStatus: trigger_status,
         templateId: trigger_status,
@@ -164,7 +202,7 @@ export const sendTrackingEmailTask = task({
     const realRecipient = await resolveRecipientEmail(supabase, shipment);
     if (!realRecipient) {
       const skipped = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
+        workspaceId,
         shipmentId: shipment_id,
         triggerStatus: trigger_status,
         templateId: trigger_status,
@@ -186,7 +224,7 @@ export const sendTrackingEmailTask = task({
     const sendTo = isShadow ? (shadowRecipients[0] ?? null) : realRecipient;
     if (isShadow && !sendTo) {
       const skipped = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
+        workspaceId,
         shipmentId: shipment_id,
         triggerStatus: trigger_status,
         templateId: trigger_status,
@@ -202,20 +240,23 @@ export const sendTrackingEmailTask = task({
         rationale: "shadow mode but no shadow_recipients configured",
       };
     }
+    if (!sendTo) {
+      throw new Error("recipient unexpectedly null after resolution");
+    }
 
     // ── 4. Suppression check ─────────────────────────────────────────────
     if (
       await isRecipientSuppressed(supabase, {
-        workspaceId: shipment.workspace_id as string,
-        recipient: sendTo!,
+        workspaceId,
+        recipient: sendTo,
       })
     ) {
       const suppressed = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
+        workspaceId,
         shipmentId: shipment_id,
         triggerStatus: trigger_status,
         templateId: trigger_status,
-        recipient: sendTo!,
+        recipient: sendTo,
         status: "suppressed",
         error: "recipient on resend_suppressions list",
         shadowIntendedRecipient: isShadow ? realRecipient : null,
@@ -228,8 +269,12 @@ export const sendTrackingEmailTask = task({
       };
     }
 
-    // ── 5. Application-layer dedup gate ──────────────────────────────────
-    const prior = await findPriorSuccessfulSend(supabase, {
+    // ── 5. Application-layer pre-check (DB-first canonical idempotency) ──
+    // findPriorActiveSend covers the WIDE active set so any prior pending /
+    // sent / delivered / delayed / bounced / complained / provider_suppressed
+    // / shadow row blocks. provider_failed and cancelled are intentionally
+    // outside the active set so an operator Retry can re-enter.
+    const prior = await findPriorActiveSend(supabase, {
       shipmentId: shipment_id,
       triggerStatus: trigger_status,
     });
@@ -238,11 +283,11 @@ export const sendTrackingEmailTask = task({
         ok: true,
         decision: "skipped_already_sent",
         notification_send_id: prior.id,
-        rationale: `prior ${prior.status} send at ${prior.sent_at}`,
+        rationale: `prior ${prior.status} send (id=${prior.id}) at ${prior.pending_at ?? prior.sent_at ?? "unknown"}`,
       };
     }
 
-    // ── 6. Build template + send ─────────────────────────────────────────
+    // ── 6. Build template ────────────────────────────────────────────────
     const orgBranding = await loadOrgBranding(supabase, shipment.org_id as string | null);
     const itemSummary = await loadItemSummary(supabase, shipment, channelInfo);
     const customerName = await loadCustomerName(supabase, shipment);
@@ -266,58 +311,126 @@ export const sendTrackingEmailTask = task({
     };
     const rendered = renderForTrigger(trigger_status, ctx);
 
+    const idempotencyKey = buildIdempotencyKey(shipment_id, trigger_status);
+
+    // ── 7. Insert pending row BEFORE Resend call (DB-first contract) ─────
+    // The widened partial unique index traps races: a second concurrent
+    // attempt collides on 23505 and recordSend returns the existing winner.
+    // shadow mode short-circuits to terminal `shadow` status (mirror of
+    // sent) — no provider call, no follow-up transition needed.
+    const pendingStatus = isShadow ? "shadow" : "pending";
+    const pending = await recordSend(supabase, {
+      workspaceId,
+      shipmentId: shipment_id,
+      triggerStatus: trigger_status,
+      templateId: trigger_status,
+      recipient: sendTo,
+      status: pendingStatus,
+      idempotencyKey,
+      shadowIntendedRecipient: isShadow ? realRecipient : null,
+      attemptCount: 1,
+      lastAttemptAt: new Date().toISOString(),
+    });
+
+    // If recordSend returned an existing row instead of a freshly inserted
+    // one (race recovery), short-circuit to skipped_already_sent — the
+    // winner row is the canonical send.
+    if (pending.status !== pendingStatus || pending.idempotency_key !== idempotencyKey) {
+      return {
+        ok: true,
+        decision: "skipped_already_sent",
+        notification_send_id: pending.id,
+        rationale: `race-recovered to existing ${pending.status} row (id=${pending.id})`,
+      };
+    }
+
+    if (isShadow) {
+      // Shadow mode: no real provider call. The pending row above is
+      // already in `shadow` terminal state; nothing else to do.
+      return {
+        ok: true,
+        decision: "shadow",
+        notification_send_id: pending.id,
+        rationale: strategy.rationale,
+      };
+    }
+
+    // ── 8. Provider call ─────────────────────────────────────────────────
     try {
       const sendResult = await sendTrackingEmail({
-        to: sendTo!,
+        to: sendTo,
         fromName: orgBranding.org_name,
         subject: rendered.subject,
         html: rendered.html,
         text: rendered.text,
-        tag: `tracking_${trigger_status}${isShadow ? "_shadow" : ""}`,
+        idempotencyKey,
+        replyTo: orgBranding.support_email ?? undefined,
+        tags: {
+          kind: `tracking_${trigger_status}`,
+          workspace: workspaceId,
+          trigger: trigger_status,
+        },
       });
 
-      const stamped = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
-        shipmentId: shipment_id,
-        triggerStatus: trigger_status,
-        templateId: trigger_status,
-        recipient: sendTo!,
-        status: isShadow ? "shadow" : "sent",
+      // ── 9. Transition pending → sent + stamp message id ─────────────────
+      await updateNotificationStatusSafe(supabase, {
+        notificationSendId: pending.id,
+        newStatus: "sent",
         resendMessageId: sendResult.messageId,
-        shadowIntendedRecipient: isShadow ? realRecipient : null,
       });
 
       return {
         ok: true,
-        decision: isShadow ? "shadow" : "sent",
-        notification_send_id: stamped.id,
+        decision: "sent",
+        notification_send_id: pending.id,
         resend_message_id: sendResult.messageId,
         rationale: strategy.rationale,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const stamped = await recordSend(supabase, {
-        workspaceId: shipment.workspace_id as string,
-        shipmentId: shipment_id,
-        triggerStatus: trigger_status,
-        templateId: trigger_status,
-        recipient: sendTo!,
-        status: "failed",
-        error: msg,
-        shadowIntendedRecipient: isShadow ? realRecipient : null,
-      });
-      // 4xx from Resend = bad recipient / template; do not retry. Trigger.dev
-      // re-throws → retry only if message looks transient.
-      if (/^Resend tracking-email send failed: .* \b4\d\d/.test(msg)) {
+      // Classified ResendSendError or generic Error.
+      if (err instanceof ResendSendError) {
+        if (err.kind === "rate_limited" || err.kind === "transient") {
+          // KEEP pending — Trigger.dev will retry on the SAME row (preserving
+          // idempotency_key, so Resend collapses re-sends within its 24h
+          // window). Bump bookkeeping for ops UI visibility.
+          const nextAttempt = (pending.attempt_count ?? 1) + 1;
+          await bumpAttemptBookkeeping(supabase, {
+            notificationSendId: pending.id,
+            attemptCount: nextAttempt,
+            lastAttemptAt: new Date().toISOString(),
+            nextRetryAt: new Date(Date.now() + nextRetryDelayMs(nextAttempt)).toISOString(),
+            error: err.message,
+          });
+          throw err; // → Trigger.dev exponential backoff
+        }
+        // 4xx validation OR 409 idempotency: TERMINAL provider_failed,
+        // do NOT retry. The plan calls out 409 as final because our DB
+        // already has the winner row.
+        await updateNotificationStatusSafe(supabase, {
+          notificationSendId: pending.id,
+          newStatus: "provider_failed",
+          error: err.message,
+        });
         return {
           ok: false,
-          decision: "failed",
-          notification_send_id: stamped.id,
-          rationale: strategy.rationale,
-          error: msg,
+          decision: "provider_failed",
+          notification_send_id: pending.id,
+          rationale: `Resend ${err.kind}: ${err.message}`,
+          error: err.message,
         };
       }
-      throw err; // 5xx → retry
+
+      // Unknown / unclassified — treat as transient (retry).
+      const msg = err instanceof Error ? err.message : String(err);
+      const nextAttempt = (pending.attempt_count ?? 1) + 1;
+      await bumpAttemptBookkeeping(supabase, {
+        notificationSendId: pending.id,
+        attemptCount: nextAttempt,
+        lastAttemptAt: new Date().toISOString(),
+        nextRetryAt: new Date(Date.now() + nextRetryDelayMs(nextAttempt)).toISOString(),
+        error: msg,
+      });
+      throw err;
     }
   },
 });

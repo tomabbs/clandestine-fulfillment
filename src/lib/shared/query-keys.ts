@@ -232,4 +232,16 @@ export const queryKeysV2 = {
     workspaceId: (viewer?: QueryViewer) =>
       ["auth-context-v2", "workspace-id", viewer ?? "any"] as const,
   },
+  skuMatching: {
+    domain: () => ["sku-matching-v2"] as const,
+    all: (scope: QueryScope) => ["sku-matching-v2", ...scopePrefix(scope)] as const,
+    connections: (scope: QueryScope, orgId?: string | null) =>
+      ["sku-matching-v2", ...scopePrefix(scope), "connections", orgId ?? "*"] as const,
+    workspace: (scope: QueryScope, connectionId: string) =>
+      ["sku-matching-v2", ...scopePrefix(scope), "workspace", connectionId] as const,
+    preview: (scope: QueryScope, connectionId: string, variantId: string) =>
+      ["sku-matching-v2", ...scopePrefix(scope), "preview", connectionId, variantId] as const,
+    conflicts: (scope: QueryScope, connectionId: string) =>
+      ["sku-matching-v2", ...scopePrefix(scope), "conflicts", connectionId] as const,
+  },
 } as const;

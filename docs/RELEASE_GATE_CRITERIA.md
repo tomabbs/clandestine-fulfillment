@@ -199,6 +199,47 @@ operator surface:
 
 ---
 
+### C.3 SKU matching rollout preconditions (added 2026-04-25)
+
+Hard gates required before staff are told to use `/admin/settings/sku-matching`
+as the canonical alias-review workspace.
+
+| ID | Gate | How verified |
+|---|---|---|
+| SKU-1 | Duplicate cleanup completed before active-row unique indexes are applied. | `reports/sku-matching-duplicate-audit-20260425T1337Z.json` shows zero duplicate groups; `npx tsx scripts/remediate-sku-mapping-duplicates.ts` dry-run + `--live` both report zero rows to deactivate (or an operator-approved remediation log is attached for non-zero cases). |
+| SKU-2 | SKU matching schema/RPC substrate is present on the linked production database. | `supabase migration list --linked` shows `20260425000002_sku_matching_provenance`; `supabase db push --yes --include-all` completed successfully; `persist_sku_match`, `find_remote_to_canonical_dupes`, and `find_canonical_sku_duplicates` are callable. |
+| SKU-3 | Review drawer stale-match protection is live. | `pnpm typecheck` passes and `pnpm test -- tests/unit/lib/server/sku-matching.test.ts` passes; operator spot-check confirms a changed candidate fingerprint blocks `createOrUpdateSkuMatch()` until the preview is refreshed. |
+| SKU-4 | Shopify operational readiness is visible before staff accept Shopify aliases. | On a Shopify connection with `default_location_id` set, `getShopifyMatchReadiness()` returns one of the explicit readiness states (`ready_at_default_location`, `missing_default_location`, `missing_remote_inventory_item_id`, `not_stocked_at_default_location`, `location_read_failed`), and the review drawer can call `activateShopifyInventoryAtDefaultLocation()` for non-ready accepted matches. |
+| SKU-5 | Monitoring exists before rollout widens beyond initial staff review. | `supabase migration list --linked` shows `20260425000003_sku_matching_monitoring`; SKU matching server actions emit best-effort rows into `sku_matching_perf_events`; and scheduled task `sku-matching-monitor` writes weekly `sensor_readings` plus a review-queue alert when conflict growth breaches the rollout threshold. |
+
+Operator note: this workspace is intentionally connection-scoped and read-mostly.
+It does not enqueue Trigger tasks and does not rewrite remote SKUs; the release
+bar is therefore focused on duplicate safety, RPC availability, stale-review
+protection, and Shopify activation readiness.
+Phase 6 adds a lightweight telemetry gate as well so slow connection loads or
+steady conflict growth become operator-visible before the workspace is expanded.
+
+---
+
+### C.4 Tracking-notification hardening preconditions (added 2026-04-25)
+
+Hard gates required before the EasyPost-driven customer tracking + notification path is rolled out (or before the legacy `/api/webhooks/aftership` route is fully sunset).
+
+| ID | Gate | How verified |
+|---|---|---|
+| TN-1 | Webhook secret rotation envelope is set on every prod environment. | `pnpm ops:check-webhook-secrets` exits 0 — confirms `EASYPOST_WEBHOOK_SECRET`, `EASYPOST_WEBHOOK_SECRET_PREVIOUS`, `RESEND_WEBHOOK_SECRET`, `RESEND_WEBHOOK_SECRET_PREVIOUS` are present in env (current required; previous optional but allowed-empty). |
+| TN-2 | Centralized status writes are enforced in CI. | `bash scripts/check-notification-status-writes.sh` exits 0 — no direct writes to `notification_sends.status` or `warehouse_shipments.easypost_tracker_status` outside `src/lib/server/notification-status.ts`. The legacy `/api/webhooks/aftership` route's direct `warehouse_shipments.status` write is intentionally excluded from this guard during the dual-mode sunset window. |
+| TN-3 | Idempotency unique index applied without conflict. | `supabase migration list --linked` shows the Slice 2 state-machine migration; pre-migration duplicate detector ran clean (or operator-approved remediation log is attached); `notification_sends_unique_send` partial index present on `(workspace_id, shipment_id, kind, idempotency_key)`. |
+| TN-4 | Provider ledger + operator audit tables exist. | `notification_provider_events` (with normalized `workspace_id` + `shipment_id` columns + `provider IN ('resend','easypost')`) and `notification_operator_events` (FK → `public.users(id)`) present and writable by the service role. |
+| TN-5 | Test suite green for the tracking-notification path. | `pnpm vitest run tests/unit/lib/server/notification-status.test.ts tests/unit/lib/server/notification-sends.test.ts tests/unit/lib/server/notification-provider-events.test.ts tests/unit/api/webhooks/easypost-route.test.ts tests/unit/api/webhooks/resend-route.test.ts tests/unit/lib/carrier-tracking-urls.test.ts tests/unit/lib/tracking-email-templates.test.ts tests/unit/lib/resend-client.test.ts tests/unit/scripts/check-notification-status-writes.test.ts tests/unit/scripts/check-webhook-secrets.test.ts tests/unit/server/easypost-webhook-signature.test.ts tests/unit/server/resend-webhook-signature.test.ts tests/unit/trigger/send-tracking-email-recon.test.ts tests/unit/actions/notification-operations.test.ts tests/unit/lib/public-track-token.test.ts` exits 0 (194+ tests passing). |
+| TN-6 | Parity sensor between aftership and easypost is live and green. | `tracking.status_drift_24h` sensor reports zero divergent shipments for ≥7 days before the aftership route is removed. Until then both routes run; only `/api/webhooks/easypost` is wired into label creation. |
+| TN-7 | Operator surface deployed. | `/admin/operations/notifications` page renders with 24h status counts (incl. `provider_failed`/`delivered`/`cancelled`), suppression count, last sensor run, and currently-stuck rows. Per-shipment audit drilldown link visible from at least one shipment surface. |
+| TN-8 | Public tracking page PII allowlist enforced. | `tests/unit/lib/public-track-token.test.ts` passes — confirms `pickPublicDestination` and `PublicTrackingShipment` types only expose `name`/`city`/`state`/`country`/`postal_code`. |
+
+Release manifest split for the four sequential PRs lives at `docs/RELEASE_SLICES_TRACKING_NOTIFICATION.md`.
+
+---
+
 ### D. Trigger runtime smoke checks
 
 Follow:

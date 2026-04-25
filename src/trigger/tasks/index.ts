@@ -75,6 +75,10 @@ export { sendTrackingEmailTask } from "./send-tracking-email";
 // rate documented for EP at peak load. Re-fires send-tracking-email for any
 // shipment whose status warranted an email but no notification_sends row exists.
 export { sendTrackingEmailReconCronTask } from "./send-tracking-email-recon";
+// Slice 4 — every-15-min sensor for stuck pending sends, provider failures,
+// and webhook signature spikes. Writes sensor_readings rows + escalates
+// to Sentry/Slack when signature failure thresholds are exceeded.
+export { notificationFailureSensorTask } from "./notification-failure-sensor";
 export { sensorCheckTask } from "./sensor-check";
 // Phase 3 Pass 2 — shadow-mode comparison task. Fired with a delay by
 //   recordShadowPush() when a connection is in cutover_state='shadow'.
@@ -121,6 +125,7 @@ export { shopifyPolicyAuditTask } from "./shopify-policy-audit";
 // productVariantsBulkUpdate. Enqueued by `auditShopifyPolicy({fixMode:'fix_drift'})`.
 export { shopifyPolicyFixTask } from "./shopify-policy-fix";
 export { shopifySyncTask } from "./shopify-sync";
+export { skuMatchingMonitorTask } from "./sku-matching-monitor";
 export { storageCalcTask } from "./storage-calc";
 export { supportEscalationTask } from "./support-escalation";
 export {
