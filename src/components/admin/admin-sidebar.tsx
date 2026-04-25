@@ -78,6 +78,7 @@ const SETTINGS_ITEMS = [
   { title: "Users", href: "/admin/settings/users" },
   { title: "Bandcamp Accounts", href: "/admin/settings/bandcamp" },
   { title: "Store Connections", href: "/admin/settings/store-connections" },
+  { title: "SKU Matching", href: "/admin/settings/sku-matching" },
   { title: "Reconnect Client Stores", href: "/admin/settings/client-store-reconnect" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },
   { title: "Carrier Mapping", href: "/admin/settings/carrier-map" },
