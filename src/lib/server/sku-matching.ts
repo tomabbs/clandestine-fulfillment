@@ -1,10 +1,22 @@
 import { createHash } from "node:crypto";
 import { computeEffectiveBandcampAvailableByOption } from "@/lib/server/bandcamp-effective-available";
 import {
+  type MusicVariantDescriptors,
+  parseMusicVariantDescriptors,
+} from "@/lib/server/music-variant-descriptors";
+import {
   type ConnectionShopifyContext,
   getInventoryLevelsAtLocation,
   iterateAllVariants,
 } from "@/lib/server/shopify-connection-graphql";
+import {
+  buildCandidateEvidence,
+  type CandidateEvidence,
+  classifyEvidenceGates,
+  type DisqualifierCode,
+  type EvidenceGateResult,
+} from "@/lib/server/sku-candidate-evidence";
+import type { StockSignal } from "@/lib/server/stock-reliability";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 import { normalizeBarcode, normalizeProductText, normalizeSku } from "@/lib/shared/utils";
 
@@ -83,6 +95,68 @@ export interface RankedSkuCandidate {
   confidenceTier: ConfidenceTier;
   reasons: string[];
   disqualifiers: string[];
+  /**
+   * Structured per-candidate evidence (plan §1691–1740). Populated only
+   * when `rankSkuCandidates` is called with `evidenceContext`. Existing
+   * callers that omit the context see `undefined` here and are
+   * unaffected — this is purely additive.
+   */
+  evidence?: CandidateEvidence;
+  /**
+   * Gate classification of `evidence` (plan §1732–1737). Populated
+   * only when `evidence` is populated. `overall` is the recommended
+   * outcome; `disqualifiers` is the machine-readable list that
+   * explains any non-`pass` result.
+   */
+  evidenceGates?: EvidenceGateResult;
+  /**
+   * Machine-readable copy of `evidenceGates.disqualifiers` exposed at
+   * the candidate root so downstream consumers that only care about
+   * disqualifier codes don't have to reach into `evidenceGates`.
+   */
+  disqualifierCodes?: ReadonlyArray<DisqualifierCode>;
+}
+
+/**
+ * Optional context passed to `rankSkuCandidates()` to enable the
+ * §1691–1740 structured evidence shape. When omitted, the ranker
+ * behaves exactly as before (score + reasons + disqualifiers only)
+ * — every existing caller remains source- and behavior-compatible.
+ */
+export interface RankSkuEvidenceContext {
+  /** Canonical-side parsed descriptors. If omitted, ranker parses from
+   *  the canonical title/variant automatically. */
+  canonicalDescriptors?: MusicVariantDescriptors | null;
+  /** Canonical-side identity signals (uniqueness, verified remote id,
+   *  verified Bandcamp option, prior safe mapping). All default to
+   *  false when omitted — a strict posture consistent with the plan's
+   *  "gate cannot be bypassed" invariant. */
+  identity?: {
+    canonicalSkuUniqueWithinOrg?: boolean;
+    remoteSkuUniqueWithinConnection?: (remote: RemoteCatalogItem) => boolean;
+    verifiedRemoteId?: (remote: RemoteCatalogItem) => boolean;
+    verifiedBandcampOption?: boolean;
+    priorMappingId?: string | null;
+  };
+  /** Per-remote operational lookups. All default to null/unknown tier. */
+  operational?: {
+    warehouseStock?: StockSignal | null;
+    remoteStock?: (remote: RemoteCatalogItem) => StockSignal | null;
+    stockedAtDefaultLocation?: (remote: RemoteCatalogItem) => boolean | null;
+  };
+  /** Per-remote negative-evidence hints. Defaults to all-false. */
+  negative?: {
+    nonOperationalRow?: (remote: RemoteCatalogItem) => boolean;
+    duplicateRemote?: (remote: RemoteCatalogItem) => boolean;
+    duplicateCanonicalSku?: boolean;
+    genericTitle?: (remote: RemoteCatalogItem) => boolean;
+  };
+  /** Gate-classifier options — identical to `classifyEvidenceGates`. */
+  gateOptions?: {
+    enforceShopifyDefaultLocation?: boolean;
+    /** Override platform; defaults to `remote.platform` per candidate. */
+    platform?: "shopify" | "woocommerce" | "squarespace";
+  };
 }
 
 function toPriceNumber(value: string | number | null | undefined): number | null {
@@ -283,6 +357,7 @@ function classifyCandidate(score: number, disqualifiers: string[]): ConfidenceTi
 export function rankSkuCandidates(
   canonical: CanonicalCandidateSignalSource,
   remoteItems: RemoteCatalogItem[],
+  evidenceContext?: RankSkuEvidenceContext,
 ): RankedSkuCandidate[] {
   const normalizedCanonicalSku = normalizeSku(canonical.sku);
   const normalizedCanonicalBarcode = normalizeBarcode(canonical.barcode);
@@ -290,6 +365,15 @@ export function rankSkuCandidates(
   const normalizedFormat = normalizeProductText(canonical.format);
   const canonicalTitles = buildCanonicalTitles(canonical).map(normalizeProductText).filter(Boolean);
   const optionHasStock = hasBandcampOptionStock(canonical);
+
+  const canonicalDescriptors = evidenceContext
+    ? (evidenceContext.canonicalDescriptors ??
+      parseMusicVariantDescriptors({
+        title: [canonical.title, canonical.variantTitle, canonical.optionValue]
+          .filter((value): value is string => Boolean(value?.trim()))
+          .join(" - "),
+      }))
+    : null;
 
   const ranked = remoteItems
     .map((remote): RankedSkuCandidate => {
@@ -409,13 +493,69 @@ export function rankSkuCandidates(
         matchMethod = "title_vendor_format";
       }
 
-      return {
+      const base: RankedSkuCandidate = {
         remote,
         score,
         matchMethod,
         confidenceTier,
         reasons,
         disqualifiers,
+      };
+
+      if (!evidenceContext) return base;
+
+      const remoteDescriptors = parseMusicVariantDescriptors({
+        title: [remote.productTitle, remote.variantTitle]
+          .filter((value): value is string => Boolean(value?.trim()))
+          .join(" - "),
+      });
+      const evidence = buildCandidateEvidence({
+        canonical: {
+          sku: canonical.sku,
+          barcode: canonical.barcode,
+          descriptors: canonicalDescriptors,
+          priorMappingId: evidenceContext.identity?.priorMappingId ?? null,
+        },
+        remote: {
+          sku: remote.remoteSku,
+          barcode: remote.barcode,
+          combinedTitle: remote.combinedTitle,
+          descriptors: remoteDescriptors,
+          platform: remote.platform,
+        },
+        identitySignals: {
+          verifiedRemoteId: evidenceContext.identity?.verifiedRemoteId?.(remote) ?? false,
+          verifiedBandcampOption: evidenceContext.identity?.verifiedBandcampOption ?? false,
+          canonicalSkuUniqueWithinOrg:
+            evidenceContext.identity?.canonicalSkuUniqueWithinOrg ?? false,
+          remoteSkuUniqueWithinConnection:
+            evidenceContext.identity?.remoteSkuUniqueWithinConnection?.(remote) ?? false,
+        },
+        operationalSignals: {
+          warehouseStock: evidenceContext.operational?.warehouseStock ?? null,
+          remoteStock: evidenceContext.operational?.remoteStock?.(remote) ?? null,
+          stockedAtDefaultLocation:
+            evidenceContext.operational?.stockedAtDefaultLocation?.(remote) ?? null,
+        },
+        negativeSignals: {
+          genericTitle: evidenceContext.negative?.genericTitle?.(remote) ?? false,
+          nonOperationalRow: evidenceContext.negative?.nonOperationalRow?.(remote) ?? false,
+          duplicateCanonicalSku: evidenceContext.negative?.duplicateCanonicalSku ?? false,
+          duplicateRemote: evidenceContext.negative?.duplicateRemote?.(remote) ?? false,
+        },
+      });
+
+      const gates = classifyEvidenceGates(evidence, {
+        enforceShopifyDefaultLocation:
+          evidenceContext.gateOptions?.enforceShopifyDefaultLocation ?? true,
+        platform: evidenceContext.gateOptions?.platform ?? remote.platform,
+      });
+
+      return {
+        ...base,
+        evidence,
+        evidenceGates: gates,
+        disqualifierCodes: gates.disqualifiers,
       };
     })
     .filter((candidate) => candidate.score > 0 || candidate.disqualifiers.length > 0)
