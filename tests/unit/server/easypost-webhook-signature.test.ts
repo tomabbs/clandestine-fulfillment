@@ -15,10 +15,7 @@
 
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import {
-  normalizePath,
-  verifyEasypostSignature,
-} from "@/lib/server/easypost-webhook-signature";
+import { normalizePath, verifyEasypostSignature } from "@/lib/server/easypost-webhook-signature";
 
 const SECRET = "test-ep-secret";
 const PREVIOUS_SECRET = "test-ep-secret-previous";

@@ -85,9 +85,7 @@ export function pickPublicDestination(shipment: ShipmentLikeForDestination): Pub
   const ep = ld as Record<string, unknown>;
   const ship = (ep.shipment ?? ep) as Record<string, unknown> | undefined;
   if (!ship || typeof ship !== "object") return direct;
-  const to = (ship as Record<string, unknown>).to_address as
-    | Record<string, unknown>
-    | undefined;
+  const to = (ship as Record<string, unknown>).to_address as Record<string, unknown> | undefined;
   if (!to || typeof to !== "object") return direct;
   return {
     city: pickStringOrNull(to.city),

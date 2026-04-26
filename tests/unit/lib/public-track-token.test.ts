@@ -163,9 +163,9 @@ describe("pickPublicDestination (Slice 3 — PII allowlist)", () => {
 
 describe("formatPublicDestination", () => {
   it("formats all three", () => {
-    expect(
-      formatPublicDestination({ city: "Los Angeles", state: "CA", country: "US" }),
-    ).toBe("Los Angeles, CA, US");
+    expect(formatPublicDestination({ city: "Los Angeles", state: "CA", country: "US" })).toBe(
+      "Los Angeles, CA, US",
+    );
   });
   it("skips empties", () => {
     expect(formatPublicDestination({ city: "Berlin", state: null, country: "DE" })).toBe(
@@ -204,9 +204,7 @@ describe("sanitizeBrandColor (Slice 3 — CSS-injection defense)", () => {
 
 describe("sanitizeImageUrl (Slice 3 — image src defense)", () => {
   it("allows https URLs", () => {
-    expect(sanitizeImageUrl("https://example.com/logo.png")).toBe(
-      "https://example.com/logo.png",
-    );
+    expect(sanitizeImageUrl("https://example.com/logo.png")).toBe("https://example.com/logo.png");
   });
   it("rejects http", () => {
     expect(sanitizeImageUrl("http://example.com/logo.png")).toBeNull();

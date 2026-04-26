@@ -85,9 +85,9 @@ describe("buildCarrierTrackingUrl — Slice 3 EasyPost public URL preference", (
     expect(buildCarrierTrackingUrl("USPS", "9405511899560000000000", "")).toContain(
       "tools.usps.com",
     );
-    expect(
-      buildCarrierTrackingUrl("USPS", "9405511899560000000000", undefined),
-    ).toContain("tools.usps.com");
+    expect(buildCarrierTrackingUrl("USPS", "9405511899560000000000", undefined)).toContain(
+      "tools.usps.com",
+    );
   });
 
   it("rejects unsafe protocols smuggled into easyPostPublicUrl (defense-in-depth)", () => {
@@ -105,9 +105,9 @@ describe("buildCarrierTrackingUrl — Slice 3 EasyPost public URL preference", (
   });
 
   it("returns easyPostPublicUrl even when carrier is unknown", () => {
-    expect(
-      buildCarrierTrackingUrl("MysteryCarrier", "TRK1", "https://track.easypost.com/x"),
-    ).toBe("https://track.easypost.com/x");
+    expect(buildCarrierTrackingUrl("MysteryCarrier", "TRK1", "https://track.easypost.com/x")).toBe(
+      "https://track.easypost.com/x",
+    );
   });
 
   it("returns null for unknown carriers and no easyPostPublicUrl", () => {

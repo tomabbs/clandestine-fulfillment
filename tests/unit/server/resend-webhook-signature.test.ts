@@ -9,7 +9,12 @@ const PREFIXED_SECRET = `whsec_${BASE64_SECRET}`;
 const PREVIOUS_BASE64 = Buffer.from("previous-secret-bytes").toString("base64");
 const PREVIOUS_PREFIXED = `whsec_${PREVIOUS_BASE64}`;
 
-function sign(rawBody: string, svixId: string, svixTimestamp: string, secret = BASE64_SECRET): string {
+function sign(
+  rawBody: string,
+  svixId: string,
+  svixTimestamp: string,
+  secret = BASE64_SECRET,
+): string {
   const signed = `${svixId}.${svixTimestamp}.${rawBody}`;
   const hmac = createHmac("sha256", Buffer.from(secret, "base64"))
     .update(signed, "utf8")

@@ -31,8 +31,8 @@ import {
   getRecentNotificationFailures,
   getRecentSignatureFailures,
   getStuckPendingNotifications,
-  retryStuckNotification,
   type RecentFailureRow,
+  retryStuckNotification,
   type SignatureFailureRow,
   type StuckPendingRow,
   triggerNotificationFailureSensor,
@@ -131,9 +131,7 @@ export default function NotificationOperationsPage() {
         <RollupCard
           title="Pending"
           value={overview.data?.pendingTotal ?? 0}
-          tone={
-            (overview.data?.stuckPending1h ?? 0) > 0 ? "warning" : "neutral"
-          }
+          tone={(overview.data?.stuckPending1h ?? 0) > 0 ? "warning" : "neutral"}
           subline={
             (overview.data?.stuckPending1h ?? 0) > 0
               ? `${overview.data?.stuckPending1h} stuck >1h`
@@ -286,11 +284,7 @@ function RollupCard({
   subline: string;
 }) {
   const valueClass =
-    tone === "danger"
-      ? "text-red-600"
-      : tone === "warning"
-        ? "text-amber-600"
-        : "text-foreground";
+    tone === "danger" ? "text-red-600" : tone === "warning" ? "text-amber-600" : "text-foreground";
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -353,7 +347,10 @@ function StuckPendingTableRow({
       </td>
       <td className="py-2 pr-3">{formatRelative(row.pending_at)}</td>
       <td className="py-2 pr-3 tabular-nums">{row.attempt_count}</td>
-      <td className="py-2 pr-3 max-w-xs truncate text-xs text-muted-foreground" title={row.error ?? ""}>
+      <td
+        className="py-2 pr-3 max-w-xs truncate text-xs text-muted-foreground"
+        title={row.error ?? ""}
+      >
         {row.error ?? "—"}
       </td>
       <td className="py-2 pr-3 text-right space-x-2">
@@ -379,7 +376,10 @@ function FailureTableRow({ row }: { row: RecentFailureRow }) {
         <Badge variant="secondary">{row.trigger_status}</Badge>
       </td>
       <td className="py-2 pr-3 font-mono text-xs">{row.recipient}</td>
-      <td className="py-2 pr-3 max-w-xs truncate text-xs text-muted-foreground" title={row.error ?? ""}>
+      <td
+        className="py-2 pr-3 max-w-xs truncate text-xs text-muted-foreground"
+        title={row.error ?? ""}
+      >
         {row.error ?? "—"}
       </td>
       <td className="py-2 pr-3 text-right">

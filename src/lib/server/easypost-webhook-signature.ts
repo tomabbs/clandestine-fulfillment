@@ -173,10 +173,7 @@ function verifyV2(args: V2Args): EasyPostVerifyResult {
   // String-to-sign: xTimestamp + method (uppercase) + xPath (raw header value) + rawBody
   // NB: HMAC uses the raw `x-path` header bytes as received, NOT the
   // normalized form. Normalization is only for the path-mismatch check.
-  const prefix = Buffer.from(
-    `${args.xTimestamp}${args.method.toUpperCase()}${args.xPath}`,
-    "utf8",
-  );
+  const prefix = Buffer.from(`${args.xTimestamp}${args.method.toUpperCase()}${args.xPath}`, "utf8");
   const signedPayload = Buffer.concat([prefix, args.rawBody]);
 
   for (let i = 0; i < args.secrets.length; i++) {

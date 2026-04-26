@@ -77,11 +77,7 @@ export async function updateNotificationStatusSafe(
     newStatus: (row?.new_status as string | null) ?? input.newStatus,
     skippedReason: (row?.skipped_reason as string | null) ?? null,
   };
-  if (
-    !verdict.applied &&
-    verdict.skippedReason &&
-    verdict.skippedReason !== "no_op_same_status"
-  ) {
+  if (!verdict.applied && verdict.skippedReason && verdict.skippedReason !== "no_op_same_status") {
     Sentry.captureMessage(
       `[notification-status] state-machine rejected transition: ${verdict.skippedReason}`,
       {
@@ -130,11 +126,7 @@ export async function updateShipmentTrackingStatusSafe(
     newStatus: (row?.new_status as string | null) ?? input.newStatus,
     skippedReason: (row?.skipped_reason as string | null) ?? null,
   };
-  if (
-    !verdict.applied &&
-    verdict.skippedReason &&
-    verdict.skippedReason !== "no_op_same_status"
-  ) {
+  if (!verdict.applied && verdict.skippedReason && verdict.skippedReason !== "no_op_same_status") {
     Sentry.captureMessage(
       `[tracking-status] state-machine rejected transition: ${verdict.skippedReason}`,
       {

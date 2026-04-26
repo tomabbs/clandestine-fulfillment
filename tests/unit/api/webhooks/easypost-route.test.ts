@@ -14,7 +14,15 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockEnv, mockVerifySignature, mockSupabase, mockTrigger, mockRecordEvent, mockUpdateTrackingStatus, mockSentry } = vi.hoisted(() => {
+const {
+  mockEnv,
+  mockVerifySignature,
+  mockSupabase,
+  mockTrigger,
+  mockRecordEvent,
+  mockUpdateTrackingStatus,
+  mockSentry,
+} = vi.hoisted(() => {
   const fromMock = vi.fn();
   return {
     mockEnv: vi.fn(),
@@ -89,6 +97,7 @@ function chain(result: { data: unknown; error: unknown }) {
     upsert: vi.fn(),
     single: vi.fn().mockResolvedValue(result),
     maybeSingle: vi.fn().mockResolvedValue(result),
+    // biome-ignore lint/suspicious/noThenProperty: Supabase's PostgrestBuilder is intentionally thenable (callers can `await query.select().eq(...)` directly); this mock mirrors that contract so `await`-chaining in the webhook under test routes through the same code path as in real Supabase calls.
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
     catch: () => undefined,
   };

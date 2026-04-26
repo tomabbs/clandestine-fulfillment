@@ -221,7 +221,12 @@ describe("applyOperatorNotificationAction — wrapper contract", () => {
 
   it("supports overriding newStatus on the action", async () => {
     const m = mockSupabase({
-      data: { applied: true, previous_status: "sent", new_status: "delivered", operator_event_id: "evt-1" },
+      data: {
+        applied: true,
+        previous_status: "sent",
+        new_status: "delivered",
+        operator_event_id: "evt-1",
+      },
     });
     await applyOperatorNotificationAction(m.client as never, {
       notificationSendId: "ns-1",

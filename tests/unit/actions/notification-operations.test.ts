@@ -16,22 +16,17 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const {
-  mockRequireAuth,
-  mockApplyOperator,
-  mockSupabaseClient,
-  mockSupabaseFrom,
-  mockTrigger,
-} = vi.hoisted(() => {
-  const fromMock = vi.fn();
-  return {
-    mockRequireAuth: vi.fn(),
-    mockApplyOperator: vi.fn(),
-    mockSupabaseClient: { from: fromMock } as never,
-    mockSupabaseFrom: fromMock,
-    mockTrigger: vi.fn().mockResolvedValue({ id: "run-1" }),
-  };
-});
+const { mockRequireAuth, mockApplyOperator, mockSupabaseClient, mockSupabaseFrom, mockTrigger } =
+  vi.hoisted(() => {
+    const fromMock = vi.fn();
+    return {
+      mockRequireAuth: vi.fn(),
+      mockApplyOperator: vi.fn(),
+      mockSupabaseClient: { from: fromMock } as never,
+      mockSupabaseFrom: fromMock,
+      mockTrigger: vi.fn().mockResolvedValue({ id: "run-1" }),
+    };
+  });
 
 vi.mock("@/lib/server/auth-context", () => ({
   requireAuth: mockRequireAuth,
@@ -61,6 +56,7 @@ function chain(result: { data: unknown; error: unknown }) {
     select: vi.fn(),
     eq: vi.fn(),
     maybeSingle: vi.fn().mockResolvedValue(result),
+    // biome-ignore lint/suspicious/noThenProperty: Supabase's PostgrestBuilder is intentionally thenable (callers can `await query.select().eq(...)` directly); this mock mirrors that contract so `await`-chaining in the production code under test routes through the same code path as in real Supabase calls.
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
   };
   for (const k of ["select", "eq"]) {

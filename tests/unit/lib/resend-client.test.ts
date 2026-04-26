@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  ResendSendError,
   inboundEmailWebhookSchema,
   parseInboundWebhook,
+  ResendSendError,
   sanitizeTagValue,
 } from "@/lib/clients/resend-client";
 

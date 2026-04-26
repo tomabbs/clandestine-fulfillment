@@ -422,7 +422,8 @@ export async function getShipStationOrdersDb(
         shipstation_writeback_path: s.shipstation_writeback_path as "v2" | "v1" | null,
         shipstation_writeback_error: s.shipstation_writeback_error,
         shipstation_tracking_url: trackingUrl,
-        public_track_token: (s as { public_track_token?: string | null }).public_track_token ?? null,
+        public_track_token:
+          (s as { public_track_token?: string | null }).public_track_token ?? null,
       });
     }
   }

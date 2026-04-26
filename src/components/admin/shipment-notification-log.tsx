@@ -55,11 +55,7 @@ export function ShipmentNotificationLog({ shipmentId }: { shipmentId: string }) 
         className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/30"
       >
         <span className="flex items-center gap-2">
-          {expanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           <span className="font-medium">Notification audit log</span>
           {expanded && query.isFetching ? (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
@@ -101,25 +97,17 @@ function NotificationLogEntry({ entry }: { entry: ShipmentNotificationLogRow }) 
           <div className="flex items-center gap-2">
             <Badge variant="secondary">{send.trigger_status}</Badge>
             <Badge variant={statusBadgeVariant(send.status)}>{send.status}</Badge>
-            <span className="text-xs text-muted-foreground">
-              attempt {send.attempt_count}
-            </span>
+            <span className="text-xs text-muted-foreground">attempt {send.attempt_count}</span>
           </div>
           <p className="text-xs font-mono text-muted-foreground">{send.recipient}</p>
         </div>
         <div className="text-xs text-right text-muted-foreground space-y-0.5">
           <p>Pending: {new Date(send.pending_at).toLocaleString()}</p>
           {send.sent_at && <p>Sent: {new Date(send.sent_at).toLocaleString()}</p>}
-          {send.delivered_at && (
-            <p>Delivered: {new Date(send.delivered_at).toLocaleString()}</p>
-          )}
+          {send.delivered_at && <p>Delivered: {new Date(send.delivered_at).toLocaleString()}</p>}
           {send.bounced_at && <p>Bounced: {new Date(send.bounced_at).toLocaleString()}</p>}
-          {send.complained_at && (
-            <p>Complained: {new Date(send.complained_at).toLocaleString()}</p>
-          )}
-          {send.cancelled_at && (
-            <p>Cancelled: {new Date(send.cancelled_at).toLocaleString()}</p>
-          )}
+          {send.complained_at && <p>Complained: {new Date(send.complained_at).toLocaleString()}</p>}
+          {send.cancelled_at && <p>Cancelled: {new Date(send.cancelled_at).toLocaleString()}</p>}
         </div>
       </div>
 
@@ -182,9 +170,7 @@ function NotificationLogEntry({ entry }: { entry: ShipmentNotificationLogRow }) 
                     </span>
                   )}
                 </div>
-                {ev.reason && (
-                  <p className="text-muted-foreground italic pl-1">{ev.reason}</p>
-                )}
+                {ev.reason && <p className="text-muted-foreground italic pl-1">{ev.reason}</p>}
               </li>
             ))}
           </ul>

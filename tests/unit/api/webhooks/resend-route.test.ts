@@ -94,6 +94,7 @@ function chain(result: { data: unknown; error: unknown }) {
     eq: vi.fn(),
     single: vi.fn().mockResolvedValue(result),
     maybeSingle: vi.fn().mockResolvedValue(result),
+    // biome-ignore lint/suspicious/noThenProperty: Supabase's PostgrestBuilder is intentionally thenable (callers can `await query.select().eq(...)` directly); this mock mirrors that contract so `await`-chaining in the webhook under test routes through the same code path as in real Supabase calls.
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
     catch: () => undefined,
   };
@@ -171,9 +172,7 @@ describe("Resend webhook — signature failure", () => {
     const sigFailureChain = chain({ data: null, error: null });
     mockSupabaseFrom.mockReturnValueOnce(sigFailureChain);
 
-    const res = await POST(
-      makeRequest({ type: "email.delivered" }, { "svix-id": "msg_bad_1" }),
-    );
+    const res = await POST(makeRequest({ type: "email.delivered" }, { "svix-id": "msg_bad_1" }));
     expect(res.status).toBe(401);
     expect(mockSupabaseFrom).toHaveBeenCalledWith("webhook_events");
     const insertedRow = (sigFailureChain.insert as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];

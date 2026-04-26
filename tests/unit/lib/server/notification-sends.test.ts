@@ -17,13 +17,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ACTIVE_NOTIFICATION_STATUSES,
-  STICKY_TERMINAL_STATUSES,
   bumpAttemptBookkeeping,
   findNotificationSendByIdempotencyKey,
   findNotificationSendByMessageId,
   findPriorActiveSend,
   findPriorSuccessfulSend,
   recordSend,
+  STICKY_TERMINAL_STATUSES,
   stampResendMessageId,
   suppressRecipient,
 } from "@/lib/server/notification-sends";
@@ -59,6 +59,7 @@ function makeChain(result: MaybeResult): Chain {
     limit: vi.fn(),
     or: vi.fn(),
     maybeSingle: vi.fn().mockResolvedValue(result),
+    // biome-ignore lint/suspicious/noThenProperty: Supabase's PostgrestBuilder is intentionally thenable (callers can `await query.select().eq(...)` directly); this mock mirrors that contract so `await`-chaining in the notification-send helpers routes through the same code path as in real Supabase calls.
     then(resolve: (value: MaybeResult) => unknown) {
       return Promise.resolve(result).then(resolve);
     },
@@ -216,10 +217,7 @@ describe("recordSend — 23505 recovery (the Slice 2 dedup contract)", () => {
     // Recovery branch filtered on (shipment_id, trigger_status, status IN active).
     expect(chains[1]?.eq).toHaveBeenCalledWith("shipment_id", "sh-1");
     expect(chains[1]?.eq).toHaveBeenCalledWith("trigger_status", "shipped");
-    expect(chains[1]?.in).toHaveBeenCalledWith(
-      "status",
-      Array.from(ACTIVE_NOTIFICATION_STATUSES),
-    );
+    expect(chains[1]?.in).toHaveBeenCalledWith("status", Array.from(ACTIVE_NOTIFICATION_STATUSES));
   });
 
   it("falls through and throws when 23505 fires but no recovery row found", async () => {
@@ -282,10 +280,7 @@ describe("findPriorActiveSend filter contract", () => {
     });
     expect(chains[0]?.eq).toHaveBeenCalledWith("shipment_id", "sh-1");
     expect(chains[0]?.eq).toHaveBeenCalledWith("trigger_status", "delivered");
-    expect(chains[0]?.in).toHaveBeenCalledWith(
-      "status",
-      Array.from(ACTIVE_NOTIFICATION_STATUSES),
-    );
+    expect(chains[0]?.in).toHaveBeenCalledWith("status", Array.from(ACTIVE_NOTIFICATION_STATUSES));
     expect(chains[0]?.order).toHaveBeenCalledWith("pending_at", { ascending: false });
     expect(chains[0]?.limit).toHaveBeenCalledWith(1);
   });
