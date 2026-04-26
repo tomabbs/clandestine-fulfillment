@@ -12,7 +12,7 @@ export function PortalPresenceTracker() {
   const pathname = usePathname();
   const { data: user } = useAppQuery({
     queryKey: queryKeys.auth.userContext(),
-    queryFn: getUserContext,
+    queryFn: () => getUserContext(),
     tier: CACHE_TIERS.REALTIME,
   });
 

@@ -102,7 +102,7 @@ export default function AdminSupportPage() {
     error: summaryError,
   } = useAppQuery({
     queryKey: queryKeys.support.summary(),
-    queryFn: getSupportInboxSummary,
+    queryFn: () => getSupportInboxSummary(),
     tier: CACHE_TIERS.REALTIME,
   });
 
@@ -330,17 +330,17 @@ function ConversationDetail({ conversationId }: { conversationId: string }) {
   });
   const { data: viewer } = useAppQuery({
     queryKey: queryKeys.support.viewerContext(),
-    queryFn: getSupportViewerContext,
+    queryFn: () => getSupportViewerContext(),
     tier: CACHE_TIERS.SESSION,
   });
   const { data: assignees } = useAppQuery({
     queryKey: queryKeys.support.assignees(),
-    queryFn: listSupportAssignees,
+    queryFn: () => listSupportAssignees(),
     tier: CACHE_TIERS.SESSION,
   });
   const { data: savedReplies } = useAppQuery({
     queryKey: queryKeys.support.savedReplies(),
-    queryFn: listSavedReplies,
+    queryFn: () => listSavedReplies(),
     tier: CACHE_TIERS.SESSION,
   });
   const { data: context } = useAppQuery({

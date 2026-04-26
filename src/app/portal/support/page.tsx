@@ -75,7 +75,7 @@ function ClientConversationList({ onSelect }: { onSelect: (id: string) => void }
   });
   const { data: viewer } = useAppQuery({
     queryKey: queryKeys.support.viewerContext(),
-    queryFn: getSupportViewerContext,
+    queryFn: () => getSupportViewerContext(),
     tier: CACHE_TIERS.REALTIME,
   });
   const { counts } = useSupportPresence({
@@ -199,7 +199,7 @@ function ConversationDetail({
   });
   const { data: viewer } = useAppQuery({
     queryKey: queryKeys.support.viewerContext(),
-    queryFn: getSupportViewerContext,
+    queryFn: () => getSupportViewerContext(),
     tier: CACHE_TIERS.REALTIME,
   });
   const { counts } = useSupportPresence({

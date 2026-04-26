@@ -50,7 +50,7 @@ export function SupportLauncher({
 
   const { data: viewer } = useAppQuery({
     queryKey: queryKeys.support.viewerContext(),
-    queryFn: getSupportViewerContext,
+    queryFn: () => getSupportViewerContext(),
     tier: CACHE_TIERS.REALTIME,
   });
 
