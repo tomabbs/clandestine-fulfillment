@@ -293,7 +293,7 @@ function ConversationDetail({
 
       <Separator />
 
-      <ScrollArea className="flex-1 py-4">
+      <ScrollArea className="min-h-0 flex-1 py-4">
         <div className="space-y-4 max-w-3xl mx-auto">
           {messages.map((msg) => (
             <div

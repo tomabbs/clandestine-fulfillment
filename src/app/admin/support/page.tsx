@@ -157,7 +157,7 @@ export default function AdminSupportPage() {
         )}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(280px,380px)_1fr] overflow-hidden rounded-lg border">
+      <div className="grid min-h-0 flex-1 grid-cols-[220px_minmax(280px,380px)_1fr] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-lg border">
         <aside className="border-r bg-muted/20 p-3">
           <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">Queues</p>
           <div className="space-y-1">
@@ -445,8 +445,8 @@ function ConversationDetail({ conversationId }: { conversationId: string }) {
   }
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-[1fr_280px]">
-      <div className="flex min-w-0 flex-col">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[1fr_280px] grid-rows-[minmax(0,1fr)]">
+      <div className="flex min-h-0 min-w-0 flex-col">
         <header className="border-b p-4">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
