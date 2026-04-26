@@ -217,20 +217,27 @@ export function legalNextStates(
 }
 
 /**
- * Input shape for the TS-side wrapper that will call the Phase 2+ RPC.
- * The RPC itself (`apply_outcome_transition`, to be added alongside the
- * shadow-promotion loop in Phase 2) is responsible for:
+ * Input shape for the TS-side wrapper that calls the
+ * `apply_sku_outcome_transition` PL/pgSQL RPC (migration
+ * 20260428000002). The RPC is responsible for:
  *   1. `SELECT pg_advisory_xact_lock(hashtext('sku_transition:' || id))`
- *      as the first statement.
- *   2. Rejecting illegal transitions by consulting a PL/pgSQL mirror of
- *      this table.
- *   3. Rejecting terminal-state egress via any trigger other than
+ *      as the first effectful statement (SKU-AUTO-22).
+ *   2. Re-reading the row FOR UPDATE.
+ *   3. OCC check on `state_version` (SKU-AUTO-14).
+ *   4. from_state drift detection.
+ *   5. Rejecting terminal-state egress via any trigger other than
  *      `human_review`.
- *   4. OCC check on `state_version`.
- *   5. Updating the row and appending a `sku_outcome_transitions` audit.
+ *   6. Rejecting writes of `auto_live_inventory_alias` to identity rows
+ *      (that state lives on `client_store_sku_mappings` and is written
+ *      by `promote_identity_match_to_alias`).
+ *   7. UPDATE identity row + INSERT `sku_outcome_transitions` audit row
+ *      atomically in one transaction.
  *
- * Phase 1 only ships this typed shape + the pure predicate above. The
- * wrapper function (`applyOutcomeTransition`) lands when the RPC lands.
+ * The TS-layer JS `LEGAL_TRANSITIONS` table is the canonical legality
+ * source; `validateOutcomeTransition()` is called by the wrapper BEFORE
+ * the RPC so most illegal transitions are rejected in-process with a
+ * structured reason rather than surfaced as a DB exception. The RPC
+ * enforces the narrower DB-critical invariant set for defense-in-depth.
  */
 export interface ApplyOutcomeTransitionInput {
   workspaceId: string;
@@ -245,6 +252,139 @@ export interface ApplyOutcomeTransitionInput {
   reasonCode: ReasonCode;
   evidenceSnapshot?: Record<string, unknown>;
   triggeredBy?: string | null;
+}
+
+/**
+ * Stronger input for the live RPC call path. The `initial` → X case is
+ * an INSERT path (row creation) and is NOT routed through this wrapper;
+ * callers in the INSERT path use a separate code path.
+ */
+export interface ApplyOutcomeTransitionCallInput extends ApplyOutcomeTransitionInput {
+  identityMatchId: string;
+  from: OutcomeState;
+}
+
+export type ApplyOutcomeTransitionErrorReason =
+  | "missing_reason_code"
+  | "terminal_state_non_human_egress"
+  | "illegal_transition"
+  | "to_state_forbidden_on_identity_row"
+  | "stale_state_version"
+  | "from_state_drift"
+  | "identity_match_not_found"
+  | "identity_match_inactive"
+  | "rpc_error"
+  | "unexpected_response_shape";
+
+export type ApplyOutcomeTransitionResult =
+  | { ok: true; newStateVersion: number; transitionId: string }
+  | { ok: false; reason: ApplyOutcomeTransitionErrorReason; detail?: string };
+
+/**
+ * Structural contract of the DB row returned by the `RETURNS TABLE (...)`
+ * RPC. PostgREST returns it as a one-element array.
+ */
+interface ApplyOutcomeTransitionRpcRow {
+  new_state_version: number;
+  transition_id: string;
+}
+
+/**
+ * Minimal supabase client surface we actually depend on. Using this
+ * shape instead of importing `SupabaseClient<...>` keeps the module
+ * free of a hard dependency on the generated Database types and lets
+ * tests pass a tiny mock. Uses `PromiseLike` (not `Promise`) because
+ * the real supabase-js `rpc()` returns a `PostgrestFilterBuilder` that
+ * is thenable but not an actual `Promise` — it needs `await` to
+ * resolve, which both shapes satisfy.
+ */
+export interface RpcClient {
+  rpc(
+    fn: string,
+    args: Record<string, unknown>,
+  ): PromiseLike<{ data: unknown; error: { message: string } | null }>;
+}
+
+/**
+ * Map a Postgres exception message back to a typed error reason so
+ * callers can branch on `stale_state_version` vs `from_state_drift` vs
+ * `identity_match_inactive` without string matching at the call site.
+ * The regexes are deliberately tolerant of the prefix so a change to
+ * the RAISE EXCEPTION prefix (e.g., Supabase wrapping) does not break
+ * matching.
+ */
+function mapRpcErrorToReason(message: string): ApplyOutcomeTransitionErrorReason {
+  if (/state_version drift/i.test(message)) return "stale_state_version";
+  if (/from_state drift/i.test(message)) return "from_state_drift";
+  if (/not found/i.test(message)) return "identity_match_not_found";
+  if (/is not active/i.test(message)) return "identity_match_inactive";
+  if (/terminal state/i.test(message)) return "terminal_state_non_human_egress";
+  if (/auto_live_inventory_alias must go through/i.test(message)) {
+    return "to_state_forbidden_on_identity_row";
+  }
+  return "rpc_error";
+}
+
+/**
+ * Apply an outcome-state transition on a
+ * `client_store_product_identity_matches` row by calling the
+ * `apply_sku_outcome_transition` RPC (migration 20260428000002).
+ *
+ * Client-side defenses (run BEFORE the RPC):
+ *   * `validateOutcomeTransition()` rejects illegal transitions,
+ *     missing reason codes, and terminal-state egress by non-human
+ *     triggers.
+ *   * An additional guard rejects `to === 'auto_live_inventory_alias'`
+ *     so the alias-only state never even reaches the RPC.
+ *
+ * Server-side defenses (run by the RPC):
+ *   * pg_advisory_xact_lock serializes concurrent callers for the same
+ *     identity row (SKU-AUTO-22).
+ *   * state_version OCC (SKU-AUTO-14).
+ *   * from_state drift detection.
+ *   * Same terminal-egress + alias-rejection guards.
+ *
+ * On success returns `{ ok: true, newStateVersion, transitionId }`.
+ * On failure returns `{ ok: false, reason, detail? }` with a typed
+ * reason so callers can branch cleanly.
+ */
+export async function applyOutcomeTransition(
+  supabase: RpcClient,
+  input: ApplyOutcomeTransitionCallInput,
+): Promise<ApplyOutcomeTransitionResult> {
+  const validation = validateOutcomeTransition(input);
+  if (!validation.ok) {
+    return { ok: false, reason: validation.reason as ApplyOutcomeTransitionErrorReason };
+  }
+
+  if (input.to === "auto_live_inventory_alias") {
+    return { ok: false, reason: "to_state_forbidden_on_identity_row" };
+  }
+
+  const { data, error } = await supabase.rpc("apply_sku_outcome_transition", {
+    p_identity_match_id: input.identityMatchId,
+    p_expected_state_version: input.expectedStateVersion,
+    p_expected_from_state: input.from,
+    p_to_state: input.to,
+    p_trigger: input.trigger,
+    p_reason_code: input.reasonCode,
+    p_evidence_snapshot: input.evidenceSnapshot ?? null,
+    p_triggered_by: input.triggeredBy ?? null,
+  });
+
+  if (error) {
+    return { ok: false, reason: mapRpcErrorToReason(error.message), detail: error.message };
+  }
+
+  const row: ApplyOutcomeTransitionRpcRow | undefined = Array.isArray(data)
+    ? (data[0] as ApplyOutcomeTransitionRpcRow | undefined)
+    : (data as ApplyOutcomeTransitionRpcRow | undefined);
+
+  if (!row || typeof row.new_state_version !== "number" || typeof row.transition_id !== "string") {
+    return { ok: false, reason: "unexpected_response_shape" };
+  }
+
+  return { ok: true, newStateVersion: row.new_state_version, transitionId: row.transition_id };
 }
 
 /**
