@@ -104,7 +104,6 @@ export interface RehydrateIdentityKeys {
 
 export interface RehydrateWebhookInventoryUpdateInput {
   workspaceId: string;
-  orgId: string;
   connectionId: string;
   platform: RehydratePlatform;
   inboundStockSignal: StockSignal;

@@ -29,6 +29,7 @@ const {
   mockWriteLastSeenAt,
   mockCommitOrderItems,
   mockReleaseOrderItems,
+  mockRehydrateWebhookInventoryUpdate,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockTrigger: vi.fn().mockResolvedValue({ id: "run-1" }),
@@ -53,6 +54,11 @@ const {
   // this file exercise the actual call shapes.
   mockCommitOrderItems: vi.fn().mockResolvedValue({ inserted: 0, alreadyOpen: [] }),
   mockReleaseOrderItems: vi.fn().mockResolvedValue({ released: 0 }),
+  // Phase 4 SKU-AUTO-24 — default returns `no_identity_row` so
+  // pre-existing missing-mapping tests keep flowing through to the
+  // historical `sku_mapping_missing` path. Rehydrate-branch tests
+  // override this per-case.
+  mockRehydrateWebhookInventoryUpdate: vi.fn().mockResolvedValue({ kind: "no_identity_row" }),
 }));
 
 vi.mock("@/lib/server/supabase-server", () => ({
@@ -90,6 +96,17 @@ vi.mock("@/lib/server/webhook-monotonic-guard", () => ({
   writeLastSeenAt: mockWriteLastSeenAt,
 }));
 
+// Phase 4 SKU-AUTO-24 — mock the rehydrate orchestrator so each
+// wiring branch in `handleInventoryUpdate` can be driven
+// deterministically. The orchestrator itself has its own test suite
+// (tests/unit/lib/server/webhook-rehydrate.test.ts); here we only
+// assert the handler correctly maps each outcome to a `webhook_events`
+// status + return value and, where appropriate, halts before the
+// historical `sku_mapping_missing` path.
+vi.mock("@/lib/server/webhook-rehydrate", () => ({
+  rehydrateWebhookInventoryUpdate: mockRehydrateWebhookInventoryUpdate,
+}));
+
 import { processClientStoreWebhookTask as _processClientStoreWebhookTask } from "@/trigger/tasks/process-client-store-webhook";
 
 // Trigger.dev v4 Task<…> doesn't expose .run on its public type; cast through
@@ -112,6 +129,11 @@ interface MockState {
   warehouseOrdersUpdates: Array<{ id: string; payload: Record<string, unknown> }>;
   warehouseOrderItems: Array<Record<string, unknown>>;
   reviewQueueUpserts: Array<Record<string, unknown>>;
+  // ── Phase 4 SKU-AUTO-24 rehydrate-orchestrator test harness ──
+  rehydrateWorkspace: Record<string, unknown> | null;
+  rehydrateIdentityRow: Record<string, unknown> | null;
+  rehydrateWarehouseLevelByVariantId: Map<string, Record<string, unknown>>;
+  rehydrateStabilityHistory: Array<Record<string, unknown>>;
 }
 
 function newState(): MockState {
@@ -126,6 +148,10 @@ function newState(): MockState {
     warehouseOrdersUpdates: [],
     warehouseOrderItems: [],
     reviewQueueUpserts: [],
+    rehydrateWorkspace: null,
+    rehydrateIdentityRow: null,
+    rehydrateWarehouseLevelByVariantId: new Map(),
+    rehydrateStabilityHistory: [],
   };
 }
 
@@ -194,6 +220,8 @@ function installFromMock() {
       return {
         select: () => ({
           eq: (firstCol: string, firstVal: unknown) => ({
+            // Two-eq terminator — existing handler reads by
+            // (workspace_id, sku) when computing the delta.
             eq: (secondCol: string, secondVal: unknown) => ({
               maybeSingle: async () => ({
                 data:
@@ -210,6 +238,17 @@ function installFromMock() {
                 error: null,
               }),
             }),
+            // Single-eq terminator — Phase 4 rehydrate orchestrator
+            // reads by variant_id only to compute warehouse ATP.
+            maybeSingle: async () => {
+              if (firstCol !== "variant_id" || typeof firstVal !== "string") {
+                return { data: null, error: null };
+              }
+              return {
+                data: state.rehydrateWarehouseLevelByVariantId.get(firstVal) ?? null,
+                error: null,
+              };
+            },
           }),
         }),
       };
@@ -282,6 +321,93 @@ function installFromMock() {
         },
       };
     }
+
+    // ── Phase 4 SKU-AUTO-24 webhook-rehydrate orchestrator tables ──
+    //
+    // These mocks let the rehydrate orchestrator run during existing
+    // handler tests without affecting their assertions: workspaces
+    // always reports `emergency_paused=false`, identity matches
+    // always miss (orchestrator returns `no_identity_row` and the
+    // handler falls through to the historical `sku_mapping_missing`
+    // return). Tests that want to exercise rehydrate branches stub
+    // `state.rehydrateIdentityRow` + `state.rehydrateWarehouseLevel`
+    // below.
+    if (table === "workspaces") {
+      return {
+        select: () => ({
+          eq: (_col: string, _id: string) => ({
+            maybeSingle: async () => ({
+              data: state.rehydrateWorkspace ?? { sku_autonomous_emergency_paused: false },
+              error: null,
+            }),
+            single: async () => ({
+              data: state.rehydrateWorkspace ?? { sku_autonomous_emergency_paused: false },
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
+    if (table === "client_store_product_identity_matches") {
+      return {
+        select: () => {
+          const builder = {
+            eq: (_c: string, _v: string) => builder,
+            maybeSingle: async () => ({
+              data: state.rehydrateIdentityRow ?? null,
+              error: null,
+            }),
+          };
+          return builder;
+        },
+        update: (_payload: Record<string, unknown>) => ({
+          eq: async (_c: string, _v: string) => ({ data: null, error: null }),
+        }),
+      };
+    }
+    if (table === "stock_stability_readings") {
+      return {
+        select: () => {
+          const builder = {
+            eq: (_c: string, _v: string) => builder,
+            order: (_c: string, _o: { ascending: boolean }) => ({
+              limit: async (_n: number) => ({
+                data: state.rehydrateStabilityHistory ?? [],
+                error: null,
+              }),
+            }),
+          };
+          return builder;
+        },
+      };
+    }
+    if (table === "sku_autonomous_runs") {
+      return {
+        insert: (_rows: Record<string, unknown>[]) => ({
+          select: () => ({
+            single: async () => ({
+              data: { id: "auto-run-1" },
+              error: null,
+            }),
+          }),
+        }),
+        update: (_payload: Record<string, unknown>) => ({
+          eq: async (_c: string, _v: string) => ({ data: null, error: null }),
+        }),
+      };
+    }
+    if (table === "sku_autonomous_decisions") {
+      return {
+        insert: (_rows: Record<string, unknown>[]) => ({
+          select: () => ({
+            single: async () => ({
+              data: { id: "auto-decision-1" },
+              error: null,
+            }),
+          }),
+        }),
+      };
+    }
     return {};
   });
 }
@@ -343,6 +469,11 @@ beforeEach(() => {
   mockExtractEventContext.mockReturnValue({ entityId: null, eventTimestamp: null });
   mockCheckMonotonicGuard.mockReset();
   mockCheckMonotonicGuard.mockResolvedValue({ stale: false });
+  mockRehydrateWebhookInventoryUpdate.mockReset();
+  // Default outcome = `no_identity_row` so pre-existing tests that
+  // never stub this keep falling through to the historical
+  // `sku_mapping_missing` path.
+  mockRehydrateWebhookInventoryUpdate.mockResolvedValue({ kind: "no_identity_row" });
 });
 
 const WORKSPACE_ID = "ws-1";
@@ -557,6 +688,376 @@ describe("handleInventoryUpdate — Shopify inventory_levels/update", () => {
     expect(mockRecordInventoryChange).toHaveBeenCalledWith(
       expect.objectContaining({ source: "woocommerce", delta: 7 }),
     );
+  });
+});
+
+// ─── handleInventoryUpdate — Phase 4 SKU-AUTO-24 demotion-rehydrate ───
+//
+// These tests exercise the wiring between `handleInventoryUpdate` and
+// the `rehydrateWebhookInventoryUpdate` orchestrator. The orchestrator
+// itself is mocked (see vi.mock above) so we can drive each outcome
+// branch deterministically without standing up identity rows,
+// warehouse levels, stability history, etc. The orchestrator's own
+// correctness is covered in tests/unit/lib/server/webhook-rehydrate.test.ts.
+//
+// Key invariants asserted here:
+//   1. The rehydrate orchestrator is called BEFORE the historical
+//      `sku_mapping_missing` return, but ONLY when `mappingRow` is
+//      missing a `remote_sku` (i.e. no live alias exists).
+//   2. `no_identity_row` and `identity_lookup_failed` fall through to
+//      the historical `sku_mapping_missing` path so discovery still
+//      triggers for genuinely unknown listings.
+//   3. Every other outcome halts the handler at a rehydrate-specific
+//      `webhook_events.status` and returns a rehydrate-specific
+//      `reason` — it NEVER falls through to `sku_mapping_missing`.
+//   4. A positive-stock Shopify webhook that resolves to an existing
+//      mapping (live alias) does NOT call the rehydrate orchestrator
+//      — rehydrate is only for missing mappings.
+
+describe("handleInventoryUpdate — Phase 4 rehydrate branches", () => {
+  it("emergency_paused: halts with sku_autonomy_emergency_paused, no inventory write, no fall-through", async () => {
+    seedConnection();
+    // No mapping seeded → orchestrator is invoked.
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "emergency_paused",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 7,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(mockRehydrateWebhookInventoryUpdate).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      processed: false,
+      reason: "sku_autonomy_emergency_paused",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+    });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "sku_autonomy_emergency_paused",
+    });
+    // Critical: we MUST NOT also persist `sku_mapping_missing` —
+    // emergency_paused is a halt, not a fall-through.
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("promoted: halts with rehydrate_promoted_alias and surfaces alias/decision/run IDs", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "promoted",
+      aliasId: "alias-42",
+      identityMatchId: "identity-42",
+      decisionId: "decision-42",
+      runId: "run-42",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 12,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    // Orchestrator must be called with the right shape (platform, IDs,
+    // identityKeys from inventory_item_id, and a positive stock signal).
+    expect(mockRehydrateWebhookInventoryUpdate).toHaveBeenCalledTimes(1);
+    const [, orchestratorInput] = mockRehydrateWebhookInventoryUpdate.mock.calls[0] as [
+      unknown,
+      {
+        workspaceId: string;
+        connectionId: string;
+        platform: string;
+        identityKeys: { remoteInventoryItemId?: string };
+        inboundStockSignal: { value: number | null; source: string; tier: string };
+        webhookEventId: string;
+      },
+    ];
+    expect(orchestratorInput.workspaceId).toBe(WORKSPACE_ID);
+    expect(orchestratorInput.connectionId).toBe(CONNECTION_ID);
+    expect(orchestratorInput.platform).toBe("shopify");
+    expect(orchestratorInput.identityKeys.remoteInventoryItemId).toBe(REMOTE_INVENTORY_ITEM_ID);
+    expect(orchestratorInput.inboundStockSignal.value).toBe(12);
+    expect(orchestratorInput.inboundStockSignal.source).toBe("shopify_graphql");
+    expect(orchestratorInput.webhookEventId).toBe(eventId);
+
+    expect(result).toMatchObject({
+      processed: true,
+      reason: "rehydrate_promoted_alias",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      alias_id: "alias-42",
+      identity_match_id: "identity-42",
+      decision_id: "decision-42",
+      run_id: "run-42",
+    });
+    // Promotion is audit-only at the webhook layer — the post-promotion
+    // webhook carries the inventory delta, not this one.
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "rehydrate_promoted_alias",
+    });
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("updated_evidence_only: halts with rehydrate_evidence_only + surfaces outcome_state/rationale", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "updated_evidence_only",
+      identityMatchId: "identity-7",
+      outcomeState: "auto_database_identity_match",
+      rationale: "non-exception state, evidence refreshed",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 5,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(result).toMatchObject({
+      processed: true,
+      reason: "rehydrate_evidence_only",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      identity_match_id: "identity-7",
+      outcome_state: "auto_database_identity_match",
+      rationale: "non-exception state, evidence refreshed",
+    });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "rehydrate_evidence_only",
+    });
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("bumped_reobserved: halts with rehydrate_bumped_evidence for stock_tier_unreliable / gate-failed exceptions", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "bumped_reobserved",
+      identityMatchId: "identity-9",
+      rationale: "stock tier unreliable; evidence re-observed",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 3,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(result).toMatchObject({
+      processed: true,
+      reason: "rehydrate_bumped_evidence",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      identity_match_id: "identity-9",
+      rationale: "stock tier unreliable; evidence re-observed",
+    });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "rehydrate_bumped_evidence",
+    });
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("promotion_blocked: halts with rehydrate_promotion_blocked + surfaces reason/detail/runId", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "promotion_blocked",
+      identityMatchId: "identity-11",
+      reason: "optimistic_concurrency_conflict",
+      detail: "state_version mismatch on retry",
+      runId: "run-11",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 9,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(result).toMatchObject({
+      processed: false,
+      reason: "rehydrate_promotion_blocked",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      identity_match_id: "identity-11",
+      promotion_reason: "optimistic_concurrency_conflict",
+      promotion_detail: "state_version mismatch on retry",
+      run_id: "run-11",
+    });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "rehydrate_promotion_blocked",
+    });
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("run_open_failed: halts with rehydrate_run_open_failed + surfaces detail", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "run_open_failed",
+      identityMatchId: "identity-13",
+      detail: "supabase insert failed: connection reset",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 6,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(result).toMatchObject({
+      processed: false,
+      reason: "rehydrate_run_open_failed",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      identity_match_id: "identity-13",
+      detail: "supabase insert failed: connection reset",
+    });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "rehydrate_run_open_failed",
+    });
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("identity_lookup_failed: falls through to sku_mapping_missing (fail-open)", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "identity_lookup_failed",
+      detail: "supabase select timed out",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 4,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    // Fail-open: transient identity-cascade errors MUST NOT block the
+    // webhook from reaching the historical discovery path.
+    expect(result).toMatchObject({
+      processed: false,
+      reason: "sku_mapping_missing",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+    });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+    // And we should NOT have persisted any rehydrate-specific status.
+    expect(state.webhookEventStatusUpdates).not.toContainEqual({
+      id: eventId,
+      status: "rehydrate_promoted_alias",
+    });
+  });
+
+  it("no_identity_row: falls through to sku_mapping_missing (genuine unknown listing)", async () => {
+    seedConnection();
+    mockRehydrateWebhookInventoryUpdate.mockResolvedValueOnce({
+      kind: "no_identity_row",
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 2,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(result).toMatchObject({
+      processed: false,
+      reason: "sku_mapping_missing",
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+    });
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
+
+  it("live alias exists: rehydrate orchestrator is NOT called (rehydrate is for missing mappings only)", async () => {
+    seedConnection();
+    state.skuMappings.push({
+      connection_id: CONNECTION_ID,
+      remote_inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      remote_sku: SKU,
+      variant_id: "var-1",
+      last_pushed_quantity: 99,
+    });
+    state.inventoryLevels.push({
+      workspace_id: WORKSPACE_ID,
+      sku: SKU,
+      available: 5,
+    });
+
+    const eventId = seedShopifyInventoryEvent({
+      inventory_item_id: REMOTE_INVENTORY_ITEM_ID,
+      location_id: DEFAULT_LOCATION_ID,
+      available: 7,
+    });
+
+    const result = await processClientStoreWebhookTask.run({
+      webhookEventId: eventId,
+    });
+
+    expect(result).toMatchObject({ processed: true, sku: SKU, delta: 2 });
+    // When the mapping has remote_sku, we take the existing fast path —
+    // the rehydrate orchestrator must not be called.
+    expect(mockRehydrateWebhookInventoryUpdate).not.toHaveBeenCalled();
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(1);
   });
 });
 

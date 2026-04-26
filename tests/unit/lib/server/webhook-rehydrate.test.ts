@@ -59,7 +59,6 @@ const NOW_ISO = "2026-04-21T12:00:00.000Z";
 const NOW_MS = new Date(NOW_ISO).getTime();
 
 const workspaceId = "ws-1";
-const orgId = "org-1";
 const connectionId = "conn-1";
 const variantId = "var-1";
 const identityMatchId = "ident-1";
@@ -401,7 +400,6 @@ function baseInput(
 ): RehydrateWebhookInventoryUpdateInput {
   return {
     workspaceId,
-    orgId,
     connectionId,
     platform: "shopify",
     inboundStockSignal: positiveSignal(4),

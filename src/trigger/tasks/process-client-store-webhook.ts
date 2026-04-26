@@ -11,6 +11,7 @@ import { triggerBundleFanout } from "@/lib/server/bundles";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import { commitOrderItems, releaseOrderItems } from "@/lib/server/inventory-commitments";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
+import type { StockSignal } from "@/lib/server/stock-reliability";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import {
   checkMonotonicGuard,
@@ -19,6 +20,10 @@ import {
   stashEntityIdOnCurrentRow,
   writeLastSeenAt,
 } from "@/lib/server/webhook-monotonic-guard";
+import {
+  type RehydrateSupabaseClient,
+  rehydrateWebhookInventoryUpdate,
+} from "@/lib/server/webhook-rehydrate";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
 export const processClientStoreWebhookTask = task({
@@ -267,11 +272,157 @@ async function handleInventoryUpdate(
       .maybeSingle();
 
     if (!mappingRow?.remote_sku) {
-      // SKU mapping missing — we can't safely route this event. The autoDiscoverShopifySkus
-      // step is supposed to backfill these rows for every variant before the connection's
-      // do_not_fanout flag is flipped. A miss here means either (a) staff flipped the gate
-      // before running autoDiscover, or (b) a brand-new variant was added in Shopify after
-      // the last autoDiscover run. Surface as `sku_mapping_missing` so the operator sees it.
+      // SKU mapping missing — we can't safely route this event via the
+      // alias table. BEFORE routing to unknown-SKU discovery (the
+      // `sku_mapping_missing` path), we try the demotion-rehydrate
+      // flow (plan §"Post-demotion webhook ingress", SKU-AUTO-24):
+      //   * If there is an ACTIVE identity row in
+      //     `client_store_product_identity_matches` for this
+      //     (connection, remote_inventory_item_id), and the row is in
+      //     `client_stock_exception` with a credible positive stock
+      //     signal + warehouse ATP + stability, re-promote it to a
+      //     live alias and halt the webhook with
+      //     `rehydrate_promoted_alias`.
+      //   * For any other active identity row we bump evidence and
+      //     halt (no inventory side-effect yet — the next webhook will
+      //     find the rehydrated alias).
+      //   * Only when NO identity row exists (or a DB error) do we
+      //     fall through to the historical `sku_mapping_missing`
+      //     return, which is what eventually spawns unknown-SKU
+      //     discovery downstream.
+      //
+      // The orchestrator self-gates on workspace-emergency-pause; the
+      // nested `promoteIdentityMatchToAlias()` wrapper self-gates on
+      // `workspaces.flags.sku_live_alias_autonomy_enabled`. No flag
+      // check is needed here.
+      const nowIso = new Date().toISOString();
+      const inboundStockSignal: StockSignal = {
+        value: typeof available === "number" ? available : null,
+        observedAt: nowIso,
+        observedAtLocal: nowIso,
+        source: "shopify_graphql",
+        tier: "fresh_remote",
+      };
+
+      const rehydrateOutcome = await rehydrateWebhookInventoryUpdate(
+        supabase as unknown as RehydrateSupabaseClient,
+        {
+          workspaceId,
+          connectionId,
+          platform: "shopify",
+          inboundStockSignal,
+          identityKeys: { remoteInventoryItemId: inventoryItemIdString },
+          triggeredBy: `webhook:shopify:inventory_levels_update:${eventId}`,
+          webhookEventId: eventId,
+        },
+      );
+
+      switch (rehydrateOutcome.kind) {
+        case "emergency_paused": {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "sku_autonomy_emergency_paused" })
+            .eq("id", eventId);
+          return {
+            processed: false,
+            reason: "sku_autonomy_emergency_paused",
+            inventory_item_id: inventoryItemIdString,
+          };
+        }
+        case "promoted": {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "rehydrate_promoted_alias" })
+            .eq("id", eventId);
+          return {
+            processed: true,
+            reason: "rehydrate_promoted_alias",
+            inventory_item_id: inventoryItemIdString,
+            alias_id: rehydrateOutcome.aliasId,
+            identity_match_id: rehydrateOutcome.identityMatchId,
+            decision_id: rehydrateOutcome.decisionId,
+            run_id: rehydrateOutcome.runId,
+          };
+        }
+        case "updated_evidence_only": {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "rehydrate_evidence_only" })
+            .eq("id", eventId);
+          return {
+            processed: true,
+            reason: "rehydrate_evidence_only",
+            inventory_item_id: inventoryItemIdString,
+            identity_match_id: rehydrateOutcome.identityMatchId,
+            outcome_state: rehydrateOutcome.outcomeState,
+            rationale: rehydrateOutcome.rationale,
+          };
+        }
+        case "bumped_reobserved": {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "rehydrate_bumped_evidence" })
+            .eq("id", eventId);
+          return {
+            processed: true,
+            reason: "rehydrate_bumped_evidence",
+            inventory_item_id: inventoryItemIdString,
+            identity_match_id: rehydrateOutcome.identityMatchId,
+            rationale: rehydrateOutcome.rationale,
+          };
+        }
+        case "promotion_blocked": {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "rehydrate_promotion_blocked" })
+            .eq("id", eventId);
+          return {
+            processed: false,
+            reason: "rehydrate_promotion_blocked",
+            inventory_item_id: inventoryItemIdString,
+            identity_match_id: rehydrateOutcome.identityMatchId,
+            promotion_reason: rehydrateOutcome.reason,
+            promotion_detail: rehydrateOutcome.detail,
+            run_id: rehydrateOutcome.runId,
+          };
+        }
+        case "run_open_failed": {
+          await supabase
+            .from("webhook_events")
+            .update({ status: "rehydrate_run_open_failed" })
+            .eq("id", eventId);
+          return {
+            processed: false,
+            reason: "rehydrate_run_open_failed",
+            inventory_item_id: inventoryItemIdString,
+            identity_match_id: rehydrateOutcome.identityMatchId,
+            detail: rehydrateOutcome.detail,
+          };
+        }
+        case "identity_lookup_failed": {
+          // Fail-open: a transient Supabase read error on the
+          // identity cascade MUST NOT block the webhook from
+          // eventually reaching the discovery path. The existing
+          // `sku_mapping_missing` status surfaces the miss; we add a
+          // metadata breadcrumb so ops can audit the rehydrate miss.
+          console.warn(
+            "[rehydrate] identity_lookup_failed, falling through to sku_mapping_missing",
+            { eventId, detail: rehydrateOutcome.detail },
+          );
+          break;
+        }
+        case "no_identity_row":
+          // No identity row anywhere → this is a genuine brand-new
+          // unknown remote listing. Fall through to the historical
+          // sku_mapping_missing path below so downstream discovery
+          // can handle it.
+          break;
+      }
+
+      // Existing `sku_mapping_missing` path. Reached ONLY when:
+      //   * rehydrate orchestrator returned `no_identity_row`, OR
+      //   * rehydrate orchestrator returned `identity_lookup_failed`
+      //     (fail-open).
       await supabase
         .from("webhook_events")
         .update({ status: "sku_mapping_missing" })
