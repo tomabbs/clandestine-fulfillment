@@ -40,7 +40,7 @@ jobs:
       - name: Vitest
         run: pnpm test
 
-      - name: "use server" exports guard
+      - name: '"use server" exports guard'
         # Fast (~200ms) pre-build gate that catches non-async-function
         # exports from `"use server"` modules before they reach the
         # Next.js build step (where the failure is cryptic, points
