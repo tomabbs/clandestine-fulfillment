@@ -40,6 +40,16 @@ jobs:
       - name: Vitest
         run: pnpm test
 
+      - name: "use server" exports guard
+        # Fast (~200ms) pre-build gate that catches non-async-function
+        # exports from `"use server"` modules before they reach the
+        # Next.js build step (where the failure is cryptic, points
+        # at compiled `.next/server/*` chunks, and costs ~90s to
+        # reproduce). Runs ahead of `pnpm build` so the cheap check
+        # shields the expensive step. See
+        # scripts/check-use-server-exports.ts for the rule set.
+        run: bash scripts/ci-use-server-exports-guard.sh
+
       - name: Next.js build
         run: pnpm build
         env:

@@ -40,6 +40,7 @@ Run:
 pnpm check
 pnpm typecheck
 pnpm test
+bash scripts/ci-use-server-exports-guard.sh
 pnpm build
 bash scripts/ci-inventory-guard.sh
 bash scripts/ci-webhook-dedup-guard.sh
@@ -48,6 +49,19 @@ bash scripts/ci-webhook-dedup-guard.sh
 Pass criteria:
 - all commands exit with status `0`
 - no new failing tests
+
+Note: `scripts/ci-use-server-exports-guard.sh` runs BEFORE `pnpm build`. It
+AST-parses every `src/**/*.{ts,tsx}` file that carries the `"use server"`
+directive and fails fast (~200ms) if any module exports anything other than
+`async function`s (or erased types). This guard was added 2026-04-26 after a
+Phase 6 deploy hit the `Error: A "use server" file can only export async
+functions, found object` build failure (NextJS RSC validation at page-data
+collection). Without this guard, the same class of bug costs ~90s of
+CI time and produces a stacktrace pointing at compiled `.next/server/*`
+chunks rather than the offending source line. See
+`scripts/check-use-server-exports.ts` for the full rule set and
+`tests/unit/scripts/check-use-server-exports.test.ts` for the 14-case
+coverage matrix.
 
 ---
 
