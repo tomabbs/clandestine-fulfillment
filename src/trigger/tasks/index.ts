@@ -237,6 +237,18 @@ export { rampHaltCriteriaSensorTask } from "./ramp-halt-criteria-sensor";
 export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
+// Phase 7.B (autonomous SKU matcher) — weekly-per-workspace rollout
+//   telemetry. Reads the last 30 days of runs/decisions/transitions/
+//   hold events + the current identity-match outcome breakdown, runs
+//   the pure `summarizeAutonomousTelemetry()` helper, emits one
+//   `sensor_readings` row ("sku_autonomous.telemetry"), and for each
+//   threshold trip upserts a weekly-bucketed `warehouse_review_queue`
+//   row. Emergency-pause narrows to sensor-only (no review-queue
+//   writes) so ops keep observability without spam during remediation.
+export {
+  skuAutonomousTelemetryManualTask,
+  skuAutonomousTelemetryScheduledTask,
+} from "./sku-autonomous-telemetry";
 // Phase 5.C (autonomous SKU matcher) — hold recovery recheck.
 //   */30 cadence. Scans warehouse_orders held with reason
 //   `fetch_incomplete_at_match` in the last 24h. For each order:
