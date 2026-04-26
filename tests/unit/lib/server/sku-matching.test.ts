@@ -201,19 +201,17 @@ describe("rankSkuCandidates — evidenceContext (additive)", () => {
       operational: {
         warehouseStock: {
           value: 12,
-          source: "warehouse",
+          source: "warehouse_inventory_levels",
           observedAt: "2026-04-25T10:00:00.000Z",
+          observedAtLocal: "2026-04-25T10:00:00.000Z",
           tier: "authoritative",
-          freshness: "fresh",
-          freshnessMs: 1000,
         },
         remoteStock: () => ({
           value: 5,
-          source: "shopify",
+          source: "shopify_graphql",
           observedAt: "2026-04-25T10:00:05.000Z",
+          observedAtLocal: "2026-04-25T10:00:05.000Z",
           tier: "fresh_remote",
-          freshness: "fresh",
-          freshnessMs: 1500,
         }),
         stockedAtDefaultLocation: () => true,
       },
@@ -244,11 +242,10 @@ describe("rankSkuCandidates — evidenceContext (additive)", () => {
       operational: {
         warehouseStock: {
           value: 12,
-          source: "warehouse",
+          source: "warehouse_inventory_levels",
           observedAt: "2026-04-25T10:00:00.000Z",
+          observedAtLocal: "2026-04-25T10:00:00.000Z",
           tier: "authoritative",
-          freshness: "fresh",
-          freshnessMs: 1000,
         },
         stockedAtDefaultLocation: () => true,
       },
@@ -271,11 +268,10 @@ describe("rankSkuCandidates — evidenceContext (additive)", () => {
       operational: {
         warehouseStock: {
           value: 0,
-          source: "warehouse",
+          source: "warehouse_inventory_levels",
           observedAt: "2026-04-25T10:00:00.000Z",
+          observedAtLocal: "2026-04-25T10:00:00.000Z",
           tier: "authoritative",
-          freshness: "fresh",
-          freshnessMs: 1000,
         },
         remoteStock: () => null,
         stockedAtDefaultLocation: () => true,
@@ -298,11 +294,10 @@ describe("rankSkuCandidates — evidenceContext (additive)", () => {
       operational: {
         warehouseStock: {
           value: 12,
-          source: "warehouse",
+          source: "warehouse_inventory_levels",
           observedAt: "2026-04-25T10:00:00.000Z",
+          observedAtLocal: "2026-04-25T10:00:00.000Z",
           tier: "authoritative",
-          freshness: "fresh",
-          freshnessMs: 1000,
         },
         stockedAtDefaultLocation: () => true,
       },
@@ -327,11 +322,10 @@ describe("rankSkuCandidates — evidenceContext (additive)", () => {
       operational: {
         warehouseStock: {
           value: 12,
-          source: "warehouse",
+          source: "warehouse_inventory_levels",
           observedAt: "2026-04-25T10:00:00.000Z",
+          observedAtLocal: "2026-04-25T10:00:00.000Z",
           tier: "authoritative",
-          freshness: "fresh",
-          freshnessMs: 1000,
         },
         // Woo doesn't expose stockedAtDefaultLocation — gate must still pass.
         stockedAtDefaultLocation: () => null,

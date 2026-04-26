@@ -194,6 +194,12 @@ export interface StockHistoryReadings {
 const STABILITY_WINDOWS_MS = {
   tiebreak: 4 * 60 * 60 * 1000,
   boost: 6 * 60 * 60 * 1000,
+  // Promotion gate used by sku-alias-promotion.ts (SKU-AUTO-8). Matches
+  // the `boost` window by default because promotion is a stronger,
+  // slower-cadence decision than a ranker tiebreak — we want at least 6
+  // hours of identical readings before flipping a shadow identity match
+  // into a live inventory alias.
+  promotion: 6 * 60 * 60 * 1000,
 } as const;
 
 /**

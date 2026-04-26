@@ -45,6 +45,17 @@ export const workspaceFlagsSchema = z
     email_send_strategy: z.enum(["off", "shadow", "unified_resend", "ss_for_all"]).optional(),
     shadow_recipients: z.array(z.string().email()).optional(),
     bandcamp_skip_ss_email: z.boolean().optional(),
+    // Autonomous SKU matching rollout flags (plan §"Phased rollout + flags",
+    // release gates SKU-AUTO-*). Default OFF for every workspace until Phase
+    // 2 (identity) / Phase 7 (live alias) canary-acceptance reviews ship.
+    // Emergency pause is a top-level column on `workspaces` (enforced by the
+    // pg migration), not a JSON flag — see sku_autonomous_emergency_paused
+    // on the workspaces table directly.
+    sku_identity_autonomy_enabled: z.boolean().optional(),
+    sku_live_alias_autonomy_enabled: z.boolean().optional(),
+    non_warehouse_order_hold_enabled: z.boolean().optional(),
+    non_warehouse_order_client_alerts_enabled: z.boolean().optional(),
+    sku_autonomous_ui_enabled: z.boolean().optional(),
   })
   .strict();
 
@@ -114,6 +125,24 @@ export interface WorkspaceFlags {
    * hybrid mode). In unified_resend mode this flag is moot.
    */
   bandcamp_skip_ss_email?: boolean;
+  /**
+   * Autonomous SKU matching rollout flags (plan §"Phased rollout + flags").
+   * Default OFF for every workspace until the relevant canary-acceptance
+   * review is signed off. Order enforcement:
+   *   Phase 2 → sku_identity_autonomy_enabled  (identity writes)
+   *   Phase 4 → non_warehouse_order_hold_enabled  (order holds)
+   *   Phase 5 → non_warehouse_order_client_alerts_enabled  (client alerts)
+   *   Phase 7 → sku_live_alias_autonomy_enabled  (live alias writes)
+   * UI gate:
+   *   sku_autonomous_ui_enabled
+   * The emergency-pause kill switch is a top-level `workspaces` column
+   * (`sku_autonomous_emergency_paused`), not a JSON flag.
+   */
+  sku_identity_autonomy_enabled?: boolean;
+  sku_live_alias_autonomy_enabled?: boolean;
+  non_warehouse_order_hold_enabled?: boolean;
+  non_warehouse_order_client_alerts_enabled?: boolean;
+  sku_autonomous_ui_enabled?: boolean;
 }
 
 const cache = new Map<string, { flags: WorkspaceFlags; expiresAt: number }>();
