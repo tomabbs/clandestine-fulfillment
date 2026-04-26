@@ -11,6 +11,11 @@ export const TOGGLEABLE_PAGES = [
   { key: "sales", title: "Sales", href: "/portal/sales" },
   { key: "billing", title: "Billing", href: "/portal/billing" },
   { key: "support", title: "Support", href: "/portal/support" },
+  // Phase 6 Slice 6.F — client-facing stock-exceptions feed. Visible by
+  // default (following the TOGGLEABLE_PAGES convention) but separately
+  // gated per-workspace by `client_stock_exception_reports_enabled` so
+  // ops can enable the workspace flag before any client sees the route.
+  { key: "stock-exceptions", title: "Stock Exceptions", href: "/portal/stock-exceptions" },
 ] as const;
 
 export type PortalPageKey = (typeof TOGGLEABLE_PAGES)[number]["key"];

@@ -56,6 +56,7 @@ export const workspaceFlagsSchema = z
     non_warehouse_order_hold_enabled: z.boolean().optional(),
     non_warehouse_order_client_alerts_enabled: z.boolean().optional(),
     sku_autonomous_ui_enabled: z.boolean().optional(),
+    client_stock_exception_reports_enabled: z.boolean().optional(),
   })
   .strict();
 
@@ -143,6 +144,15 @@ export interface WorkspaceFlags {
   non_warehouse_order_hold_enabled?: boolean;
   non_warehouse_order_client_alerts_enabled?: boolean;
   sku_autonomous_ui_enabled?: boolean;
+  /**
+   * Phase 6 Slice 6.F — gate for the `/portal/stock-exceptions`
+   * client-facing page. When OFF (default) the portal route renders a
+   * "reports disabled" placeholder instead of the exception list, even
+   * if identity rows in `client_stock_exception` exist. Flip ON per
+   * workspace once ops confirm the client has onboarding context for
+   * reading the reports.
+   */
+  client_stock_exception_reports_enabled?: boolean;
 }
 
 const cache = new Map<string, { flags: WorkspaceFlags; expiresAt: number }>();
@@ -167,4 +177,91 @@ export async function getWorkspaceFlags(workspaceId: string): Promise<WorkspaceF
 export function invalidateWorkspaceFlags(workspaceId?: string): void {
   if (workspaceId) cache.delete(workspaceId);
   else cache.clear();
+}
+
+/**
+ * Autonomous-SKU emergency-pause reader (SKU-AUTO emergency-pause contract).
+ *
+ * The kill switch lives on `workspaces.sku_autonomous_emergency_paused`
+ * (a proper column, not a JSON flag) so ops can `UPDATE workspaces SET
+ * sku_autonomous_emergency_paused=true` to halt every autonomous write
+ * path for a single workspace without touching feature flags or deploys.
+ *
+ * Every autonomous Trigger task and the webhook rehydrate orchestrator
+ * MUST consult this helper before performing ANY autonomous side effect
+ * (decision rows, run rows, outcome transitions, promotions, alias
+ * writes, order holds, hold releases). The pure helpers that DESCRIBE
+ * decisions (ranker, hold evaluator, rehydrate policy) do not need to
+ * call this — their gate lives in the async orchestrator that wraps them.
+ *
+ * Structural Supabase subset: just enough to read the column. Callers
+ * pass either a full `createServiceRoleClient()` or a structural mock
+ * (unit tests use the latter).
+ */
+export interface EmergencyPauseSupabaseClient {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (
+        column: string,
+        value: string,
+      ) => {
+        maybeSingle: () => PromiseLike<{
+          data: { sku_autonomous_emergency_paused?: boolean | null } | null;
+          error: { message: string } | null;
+        }>;
+      };
+    };
+  };
+}
+
+export type EmergencyPauseReadResult =
+  | { kind: "ok"; paused: boolean }
+  | { kind: "error"; detail: string };
+
+/**
+ * Read the per-workspace emergency-pause flag.
+ *
+ * Fail CLOSED: if the column read returns an error, treat as PAUSED. The
+ * SKU-AUTO invariants say we must never silently proceed with a database
+ * outage — better to skip one sampler/promotion tick than to mint bad
+ * state. Callers surface the error in their logs/metrics.
+ */
+export async function readWorkspaceEmergencyPause(
+  supabase: EmergencyPauseSupabaseClient,
+  workspaceId: string,
+): Promise<EmergencyPauseReadResult> {
+  const { data, error } = await supabase
+    .from("workspaces")
+    .select("sku_autonomous_emergency_paused")
+    .eq("id", workspaceId)
+    .maybeSingle();
+
+  if (error) {
+    return { kind: "error", detail: error.message };
+  }
+
+  if (!data) {
+    return { kind: "error", detail: "workspace_not_found" };
+  }
+
+  return {
+    kind: "ok",
+    paused:
+      (data as { sku_autonomous_emergency_paused?: boolean | null })
+        .sku_autonomous_emergency_paused === true,
+  };
+}
+
+/**
+ * Convenience wrapper: returns `true` if the workspace is paused OR if the
+ * read failed (fail-closed). Callers that want to differentiate "paused"
+ * vs "DB error" should use {@link readWorkspaceEmergencyPause} directly.
+ */
+export async function isWorkspaceEmergencyPaused(
+  supabase: EmergencyPauseSupabaseClient,
+  workspaceId: string,
+): Promise<boolean> {
+  const result = await readWorkspaceEmergencyPause(supabase, workspaceId);
+  if (result.kind === "error") return true;
+  return result.paused;
 }

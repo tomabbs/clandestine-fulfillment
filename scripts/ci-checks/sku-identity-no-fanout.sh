@@ -48,7 +48,15 @@ for file in "${GUARDED_FILES[@]}"; do
     exit 1
   fi
 
-  if grep -q "$IDENTITY_TABLE" "$file"; then
+  # Strip `//` single-line comments before grepping. Comments that
+  # mention the identity table for doc purposes (e.g. explaining that
+  # the rehydrate orchestrator handles identity lookups out-of-band)
+  # don't constitute a fanout read and shouldn't trip the guard.
+  # The comment-stripping regex handles `// ...` and `/*...*/` on a
+  # single line; multi-line block comments fall through (rare and
+  # would be worth flagging anyway).
+  STRIPPED=$(sed -E 's#//.*$##; s#/\*.*\*/##' "$file")
+  if echo "$STRIPPED" | grep -q "$IDENTITY_TABLE"; then
     VIOLATIONS+=("$file")
   fi
 done

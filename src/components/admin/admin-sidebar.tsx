@@ -62,6 +62,11 @@ const NAV_ITEMS = [
   // /admin/shipstation-orders, now 301-redirected to /admin/orders).
   // /admin/orders-legacy is intentionally NOT in the sidebar — ops only.
   { title: "Orders", href: "/admin/orders", icon: ShoppingCart },
+  // Phase 6 Slice 6.D — fulfillment-hold resolution surface. Separate
+  // from "Orders" (which doesn't surface on_hold rows in the default
+  // cockpit view) so staff can triage held orders without filtering the
+  // main orders table.
+  { title: "Order Holds", href: "/admin/orders/holds", icon: AlertCircle },
   { title: "Mail-Order", href: "/admin/mail-order", icon: Store },
   { title: "Catalog", href: "/admin/catalog", icon: Library },
   { title: "Clients", href: "/admin/clients", icon: Users },
@@ -79,6 +84,12 @@ const SETTINGS_ITEMS = [
   { title: "Bandcamp Accounts", href: "/admin/settings/bandcamp" },
   { title: "Store Connections", href: "/admin/settings/store-connections" },
   { title: "SKU Matching", href: "/admin/settings/sku-matching" },
+  // Phase 6 Slices 6.B + 6.E — autonomous-matching read surfaces. Both
+  // pages are gated behind `sku_autonomous_ui_enabled` (see the server
+  // components in each route) so they render a stub until ops enables
+  // the flag.
+  { title: "Autonomous Runs", href: "/admin/settings/sku-matching/autonomous-runs" },
+  { title: "Identity Matches", href: "/admin/settings/sku-matching/identity-matches" },
   { title: "Reconnect Client Stores", href: "/admin/settings/client-store-reconnect" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },
   { title: "Carrier Mapping", href: "/admin/settings/carrier-map" },

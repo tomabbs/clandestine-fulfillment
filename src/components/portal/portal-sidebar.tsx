@@ -2,6 +2,7 @@
 
 import { createBrowserClient } from "@supabase/ssr";
 import {
+  AlertTriangle,
   Disc3,
   DollarSign,
   LayoutDashboard,
@@ -53,6 +54,12 @@ const NAV_ITEMS = [
   { title: "Sales", href: "/portal/sales", icon: TrendingUp, key: "sales" },
   { title: "Billing", href: "/portal/billing", icon: Receipt, key: "billing" },
   { title: "Support", href: "/portal/support", icon: MessageSquare, key: "support" },
+  {
+    title: "Stock Exceptions",
+    href: "/portal/stock-exceptions",
+    icon: AlertTriangle,
+    key: "stock-exceptions",
+  },
   { title: "Settings", href: "/portal/settings", icon: Settings, alwaysVisible: true },
 ] as const;
 

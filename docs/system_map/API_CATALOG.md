@@ -63,6 +63,23 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `triggerSensorCheck`, `triggerTagCleanup`
 - Admin page: `/admin/catalog/bundles` — bundle management
 
+### Autonomous SKU Matching — staff surfaces (Phase 6, 2026-04-26)
+
+- Files:
+  - `src/actions/sku-autonomous-runs.ts` (Slice 6.A)
+  - `src/actions/sku-identity-matches.ts` (Slice 6.E)
+  - `src/actions/order-holds.ts` (Slice 6.C)
+  - `src/actions/sku-autonomous-canary.ts` (Slice 6.G)
+- Key exports (all staff-only via `requireStaff()`; workspace-scoped defense-in-depth over RLS):
+  - Slice 6.A — `listAutonomousRuns({ filters, page })`, `getAutonomousRunDetail({ runId })`, `getVariantDecisionHistory({ variantId })` — read surface over `sku_autonomous_runs` and `sku_autonomous_decisions` (never writes). Bounded `limit ≤ 200`.
+  - Slice 6.E — `listIdentityMatches({ filters, page })`, `getIdentityMatchDetail({ identityMatchId, transitionsLimit ≤ 200 })` — read surface over `client_store_product_identity_matches` + `sku_outcome_transitions`. Whitelisted in `scripts/ci-checks/sku-identity-no-fanout.sh` (read-only). Promotion still goes through `promote_identity_match_to_alias` — this module never mutates identity state.
+  - Slice 6.C — `listOrderHolds({ filters, page })`, `releaseOrderHold({ orderId, resolutionCode, note? })`, `releaseOrderHoldsBulk({ orderIds, resolutionCode, note? })` — single-entry mutation for held orders; both wrap `release_order_fulfillment_hold` RPC. `staff_override` resolution requires a non-empty note (SKU-AUTO-17).
+  - Slice 6.G — `flipAutonomousMatchingFlag({ flag, enabled, note? })` — SKU-AUTO-19 enforcement for turning autonomous-matching flags ON. Canary-gated flags (`sku_identity_autonomy_enabled`, `sku_live_alias_autonomy_enabled`) require a RESOLVED `warehouse_review_queue` row with category `sku_autonomous_canary_review`; `sku_live_alias_autonomy_enabled` additionally requires `compute_bandcamp_linkage_metrics` to clear the Phase 7 thresholds (70% linkage / 60% verified / 40% option) AND the workspace not to be in `sku_autonomous_emergency_paused`. Turning a flag OFF bypasses both preflights (fast-rollback path). Writes an audit row to `warehouse_review_queue` and invalidates the flag cache.
+- Admin pages:
+  - `/admin/settings/sku-matching/autonomous-runs` (Slice 6.B) — gated by `sku_autonomous_ui_enabled`.
+  - `/admin/settings/sku-matching/identity-matches` (Slice 6.E) — gated by `sku_autonomous_ui_enabled`.
+  - `/admin/orders/holds` (Slice 6.D) — NOT flag-gated (staff should always be able to resolve existing holds).
+
 ### Per-Channel Safety Stock (Phase 5 §9.6 D2 — 2026-04-24)
 
 - File: `src/actions/safety-stock.ts` (single-owner per Rule #58 — every safety_stock write goes through here)
@@ -233,7 +250,10 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/portal-sales.ts`
   - `src/actions/portal-settings.ts`
   - `src/actions/portal-stores.ts`
+  - `src/actions/portal-stock-exceptions.ts`
   - `src/actions/support.ts`
+- Phase 6 Slice 6.F — portal SKU stock-exceptions surface (2026-04-26):
+  - `listClientStockExceptions({ connectionId?, platform?, limit, offset })` — `src/actions/portal-stock-exceptions.ts`. Client-only (`requireClient()`), read-only, org-scoped via explicit `org_id=:caller.orgId` filter on top of the `client_select_identity_matches` RLS policy. Returns only `outcome_state='client_stock_exception'` + `is_active=true` rows ordered by `last_evaluated_at DESC`. Intentionally hides `evidence_snapshot`, `remote_fingerprint`, and `remote_inventory_item_id` from the client payload. Companion page at `/portal/stock-exceptions` is gated by the `client_stock_exception_reports_enabled` workspace flag.
 - Key exports:
   - `getPortalDashboard`, `getSalesData`, `getPortalSettings`, `updateNotificationPreferences`
   - portal stores: `getMyStoreConnections`, `getWooCommerceAuthUrl`, `deleteStoreConnection`

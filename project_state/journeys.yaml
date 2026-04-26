@@ -1,5 +1,6 @@
 version: 1
-updated_at: 2026-04-25  # SKU matching review journey live. Staff open `/admin/settings/sku-matching`, pick one client-store connection at a time, inspect canonical warehouse variants beside ranked Shopify / WooCommerce / Squarespace candidates, review existing SKU-conflict overlays plus Discogs identity context, and confirm alias-style matches without rewriting remote SKUs. The review drawer enforces fingerprint-based stale-review protection and surfaces Shopify readiness (`default_location_id`, `remote_inventory_item_id`, stocked-at-default-location) before an accepted alias is treated as operational; non-ready Shopify rows can be activated at the default location from the same drawer. Weekly telemetry now summarizes workspace-load latency, preview/accept ratios, and conflict growth into `sensor_readings`, with review-queue escalation when rollout safety regresses. Prior update preserved below.
+updated_at: 2026-04-26  # Autonomous SKU matching Phase 6 admin + portal audit surfaces live. Staff reach `/admin/settings/sku-matching/autonomous-runs` and `/admin/settings/sku-matching/identity-matches` (both gated on `sku_autonomous_ui_enabled`) to read `sku_autonomous_runs` / `sku_autonomous_decisions` and `client_store_product_identity_matches` / `sku_outcome_transitions` with filters, pagination, and a detail drawer rendering `evidence_snapshot` plus a reverse-chronological transition timeline. `/admin/orders/holds` is the single resolution surface for `warehouse_orders.fulfillment_hold='on_hold'` rows — staff pick a resolution code (one of the five SKU-AUTO-17 whitelist values), append a mandatory note on `staff_override`, and can bulk-resolve multiple orders with a shared code/note. The flip of `sku_identity_autonomy_enabled` and `sku_live_alias_autonomy_enabled` ON is no longer a raw feature-flags edit — it goes through `flipAutonomousMatchingFlag` which preflights a resolved `warehouse_review_queue` row of category `sku_autonomous_canary_review` and, for the live-alias flag, the Phase 7 Bandcamp linkage thresholds plus `sku_autonomous_emergency_paused=false`. Clients whose workspace has `client_stock_exception_reports_enabled` see `/portal/stock-exceptions` — a read-only feed of `outcome_state='client_stock_exception'` rows so they can correct mis-listed availability on their storefront before oversells ship. Prior update preserved below.
+prior_update: 2026-04-25  # SKU matching review journey live. Staff open `/admin/settings/sku-matching`, pick one client-store connection at a time, inspect canonical warehouse variants beside ranked Shopify / WooCommerce / Squarespace candidates, review existing SKU-conflict overlays plus Discogs identity context, and confirm alias-style matches without rewriting remote SKUs. The review drawer enforces fingerprint-based stale-review protection and surfaces Shopify readiness (`default_location_id`, `remote_inventory_item_id`, stocked-at-default-location) before an accepted alias is treated as operational; non-ready Shopify rows can be activated at the default location from the same drawer. Weekly telemetry now summarizes workspace-load latency, preview/accept ratios, and conflict growth into `sensor_readings`, with review-queue escalation when rollout safety regresses. Prior update preserved below.
 prior_update: 2026-04-25  # Support Inbox DB evidence patch: `/admin/support` now shows total ticket/message counts, latest-message timestamp, DB loaded timestamp, and per-thread message counts. Resolved queue badges now count resolved tickets by queue membership (`status='resolved'`) instead of `resolved_at`-today, so imported support rows no longer appear in the list with a zero queue badge. Prior update preserved below.
 prior_update: 2026-04-25  # Support Inbox 2.0 journey live. Staff now work `/admin/support` as a triage inbox with computed queues, SLA health, assignment/category/priority/snooze/resolution controls, client context, internal notes, saved replies, duplicate candidate review, and delivery failure visibility. Portal + launcher copy now use client-friendly next-action language, and the launcher keeps granular Realtime scoped to the active detail thread. Prior update preserved below.
 prior_update: 2026-04-27  # WooCommerce + Squarespace connection review is now catalog-aware. On `/admin/settings/store-connections`, the Test action validates those platforms with real catalog reads instead of shallow order/inventory checks, and the legacy non-Shopify auto-discovery path now scans full Woo/Squarespace catalogs (including Woo variations and Squarespace v2 product variants) so operators can prepare mappings with materially better coverage. Prior update preserved below.
@@ -46,6 +47,53 @@ journeys:
       - accepted matches persist through persist_sku_match RPC and leave an append-only sku_mapping_events audit trail
       - preview drawer blocks stale approvals when the candidate fingerprint changes
       - Shopify rows surface readiness before approval and can activate inventory at the selected default location without changing quantity
+
+  - id: autonomous_sku_matching_admin
+    area: admin_settings
+    paths:
+      - src/app/admin/settings/sku-matching/autonomous-runs/page.tsx
+      - src/app/admin/settings/sku-matching/autonomous-runs/autonomous-runs-client.tsx
+      - src/app/admin/settings/sku-matching/identity-matches/page.tsx
+      - src/app/admin/settings/sku-matching/identity-matches/identity-matches-client.tsx
+      - src/actions/sku-autonomous-runs.ts
+      - src/actions/sku-identity-matches.ts
+      - src/actions/sku-autonomous-canary.ts
+    status: green
+    checks:
+      - both list pages render a "disabled" stub until the workspace flips sku_autonomous_ui_enabled
+      - list + detail reads are staff-only (requireStaff) and scoped to the caller's workspace_id on top of RLS
+      - identity-matches detail drawer renders the evidence_snapshot JSON plus a reverse-chronological sku_outcome_transitions timeline
+      - flipAutonomousMatchingFlag refuses to turn sku_identity_autonomy_enabled / sku_live_alias_autonomy_enabled ON until a RESOLVED warehouse_review_queue row with category sku_autonomous_canary_review exists; sku_live_alias_autonomy_enabled additionally requires the Phase 7 Bandcamp linkage thresholds and no active emergency pause
+      - every OFF flip bypasses the canary + linkage preflights so rollback stays fast
+
+  - id: order_holds_resolution
+    area: admin_orders
+    paths:
+      - src/app/admin/orders/holds/page.tsx
+      - src/app/admin/orders/holds/holds-client.tsx
+      - src/actions/order-holds.ts
+      - src/lib/server/order-hold-rpcs.ts
+    status: green
+    checks:
+      - list surface is staff-only, workspace-scoped, and groups results by fulfillment_hold_reason
+      - single + bulk release wrap release_order_fulfillment_hold RPC (never raw UPDATE)
+      - resolution_code 'staff_override' is blocked at the Zod boundary unless a non-empty note is supplied (SKU-AUTO-17/32)
+      - page is NOT flag-gated — staff can always resolve an existing hold even after flags flip OFF
+
+  - id: portal_stock_exceptions
+    area: portal
+    paths:
+      - src/app/portal/stock-exceptions/page.tsx
+      - src/app/portal/stock-exceptions/stock-exceptions-client.tsx
+      - src/actions/portal-stock-exceptions.ts
+      - src/lib/shared/portal-pages.ts
+      - src/components/portal/portal-sidebar.tsx
+    status: green
+    checks:
+      - route renders a "reports disabled" stub unless workspaces.flags.client_stock_exception_reports_enabled=true
+      - requireClient() gates the Server Action; explicit org_id filter layers defense-in-depth on top of client_select_identity_matches RLS
+      - payload hides evidence_snapshot / remote_fingerprint / remote_inventory_item_id so clients never see identity internals
+      - list returns ONLY outcome_state='client_stock_exception' AND is_active=true
 
   - id: staff_client_invite
     area: admin_clients
