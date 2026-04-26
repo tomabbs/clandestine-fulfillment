@@ -58,6 +58,10 @@ export { inboundProductCreate } from "./inbound-product-create";
 export { inventoryCommittedCounterReconTask } from "./inventory-committed-counter-recon";
 export { monthlyBillingTask } from "./monthly-billing";
 export { multiStoreInventoryPushTask } from "./multi-store-inventory-push";
+// Slice 4 — every-15-min sensor for stuck pending sends, provider failures,
+// and webhook signature spikes. Writes sensor_readings rows + escalates
+// to Sentry/Slack when signature failure thresholds are exceeded.
+export { notificationFailureSensorTask } from "./notification-failure-sensor";
 export { pirateShipImportTask } from "./pirate-ship-import";
 export { preorderFulfillmentTask, preorderReleaseVariantTask } from "./preorder-fulfillment";
 export { preorderSetupTask } from "./preorder-setup";
@@ -67,6 +71,13 @@ export { processClientStoreWebhookTask } from "./process-client-store-webhook";
 export { processShipstationShipmentTask } from "./process-shipstation-shipment";
 export { processShopifyWebhookTask } from "./process-shopify-webhook";
 export { redisBackfillTask } from "./redis-backfill";
+// Phase 3.C (autonomous SKU matcher) — client alert dispatcher for
+// non-warehouse order holds. Idempotent on (workspace_id, order_id,
+// hold_cycle_id) via partial unique index. Flag-gated on
+// non_warehouse_order_client_alerts_enabled; integrates with
+// shouldSuppressBulkHold (SKU-AUTO-31) to collapse catalog-outage storms
+// to one ops alert per window instead of spamming the client.
+export { sendNonWarehouseOrderHoldAlertTask } from "./send-non-warehouse-order-hold-alert";
 // Phase 12 — Unified customer-facing email pipeline (Resend). Single task
 // driven by post-label-purchase (shipped) + EP webhook (OOD/Delivered/exception).
 // Strategy-gated; safe to deploy pre-cutover.
@@ -75,10 +86,6 @@ export { sendTrackingEmailTask } from "./send-tracking-email";
 // rate documented for EP at peak load. Re-fires send-tracking-email for any
 // shipment whose status warranted an email but no notification_sends row exists.
 export { sendTrackingEmailReconCronTask } from "./send-tracking-email-recon";
-// Slice 4 — every-15-min sensor for stuck pending sends, provider failures,
-// and webhook signature spikes. Writes sensor_readings rows + escalates
-// to Sentry/Slack when signature failure thresholds are exceeded.
-export { notificationFailureSensorTask } from "./notification-failure-sensor";
 export { sensorCheckTask } from "./sensor-check";
 // Phase 3 Pass 2 — shadow-mode comparison task. Fired with a delay by
 //   recordShadowPush() when a connection is in cutover_state='shadow'.

@@ -43,11 +43,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type ApplyOrderFulfillmentHoldInput,
-  type HoldRpcClient,
-  type ReleaseOrderFulfillmentHoldInput,
   applyOrderFulfillmentHold,
+  type HoldRpcClient,
   isApplyHoldReason,
   isReleaseResolutionCode,
+  type ReleaseOrderFulfillmentHoldInput,
   releaseOrderFulfillmentHold,
 } from "@/lib/server/order-hold-rpcs";
 
@@ -116,12 +116,7 @@ describe("isApplyHoldReason", () => {
   });
 
   it("rejects any other string", () => {
-    for (const reason of [
-      "",
-      "all_lines_warehouse_ready",
-      "random",
-      "UNKNOWN_REMOTE_SKU",
-    ]) {
+    for (const reason of ["", "all_lines_warehouse_ready", "random", "UNKNOWN_REMOTE_SKU"]) {
       expect(isApplyHoldReason(reason)).toBe(false);
     }
   });
@@ -286,8 +281,7 @@ describe("applyOrderFulfillmentHold — RPC error mapping", () => {
 
   const cases: Array<{ message: string; reason: string }> = [
     {
-      message:
-        "apply_order_fulfillment_hold: invalid hold reason all_lines_warehouse_ready",
+      message: "apply_order_fulfillment_hold: invalid hold reason all_lines_warehouse_ready",
       reason: "invalid_hold_reason",
     },
     {
@@ -295,8 +289,7 @@ describe("applyOrderFulfillmentHold — RPC error mapping", () => {
       reason: "missing_cycle_id",
     },
     {
-      message:
-        "apply_order_fulfillment_hold: order 00000000-0000-0000-0000-000000000001 not found",
+      message: "apply_order_fulfillment_hold: order 00000000-0000-0000-0000-000000000001 not found",
       reason: "order_not_found",
     },
     {
