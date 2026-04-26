@@ -240,6 +240,62 @@ Release manifest split for the four sequential PRs lives at `docs/RELEASE_SLICES
 
 ---
 
+### C.5 Autonomous SKU matching preconditions (added 2026-04-26)
+
+The `SKU-AUTO-*` namespace is ADDITIVE to the existing `SKU-1..5` gates in
+Section C.3 — both sets must pass before general availability of the
+autonomous-matching feature. The plan for this feature lives at
+`/Users/tomabbs/.cursor/plans/autonomous_sku_matching_da557209.plan.md`.
+
+Gates marked `Active` are backed by migration / code / CI and are enforced
+now. Gates marked `Pending-Phase-N` are design-frozen in the plan but
+will only be asserted once the phase ships; they are listed here so the
+release-gate script can grow into them without re-negotiating the
+contract.
+
+| ID | Gate | Status | How verified |
+|---|---|---|---|
+| SKU-AUTO-1 | Identity-only rows in `client_store_product_identity_matches` are never consumed by `inventory-fanout.ts`, `client-store-fanout-gate.ts`, `multi-store-inventory-push`, or `process-client-store-webhook`. | Active | `bash scripts/ci-checks/sku-identity-no-fanout.sh` exits 0 (wired into `release-gate.sh` + `cloud-agent-verify.sh`). Phase 2 adds a positive test fixture. |
+| SKU-AUTO-6 | Two-set drift guard: `STORED_IDENTITY_OUTCOME_STATES` (TS) equals the DB CHECK on `client_store_product_identity_matches.outcome_state`; `FULL_OUTCOME_STATES` equals the STORED set ∪ `{ 'auto_live_inventory_alias' }`; every legal transition edge references only states in `FULL_OUTCOME_STATES`. | Active | `pnpm vitest run tests/unit/lib/server/sku-outcome-transitions.test.ts` — the test reads migration `20260428000001_sku_autonomous_matching_phase0.sql` at runtime and diffs the CHECK constraint against the TS sets. |
+| SKU-AUTO-12 | `client_store_product_identity_matches` CHECK constraint enforces the per-outcome `variant_id` nullability rules so `auto_database_identity_match` / `auto_shadow_identity_match` without a `variant_id` are rejected at insert time. | Active | Migration `20260428000001_sku_autonomous_matching_phase0.sql` defines `client_store_product_identity_matches_variant_nullability_check`; regression test added with Phase 2 insert fixtures. |
+| SKU-AUTO-13 | Remote-listing uniqueness on `client_store_product_identity_matches` via three partial unique indexes: `(connection_id, remote_product_id, remote_variant_id)`, `(connection_id, remote_inventory_item_id)`, `(connection_id, remote_fingerprint)`. | Active | Schema probe (Phase 0 migration); Phase 2 duplicate-insert regression test. |
+| SKU-AUTO-14 | Every `applyOutcomeTransition` call supplies `expectedStateVersion` + `reasonCode`. Stale `state_version` fails cleanly; missing `reasonCode` fails the DB CHECK. | Active for validator; Pending-Phase-2 for RPC wrapper | `validateOutcomeTransition()` in `src/lib/server/sku-outcome-transitions.ts` rejects empty `reasonCode` at runtime; Phase 2 ships the `apply_sku_outcome_transition` RPC + tests. |
+| SKU-AUTO-25 | `buildRemoteFingerprint` returns SHA-256 hex digests; different vinyl sizes / colors / editions produce different hashes; frozen fixtures stay byte-identical across commits. | Active | `pnpm vitest run tests/unit/lib/server/remote-fingerprint.test.ts` (12 cases, incl. frozen-hash stability). |
+| SKU-AUTO-26 | Cross-workspace inserts into `client_store_product_identity_matches` and `client_store_sku_mappings` are rejected at the DB trigger level. | Active for trigger; Pending-Phase-2 for insert-regression tests | Migration `20260428000001_sku_autonomous_matching_phase0.sql` attaches `enforce_identity_match_scope()` to both tables; Phase 2 fixture tests exercise the rejection paths. |
+| SKU-AUTO-2 | Deterministic warehouse-positive aliases are only written via `persist_sku_match` (directly or via `promote_identity_match_to_alias` → `persist_sku_match`). No other path writes `client_store_sku_mappings`. | Pending-Phase-2 | RPC `promote_identity_match_to_alias` is already shipped (Phase 0 migration); Phase 2 adds the grep guard + test fixtures. |
+| SKU-AUTO-3 | Webhook-ingest and poll-ingest both construct `NormalizedClientStoreOrder` via the shared adapter and call `evaluateOrderForHold()`, OR the poll path is explicitly disabled for any connection with `non_warehouse_order_hold_enabled=true`. | Pending-Phase-2 | `loadNormalizedOrder()` + `evaluateOrderForHold()` + parity integration test land with Phase 2. |
+| SKU-AUTO-4 | Fetch-incomplete connections are excluded from client correction reports and from live-alias promotion. | Pending-Phase-5 | Connection-scoped filter in report queries + promotion RPC preflight. |
+| SKU-AUTO-5 | Query-key / cache tests cover every new stock-exception, hold-queue, identity-match, and autonomous-run read surface. | Pending-Phase-2 | Added alongside the admin views in `src/lib/shared/query-keys.ts`. |
+| SKU-AUTO-7 | Stock-based tiebreaks never fire when warehouse tier ≠ `authoritative` or remote tier ∈ `{ cached_only, unknown }`; `fresh_remote_unbounded` never participates in numeric tiebreaks. | Pending-Phase-2 | `rankSkuCandidates()` tests land with Phase 2. |
+| SKU-AUTO-8 | Promotion from `auto_database_identity_match` to `auto_live_inventory_alias` only occurs via documented paths A/B/C, and every promotion writes a `sku_outcome_transitions` row + a `sku_autonomous_decisions` row. | Pending-Phase-3 | Alias-promotion wrapper in `src/lib/server/sku-alias-promotion.ts` + integration test. |
+| SKU-AUTO-9 | Holdout backlog cannot exceed the stop-condition thresholds (10 evaluations / 90 days); a periodic job enforces the give-up transition. | Pending-Phase-5 | `sku-holdout-stop-condition-sweep` Trigger task + test. |
+| SKU-AUTO-10 | `warehouse_orders.fulfillment_hold` is treated as a distinct state by every downstream consumer (ShipStation export, fulfillment UI, commitments). No consumer coerces `on_hold` into ShipStation's `on_hold` or into `cancelled`. | Pending-Phase-3 | Consumer grep + contract test. |
+| SKU-AUTO-11 | State-machine enforcement is split across `sku-outcome-transitions.ts`, `sku-alias-promotion.ts`, and `order-hold-policy.ts`. No module writes to another module's table. | Pending-Phase-3 | CI test asserts each module's legal-transition table references only states that module owns. |
+| SKU-AUTO-15 | `order_fulfillment_hold_events` is written in the same transaction as every `fulfillment_hold` state change. One `hold_applied` event per cycle, one `hold_released` per release, one `hold_alert_sent` per dispatch. | Pending-Phase-3 | RPC-driven hold transitions + test. |
+| SKU-AUTO-16 | The client alert task `send-non-warehouse-order-hold-alert` is idempotent on `(workspace_id, order_id, hold_cycle_id)`. | Pending-Phase-3 | Task ships with test that reruns twice per cycle. |
+| SKU-AUTO-17 | `releaseFulfillmentHold(orderId, { resolutionCode })` rejects any `resolutionCode` outside the enum; `staff_override` without a note is rejected. | Pending-Phase-3 | Server Action + Zod test. |
+| SKU-AUTO-18 | Dry-run mode (Phase 1) writes `sku_autonomous_runs` + `sku_autonomous_decisions` but writes nothing to identity tables, alias tables, `warehouse_orders.fulfillment_hold`, or the alert task queue. | Pending-Phase-2 | Dry-run runner test. |
+| SKU-AUTO-19 | Before enabling `sku_identity_autonomy_enabled` (Phase 2) or `sku_live_alias_autonomy_enabled` (Phase 7) on a connection, a signed-off `warehouse_review_queue` row of category `sku_autonomous_canary_review` must exist. | Pending-Phase-2 | Admin-action guard. |
+| SKU-AUTO-20 | Squarespace "unlimited" listings produce `fresh_remote_unbounded` and never a large integer. | Pending-Phase-2 | Fixture-based parser test. |
+| SKU-AUTO-21 | When a held order contains valid warehouse-stocked lines, those lines are committed through `commitOrderItems()` in the same transaction as the hold write. | Pending-Phase-4 | Integration test with mixed order. |
+| SKU-AUTO-22 | `promote_identity_match_to_alias` and the `applyOutcomeTransition` RPC wrapper both invoke `pg_advisory_xact_lock(hashtext('sku_transition:' || id))` before reading the row. | Pending-Phase-2 | Concurrent-RPC test fires N simultaneous promotions on the same row and asserts one succeeds. |
+| SKU-AUTO-23 | Stock tiebreaks in `rankSkuCandidates()` fire only when `isStockStableFor('tiebreak', ...)` returns true. | Pending-Phase-2 | Ranker test with oscillating ATP. |
+| SKU-AUTO-24 | A demoted `client_stock_exception` row does not trigger unknown-SKU discovery on subsequent webhooks; instead webhook ingress calls `promote_identity_match_to_alias` with `reason_code='stock_positive_promotion'` when remote stock recovers. | Pending-Phase-5 | Webhook-ingress test with demotion-rehydrate fixture. |
+| SKU-AUTO-27 | An in-flight autonomous run can be cancelled within 30 seconds of the cancellation request. | Pending-Phase-2 | Cancellation-loop integration test using `sku_autonomous_runs.cancellation_requested_at`. |
+| SKU-AUTO-28 | Setting `workspaces.sku_autonomous_emergency_paused=true` prevents any new autonomous run from starting; the order-hold evaluator's READ path continues to classify held orders. | Active for column; Pending-Phase-2 for guard plumbing | Column + DB-level tests land in Phase 0; `checkEmergencyPause()` guard lands in Phase 2. |
+| SKU-AUTO-29 | Phase advancement (Phase 2, 5, 7) checks Bandcamp linkage thresholds (`30/20/10` → `50/40/25` → `70/60/40` for linkage / verified / option rates) via `compute_bandcamp_linkage_metrics`. | Active for RPC; Pending-Phase-2 for admin-action wiring | RPC lands in Phase 0 migration; the admin action that flips `sku_identity_autonomy_enabled` / `sku_live_alias_autonomy_enabled` is gated in Phase 2. |
+| SKU-AUTO-30 | Non-authoritative `StockSignal` with `|clock_skew_ms| > 1h` always classifies as `cached_only` regardless of claimed freshness. | Active | `pnpm vitest run tests/unit/lib/server/stock-reliability.test.ts` covers both skew directions. |
+| SKU-AUTO-31 | Bulk hold suppression triggers on ≥ 10 `fetch_incomplete_at_match` holds per `(workspace_id, connection_id)` in a 15-minute window, producing one ops alert and zero client emails for the suppressed window. | Pending-Phase-3 | Integration test with 12 synthetic holds. |
+| SKU-AUTO-32 | `sku-hold-recovery-recheck` auto-releases eligible held orders with `resolutionCode='fetch_recovered_evaluator_passed'` (accepted ONLY from the recovery task, never from staff). | Pending-Phase-5 | Recovery-task test + enum guard. |
+
+Operator note: the `Active` subset is enforceable today. The
+`Pending-Phase-*` subset is tracked here so the rollout cannot advance
+past the corresponding phase without flipping its row green in this
+table. The Phase 0 migration file (`20260428000001_sku_autonomous_matching_phase0.sql`)
+is the single source of truth for the schema that Active gates probe.
+
+---
+
 ### D. Trigger runtime smoke checks
 
 Follow:

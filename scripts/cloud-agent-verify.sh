@@ -38,4 +38,7 @@ bash scripts/check-webhook-runtime.sh
 echo "==> CI guard: fulfilled_quantity write-only (F-1)"
 bash scripts/check-fulfilled-quantity-writers.sh
 
+echo "==> CI guard: SKU identity rows not read in fanout paths (SKU-AUTO-fanout-isolation)"
+bash scripts/ci-checks/sku-identity-no-fanout.sh
+
 echo "cloud-agent-verify.sh: all steps passed."

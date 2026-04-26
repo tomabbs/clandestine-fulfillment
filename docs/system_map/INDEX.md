@@ -51,6 +51,7 @@ Use this index as the first-stop map before planning/building/auditing.
 - Direct-Shopify cutover gate script (Section C.1): `scripts/check-release-gates.sh` — wired to the `release-gate-check` GitHub Actions job on `main`.
 - Webhook runtime guard (HRD-23): `scripts/check-webhook-runtime.sh` — every `src/app/api/webhooks/**/route.ts` must export `runtime='nodejs'` + `dynamic='force-dynamic'`.
 - Fulfilled-quantity write-only guard (HRD-08.1): `scripts/check-fulfilled-quantity-writers.sh` — `warehouse_order_items.fulfilled_quantity` is write-only from webhook handlers.
+- Autonomous SKU identity fanout-isolation guard (SKU-AUTO-fanout-isolation): `scripts/ci-checks/sku-identity-no-fanout.sh` — `client_store_product_identity_matches` rows must never be read in `inventory-fanout.ts`, `client-store-fanout-gate.ts`, `multi-store-inventory-push`, or `process-client-store-webhook`. Wired into `release-gate.sh` and `cloud-agent-verify.sh`.
 - Full-site audit: `tests/e2e/full-site-audit.spec.ts`
 - Reports: `reports/playwright-audit/`
 

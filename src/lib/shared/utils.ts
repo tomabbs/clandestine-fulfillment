@@ -84,3 +84,67 @@ export function normalizeProductText(value: string | null | undefined): string {
     .trim()
     .replace(/\s+/g, " ");
 }
+
+/**
+ * Autonomous SKU matcher — placeholder SKU detector.
+ *
+ * Plan: autonomous_sku_matching_da557209.plan.md
+ *       §"Hard disqualifiers, not penalties" +
+ *       §"New helpers this plan introduces".
+ *
+ * Returns `true` when a remote SKU is semantically empty enough that a
+ * textual equality match with a canonical warehouse SKU would be
+ * meaningless. Callers treat `true` as a HARD DISQUALIFIER, not a
+ * penalty:
+ *   - `rankSkuCandidates()` refuses to promote a candidate to
+ *     `auto_live_inventory_alias` or `auto_database_identity_match`
+ *     when the matching side is a placeholder (still allowed to produce
+ *     `auto_shadow_identity_match` / `auto_holdout_for_evidence`).
+ *   - `evaluateOrderForHold()` holds the order with reason
+ *     `placeholder_sku_detected` when any order line carries one.
+ *
+ * The set mirrors the examples in the plan plus the Squarespace
+ * auto-generated `SQ####` prefix that `sku-sync-audit.ts` already
+ * classifies as "placeholder_squarespace" (Phase 5 observation). Short
+ * all-digit strings up through 3 digits are considered placeholders
+ * because they are rows a human typed into Shopify or WooCommerce when
+ * they ran out of ideas — they almost never correspond to a real SKU in
+ * this domain.
+ */
+const PLACEHOLDER_LITERALS = new Set<string>([
+  "",
+  "0",
+  "-",
+  "--",
+  "n/a",
+  "na",
+  "none",
+  "null",
+  "tbd",
+  "tba",
+  "unknown",
+  "placeholder",
+  "default",
+  "test",
+  "sample",
+]);
+
+export function isPlaceholderSku(value: string | null | undefined): boolean {
+  if (typeof value !== "string") return true;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return true;
+
+  const lowered = trimmed.toLowerCase();
+  if (PLACEHOLDER_LITERALS.has(lowered)) return true;
+
+  // All-digit strings of 3 characters or fewer are placeholders (e.g.,
+  // "1", "4", "55"). Real SKUs are almost never that short, and every
+  // real "1"/"4" observed in production has been a placeholder.
+  if (/^\d{1,3}$/.test(trimmed)) return true;
+
+  // Squarespace-style auto-generated "SQ#####" SKUs — already treated
+  // as placeholder by sku-sync-audit.ts.
+  if (/^SQ\d+$/i.test(trimmed)) return true;
+
+  return false;
+}
