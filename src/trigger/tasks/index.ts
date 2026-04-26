@@ -237,9 +237,56 @@ export { rampHaltCriteriaSensorTask } from "./ramp-halt-criteria-sensor";
 export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
+// Phase 5.C (autonomous SKU matcher) — hold recovery recheck.
+//   */30 cadence. Scans warehouse_orders held with reason
+//   `fetch_incomplete_at_match` in the last 24h. For each order:
+//   (1) re-fetches the platform catalog; (2) re-runs the hold
+//   evaluator; (3) releases with resolution_code
+//   `fetch_recovered_evaluator_passed` when both signals clear.
+//   Emergency-pause aware per workspace. NOT pinned to bandcamp-api.
+export {
+  skuHoldRecoveryRecheckManualTask,
+  skuHoldRecoveryRecheckScheduledTask,
+} from "./sku-hold-recovery-recheck";
+// Phase 5.D (autonomous SKU matcher) — holdout stop-condition sweep.
+//   Daily sweep that retires `auto_holdout_for_evidence` identity
+//   matches meeting either stop condition (evaluation_count >= 10
+//   OR age_days >= 90) to the terminal `auto_reject_non_match`
+//   state via applyOutcomeTransition() with
+//   trigger='periodic_revaluation'. Emergency-pause aware. NOT
+//   pinned to bandcamp-api.
+export {
+  skuHoldoutStopConditionSweepManualTask,
+  skuHoldoutStopConditionSweepScheduledTask,
+} from "./sku-holdout-stop-condition-sweep";
 // ── SKU rectify infrastructure (Phase 0.5) ────────────────────────────────────
 export { skuRectifyViaAliasTask } from "./sku-rectify-via-alias";
+// Phase 5.B (autonomous SKU matcher) — shadow-to-live promotion scheduler.
+//   Daily at 02:30 UTC. Scans idx_identity_matches_promotion_candidates
+//   per workspace, evaluates Promotion Paths A + B via the pure
+//   `shouldPromoteShadow()` policy, and delegates actual promotion to
+//   the `promoteIdentityMatchToAlias()` wrapper (which enforces
+//   emergency-pause, autonomy-flag, and stock-stability gates). Path C
+//   is human-driven; this task never simulates it. Writes one run row
+//   per workspace and one decision row per candidate evaluated.
+export {
+  skuShadowPromotionManualTask,
+  skuShadowPromotionScheduledTask,
+} from "./sku-shadow-promotion";
 export { skuSyncAuditTask } from "./sku-sync-audit";
+// Phase 5.A (autonomous SKU matcher) — stock-stability sampler.
+//   */15 cadence, warehouse-only readings for every variant referenced by
+//   client_store_product_identity_matches (non-terminal) OR
+//   client_store_sku_mappings. Observed_at is floored to the 15-minute
+//   boundary so ON CONFLICT DO NOTHING silently dedupes Trigger.dev
+//   double-deliveries. Emergency-pause aware per-workspace. Nightly purge
+//   sibling task at 03:15 UTC enforces the 30-day retention contract.
+export {
+  stockStabilityReadingsPurgeManualTask,
+  stockStabilityReadingsPurgeScheduledTask,
+  stockStabilitySamplerManualTask,
+  stockStabilitySamplerScheduledTask,
+} from "./stock-stability-sampler";
 // ── Tag cleanup (admin settings) ──────────────────────────────────────────────
 export { tagCleanupBackfillTask } from "./tag-cleanup-backfill";
 // HRD-17.1 — recovery sweeper for webhook_events rows that never made it past
