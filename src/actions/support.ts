@@ -5,7 +5,6 @@ import { requireAuth } from "@/lib/server/auth-context";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import {
   enqueuePendingSupportDeliveryForMessage,
-  nextSupportDeliveryRetryAt,
   normalizeDeliveryRoutes,
   type SupportDeliveryRoute,
 } from "@/lib/server/support-delivery";
@@ -1301,4 +1300,9 @@ function normalizeSubject(value: string): string {
     .trim();
 }
 
-export { nextSupportDeliveryRetryAt };
+// NOTE: Do not re-export non-async functions from this file. Next.js RSC
+// validates every export of a `"use server"` module at build time and
+// rejects anything other than async functions (see
+// https://nextjs.org/docs/messages/invalid-use-server-value). Anything
+// that needs `nextSupportDeliveryRetryAt` imports it directly from
+// `@/lib/server/support-delivery`.

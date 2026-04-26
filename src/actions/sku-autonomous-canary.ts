@@ -396,7 +396,12 @@ export async function flipAutonomousMatchingFlag(rawInput: FlipFlagInput): Promi
   };
 }
 
-export const AUTONOMOUS_FLAG_NAMES = FLIP_FLAG_NAMES;
-export const AUTONOMOUS_FLAG_CANARY_GATED = CANARY_GATED_FLAGS;
-export const AUTONOMOUS_FLAG_LINKAGE_GATED = LINKAGE_GATED_FLAGS;
-export const AUTONOMOUS_FLAG_LINKAGE_THRESHOLDS = LINKAGE_THRESHOLDS;
+// NOTE: Do not re-export constants, types-with-runtime-values, or
+// non-async functions from this file. Next.js RSC validates every
+// export of a `"use server"` module at build time and rejects anything
+// other than async functions (see
+// https://nextjs.org/docs/messages/invalid-use-server-value). The
+// Phase 7 rollout page (`/admin/settings/sku-matching/rollout`) reads
+// FLIP_FLAG_NAMES / CANARY_GATED_FLAGS / LINKAGE_GATED_FLAGS /
+// LINKAGE_THRESHOLDS through a non-"use server" shim — see
+// `src/lib/shared/sku-autonomous-flags.ts` — never through this file.

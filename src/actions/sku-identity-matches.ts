@@ -2,10 +2,7 @@
 
 import { z } from "zod/v4";
 import { requireStaff } from "@/lib/server/auth-context";
-import {
-  FULL_OUTCOME_STATES,
-  STORED_IDENTITY_OUTCOME_STATES,
-} from "@/lib/server/sku-outcome-transitions";
+import { STORED_IDENTITY_OUTCOME_STATES } from "@/lib/server/sku-outcome-transitions";
 import { createServerSupabaseClient } from "@/lib/server/supabase-server";
 
 // Phase 6 — Slice 6.E
@@ -289,10 +286,11 @@ export async function getIdentityMatchDetail(
   };
 }
 
-/**
- * Re-exported copy of the full outcome-state alphabet so the admin UI
- * can render state badges without importing from `@/lib/server/*`
- * directly (keeps the client bundle clean).
- */
-export const IDENTITY_OUTCOME_STATES = STORED_IDENTITY_OUTCOME_STATES;
-export const FULL_OUTCOME_STATE_ALPHABET = FULL_OUTCOME_STATES;
+// NOTE: Do not re-export constants, types-with-runtime-values, or
+// non-async functions from this file. Next.js RSC validates every
+// export of a `"use server"` module at build time and rejects anything
+// other than async functions (see
+// https://nextjs.org/docs/messages/invalid-use-server-value). Clients
+// that need the outcome-state alphabet import it directly from
+// `@/lib/server/sku-outcome-transitions` through a non-"use server"
+// intermediary (e.g. a shared constants module).
