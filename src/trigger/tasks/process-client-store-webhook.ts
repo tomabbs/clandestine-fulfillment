@@ -10,6 +10,11 @@ import { task, tasks } from "@trigger.dev/sdk";
 import { triggerBundleFanout } from "@/lib/server/bundles";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import { commitOrderItems, releaseOrderItems } from "@/lib/server/inventory-commitments";
+import {
+  type IngressSensorWarning,
+  runHoldIngressSafely,
+  type SafeIngressVerdict,
+} from "@/lib/server/order-hold-ingress";
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 import type { StockSignal } from "@/lib/server/stock-reliability";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
@@ -513,6 +518,40 @@ async function handleInventoryUpdate(
   return { processed: true, sku, delta };
 }
 
+/**
+ * Best-effort persistence of the `runHoldIngressSafely` sensor warnings.
+ *
+ * The wrapper returns these as data (not a side-effect) so callers can
+ * control the supabase client + workspace scope. Writing them here
+ * keeps the per-site sensor taxonomy consistent with the pre-Phase-8
+ * convention (one `sensor_readings` row per failure type). Errors are
+ * swallowed — a `sensor_readings` write failure must never block order
+ * ingestion (same policy as `inv.commit_ledger_write_failed`).
+ */
+async function persistIngressWarnings(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  warnings: ReadonlyArray<IngressSensorWarning>,
+): Promise<void> {
+  if (warnings.length === 0) return;
+  try {
+    await supabase.from("sensor_readings").insert(
+      warnings.map((w) => ({
+        workspace_id: workspaceId,
+        sensor_name: w.sensor_name,
+        status: w.status,
+        message: w.message,
+        value: w.value,
+      })),
+    );
+  } catch (err) {
+    console.error(
+      "[process-client-store-webhook] sensor_readings insert (hold ingress) failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 async function handleOrderCreated(
   supabase: ReturnType<typeof createServiceRoleClient>,
   event: Record<string, unknown>,
@@ -588,54 +627,130 @@ async function handleOrderCreated(
     });
     await supabase.from("warehouse_order_items").insert(items);
 
-    // Phase 5 §9.6 D1.b — open one inventory_commitments row per
-    // (workspace_id, source='order', source_id=newOrder.id, sku).
-    // The push formula `MAX(0, available - committed - safety)`
-    // ignores this column UNTIL `workspaces.atp_committed_active` is
-    // flipped per workspace (default FALSE — see migration
-    // 20260424000005). Until then this is an audit-only ledger:
-    // visible in the recon task + the megaplan spot-check, no
-    // production behavior change.
+    // Phase 8 (SKU-AUTO-3 + SKU-AUTO-21) — consult the shared hold
+    // substrate.
     //
-    // Idempotency: commitOrderItems uses ON CONFLICT DO NOTHING on
-    // the partial unique index (workspace_id, source, source_id, sku)
-    // WHERE released_at IS NULL, so retried Shopify deliveries (up to
-    // ~24 retries over 48h per the Shopify webhook contract) cannot
-    // double-commit.
+    // `runHoldIngressSafely` is the SAME function the poll-path
+    // (`client-store-order-detect`) calls on the SAME (workspaceId,
+    // orderId). That shared call is what makes the SKU-AUTO-3 parity
+    // guarantee ("webhook + poll produce identical HoldDecision")
+    // hold BY CONSTRUCTION — if the same loader/evaluator/RPC wrapper
+    // is invoked with the same DB state, the verdict is identical.
     //
-    // Failure isolation: ledger insert errors must NEVER fail the
-    // order ingestion. Inventory has already decremented via
-    // recordInventoryChange above; a missing audit row will surface
-    // in the daily counter↔ledger recon task as drift but will not
-    // delay the order. Wrapped in try/catch + sensor row.
-    try {
-      const commitItems = items.map((it) => ({ sku: it.sku, qty: it.quantity }));
-      const commitResult = await commitOrderItems({
-        workspaceId,
-        orderId: newOrder.id,
-        items: commitItems,
-        metadata: {
-          platform,
-          connection_id: connectionId ?? null,
-          remote_order_id: remoteOrderId,
-          webhook_event_id: event.id,
-        },
-      });
-      if (commitResult.alreadyOpen.length > 0) {
-        console.info(
-          `[process-client-store-webhook] commitOrderItems: ${commitResult.inserted} new, ${commitResult.alreadyOpen.length} already-open (retry)`,
-        );
+    // Fail-open policy (everywhere): when the wrapper returns
+    // `verdict:"legacy"` (flag off, emergency pause, workspace read
+    // error, loader error, evaluator error, apply error, or thrown
+    // exception), we fall through to the pre-Phase-8 unconditional-
+    // decrement path. A hold-evaluation bug MUST NOT block order
+    // ingestion — we'd rather ship something than hang the order.
+    // Structured warnings are persisted as `sensor_readings` rows so
+    // the rollout page surfaces hold-ingress failure rates.
+    const holdIngress = await runHoldIngressSafely(supabase, {
+      workspaceId,
+      orderId: newOrder.id,
+      source: "webhook",
+      platform,
+    });
+    await persistIngressWarnings(supabase, workspaceId, holdIngress.warnings);
+    const holdVerdict: SafeIngressVerdict = holdIngress.verdict;
+    const skipLegacyCommitLedger = holdVerdict.kind === "hold_applied";
+
+    if (!skipLegacyCommitLedger) {
+      // Phase 5 §9.6 D1.b — open one inventory_commitments row per
+      // (workspace_id, source='order', source_id=newOrder.id, sku).
+      // The push formula `MAX(0, available - committed - safety)`
+      // ignores this column UNTIL `workspaces.atp_committed_active` is
+      // flipped per workspace (default FALSE — see migration
+      // 20260424000005). Until then this is an audit-only ledger:
+      // visible in the recon task + the megaplan spot-check, no
+      // production behavior change.
+      //
+      // Idempotency: commitOrderItems uses ON CONFLICT DO NOTHING on
+      // the partial unique index (workspace_id, source, source_id, sku)
+      // WHERE released_at IS NULL, so retried Shopify deliveries (up to
+      // ~24 retries over 48h per the Shopify webhook contract) cannot
+      // double-commit.
+      //
+      // Failure isolation: ledger insert errors must NEVER fail the
+      // order ingestion. Inventory has already decremented via
+      // recordInventoryChange above; a missing audit row will surface
+      // in the daily counter↔ledger recon task as drift but will not
+      // delay the order. Wrapped in try/catch + sensor row.
+      //
+      // Phase 8 SKIP: when `holdVerdict.kind === "hold_applied"`, the
+      // `apply_order_fulfillment_hold` RPC already wrote
+      // `inventory_commitments` rows for the committable-warehouse
+      // lines in the SAME ACID transaction as the hold stamp (Rule #64,
+      // SKU-AUTO-21). Calling commitOrderItems again would be
+      // idempotent (ON CONFLICT DO NOTHING) but wasteful, and also
+      // attempts to commit HELD lines — which must stay uncommitted
+      // until the hold is released.
+      try {
+        const commitItems = items.map((it) => ({ sku: it.sku, qty: it.quantity }));
+        const commitResult = await commitOrderItems({
+          workspaceId,
+          orderId: newOrder.id,
+          items: commitItems,
+          metadata: {
+            platform,
+            connection_id: connectionId ?? null,
+            remote_order_id: remoteOrderId,
+            webhook_event_id: event.id,
+          },
+        });
+        if (commitResult.alreadyOpen.length > 0) {
+          console.info(
+            `[process-client-store-webhook] commitOrderItems: ${commitResult.inserted} new, ${commitResult.alreadyOpen.length} already-open (retry)`,
+          );
+        }
+      } catch (commitErr) {
+        const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+        console.error("[process-client-store-webhook] commitOrderItems failed:", msg);
+        await supabase.from("sensor_readings").insert({
+          workspace_id: workspaceId,
+          sensor_name: "inv.commit_ledger_write_failed",
+          status: "warning",
+          message: `commitOrderItems failed for order ${newOrder.id}: ${msg.slice(0, 200)}`,
+          value: { order_id: newOrder.id, platform, error: msg },
+        });
       }
-    } catch (commitErr) {
-      const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
-      console.error("[process-client-store-webhook] commitOrderItems failed:", msg);
-      await supabase.from("sensor_readings").insert({
-        workspace_id: workspaceId,
-        sensor_name: "inv.commit_ledger_write_failed",
-        status: "warning",
-        message: `commitOrderItems failed for order ${newOrder.id}: ${msg.slice(0, 200)}`,
-        value: { order_id: newOrder.id, platform, error: msg },
-      });
+    }
+
+    // Phase 8 — enqueue the client-alert task when a hold was applied
+    // AND the evaluator says the client should know. The task itself
+    // self-gates on emergency pause, `non_warehouse_order_client_alerts_enabled`
+    // (Phase 5 flag), cycle-id freshness, per-cycle idempotency
+    // (DB partial unique index), AND bulk suppression (SKU-AUTO-31) —
+    // so there's deliberately no second gate at this enqueue site.
+    // Unconditional enqueue keeps the ingress path simple; the task
+    // owns the "should this really send?" policy, which means one
+    // change to the alert rules changes both paths at once.
+    if (holdVerdict.kind === "hold_applied" && holdVerdict.clientAlertRequired) {
+      try {
+        await tasks.trigger("send-non-warehouse-order-hold-alert", {
+          orderId: newOrder.id,
+          holdCycleId: holdVerdict.cycleId,
+        });
+      } catch (alertErr) {
+        const msg = alertErr instanceof Error ? alertErr.message : String(alertErr);
+        console.error(
+          "[process-client-store-webhook] send-non-warehouse-order-hold-alert enqueue failed:",
+          msg,
+        );
+        await supabase.from("sensor_readings").insert({
+          workspace_id: workspaceId,
+          sensor_name: "hold_ingress.alert_enqueue_failed",
+          status: "warning",
+          message: `send-non-warehouse-order-hold-alert enqueue failed for order ${newOrder.id}: ${msg.slice(0, 200)}`,
+          value: {
+            order_id: newOrder.id,
+            hold_cycle_id: holdVerdict.cycleId,
+            platform,
+            source: "webhook",
+            error: msg,
+          },
+        });
+      }
     }
 
     // Decrement warehouse inventory for each line item.
@@ -644,11 +759,21 @@ async function handleOrderCreated(
     // (F-11: `platform` is already in scope from the outer order-create block; the
     // duplicate `const platform = event.platform as string;` shadow at this point
     // was removed in the audit cleanup pass.)
+    //
+    // Phase 8 (SKU-AUTO-21): when a hold was applied, `committableFilter`
+    // is the set of remote SKUs that ARE warehouse-committable. Lines NOT
+    // in this set are HELD — they must stay at full stock until the hold
+    // is released, so we record them with `status="held"` and skip the
+    // `recordInventoryChange` call. `inventory_commitments` for the
+    // committable lines were already written by `apply_order_fulfillment_hold`
+    // in the same ACID transaction as the hold stamp (Rule #64 + #20).
+    const committableFilter: ReadonlySet<string> | null =
+      holdVerdict.kind === "hold_applied" ? holdVerdict.committableRemoteSkus : null;
     const bundleCache = new Map<string, boolean>();
     const decrementResults: {
       sku: string;
       delta: number;
-      status: "ok" | "floor_violation" | "not_mapped" | "error";
+      status: "ok" | "floor_violation" | "not_mapped" | "error" | "held";
       reason?: string;
     }[] = [];
 
@@ -656,6 +781,17 @@ async function handleOrderCreated(
       const li = lineItems[index];
       const remoteSku = (li.sku as string) ?? "";
       if (!remoteSku) continue;
+
+      if (committableFilter !== null && !committableFilter.has(remoteSku)) {
+        decrementResults.push({
+          sku: remoteSku,
+          delta: 0,
+          status: "held",
+          reason:
+            holdVerdict.kind === "hold_applied" ? holdVerdict.holdReason : "non_warehouse_hold",
+        });
+        continue;
+      }
 
       // Resolve warehouse SKU via mapping (remote SKU may differ from warehouse SKU)
       const { data: mapping } = await supabase
@@ -723,8 +859,13 @@ async function handleOrderCreated(
       }
     }
 
-    // Record partial application to review queue if any line item failed
-    const failures = decrementResults.filter((r) => r.status !== "ok" && r.status !== "not_mapped");
+    // Record partial application to review queue if any line item failed.
+    // `held` lines are expected (the hold substrate is the source of truth
+    // for them) and `not_mapped` lines surface via their own channels, so
+    // neither counts as a partial-apply failure.
+    const failures = decrementResults.filter(
+      (r) => r.status !== "ok" && r.status !== "not_mapped" && r.status !== "held",
+    );
     if (failures.length > 0) {
       const hasSystemFault = failures.some((r) => r.status === "error");
       await supabase.from("warehouse_review_queue").upsert(

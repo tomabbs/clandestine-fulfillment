@@ -30,6 +30,7 @@ const {
   mockCommitOrderItems,
   mockReleaseOrderItems,
   mockRehydrateWebhookInventoryUpdate,
+  mockRunHoldIngressSafely,
 } = vi.hoisted(() => ({
   mockFrom: vi.fn(),
   mockTrigger: vi.fn().mockResolvedValue({ id: "run-1" }),
@@ -59,6 +60,16 @@ const {
   // historical `sku_mapping_missing` path. Rehydrate-branch tests
   // override this per-case.
   mockRehydrateWebhookInventoryUpdate: vi.fn().mockResolvedValue({ kind: "no_identity_row" }),
+  // Phase 8 (SKU-AUTO-3 + SKU-AUTO-21) — default returns the pre-
+  // Phase-8 behavior: verdict `legacy:"hold_disabled"` with no
+  // warnings. Existing orders/create tests keep calling commitOrderItems
+  // and decrementing every line via recordInventoryChange exactly as
+  // they did before the wiring. Phase 8 integration tests below
+  // override this per-case to exercise no_hold / hold_applied.
+  mockRunHoldIngressSafely: vi.fn().mockResolvedValue({
+    verdict: { kind: "legacy", reason: "hold_disabled" },
+    warnings: [],
+  }),
 }));
 
 vi.mock("@/lib/server/supabase-server", () => ({
@@ -105,6 +116,17 @@ vi.mock("@/lib/server/webhook-monotonic-guard", () => ({
 // historical `sku_mapping_missing` path.
 vi.mock("@/lib/server/webhook-rehydrate", () => ({
   rehydrateWebhookInventoryUpdate: mockRehydrateWebhookInventoryUpdate,
+}));
+
+// Phase 8 (SKU-AUTO-3 + SKU-AUTO-21) — mock the shared hold ingress
+// orchestrator so each wiring branch in `handleOrderCreated` can be
+// driven deterministically. The orchestrator itself has its own test
+// suite (tests/unit/lib/server/order-hold-ingress.test.ts); here we
+// only assert the handler correctly maps each verdict to the right
+// downstream behavior (skip legacy commitOrderItems, enqueue client
+// alert, filter decrement loop, persist sensor warnings).
+vi.mock("@/lib/server/order-hold-ingress", () => ({
+  runHoldIngressSafely: mockRunHoldIngressSafely,
 }));
 
 import { processClientStoreWebhookTask as _processClientStoreWebhookTask } from "@/trigger/tasks/process-client-store-webhook";
@@ -474,6 +496,14 @@ beforeEach(() => {
   // never stub this keep falling through to the historical
   // `sku_mapping_missing` path.
   mockRehydrateWebhookInventoryUpdate.mockResolvedValue({ kind: "no_identity_row" });
+  mockRunHoldIngressSafely.mockReset();
+  // Phase 8 default = `legacy:"hold_disabled"` so pre-existing tests
+  // that don't stub this see the pre-Phase-8 behavior (commitOrderItems
+  // fires, every line is decremented unconditionally).
+  mockRunHoldIngressSafely.mockResolvedValue({
+    verdict: { kind: "legacy", reason: "hold_disabled" },
+    warnings: [],
+  });
 });
 
 const WORKSPACE_ID = "ws-1";
@@ -1931,5 +1961,578 @@ describe("Phase 5 §9.6 D1.b — commit/release wire-up", () => {
       orderId: "wh-order-rel-1",
       reason: "order_cancelled",
     });
+  });
+});
+
+// ──────── Phase 8 (SKU-AUTO-3 + SKU-AUTO-21) — hold-ingress wire-up ────────────
+//
+// These tests pin the Phase 8 CALL CONTRACT between handleOrderCreated
+// and `runHoldIngressSafely`. The helper itself is exhaustively tested
+// in tests/unit/lib/server/order-hold-ingress.test.ts — here we only
+// assert the handler:
+//
+//   1. Calls `runHoldIngressSafely` AFTER inserting warehouse_order_items
+//      (so the loader sees the just-inserted row) with `source="webhook"`
+//      and `workspaceId` + `orderId` + `platform` from the event.
+//   2. Persists every `IngressSensorWarning` as a `sensor_readings` row.
+//   3. On `legacy` verdict: calls `commitOrderItems` AND decrements EVERY
+//      line via `recordInventoryChange` (pre-Phase-8 path preserved).
+//   4. On `no_hold` verdict: calls `commitOrderItems` AND decrements every
+//      line (RPC was never invoked).
+//   5. On `hold_applied` verdict:
+//        a. DOES NOT call `commitOrderItems` (RPC already wrote commits
+//           atomically — Rule #64).
+//        b. Decrements ONLY committable remote SKUs; held lines are
+//           skipped with `status="held"`.
+//        c. Enqueues `send-non-warehouse-order-hold-alert` IFF
+//           `clientAlertRequired === true` (alert task owns all other
+//           policy gates: emergency pause / flags / bulk-suppression).
+
+describe("Phase 8 (SKU-AUTO-3 + SKU-AUTO-21) — hold-ingress wire-up", () => {
+  // Patches mockFrom for an orders/create payload: warehouse_orders insert
+  // returns the given id; warehouse_order_items insert captures rows;
+  // sensor_readings insert captures rows; client_store_sku_mappings
+  // returns the given mapping table. All other tables fall through to
+  // the pre-existing generic handler.
+  function patchOrderCreatePath(options: {
+    orderId: string;
+    sensorCapture: Array<Record<string, unknown>>;
+    mappings: Map<string, { variant_id: string; sku: string }>;
+  }) {
+    const previousImpl = mockFrom.getMockImplementation();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "warehouse_orders") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                single: async () => ({ data: null, error: null }),
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+          }),
+          insert: () => ({
+            select: () => ({
+              single: async () => ({ data: { id: options.orderId }, error: null }),
+            }),
+          }),
+          update: () => ({
+            eq: async () => ({ data: null, error: null }),
+          }),
+        };
+      }
+      if (table === "warehouse_order_items") {
+        return { insert: async () => ({ data: null, error: null }) };
+      }
+      if (table === "sensor_readings") {
+        return {
+          insert: async (rows: unknown) => {
+            if (Array.isArray(rows)) {
+              options.sensorCapture.push(...(rows as Array<Record<string, unknown>>));
+            } else if (rows && typeof rows === "object") {
+              options.sensorCapture.push(rows as Record<string, unknown>);
+            }
+            return { data: null, error: null };
+          },
+        };
+      }
+      if (table === "client_store_sku_mappings") {
+        return {
+          select: () => ({
+            eq: (_col1: string, _val1: unknown) => ({
+              eq: (_col2: string, remoteSku: string) => ({
+                single: async () => {
+                  const hit = options.mappings.get(remoteSku);
+                  if (!hit) return { data: null, error: null };
+                  return {
+                    data: {
+                      variant_id: hit.variant_id,
+                      warehouse_product_variants: { sku: hit.sku },
+                    },
+                    error: null,
+                  };
+                },
+              }),
+            }),
+          }),
+        };
+      }
+      return previousImpl ? previousImpl(table) : {};
+    });
+  }
+
+  function buildLegacyVerdict(reason = "hold_disabled") {
+    return {
+      verdict: { kind: "legacy", reason },
+      warnings: [],
+    };
+  }
+
+  function buildNoHoldVerdict() {
+    return {
+      verdict: { kind: "no_hold", classifications: [] },
+      warnings: [],
+    };
+  }
+
+  function buildHoldAppliedVerdict(opts: {
+    cycleId: string;
+    holdReason:
+      | "non_warehouse_sku"
+      | "identity_only_match"
+      | "unmapped_sku"
+      | "placeholder_sku_detected"
+      | "fetch_incomplete_at_match";
+    committableRemoteSkus: Array<string>;
+    clientAlertRequired: boolean;
+    staffReviewRequired: boolean;
+  }) {
+    const applyReason: Record<string, string> = {
+      non_warehouse_sku: "non_warehouse_match",
+      identity_only_match: "non_warehouse_match",
+      unmapped_sku: "unknown_remote_sku",
+      placeholder_sku_detected: "placeholder_remote_sku",
+      fetch_incomplete_at_match: "fetch_incomplete_at_match",
+    };
+    return {
+      verdict: {
+        kind: "hold_applied",
+        cycleId: opts.cycleId,
+        holdReason: opts.holdReason,
+        applyHoldReason: applyReason[opts.holdReason],
+        holdEventId: "hold-event-1",
+        commitsInserted: opts.committableRemoteSkus.length,
+        clientAlertRequired: opts.clientAlertRequired,
+        staffReviewRequired: opts.staffReviewRequired,
+        committableRemoteSkus: new Set(opts.committableRemoteSkus),
+        committableLines: opts.committableRemoteSkus.map((sku) => ({
+          remoteSku: sku,
+          variantId: `var-${sku}`,
+          quantity: 1,
+        })),
+        decision: {
+          shouldHold: true,
+          holdReason: opts.holdReason,
+          affectedLines: [],
+          committableLines: [],
+          clientAlertRequired: opts.clientAlertRequired,
+          staffReviewRequired: opts.staffReviewRequired,
+        },
+      },
+      warnings: [],
+    };
+  }
+
+  function seedMixedOrderEvent(eventId: string, remoteOrderId: string) {
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: remoteOrderId,
+          line_items: [
+            { id: "li-wh-1", sku: "WH-RMT-A", quantity: 2 },
+            { id: "li-wh-2", sku: "WH-RMT-B", quantity: 1 },
+            { id: "li-nw-1", sku: "NW-RMT-X", quantity: 3 },
+          ],
+        },
+      },
+    });
+  }
+
+  it("calls runHoldIngressSafely with source='webhook' + workspaceId + orderId + platform AFTER warehouse_order_items insert", async () => {
+    seedConnection();
+    state.skuMappings.push(
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-A",
+        variant_id: "var-A",
+        warehouse_product_variants: { sku: "WH-A" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-B",
+        variant_id: "var-B",
+        warehouse_product_variants: { sku: "WH-B" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "NW-RMT-X",
+        variant_id: "var-X",
+        warehouse_product_variants: { sku: "WH-X" },
+      },
+    );
+
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-hold-1",
+      sensorCapture,
+      mappings: new Map([
+        ["WH-RMT-A", { variant_id: "var-A", sku: "WH-A" }],
+        ["WH-RMT-B", { variant_id: "var-B", sku: "WH-B" }],
+        ["NW-RMT-X", { variant_id: "var-X", sku: "WH-X" }],
+      ]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce(buildLegacyVerdict("hold_disabled"));
+
+    const eventId = "evt-hold-wire-1";
+    seedMixedOrderEvent(eventId, "shopify-order-hold-1");
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockRunHoldIngressSafely).toHaveBeenCalledTimes(1);
+    const [, input] = mockRunHoldIngressSafely.mock.calls[0];
+    expect(input).toEqual({
+      workspaceId: WORKSPACE_ID,
+      orderId: "wh-order-hold-1",
+      source: "webhook",
+      platform: "shopify",
+    });
+  });
+
+  it("legacy verdict (default) preserves pre-Phase-8 behavior: commitOrderItems fires AND every line is decremented", async () => {
+    seedConnection();
+    state.skuMappings.push(
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-A",
+        variant_id: "var-A",
+        warehouse_product_variants: { sku: "WH-A" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-B",
+        variant_id: "var-B",
+        warehouse_product_variants: { sku: "WH-B" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "NW-RMT-X",
+        variant_id: "var-X",
+        warehouse_product_variants: { sku: "WH-X" },
+      },
+    );
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-legacy-1",
+      sensorCapture,
+      mappings: new Map([
+        ["WH-RMT-A", { variant_id: "var-A", sku: "WH-A" }],
+        ["WH-RMT-B", { variant_id: "var-B", sku: "WH-B" }],
+        ["NW-RMT-X", { variant_id: "var-X", sku: "WH-X" }],
+      ]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce(buildLegacyVerdict("hold_disabled"));
+
+    const eventId = "evt-legacy-1";
+    seedMixedOrderEvent(eventId, "shopify-order-legacy-1");
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockCommitOrderItems).toHaveBeenCalledTimes(1);
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(3);
+    const decrementedSkus = mockRecordInventoryChange.mock.calls.map(
+      (call) => (call[0] as { sku: string }).sku,
+    );
+    expect(decrementedSkus).toEqual(expect.arrayContaining(["WH-A", "WH-B", "WH-X"]));
+    expect(mockTrigger).not.toHaveBeenCalledWith(
+      "send-non-warehouse-order-hold-alert",
+      expect.anything(),
+    );
+  });
+
+  it("no_hold verdict: commitOrderItems fires, every line decrements (RPC was never invoked)", async () => {
+    seedConnection();
+    state.skuMappings.push(
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-A",
+        variant_id: "var-A",
+        warehouse_product_variants: { sku: "WH-A" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-B",
+        variant_id: "var-B",
+        warehouse_product_variants: { sku: "WH-B" },
+      },
+    );
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-nohold-1",
+      sensorCapture,
+      mappings: new Map([
+        ["WH-RMT-A", { variant_id: "var-A", sku: "WH-A" }],
+        ["WH-RMT-B", { variant_id: "var-B", sku: "WH-B" }],
+      ]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce(buildNoHoldVerdict());
+
+    const eventId = "evt-nohold-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-nohold-1",
+          line_items: [
+            { id: "li-wh-1", sku: "WH-RMT-A", quantity: 2 },
+            { id: "li-wh-2", sku: "WH-RMT-B", quantity: 1 },
+          ],
+        },
+      },
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockCommitOrderItems).toHaveBeenCalledTimes(1);
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(2);
+    expect(mockTrigger).not.toHaveBeenCalledWith(
+      "send-non-warehouse-order-hold-alert",
+      expect.anything(),
+    );
+  });
+
+  it("hold_applied verdict: commitOrderItems SKIPPED, only committable lines decrement, alert enqueued when clientAlertRequired", async () => {
+    seedConnection();
+    state.skuMappings.push(
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-A",
+        variant_id: "var-A",
+        warehouse_product_variants: { sku: "WH-A" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "WH-RMT-B",
+        variant_id: "var-B",
+        warehouse_product_variants: { sku: "WH-B" },
+      },
+      {
+        connection_id: CONNECTION_ID,
+        remote_sku: "NW-RMT-X",
+        variant_id: "var-X",
+        warehouse_product_variants: { sku: "WH-X" },
+      },
+    );
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-held-1",
+      sensorCapture,
+      mappings: new Map([
+        ["WH-RMT-A", { variant_id: "var-A", sku: "WH-A" }],
+        ["WH-RMT-B", { variant_id: "var-B", sku: "WH-B" }],
+        ["NW-RMT-X", { variant_id: "var-X", sku: "WH-X" }],
+      ]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce(
+      buildHoldAppliedVerdict({
+        cycleId: "ingress:ws-1:wh-order-held-1",
+        holdReason: "non_warehouse_sku",
+        committableRemoteSkus: ["WH-RMT-A", "WH-RMT-B"],
+        clientAlertRequired: true,
+        staffReviewRequired: false,
+      }),
+    );
+
+    const eventId = "evt-held-1";
+    seedMixedOrderEvent(eventId, "shopify-order-held-1");
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockCommitOrderItems).not.toHaveBeenCalled();
+
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(2);
+    const decrementedSkus = mockRecordInventoryChange.mock.calls.map(
+      (call) => (call[0] as { sku: string }).sku,
+    );
+    expect(decrementedSkus).toEqual(expect.arrayContaining(["WH-A", "WH-B"]));
+    expect(decrementedSkus).not.toContain("WH-X");
+
+    const alertCalls = mockTrigger.mock.calls.filter(
+      (call) => call[0] === "send-non-warehouse-order-hold-alert",
+    );
+    expect(alertCalls).toHaveLength(1);
+    expect(alertCalls[0][1]).toEqual({
+      orderId: "wh-order-held-1",
+      holdCycleId: "ingress:ws-1:wh-order-held-1",
+    });
+  });
+
+  it("hold_applied verdict with clientAlertRequired=false: no alert enqueued (staff-only hold)", async () => {
+    seedConnection();
+    state.skuMappings.push({
+      connection_id: CONNECTION_ID,
+      remote_sku: "WH-RMT-A",
+      variant_id: "var-A",
+      warehouse_product_variants: { sku: "WH-A" },
+    });
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-staff-1",
+      sensorCapture,
+      mappings: new Map([["WH-RMT-A", { variant_id: "var-A", sku: "WH-A" }]]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce(
+      buildHoldAppliedVerdict({
+        cycleId: "ingress:ws-1:wh-order-staff-1",
+        holdReason: "identity_only_match",
+        committableRemoteSkus: ["WH-RMT-A"],
+        clientAlertRequired: false,
+        staffReviewRequired: true,
+      }),
+    );
+
+    const eventId = "evt-staff-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-staff-1",
+          line_items: [
+            { id: "li-wh-1", sku: "WH-RMT-A", quantity: 1 },
+            { id: "li-id-1", sku: "ID-ONLY", quantity: 1 },
+          ],
+        },
+      },
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    const alertCalls = mockTrigger.mock.calls.filter(
+      (call) => call[0] === "send-non-warehouse-order-hold-alert",
+    );
+    expect(alertCalls).toHaveLength(0);
+  });
+
+  it("hold_applied verdict with NO committable lines: commitOrderItems skipped, no decrements, alert fires", async () => {
+    seedConnection();
+    state.skuMappings.push({
+      connection_id: CONNECTION_ID,
+      remote_sku: "NW-RMT-X",
+      variant_id: "var-X",
+      warehouse_product_variants: { sku: "WH-X" },
+    });
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-all-held-1",
+      sensorCapture,
+      mappings: new Map([["NW-RMT-X", { variant_id: "var-X", sku: "WH-X" }]]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce(
+      buildHoldAppliedVerdict({
+        cycleId: "ingress:ws-1:wh-order-all-held-1",
+        holdReason: "unmapped_sku",
+        committableRemoteSkus: [],
+        clientAlertRequired: true,
+        staffReviewRequired: false,
+      }),
+    );
+
+    const eventId = "evt-all-held-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-all-held-1",
+          line_items: [{ id: "li-nw-1", sku: "NW-RMT-X", quantity: 3 }],
+        },
+      },
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(mockCommitOrderItems).not.toHaveBeenCalled();
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+
+    const alertCalls = mockTrigger.mock.calls.filter(
+      (call) => call[0] === "send-non-warehouse-order-hold-alert",
+    );
+    expect(alertCalls).toHaveLength(1);
+  });
+
+  it("persists IngressSensorWarning rows as sensor_readings when verdict=legacy with warnings", async () => {
+    seedConnection();
+    state.skuMappings.push({
+      connection_id: CONNECTION_ID,
+      remote_sku: "WH-RMT-A",
+      variant_id: "var-A",
+      warehouse_product_variants: { sku: "WH-A" },
+    });
+    const sensorCapture: Array<Record<string, unknown>> = [];
+    patchOrderCreatePath({
+      orderId: "wh-order-warn-1",
+      sensorCapture,
+      mappings: new Map([["WH-RMT-A", { variant_id: "var-A", sku: "WH-A" }]]),
+    });
+
+    mockRunHoldIngressSafely.mockResolvedValueOnce({
+      verdict: { kind: "legacy", reason: "evaluator_error" },
+      warnings: [
+        {
+          sensor_name: "hold_ingress.evaluator_error",
+          status: "warning",
+          message: "hold evaluator failed for webhook order wh-order-warn-1: rpc crashed",
+          value: {
+            order_id: "wh-order-warn-1",
+            workspace_id: WORKSPACE_ID,
+            source: "webhook",
+            platform: "shopify",
+            detail: "rpc crashed",
+          },
+        },
+      ],
+    });
+
+    const eventId = "evt-warn-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "shopify",
+      topic: "orders/create",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: {
+          id: "shopify-order-warn-1",
+          line_items: [{ id: "li-wh-1", sku: "WH-RMT-A", quantity: 1 }],
+        },
+      },
+    });
+
+    await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    const holdIngressSensorRows = sensorCapture.filter(
+      (r) =>
+        typeof r.sensor_name === "string" && (r.sensor_name as string).startsWith("hold_ingress."),
+    );
+    expect(holdIngressSensorRows).toHaveLength(1);
+    expect(holdIngressSensorRows[0]).toMatchObject({
+      workspace_id: WORKSPACE_ID,
+      sensor_name: "hold_ingress.evaluator_error",
+      status: "warning",
+    });
+
+    expect(mockCommitOrderItems).toHaveBeenCalledTimes(1);
+    expect(mockRecordInventoryChange).toHaveBeenCalledTimes(1);
   });
 });

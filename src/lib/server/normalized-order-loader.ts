@@ -80,12 +80,13 @@ export type LoadNormalizedOrderResult = NormalizeOrderResult;
 export interface LoadNormalizedOrderOptions {
   /**
    * Which `source` the caller wants stamped on the normalized order.
-   * The loader is used by BOTH the poll path (after order insert) and
-   * the hold-recovery task. The two cases are distinguishable in
-   * telemetry — poll vs recovery — so we require the caller to state
-   * it explicitly rather than guessing.
+   * The loader is used by the webhook-ingress hold flow (after order
+   * insert), the poll-ingress hold flow (same), and the
+   * sku-hold-recovery-recheck task. All three cases are distinguishable
+   * in telemetry so we require the caller to state it explicitly rather
+   * than guessing.
    */
-  source: "poll" | "recovery";
+  source: "webhook" | "poll" | "recovery";
   /**
    * Override the connection-status filter. Defaults to the two
    * operationally-usable states. Tests set this to `null` to include

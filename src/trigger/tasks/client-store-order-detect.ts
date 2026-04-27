@@ -11,10 +11,15 @@
  *   - Runs on its own 10-minute cron schedule
  */
 
-import { schedules } from "@trigger.dev/sdk";
+import { schedules, tasks } from "@trigger.dev/sdk";
 import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
 import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
+import {
+  type IngressSensorWarning,
+  runHoldIngressSafely,
+  type SafeIngressVerdict,
+} from "@/lib/server/order-hold-ingress";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 import { clientStoreOrderQueue } from "@/trigger/lib/client-store-order-queue";
@@ -40,6 +45,8 @@ export const clientStoreOrderDetectTask = schedules.task({
     const workspaceIds = await getAllWorkspaceIds(supabase);
     let ordersCreated = 0;
     let echoesCancelled = 0;
+    let holdsApplied = 0;
+    let alertsEnqueued = 0;
     let errors = 0;
 
     for (const workspaceId of workspaceIds) {
@@ -132,6 +139,71 @@ export const clientStoreOrderDetectTask = schedules.task({
               }
 
               ordersCreated++;
+
+              // Phase 8 (SKU-AUTO-3 + SKU-AUTO-21) — consult the shared
+              // hold substrate. `runHoldIngressSafely` is the SAME
+              // function `process-client-store-webhook.handleOrderCreated`
+              // calls on the SAME (workspaceId, orderId) tuple. Because
+              // both ingress paths call the same helper with the same
+              // loader / evaluator / RPC wrapper against the same DB
+              // state, the resulting `HoldDecision` is identical BY
+              // CONSTRUCTION — that is SKU-AUTO-3's parity guarantee.
+              //
+              // Fail-open policy: every terminal failure kind returns
+              // `verdict:"legacy"` and a structured warning, which we
+              // persist as a `sensor_readings` row so the rollout page
+              // surfaces hold-ingress failure rates.
+              //
+              // Unlike the webhook path, the poll path does NOT decrement
+              // inventory on its own (the webhook is the canonical
+              // decrement path; poll exists as a backfill for missed
+              // webhooks). So the only Phase 8 side-effect here is:
+              //   1. persist sensor warnings on failure,
+              //   2. enqueue `send-non-warehouse-order-hold-alert` when
+              //      a hold was applied AND the evaluator says the
+              //      client should know. The alert task owns ALL
+              //      policy (emergency pause / flags / idempotency /
+              //      bulk suppression), so this enqueue is unconditional.
+              const holdIngress = await runHoldIngressSafely(supabase, {
+                workspaceId,
+                orderId: newOrder.id,
+                source: "poll",
+                platform: connection.platform,
+              });
+              await persistIngressWarnings(supabase, workspaceId, holdIngress.warnings);
+              const holdVerdict: SafeIngressVerdict = holdIngress.verdict;
+
+              if (holdVerdict.kind === "hold_applied") {
+                holdsApplied++;
+                if (holdVerdict.clientAlertRequired) {
+                  try {
+                    await tasks.trigger("send-non-warehouse-order-hold-alert", {
+                      orderId: newOrder.id,
+                      holdCycleId: holdVerdict.cycleId,
+                    });
+                    alertsEnqueued++;
+                  } catch (alertErr) {
+                    const msg = alertErr instanceof Error ? alertErr.message : String(alertErr);
+                    console.error(
+                      `[client-store-order-detect] send-non-warehouse-order-hold-alert enqueue failed for order ${newOrder.id}:`,
+                      msg,
+                    );
+                    await supabase.from("sensor_readings").insert({
+                      workspace_id: workspaceId,
+                      sensor_name: "hold_ingress.alert_enqueue_failed",
+                      status: "warning",
+                      message: `send-non-warehouse-order-hold-alert enqueue failed for order ${newOrder.id}: ${msg.slice(0, 200)}`,
+                      value: {
+                        order_id: newOrder.id,
+                        hold_cycle_id: holdVerdict.cycleId,
+                        platform: connection.platform,
+                        source: "poll",
+                        error: msg,
+                      },
+                    });
+                  }
+                }
+              }
             }
           }
 
@@ -153,6 +225,40 @@ export const clientStoreOrderDetectTask = schedules.task({
       }
     }
 
-    return { ordersCreated, echoesCancelled, errors };
+    return { ordersCreated, echoesCancelled, holdsApplied, alertsEnqueued, errors };
   },
 });
+
+/**
+ * Best-effort persistence of `runHoldIngressSafely` sensor warnings.
+ * Mirrors the helper in `process-client-store-webhook.ts` so the poll
+ * path emits identical `sensor_readings` shape as the webhook path —
+ * SKU-AUTO-3 parity for forensics.
+ *
+ * Swallowed errors: the rollout-page observability query is non-load-
+ * bearing, so a sensor insert failure must NOT fail the poll run.
+ * A failed sensor insert is logged to the task's stdout for debugging.
+ */
+async function persistIngressWarnings(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  workspaceId: string,
+  warnings: ReadonlyArray<IngressSensorWarning>,
+): Promise<void> {
+  if (warnings.length === 0) return;
+  try {
+    await supabase.from("sensor_readings").insert(
+      warnings.map((w) => ({
+        workspace_id: workspaceId,
+        sensor_name: w.sensor_name,
+        status: w.status,
+        message: w.message,
+        value: w.value,
+      })),
+    );
+  } catch (err) {
+    console.error(
+      "[client-store-order-detect] sensor_readings insert (hold ingress) failed:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
