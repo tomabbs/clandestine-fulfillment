@@ -95,6 +95,8 @@ type CanonicalVariantRow = {
   price: number | null;
   option1_value: string | null;
   format_name: string | null;
+  bandcamp_option_id: number | null;
+  bandcamp_option_title: string | null;
   is_preorder: boolean | null;
   product_id: string;
   warehouse_products:
@@ -113,7 +115,6 @@ type CanonicalVariantRow = {
     | {
         bandcamp_album_title: string | null;
         bandcamp_origin_quantities: unknown;
-        bandcamp_option_title: string | null;
         bandcamp_item_id: number | null;
       }[]
     | null;
@@ -376,13 +377,14 @@ async function getCanonicalRows(
       price,
       option1_value,
       format_name,
+      bandcamp_option_id,
+      bandcamp_option_title,
       is_preorder,
       product_id,
       warehouse_products!inner(id, title, vendor),
       bandcamp_product_mappings(
         bandcamp_album_title,
         bandcamp_origin_quantities,
-        bandcamp_option_title,
         bandcamp_item_id
       ),
       warehouse_inventory_levels(available, committed)
@@ -673,8 +675,8 @@ export async function getSkuMatchingWorkspace(
         optionValue: canonical.option1_value,
         isPreorder: Boolean(canonical.is_preorder),
         price: canonical.price,
-        bandcampOptionId: null,
-        bandcampOptionTitle: bandcamp?.bandcamp_option_title ?? null,
+        bandcampOptionId: canonical.bandcamp_option_id,
+        bandcampOptionTitle: canonical.bandcamp_option_title,
         bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
       },
       remoteCatalog.items,
@@ -846,8 +848,8 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
       optionValue: canonical.option1_value,
       isPreorder: Boolean(canonical.is_preorder),
       price: canonical.price,
-      bandcampOptionId: null,
-      bandcampOptionTitle: bandcamp?.bandcamp_option_title ?? null,
+      bandcampOptionId: canonical.bandcamp_option_id,
+      bandcampOptionTitle: canonical.bandcamp_option_title,
       bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
     },
     remoteCatalog.items,
@@ -906,8 +908,8 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
             optionValue: canonical.option1_value,
             isPreorder: Boolean(canonical.is_preorder),
             price: canonical.price,
-            bandcampOptionId: null,
-            bandcampOptionTitle: bandcamp?.bandcamp_option_title ?? null,
+            bandcampOptionId: canonical.bandcamp_option_id,
+            bandcampOptionTitle: canonical.bandcamp_option_title,
             bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
           },
           targetRemote ? [targetRemote] : remoteCatalog.items,
