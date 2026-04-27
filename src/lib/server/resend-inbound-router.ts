@@ -47,6 +47,17 @@ export async function routeInboundEmail({
   const subjectLower = subjectRaw.toLowerCase();
   const bodyLower = email.text.toLowerCase();
 
+  const isPirateShipReceipt =
+    /receipt for .*payment to pirate ship/i.test(subjectRaw) ||
+    /pirate ship payment receipt/i.test(bodyLower);
+  if (isPirateShipReceipt) {
+    await supabase
+      .from("webhook_events")
+      .update({ status: "dismissed", topic: "pirate_ship_receipt" })
+      .eq("id", webhookEventId);
+    return { status: "pirate_ship_receipt_skipped" };
+  }
+
   const isBandcamp =
     /^noreply@bandcamp\.com$/i.test(senderAddress) ||
     /bandcamp\.com$/i.test(senderAddress) ||

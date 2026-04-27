@@ -1003,8 +1003,8 @@ export async function getSupportClientContext(conversationId: string): Promise<{
     inventoryAlerts: [],
     links: {
       orgAdminUrl: `/admin/clients/${orgId}`,
-      ordersUrl: `/admin/orders?org=${orgId}`,
-      shipmentsUrl: `/admin/shipping?org=${orgId}`,
+      ordersUrl: `/admin/orders?status=all&tab=all&orgId=${orgId}`,
+      shipmentsUrl: `/admin/shipping?orgId=${orgId}`,
       inventoryUrl: `/admin/inventory?org=${orgId}`,
     },
   };

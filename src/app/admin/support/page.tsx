@@ -602,8 +602,12 @@ function ConversationDetail({ conversationId }: { conversationId: string }) {
                     </span>
                     <a
                       className="text-primary"
-                      href={`/admin/orders?search=${encodeURIComponent(
-                        context.linkedOrder.order_number ?? context.linkedOrder.id,
+                      href={`/admin/orders?status=all&tab=all&orgId=${encodeURIComponent(
+                        context.org.id,
+                      )}&search=${encodeURIComponent(
+                        context.linkedOrder.customer_email ??
+                          context.linkedOrder.order_number ??
+                          context.linkedOrder.id,
                       )}`}
                     >
                       Open
@@ -669,6 +673,16 @@ function ConversationDetail({ conversationId }: { conversationId: string }) {
               ) : (
                 <p className="mt-2 text-xs text-muted-foreground">No shipment found yet.</p>
               )}
+              {context?.linkedShipment?.tracking_number ? (
+                <a
+                  className="mt-2 block text-xs text-primary"
+                  href={`/admin/shipping?search=${encodeURIComponent(
+                    context.linkedShipment.tracking_number,
+                  )}`}
+                >
+                  Open in Shipping Log
+                </a>
+              ) : null}
             </section>
             <Separator />
             <section>

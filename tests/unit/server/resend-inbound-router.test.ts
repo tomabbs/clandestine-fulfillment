@@ -302,6 +302,31 @@ describe("routeInboundEmail", () => {
     });
   });
 
+  it("dismisses Pirate Ship payment receipts instead of creating support tickets", async () => {
+    const { supabase, inserts, updates } = makeFakeSupabase();
+    const result = await routeInboundEmail({
+      supabase,
+      workspaceId: "ws-1",
+      webhookEventId: "evt-pirate-receipt",
+      email: makeEmail({
+        realFrom: "Pirate Ship <support@pirateship.com>",
+        envelopeFrom: "support@pirateship.com",
+        subject: "Receipt for $4.47 payment to Pirate Ship",
+        text: "Pirate Ship Payment Receipt #417311837",
+      }),
+    });
+    expect(result.status).toBe("pirate_ship_receipt_skipped");
+    expect(mockTrigger).not.toHaveBeenCalled();
+    expect(inserts.some((i) => i.table === "support_conversations")).toBe(false);
+    const evtUpdate = updates.find(
+      (u) => u.table === "webhook_events" && u.id === "evt-pirate-receipt",
+    );
+    expect(evtUpdate?.payload).toMatchObject({
+      status: "dismissed",
+      topic: "pirate_ship_receipt",
+    });
+  });
+
   it("Strategy 1: thread match via In-Reply-To appends to existing support conversation", async () => {
     const { supabase, inserts, updates } = makeFakeSupabase({
       threadMatchConversationId: "conv-existing",
