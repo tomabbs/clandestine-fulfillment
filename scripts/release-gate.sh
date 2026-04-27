@@ -51,6 +51,7 @@ run_cmd "Client store fanout-gate guard" bash scripts/check-fanout-gate.sh
 run_cmd "ShipStation v2 inventory batch guard" bash scripts/check-v2-inventory-batch.sh
 run_cmd "InventorySource ↔ DB CHECK sync guard" npx tsx scripts/check-source-union-sync.ts
 run_cmd "SKU identity rows not read in fanout guard" bash scripts/ci-checks/sku-identity-no-fanout.sh
+run_cmd "SKU alias single-writer guard (SKU-AUTO-2)" bash scripts/ci-checks/sku-aliases-single-writer.sh
 
 step "Section B: Focused reliability regression tests"
 run_cmd "Support/inbound/invite envelope tests" pnpm vitest run tests/unit/actions/support-envelope.test.ts tests/unit/actions/inbound-create-envelope.test.ts tests/unit/actions/users-invite-envelope.test.ts

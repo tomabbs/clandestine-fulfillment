@@ -45,9 +45,14 @@ const HOLD_REASONS = [
   "fetch_incomplete_at_match",
 ] as const;
 
+// STAFF-FACING release resolution codes only. `fetch_recovered_evaluator_passed`
+// is intentionally excluded — per SKU-AUTO-32 that code is reserved for the
+// `sku-hold-recovery-recheck` Trigger task and MUST NOT be accepted from a
+// staff-initiated release. The broader `ReleaseResolutionCode` enum in
+// `src/lib/server/order-hold-rpcs.ts` still allows it at the RPC layer for the
+// recovery task's direct `releaseOrderFulfillmentHold()` call path.
 const RESOLUTION_CODES = [
   "staff_override",
-  "fetch_recovered_evaluator_passed",
   "alias_learned",
   "manual_sku_fix",
   "order_cancelled",

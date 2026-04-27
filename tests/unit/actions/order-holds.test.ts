@@ -269,6 +269,18 @@ describe("releaseOrderHold", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects fetch_recovered_evaluator_passed from staff path (SKU-AUTO-32)", async () => {
+    // This resolution code is RPC-allowed (the recovery task uses it) but the
+    // staff-facing Zod enum strips it out. A staff-initiated release attempting
+    // to forge this code must fail at the Zod boundary BEFORE any RPC round-trip.
+    const forged = {
+      orderId: "44444444-4444-4444-8444-444444444445",
+      resolutionCode: "fetch_recovered_evaluator_passed",
+    } as unknown as Parameters<typeof releaseOrderHold>[0];
+    await expect(releaseOrderHold(forged)).rejects.toThrow();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it("accepts staff_override with a non-empty note", async () => {
     const { builder } = makeQueryBuilder({
       data: {
@@ -445,5 +457,14 @@ describe("releaseOrderHoldsBulk", () => {
     expect(result.succeeded).toHaveLength(1);
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]?.reason).toBe("order_not_on_hold");
+  });
+
+  it("rejects fetch_recovered_evaluator_passed from staff bulk path (SKU-AUTO-32)", async () => {
+    const forged = {
+      orderIds: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"],
+      resolutionCode: "fetch_recovered_evaluator_passed",
+    } as unknown as Parameters<typeof releaseOrderHoldsBulk>[0];
+    await expect(releaseOrderHoldsBulk(forged)).rejects.toThrow();
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 });

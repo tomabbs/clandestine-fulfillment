@@ -64,6 +64,16 @@ jobs:
       - name: Webhook dedup guard
         run: bash scripts/ci-webhook-dedup-guard.sh
 
+      - name: SKU identity not-in-fanout guard (SKU-AUTO-1)
+        run: bash scripts/ci-checks/sku-identity-no-fanout.sh
+
+      - name: SKU alias single-writer guard (SKU-AUTO-2)
+        # Keeps the set of direct writers to `client_store_sku_mappings`
+        # pinned to a minimal whitelist. Any NEW direct writer fails CI
+        # and must either route through `persist_sku_match` or be added
+        # to the whitelist with a SKU-AUTO-2 note.
+        run: bash scripts/ci-checks/sku-aliases-single-writer.sh
+
   release-gate-check:
     # F-7 — Direct-Shopify cutover hard gates (Section C.1 of
     # docs/RELEASE_GATE_CRITERIA.md). Runs only on `main` since these gates

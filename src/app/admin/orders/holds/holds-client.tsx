@@ -46,18 +46,12 @@ type ReasonFilter =
   | "non_warehouse_match"
   | "fetch_incomplete_at_match";
 
-type ResolutionCode =
-  | "staff_override"
-  | "fetch_recovered_evaluator_passed"
-  | "alias_learned"
-  | "manual_sku_fix"
-  | "order_cancelled";
+type ResolutionCode = "staff_override" | "alias_learned" | "manual_sku_fix" | "order_cancelled";
 
 const PAGE_SIZE = 50;
 
 const RESOLUTION_LABELS: Record<ResolutionCode, string> = {
   staff_override: "Staff override (requires note)",
-  fetch_recovered_evaluator_passed: "Fetch recovered — evaluator passed",
   alias_learned: "Alias learned",
   manual_sku_fix: "Manual SKU fix",
   order_cancelled: "Order cancelled",
