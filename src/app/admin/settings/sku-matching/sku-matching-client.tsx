@@ -32,6 +32,10 @@ import { useAppMutation } from "@/lib/hooks/use-app-query";
 
 type TabKey = "needs-review" | "matched" | "remote-only" | "conflicts";
 
+function toPlainServerActionInput<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function formatUtcDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -333,26 +337,28 @@ export function SkuMatchingClient({
                     size="sm"
                     disabled={upsertMutation.isPending}
                     onClick={() =>
-                      upsertMutation.mutate({
-                        connectionId: workspace.connection.id,
-                        variantId: row.variantId,
-                        remoteProductId: candidate.remote.remoteProductId ?? null,
-                        remoteVariantId: candidate.remote.remoteVariantId ?? null,
-                        remoteInventoryItemId: candidate.remote.remoteInventoryItemId ?? null,
-                        remoteSku: candidate.remote.remoteSku ?? null,
-                        fingerprint: row.candidateFingerprint,
-                        matchMethod:
-                          candidate.matchMethod === "manual" ? "manual" : candidate.matchMethod,
-                        matchConfidence: candidate.confidenceTier,
-                        matchReasons: candidate.reasons,
-                        candidateSnapshot: {
-                          remoteTitle: candidate.remote.combinedTitle,
-                          reasons: candidate.reasons,
-                          disqualifiers: candidate.disqualifiers,
-                          score: candidate.score,
-                        },
-                        notes: null,
-                      })
+                      upsertMutation.mutate(
+                        toPlainServerActionInput({
+                          connectionId: workspace.connection.id,
+                          variantId: row.variantId,
+                          remoteProductId: candidate.remote.remoteProductId ?? null,
+                          remoteVariantId: candidate.remote.remoteVariantId ?? null,
+                          remoteInventoryItemId: candidate.remote.remoteInventoryItemId ?? null,
+                          remoteSku: candidate.remote.remoteSku ?? null,
+                          fingerprint: row.candidateFingerprint,
+                          matchMethod:
+                            candidate.matchMethod === "manual" ? "manual" : candidate.matchMethod,
+                          matchConfidence: candidate.confidenceTier,
+                          matchReasons: [...candidate.reasons],
+                          candidateSnapshot: {
+                            remoteTitle: candidate.remote.combinedTitle,
+                            reasons: [...candidate.reasons],
+                            disqualifiers: [...candidate.disqualifiers],
+                            score: candidate.score,
+                          },
+                          notes: null,
+                        }),
+                      )
                     }
                   >
                     Accept best match
@@ -735,29 +741,31 @@ export function SkuMatchingClient({
                 <Button
                   disabled={!previewData.targetRemote || upsertMutation.isPending}
                   onClick={() =>
-                    upsertMutation.mutate({
-                      connectionId: workspace.connection.id,
-                      variantId: previewData.canonical.variantId,
-                      remoteProductId: previewData.targetRemote?.remoteProductId ?? null,
-                      remoteVariantId: previewData.targetRemote?.remoteVariantId ?? null,
-                      remoteInventoryItemId:
-                        previewData.targetRemote?.remoteInventoryItemId ?? null,
-                      remoteSku: previewData.targetRemote?.remoteSku ?? null,
-                      fingerprint: previewData.fingerprint,
-                      matchMethod:
-                        previewData.candidate?.matchMethod === "manual"
-                          ? "manual"
-                          : (previewData.candidate?.matchMethod ?? "manual"),
-                      matchConfidence: previewData.candidate?.confidenceTier ?? "possible",
-                      matchReasons: previewData.candidate?.reasons ?? [],
-                      candidateSnapshot: {
-                        remoteTitle: previewData.targetRemote?.combinedTitle ?? null,
-                        reasons: previewData.candidate?.reasons ?? [],
-                        disqualifiers: previewData.candidate?.disqualifiers ?? [],
-                        score: previewData.candidate?.score ?? 0,
-                      },
-                      notes: null,
-                    })
+                    upsertMutation.mutate(
+                      toPlainServerActionInput({
+                        connectionId: workspace.connection.id,
+                        variantId: previewData.canonical.variantId,
+                        remoteProductId: previewData.targetRemote?.remoteProductId ?? null,
+                        remoteVariantId: previewData.targetRemote?.remoteVariantId ?? null,
+                        remoteInventoryItemId:
+                          previewData.targetRemote?.remoteInventoryItemId ?? null,
+                        remoteSku: previewData.targetRemote?.remoteSku ?? null,
+                        fingerprint: previewData.fingerprint,
+                        matchMethod:
+                          previewData.candidate?.matchMethod === "manual"
+                            ? "manual"
+                            : (previewData.candidate?.matchMethod ?? "manual"),
+                        matchConfidence: previewData.candidate?.confidenceTier ?? "possible",
+                        matchReasons: [...(previewData.candidate?.reasons ?? [])],
+                        candidateSnapshot: {
+                          remoteTitle: previewData.targetRemote?.combinedTitle ?? null,
+                          reasons: [...(previewData.candidate?.reasons ?? [])],
+                          disqualifiers: [...(previewData.candidate?.disqualifiers ?? [])],
+                          score: previewData.candidate?.score ?? 0,
+                        },
+                        notes: null,
+                      }),
+                    )
                   }
                 >
                   <Link2 className="mr-1 h-4 w-4" /> Confirm match
