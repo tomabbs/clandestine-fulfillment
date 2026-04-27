@@ -348,6 +348,17 @@ function classifyRowStatus(input: {
   return "needs_review_multiple_candidates";
 }
 
+function classifyInitialShopifyReadiness(input: {
+  platform: ClientStoreConnection["platform"];
+  defaultLocationId: string | null;
+  remoteInventoryItemId: string | null;
+}): "missing_default_location" | "missing_remote_inventory_item_id" | null {
+  if (input.platform !== "shopify") return null;
+  if (!input.defaultLocationId) return "missing_default_location";
+  if (!input.remoteInventoryItemId) return "missing_remote_inventory_item_id";
+  return null;
+}
+
 async function assertSkuMatchingConnection(connectionId: string): Promise<{
   auth: Awaited<ReturnType<typeof requireAuth>>;
   connection: ClientStoreConnection & {
@@ -645,19 +656,20 @@ export async function getSkuMatchingWorkspace(
   const startedAt = Date.now();
   const parsed = connectionInputSchema.parse(rawInput);
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
-  const flags = await getWorkspaceFlags(auth.userRecord.workspace_id);
-  const remoteCatalog = await fetchRemoteCatalogWithTimeout(connection);
-  const canonicalRows = await getCanonicalRows(connection.workspace_id, connection.org_id);
-  const existingMappings = await getExistingMappings(connection.id);
+  const [flags, remoteCatalog, canonicalRows, existingMappings, conflictMap, conflictSummaries] =
+    await Promise.all([
+      getWorkspaceFlags(auth.userRecord.workspace_id),
+      fetchRemoteCatalogWithTimeout(connection),
+      getCanonicalRows(connection.workspace_id, connection.org_id),
+      getExistingMappings(connection.id),
+      getExistingSkuConflicts(connection.workspace_id),
+      loadConflictSummaries(connection.workspace_id, connection.id),
+    ]);
   const discogs = await getDiscogsOverlays(
     connection.workspace_id,
     canonicalRows.map((row) => row.id),
   );
-  const conflictMap = await getExistingSkuConflicts(connection.workspace_id);
-  const { canonicalDuplicateConflicts, remoteDuplicateConflicts } = await loadConflictSummaries(
-    connection.workspace_id,
-    connection.id,
-  );
+  const { canonicalDuplicateConflicts, remoteDuplicateConflicts } = conflictSummaries;
 
   const duplicateCanonicalSkuSet = new Set(
     canonicalDuplicateConflicts
@@ -719,16 +731,14 @@ export async function getSkuMatchingWorkspace(
       ? (rankSkuCandidates(canonicalSignal, [existingTarget])[0] ?? null)
       : topCandidate;
     const topRemoteKey = topCandidate ? mappingRemoteKey(topCandidate.remote) : "";
-    const readiness =
-      connection.platform === "shopify"
-        ? await classifyShopifyReadiness({
-            connection,
-            remoteInventoryItemId:
-              existingMapping?.remote_inventory_item_id ??
-              topCandidate?.remote.remoteInventoryItemId ??
-              null,
-          })
-        : null;
+    const shopifyReadyState = classifyInitialShopifyReadiness({
+      platform: connection.platform,
+      defaultLocationId: connection.default_location_id,
+      remoteInventoryItemId:
+        existingMapping?.remote_inventory_item_id ??
+        topCandidate?.remote.remoteInventoryItemId ??
+        null,
+    });
 
     const rowStatus = classifyRowStatus({
       mapping: existingMapping,
@@ -737,7 +747,7 @@ export async function getSkuMatchingWorkspace(
       hasDuplicateRemote: Boolean(topRemoteKey) && duplicateRemoteKeySet.has(topRemoteKey),
       hasExistingSyncConflict: conflictMap.has(normalizeSku(canonical.sku) ?? canonical.sku),
       platform: connection.platform,
-      shopifyReadyState: readiness?.state ?? null,
+      shopifyReadyState,
     });
 
     if (rowStatus === "matched_active") matchedCount.value += 1;
