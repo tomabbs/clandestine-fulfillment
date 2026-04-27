@@ -75,6 +75,7 @@ import {
   updateShipStationOrderShipTo,
   verifyShipStationOrderAddress,
 } from "@/actions/shipstation-orders";
+import { ShipmentNotificationLog } from "@/components/admin/shipment-notification-log";
 import { PaginationBar } from "@/components/shared/pagination-bar";
 import { CreateLabelPanel } from "@/components/shipping/create-label-panel";
 import { Badge } from "@/components/ui/badge";
@@ -1114,6 +1115,8 @@ function CockpitDrawer({
 
       {/* ── Bottom toolbar: Print Slip + Scan-to-Verify + Buy Label panel ── */}
       <DrawerBottomToolbar order={order} onRefetchOrders={onRefetchOrders} />
+
+      {order.shipment?.id && <ShipmentNotificationLog shipmentId={order.shipment.id} />}
     </div>
   );
 }

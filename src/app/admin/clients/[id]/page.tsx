@@ -361,29 +361,49 @@ function ShipmentsTab({ orgId }: { orgId: string }) {
           renderExceptionZone={({ row: s }) => (
             <Badge variant={statusBadgeVariant(s.status)}>{s.status}</Badge>
           )}
-          renderBody={({ row: s }) => (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-              <ClientDetailMetric label="Ship date" value={formatDate(s.ship_date)} />
-              <ClientDetailMetric label="Cost" value={formatCurrency(s.shipping_cost)} />
-              <div className="rounded-md border bg-background/60 p-2">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  Tracking
-                </p>
-                {s.tracking_number ? (
-                  <a
-                    href={trackingUrl(s.carrier, s.tracking_number)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline text-xs font-mono"
-                  >
-                    {s.tracking_number}
-                  </a>
-                ) : (
-                  <p className="text-sm">-</p>
-                )}
+          renderBody={({ row: s }) => {
+            const publicToken = (s as { public_track_token?: string | null }).public_track_token;
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-sm">
+                <ClientDetailMetric label="Ship date" value={formatDate(s.ship_date)} />
+                <ClientDetailMetric label="Cost" value={formatCurrency(s.shipping_cost)} />
+                <div className="rounded-md border bg-background/60 p-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    Tracking
+                  </p>
+                  {s.tracking_number ? (
+                    <a
+                      href={trackingUrl(s.carrier, s.tracking_number)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-xs font-mono"
+                    >
+                      {s.tracking_number}
+                    </a>
+                  ) : (
+                    <p className="text-sm">-</p>
+                  )}
+                </div>
+                <div className="rounded-md border bg-background/60 p-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    Customer
+                  </p>
+                  {publicToken ? (
+                    <a
+                      href={`/track/${publicToken}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-xs"
+                    >
+                      View as customer
+                    </a>
+                  ) : (
+                    <p className="text-sm">-</p>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          }}
         />
       )}
     </div>

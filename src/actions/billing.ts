@@ -11,6 +11,35 @@ import type {
   WarehouseFormatCost,
 } from "@/lib/shared/types";
 
+type SupabaseClientLike = Awaited<ReturnType<typeof createServerSupabaseClient>>;
+
+async function resolveShipmentTrackTokens(
+  supabase: SupabaseClientLike,
+  snapshotData: unknown,
+): Promise<Record<string, string>> {
+  const data = (snapshotData ?? {}) as {
+    included_shipments?: Array<{ shipment_id?: string | null }>;
+    excluded_shipments?: Array<{ shipment_id?: string | null }>;
+  };
+  const ids = new Set<string>();
+  for (const row of data.included_shipments ?? []) {
+    if (row?.shipment_id) ids.add(row.shipment_id);
+  }
+  for (const row of data.excluded_shipments ?? []) {
+    if (row?.shipment_id) ids.add(row.shipment_id);
+  }
+  if (ids.size === 0) return {};
+  const { data: tokenRows } = await supabase
+    .from("warehouse_shipments")
+    .select("id, public_track_token")
+    .in("id", Array.from(ids));
+  const out: Record<string, string> = {};
+  for (const row of tokenRows ?? []) {
+    if (row.id && row.public_track_token) out[row.id] = row.public_track_token;
+  }
+  return out;
+}
+
 export async function getAuthWorkspaceId(): Promise<string> {
   const supabase = await createServerSupabaseClient();
   const { data: authData } = await supabase.auth.getUser();
@@ -199,11 +228,17 @@ export async function getBillingSnapshotDetail(id: string) {
 
   if (snapshotResult.error) throw new Error(snapshotResult.error.message);
 
+  const shipmentTokens = await resolveShipmentTrackTokens(
+    supabase,
+    snapshotResult.data?.snapshot_data,
+  );
+
   return {
     snapshot: snapshotResult.data as WarehouseBillingSnapshot & {
       organizations: { name: string };
     },
     adjustments: (adjustmentsResult.data ?? []) as WarehouseBillingAdjustment[],
+    shipmentTokens,
   };
 }
 
@@ -268,11 +303,17 @@ export async function getClientBillingSnapshotDetail(id: string) {
 
   if (snapshotResult.error) throw new Error(snapshotResult.error.message);
 
+  const shipmentTokens = await resolveShipmentTrackTokens(
+    supabase,
+    snapshotResult.data?.snapshot_data,
+  );
+
   return {
     snapshot: snapshotResult.data as WarehouseBillingSnapshot & {
       organizations: { name: string };
     },
     adjustments: (adjustmentsResult.data ?? []) as WarehouseBillingAdjustment[],
+    shipmentTokens,
   };
 }
 

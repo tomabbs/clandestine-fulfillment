@@ -299,7 +299,10 @@ function SnapshotDetail({
     return <p className="text-muted-foreground text-sm">Snapshot not found.</p>;
   }
 
-  const { snapshot, adjustments } = data;
+  const { snapshot, adjustments, shipmentTokens } = data as typeof data & {
+    shipmentTokens?: Record<string, string>;
+  };
+  const tokens: Record<string, string> = shipmentTokens ?? {};
   const sd = snapshot.snapshot_data as Record<string, unknown>;
   const included = (sd.included_shipments ?? []) as Array<{
     shipment_id: string;
@@ -370,16 +373,34 @@ function SnapshotDetail({
             renderHeader={({ row: s }) => (
               <p className="font-mono text-xs">{s.tracking_number ?? "—"}</p>
             )}
-            renderBody={({ row: s }) => (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-                <BillingMetric label="Ship Date" value={s.ship_date ?? "—"} />
-                <BillingMetric label="Carrier" value={s.carrier ?? "—"} />
-                <BillingMetric label="Format" value={s.format_name} />
-                <BillingMetric label="Shipping" value={`$${s.shipping_cost.toFixed(2)}`} mono />
-                <BillingMetric label="Pick/Pack" value={`$${s.pick_pack_cost.toFixed(2)}`} mono />
-                <BillingMetric label="Material" value={`$${s.material_cost.toFixed(2)}`} mono />
-              </div>
-            )}
+            renderBody={({ row: s }) => {
+              const token = tokens[s.shipment_id];
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  <BillingMetric label="Ship Date" value={s.ship_date ?? "—"} />
+                  <BillingMetric label="Carrier" value={s.carrier ?? "—"} />
+                  <BillingMetric label="Format" value={s.format_name} />
+                  <BillingMetric label="Shipping" value={`$${s.shipping_cost.toFixed(2)}`} mono />
+                  <BillingMetric label="Pick/Pack" value={`$${s.pick_pack_cost.toFixed(2)}`} mono />
+                  <BillingMetric label="Material" value={`$${s.material_cost.toFixed(2)}`} mono />
+                  {token ? (
+                    <div className="rounded-md border bg-background/60 p-2 col-span-2 md:col-span-3">
+                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Customer view
+                      </p>
+                      <a
+                        href={`/track/${token}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:underline text-xs"
+                      >
+                        View as customer
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            }}
           />
         )}
       </div>

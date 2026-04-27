@@ -397,7 +397,7 @@ export async function getClientShipments(orgId: string, filters?: { status?: str
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, order_id, tracking_number, carrier, service, ship_date, status, shipping_cost, voided",
+      "id, order_id, tracking_number, carrier, service, ship_date, status, shipping_cost, voided, public_track_token",
     )
     .eq("org_id", orgId)
     .eq("voided", false)

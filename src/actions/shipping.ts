@@ -139,7 +139,7 @@ export async function getShipments(filters: GetShipmentsFilters) {
   let query = supabase
     .from("warehouse_shipments")
     .select(
-      "id, workspace_id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, sku, quantity, product_title, variant_title, format_name_override)",
+      "id, workspace_id, org_id, shipstation_shipment_id, ss_order_number, order_id, tracking_number, carrier, service, ship_date, delivery_date, status, shipping_cost, customer_shipping_charged, weight, label_data, voided, billed, created_at, total_units, label_source, bandcamp_payment_id, bandcamp_synced_at, public_track_token, organizations!inner(name), warehouse_orders(order_number, shipping_cost, line_items), warehouse_shipment_items(id, sku, quantity, product_title, variant_title, format_name_override)",
       { count: "exact" },
     );
 
