@@ -91,6 +91,16 @@ const DEFAULT_FILTERS: Filters = {
 
 const PAGE_SIZE = 50;
 
+function formatUtcDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, " UTC");
+}
+
 export function IdentityMatchesClient({ bootstrap }: { bootstrap: ListIdentityMatchesResult }) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [offset, setOffset] = useState(0);
@@ -371,9 +381,7 @@ export function IdentityMatchesClient({ bootstrap }: { bootstrap: ListIdentityMa
 function IdentityRow({ row, onView }: { row: IdentityMatchListRow; onView: (id: string) => void }) {
   return (
     <tr className="border-b last:border-0 align-top">
-      <td className="py-2 pr-4 font-mono text-xs">
-        {new Date(row.last_evaluated_at).toLocaleString()}
-      </td>
+      <td className="py-2 pr-4 font-mono text-xs">{formatUtcDateTime(row.last_evaluated_at)}</td>
       <td className="py-2 pr-4 text-xs">{row.platform}</td>
       <td className="py-2 pr-4">
         <Badge variant="secondary" className="font-mono text-[10px]">
@@ -544,7 +552,7 @@ function MatchDetailBody({
                       {t.reason_code}
                     </code>
                     <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                      {new Date(t.triggered_at).toLocaleString()}
+                      {formatUtcDateTime(t.triggered_at)}
                     </span>
                   </div>
                   {t.triggered_by ? (

@@ -64,6 +64,16 @@ const DEFAULT_FILTERS: Filters = {
 
 const PAGE_SIZE = 25;
 
+function formatUtcDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, " UTC");
+}
+
 export function AutonomousRunsClient({ bootstrap }: { bootstrap: ListAutonomousRunsResult }) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [offset, setOffset] = useState(0);
@@ -236,7 +246,7 @@ export function AutonomousRunsClient({ bootstrap }: { bootstrap: ListAutonomousR
                   rows.map((row) => (
                     <tr key={row.id} className="border-b last:border-0">
                       <td className="py-2 pr-4 font-mono text-xs">
-                        {new Date(row.started_at).toLocaleString()}
+                        {formatUtcDateTime(row.started_at)}
                       </td>
                       <td className="py-2 pr-4">
                         <StatusBadge status={row.status} />
@@ -448,7 +458,7 @@ function RunDetailBody({
           </h3>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
-            {new Date(run.started_at).toLocaleString()}
+            {formatUtcDateTime(run.started_at)}
           </div>
         </div>
 
@@ -482,7 +492,7 @@ function RunDetailBody({
                     ) : null}
                   </div>
                   <span className="font-mono text-xs text-muted-foreground">
-                    {new Date(d.decided_at).toLocaleString()}
+                    {formatUtcDateTime(d.decided_at)}
                   </span>
                 </div>
                 {d.variant_id ? (

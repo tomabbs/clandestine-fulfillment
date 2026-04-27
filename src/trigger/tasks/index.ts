@@ -237,6 +237,11 @@ export { rampHaltCriteriaSensorTask } from "./ramp-halt-criteria-sensor";
 export { scraperReconcileSchedule } from "./scraper-reconcile";
 // ── RESTORED: ShipStation poll (bridge period until Shopify app approval) ────
 export { shipstationPollTask } from "./shipstation-poll";
+// Phase 1 dry-run runner (SKU-AUTO-18) — evaluates active client-store
+// connections against live remote catalogs, writes dry_run=true
+// sku_autonomous_runs + sku_autonomous_decisions rows, and intentionally
+// never writes identity matches, live aliases, order holds, or alert events.
+export { skuAutonomousDryRunTask } from "./sku-autonomous-dry-run";
 // Phase 7.B (autonomous SKU matcher) — weekly-per-workspace rollout
 //   telemetry. Reads the last 30 days of runs/decisions/transitions/
 //   hold events + the current identity-match outcome breakdown, runs

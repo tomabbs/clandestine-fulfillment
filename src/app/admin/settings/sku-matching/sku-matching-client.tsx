@@ -32,6 +32,16 @@ import { useAppMutation } from "@/lib/hooks/use-app-query";
 
 type TabKey = "needs-review" | "matched" | "remote-only" | "conflicts";
 
+function formatUtcDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, " UTC");
+}
+
 function StatusBadge({ status }: { status: SkuMatchingRow["rowStatus"] }) {
   const tone =
     status === "matched_active"
@@ -474,7 +484,7 @@ export function SkuMatchingClient({
             <div className="font-medium">Remote catalog status: {workspace.remoteCatalogState}</div>
             <div className="mt-1 text-xs">
               {workspace.remoteCatalogState === "ok"
-                ? `Fetched ${workspace.rows.length + workspace.remoteOnlyRows.length} total candidate rows${workspace.fetchedAt ? ` at ${new Date(workspace.fetchedAt).toLocaleString()}` : ""}.`
+                ? `Fetched ${workspace.rows.length + workspace.remoteOnlyRows.length} total candidate rows${workspace.fetchedAt ? ` at ${formatUtcDateTime(workspace.fetchedAt)}` : ""}.`
                 : (workspace.remoteCatalogError ??
                   "The remote catalog could not be fetched for matching.")}
             </div>
