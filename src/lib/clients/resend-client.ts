@@ -272,6 +272,26 @@ export interface ParsedInboundWebhook {
  * Sentry so we never silently 500 on a payload-shape change.
  */
 export function parseInboundWebhook(payload: unknown): ParsedInboundWebhook {
+  // Legacy/replay compatibility: some captured `webhook_events.metadata` rows
+  // from the broken inbound period only have `{ type, email_id }`. That is
+  // enough for replay because `fetchInboundEmail(email_id)` fetches the full
+  // body + headers before routing.
+  if (payload && typeof payload === "object" && "email_id" in payload) {
+    const minimal = payload as { type?: unknown; email_id?: unknown };
+    if (typeof minimal.type === "string" && typeof minimal.email_id === "string") {
+      return {
+        type: minimal.type,
+        emailId: minimal.email_id,
+        envelopeFrom: "",
+        envelopeTo: [],
+        cc: [],
+        bcc: [],
+        subject: "(no subject)",
+        messageId: "",
+      };
+    }
+  }
+
   const parsed = inboundEmailWebhookSchema.parse(payload);
   return {
     type: parsed.type,

@@ -66,14 +66,45 @@ function makeFakeSupabase(
     if (table === "support_email_mappings") {
       return {
         select: vi.fn().mockImplementation(() => ({
-          eq: vi.fn().mockImplementation(() => ({
-            eq: vi.fn().mockImplementation(() => ({
-              maybeSingle: vi.fn().mockResolvedValue({
-                data: opts.emailMappingOrgId ? { org_id: opts.emailMappingOrgId } : null,
-                error: null,
-              }),
-            })),
-          })),
+          eq: vi.fn().mockReturnThis(),
+          ilike: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: opts.emailMappingOrgId ? { org_id: opts.emailMappingOrgId } : null,
+            error: null,
+          }),
+        })),
+      };
+    }
+    if (table === "warehouse_orders") {
+      return {
+        select: vi.fn().mockImplementation(() => ({
+          eq: vi.fn().mockReturnThis(),
+          ilike: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        })),
+      };
+    }
+    if (table === "warehouse_shipments") {
+      return {
+        select: vi.fn().mockImplementation(() => ({
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        })),
+      };
+    }
+    if (table === "users") {
+      return {
+        select: vi.fn().mockImplementation(() => ({
+          eq: vi.fn().mockReturnThis(),
+          ilike: vi.fn().mockReturnThis(),
+          not: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
         })),
       };
     }

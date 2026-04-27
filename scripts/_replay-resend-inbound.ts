@@ -72,6 +72,7 @@ async function main() {
     .from("webhook_events")
     .select("id, status, created_at, metadata")
     .eq("platform", "resend")
+    .filter("metadata->>type", "eq", "email.received")
     .gte("created_at", since)
     .order("created_at", { ascending: true })
     .limit(limit);

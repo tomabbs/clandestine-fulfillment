@@ -172,37 +172,48 @@ export async function getConversations(
   const messageStats = await fetchMessageStats(auth.supabase, conversationIds);
   const now = new Date();
 
-  let conversations = (data ?? []).map((c: Record<string, unknown>) => {
-    const org = c.organizations as { name: string } | null;
-    const assignedUser = c.assigned_user as { name: string } | null;
-    const conversation = c as unknown as SupportConversation;
-    const stats = messageStats[conversation.id];
-    const lastMsg = stats?.lastMessage;
-    const readAt = auth.isStaff
-      ? conversation.staff_last_read_at
-      : conversation.client_last_read_at;
-    const unreadCount = lastMsg
-      ? lastMsg.sender_type === (auth.isStaff ? "staff" : "client")
-        ? 0
-        : readAt && lastMsg.created_at <= readAt
+  const serviceClient = createServiceRoleClient();
+  let conversations = await Promise.all(
+    (data ?? []).map(async (c: Record<string, unknown>) => {
+      const org = c.organizations as { name: string } | null;
+      const assignedUser = c.assigned_user as { name: string } | null;
+      const conversation = c as unknown as SupportConversation;
+      const stats = messageStats[conversation.id];
+      const lastMsg = stats?.lastMessage;
+      const resolved = auth.isStaff
+        ? await resolveConversationSupportContext(serviceClient, {
+            workspaceId: auth.workspaceId,
+            conversation: c,
+            messages: (stats?.messages ?? []).map((body) => ({ body })),
+          })
+        : null;
+      const readAt = auth.isStaff
+        ? conversation.staff_last_read_at
+        : conversation.client_last_read_at;
+      const unreadCount = lastMsg
+        ? lastMsg.sender_type === (auth.isStaff ? "staff" : "client")
           ? 0
-          : 1
-      : 0;
+          : readAt && lastMsg.created_at <= readAt
+            ? 0
+            : 1
+        : 0;
 
-    return {
-      ...conversation,
-      org_name: org?.name,
-      assigned_name: assignedUser?.name ?? null,
-      last_message_at: lastMsg?.created_at,
-      last_message_preview: lastMsg?.body?.slice(0, 160),
-      message_count: stats?.count ?? 0,
-      unread_count: unreadCount,
-      counterpart_last_seen_at: auth.isStaff
-        ? conversation.client_last_read_at
-        : conversation.staff_last_read_at,
-      queue_flags: getSupportQueueFlags(conversation, auth.user.id, now),
-    };
-  });
+      return {
+        ...conversation,
+        org_id: resolved?.org?.id ?? conversation.org_id,
+        org_name: resolved?.org?.name ?? org?.name,
+        assigned_name: assignedUser?.name ?? null,
+        last_message_at: lastMsg?.created_at,
+        last_message_preview: lastMsg?.body?.slice(0, 160),
+        message_count: stats?.count ?? 0,
+        unread_count: unreadCount,
+        counterpart_last_seen_at: auth.isStaff
+          ? conversation.client_last_read_at
+          : conversation.staff_last_read_at,
+        queue_flags: getSupportQueueFlags(conversation, auth.user.id, now),
+      };
+    }),
+  );
 
   if (parsed.queue) {
     conversations = conversations.filter((conversation) =>
@@ -1209,6 +1220,7 @@ async function fetchMessageStats(
     string,
     {
       count: number;
+      messages: string[];
       lastMessage?: {
         body: string;
         created_at: string;
@@ -1228,6 +1240,7 @@ async function fetchMessageStats(
     string,
     {
       count: number;
+      messages: string[];
       lastMessage?: {
         body: string;
         created_at: string;
@@ -1236,8 +1249,9 @@ async function fetchMessageStats(
     }
   > = {};
   for (const msg of messages ?? []) {
-    const conversationStats = stats[msg.conversation_id] ?? { count: 0 };
+    const conversationStats = stats[msg.conversation_id] ?? { count: 0, messages: [] };
     conversationStats.count += 1;
+    conversationStats.messages.push(msg.body);
     if (!conversationStats.lastMessage) {
       conversationStats.lastMessage = {
         body: msg.body,
