@@ -9,7 +9,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   acceptExactMatches,
   activateShopifyInventoryAtDefaultLocation,
@@ -32,8 +32,16 @@ import { useAppMutation } from "@/lib/hooks/use-app-query";
 
 type TabKey = "needs-review" | "matched" | "remote-only" | "conflicts";
 
+const SKU_MATCHING_FULL_RENDER_LIMIT = 2000;
+const SKU_MATCHING_LARGE_CATALOG_WARNING_THRESHOLD = 1500;
+
 function toPlainServerActionInput<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function formatActionError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function remoteProductLinkLabel(platform: string): string {
@@ -91,10 +99,13 @@ export function SkuMatchingClient({
   selectedOrgId: string | null;
 }) {
   const router = useRouter();
+  const activeConnectionId = workspace.connection.id;
   const [tab, setTab] = useState<TabKey>("needs-review");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [pendingRowIds, setPendingRowIds] = useState<Set<string>>(new Set());
 
   const enableFlagMutation = useAppMutation({
     mutationFn: () => enableSkuMatchingFeatureFlag(),
@@ -107,15 +118,17 @@ export function SkuMatchingClient({
       remoteProductId?: string | null;
       remoteVariantId?: string | null;
       remoteInventoryItemId?: string | null;
+      remoteSku?: string | null;
     }) =>
       previewSkuMatch({
-        connectionId: workspace.connection.id,
+        connectionId: activeConnectionId,
         variantId: input.variantId,
         remoteProductId: input.remoteProductId,
         remoteVariantId: input.remoteVariantId,
         remoteInventoryItemId: input.remoteInventoryItemId,
+        remoteSku: input.remoteSku,
       }),
-    onError: (error) => setPreviewError(error instanceof Error ? error.message : String(error)),
+    onError: (error) => setPreviewError(formatActionError(error)),
   });
 
   const upsertMutation = useAppMutation({
@@ -123,9 +136,14 @@ export function SkuMatchingClient({
     onSuccess: () => {
       setPreviewOpen(false);
       setPreviewError(null);
+      setMutationError(null);
       router.refresh();
     },
-    onError: (error) => setPreviewError(error instanceof Error ? error.message : String(error)),
+    onError: (error) => {
+      const message = formatActionError(error);
+      setMutationError(message);
+      if (previewOpen) setPreviewError(message);
+    },
   });
 
   const deactivateMutation = useAppMutation({
@@ -168,11 +186,35 @@ export function SkuMatchingClient({
 
   const previewData = previewMutation.data;
 
+  useEffect(() => {
+    setSelectedKeys(new Set());
+    setPreviewOpen(false);
+    setPreviewError(null);
+    setMutationError(null);
+    setPendingRowIds(new Set());
+    previewMutation.reset();
+    upsertMutation.reset();
+    if (activeConnectionId && typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+  }, [activeConnectionId, previewMutation.reset, upsertMutation.reset]);
+
+  useEffect(() => {
+    const rowCount = workspace.rows.length + workspace.remoteOnlyRows.length;
+    if (rowCount >= SKU_MATCHING_LARGE_CATALOG_WARNING_THRESHOLD) {
+      console.info("SKU matching catalog approaching virtualization threshold", {
+        connection_id: activeConnectionId,
+        row_count: rowCount,
+        threshold: SKU_MATCHING_FULL_RENDER_LIMIT,
+      });
+    }
+  }, [activeConnectionId, workspace.remoteOnlyRows.length, workspace.rows.length]);
+
   function navigate(next: { orgId?: string | null; connectionId?: string | null }) {
     router.push(
       buildQuery({
-        orgId: next.orgId ?? selectedOrgId,
-        connectionId: next.connectionId ?? workspace.connection.id,
+        orgId: next.orgId === undefined ? selectedOrgId : next.orgId,
+        connectionId: next.connectionId === undefined ? activeConnectionId : next.connectionId,
       }),
     );
   }
@@ -185,7 +227,48 @@ export function SkuMatchingClient({
       remoteProductId: row.remoteProductId,
       remoteVariantId: row.remoteVariantId,
       remoteInventoryItemId: row.remoteInventoryItemId,
+      remoteSku: row.remoteSku,
     });
+  }
+
+  async function acceptBestMatch(
+    row: SkuMatchingRow,
+    candidate: NonNullable<SkuMatchingRow["topCandidate"]>,
+  ) {
+    setMutationError(null);
+    setPendingRowIds((prev) => new Set(prev).add(row.variantId));
+    try {
+      await upsertMutation.mutateAsync(
+        toPlainServerActionInput({
+          connectionId: activeConnectionId,
+          variantId: row.variantId,
+          remoteProductId: candidate.remote.remoteProductId ?? null,
+          remoteVariantId: candidate.remote.remoteVariantId ?? null,
+          remoteInventoryItemId: candidate.remote.remoteInventoryItemId ?? null,
+          remoteSku: candidate.remote.remoteSku ?? null,
+          fingerprint: row.candidateFingerprint,
+          matchMethod: candidate.matchMethod === "manual" ? "manual" : candidate.matchMethod,
+          matchConfidence: candidate.confidenceTier,
+          matchReasons: [...candidate.reasons],
+          candidateSnapshot: {
+            remoteTitle: candidate.remote.combinedTitle,
+            reasons: [...candidate.reasons],
+            disqualifiers: [...candidate.disqualifiers],
+            score: candidate.score,
+          },
+          notes: null,
+        }),
+      );
+    } catch (error) {
+      setMutationError(formatActionError(error));
+      throw error;
+    } finally {
+      setPendingRowIds((prev) => {
+        const next = new Set(prev);
+        next.delete(row.variantId);
+        return next;
+      });
+    }
   }
 
   function renderRows(rows: SkuMatchingRow[], emptyDescription: string) {
@@ -197,6 +280,15 @@ export function SkuMatchingClient({
         selectedKeys={selectedKeys}
         onSelectedKeysChange={(keys) => setSelectedKeys(new Set(Array.from(keys).map(String)))}
         emptyState={<EmptyState title="Nothing here" description={emptyDescription} />}
+        virtualizeThreshold={SKU_MATCHING_FULL_RENDER_LIMIT}
+        footerNode={
+          rows.length >= SKU_MATCHING_FULL_RENDER_LIMIT ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+              This connection has a very large catalog. Use the tabs and browser search to narrow
+              review before loading more dense rows.
+            </div>
+          ) : null
+        }
         bulkActionRail={({ selectedCount, clearSelection }) => (
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">{selectedCount} selected</span>
@@ -211,7 +303,7 @@ export function SkuMatchingClient({
               }
               onClick={() =>
                 bulkAcceptMutation.mutate({
-                  connectionId: workspace.connection.id,
+                  connectionId: activeConnectionId,
                   items: Array.from(selectedKeys)
                     .map((key) => needsReviewRows.find((row) => row.variantId === String(key)))
                     .filter((row): row is SkuMatchingRow => Boolean(row))
@@ -362,33 +454,14 @@ export function SkuMatchingClient({
                 return (
                   <Button
                     size="sm"
-                    disabled={upsertMutation.isPending}
+                    disabled={
+                      pendingRowIds.has(row.variantId) || actionContext.pendingActions.has("accept")
+                    }
                     onClick={() =>
-                      upsertMutation.mutate(
-                        toPlainServerActionInput({
-                          connectionId: workspace.connection.id,
-                          variantId: row.variantId,
-                          remoteProductId: candidate.remote.remoteProductId ?? null,
-                          remoteVariantId: candidate.remote.remoteVariantId ?? null,
-                          remoteInventoryItemId: candidate.remote.remoteInventoryItemId ?? null,
-                          remoteSku: candidate.remote.remoteSku ?? null,
-                          fingerprint: row.candidateFingerprint,
-                          matchMethod:
-                            candidate.matchMethod === "manual" ? "manual" : candidate.matchMethod,
-                          matchConfidence: candidate.confidenceTier,
-                          matchReasons: [...candidate.reasons],
-                          candidateSnapshot: {
-                            remoteTitle: candidate.remote.combinedTitle,
-                            reasons: [...candidate.reasons],
-                            disqualifiers: [...candidate.disqualifiers],
-                            score: candidate.score,
-                          },
-                          notes: null,
-                        }),
-                      )
+                      actionContext.runAction("accept", () => acceptBestMatch(row, candidate))
                     }
                   >
-                    Accept best match
+                    {pendingRowIds.has(row.variantId) ? "Accepting..." : "Accept best match"}
                   </Button>
                 );
               })()}
@@ -528,6 +601,13 @@ export function SkuMatchingClient({
         </div>
       </div>
 
+      {mutationError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          <div className="font-medium">SKU match action failed</div>
+          <div className="mt-1 break-words">{mutationError}</div>
+        </div>
+      )}
+
       <Tabs value={tab} onValueChange={(value) => setTab(value as TabKey)}>
         <TabsList>
           <TabsTrigger value="needs-review">Needs review</TabsTrigger>
@@ -551,6 +631,7 @@ export function SkuMatchingClient({
           <BlockList
             items={workspace.remoteOnlyRows}
             itemKey={(row, index) => `${row.remoteProductId}:${row.remoteVariantId ?? index}`}
+            virtualizeThreshold={SKU_MATCHING_FULL_RENDER_LIMIT}
             emptyState={
               <EmptyState
                 title="No remote-only rows"
@@ -718,7 +799,11 @@ export function SkuMatchingClient({
                 ) : null}
               </div>
 
-              {previewData.targetRemote ? (
+              {previewData.targetError ? (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950">
+                  {previewData.targetError.message}
+                </div>
+              ) : previewData.targetRemote ? (
                 <div className="rounded-md border bg-card p-4">
                   <div className="font-medium">{previewData.targetRemote.combinedTitle}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
@@ -787,11 +872,15 @@ export function SkuMatchingClient({
 
               <div className="flex flex-wrap gap-2">
                 <Button
-                  disabled={!previewData.targetRemote || upsertMutation.isPending}
+                  disabled={
+                    !previewData.targetRemote ||
+                    Boolean(previewData.targetError) ||
+                    upsertMutation.isPending
+                  }
                   onClick={() =>
                     upsertMutation.mutate(
                       toPlainServerActionInput({
-                        connectionId: workspace.connection.id,
+                        connectionId: activeConnectionId,
                         variantId: previewData.canonical.variantId,
                         remoteProductId: previewData.targetRemote?.remoteProductId ?? null,
                         remoteVariantId: previewData.targetRemote?.remoteVariantId ?? null,
@@ -843,7 +932,7 @@ export function SkuMatchingClient({
                       disabled={activateShopifyMutation.isPending}
                       onClick={() =>
                         activateShopifyMutation.mutate({
-                          connectionId: workspace.connection.id,
+                          connectionId: activeConnectionId,
                           variantId: previewData.canonical.variantId,
                           remoteInventoryItemId:
                             previewData.targetRemote?.remoteInventoryItemId ?? null,

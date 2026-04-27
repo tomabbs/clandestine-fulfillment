@@ -11,11 +11,13 @@ import {
   buildCandidateFingerprint,
   classifyShopifyReadiness,
   fetchRemoteCatalogWithTimeout,
+  pickPrimaryBandcampMapping,
   type RankedSkuCandidate,
   type RemoteCatalogFetchState,
   type RemoteCatalogItem,
   rankSkuCandidates,
   type SkuMatchingRowStatus,
+  selectConnectionScopedRemoteTarget,
 } from "@/lib/server/sku-matching";
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getWorkspaceFlags, invalidateWorkspaceFlags } from "@/lib/server/workspace-flags";
@@ -34,6 +36,7 @@ const previewInputSchema = z.object({
   remoteVariantId: z.string().min(1).nullable().optional(),
   remoteInventoryItemId: z.string().min(1).nullable().optional(),
   remoteProductId: z.string().min(1).nullable().optional(),
+  remoteSku: z.string().max(255).nullable().optional(),
 });
 
 const upsertMatchInputSchema = z.object({
@@ -113,10 +116,13 @@ type CanonicalVariantRow = {
     | null;
   bandcamp_product_mappings:
     | {
+        id: string;
         bandcamp_album_title: string | null;
         bandcamp_url: string | null;
         bandcamp_origin_quantities: unknown;
         bandcamp_item_id: number | null;
+        created_at: string;
+        updated_at: string | null;
       }[]
     | null;
   warehouse_inventory_levels:
@@ -276,6 +282,10 @@ function toPlainJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function createSkuMatchingError(code: string, message: string): Error {
+  return new Error(`${code}: ${message}`);
+}
+
 function mappingRemoteKey(mapping: {
   remote_inventory_item_id?: string | null;
   remote_variant_id?: string | null;
@@ -389,10 +399,13 @@ async function getCanonicalRows(
       product_id,
       warehouse_products!inner(id, title, vendor),
       bandcamp_product_mappings(
+        id,
         bandcamp_album_title,
         bandcamp_url,
         bandcamp_origin_quantities,
-        bandcamp_item_id
+        bandcamp_item_id,
+        created_at,
+        updated_at
       ),
       warehouse_inventory_levels(available, committed)
     `,
@@ -664,32 +677,43 @@ export async function getSkuMatchingWorkspace(
     const product = asSingle(canonical.warehouse_products);
     if (!product || !canonical.sku) continue;
     const inventory = asSingle(canonical.warehouse_inventory_levels);
-    const bandcamp = Array.isArray(canonical.bandcamp_product_mappings)
-      ? canonical.bandcamp_product_mappings[0]
-      : null;
+    const bandcamp = pickPrimaryBandcampMapping(canonical.bandcamp_product_mappings);
     const existingMapping = existingMappings.byVariantId.get(canonical.id) ?? null;
 
-    const ranked = rankSkuCandidates(
-      {
-        variantId: canonical.id,
-        sku: canonical.sku,
-        barcode: canonical.barcode,
-        artist: product.vendor,
-        title: product.title,
-        bandcampTitle: bandcamp?.bandcamp_album_title ?? null,
-        format: canonical.format_name,
-        variantTitle: canonical.title,
-        optionValue: canonical.option1_value,
-        isPreorder: Boolean(canonical.is_preorder),
-        price: canonical.price,
-        bandcampOptionId: canonical.bandcamp_option_id,
-        bandcampOptionTitle: canonical.bandcamp_option_title,
-        bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
-      },
-      remoteCatalog.items,
-    );
+    const canonicalSignal = {
+      variantId: canonical.id,
+      sku: canonical.sku,
+      barcode: canonical.barcode,
+      artist: product.vendor,
+      title: product.title,
+      bandcampTitle: bandcamp?.bandcamp_album_title ?? null,
+      format: canonical.format_name,
+      variantTitle: canonical.title,
+      optionValue: canonical.option1_value,
+      isPreorder: Boolean(canonical.is_preorder),
+      price: canonical.price,
+      bandcampOptionId: canonical.bandcamp_option_id,
+      bandcampOptionTitle: canonical.bandcamp_option_title,
+      bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
+    };
+
+    const ranked = rankSkuCandidates(canonicalSignal, remoteCatalog.items);
 
     const topCandidate = ranked[0] ?? null;
+    const existingTargetSelection =
+      remoteCatalog.state === "ok" && existingMapping
+        ? selectConnectionScopedRemoteTarget({
+            items: remoteCatalog.items,
+            remoteInventoryItemId: existingMapping.remote_inventory_item_id,
+            remoteVariantId: existingMapping.remote_variant_id,
+            remoteProductId: existingMapping.remote_product_id,
+            remoteSku: existingMapping.remote_sku,
+          })
+        : null;
+    const existingTarget = existingTargetSelection?.ok ? existingTargetSelection.target : null;
+    const fingerprintCandidate = existingTarget
+      ? (rankSkuCandidates(canonicalSignal, [existingTarget])[0] ?? null)
+      : topCandidate;
     const topRemoteKey = topCandidate ? mappingRemoteKey(topCandidate.remote) : "";
     const readiness =
       connection.platform === "shopify"
@@ -762,7 +786,7 @@ export async function getSkuMatchingWorkspace(
         remoteSku: existingMapping?.remote_sku ?? topCandidate?.remote.remoteSku ?? null,
         existingMappingId: existingMapping?.id ?? null,
         existingMappingUpdatedAt: existingMapping?.updated_at ?? null,
-        conflictCount: rowStatus.startsWith("conflict_") ? 1 : 0,
+        disqualifiers: fingerprintCandidate?.disqualifiers ?? [],
       }),
       discogs: discogsOverlay
         ? {
@@ -829,9 +853,7 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
   if (!canonical) throw new Error("Variant not found for this connection");
 
   const product = asSingle(canonical.warehouse_products);
-  const bandcamp = Array.isArray(canonical.bandcamp_product_mappings)
-    ? canonical.bandcamp_product_mappings[0]
-    : null;
+  const bandcamp = pickPrimaryBandcampMapping(canonical.bandcamp_product_mappings);
   if (!product) throw new Error("Variant has no canonical product");
 
   const remoteCatalog = await fetchRemoteCatalogWithTimeout(connection);
@@ -884,21 +906,27 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
   const canonical = canonicalRows.find((row) => row.id === parsed.variantId);
   if (!canonical) throw new Error("Variant not found for this connection");
   const product = asSingle(canonical.warehouse_products);
-  const bandcamp = Array.isArray(canonical.bandcamp_product_mappings)
-    ? canonical.bandcamp_product_mappings[0]
-    : null;
+  const bandcamp = pickPrimaryBandcampMapping(canonical.bandcamp_product_mappings);
   if (!product) throw new Error("Variant has no canonical product");
 
   let targetRemote: RemoteCatalogItem | null = null;
+  let targetError: { code: string; message: string } | null = null;
   if (remoteCatalog.state === "ok") {
-    targetRemote =
-      remoteCatalog.items.find(
-        (item) =>
-          (parsed.remoteInventoryItemId &&
-            item.remoteInventoryItemId === parsed.remoteInventoryItemId) ||
-          (parsed.remoteVariantId && item.remoteVariantId === parsed.remoteVariantId) ||
-          (parsed.remoteProductId && item.remoteProductId === parsed.remoteProductId),
-      ) ?? null;
+    const targetSelection = selectConnectionScopedRemoteTarget({
+      items: remoteCatalog.items,
+      remoteInventoryItemId: parsed.remoteInventoryItemId,
+      remoteVariantId: parsed.remoteVariantId,
+      remoteProductId: parsed.remoteProductId,
+      remoteSku: parsed.remoteSku,
+    });
+    if (targetSelection.ok) {
+      targetRemote = targetSelection.target;
+    } else {
+      targetError = {
+        code: targetSelection.code,
+        message: targetSelection.message,
+      };
+    }
   }
 
   const ranked =
@@ -948,7 +976,7 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
     remoteSku: targetRemote?.remoteSku ?? existingMapping?.remote_sku ?? null,
     existingMappingId: existingMapping?.id ?? null,
     existingMappingUpdatedAt: existingMapping?.updated_at ?? null,
-    conflictCount: candidate?.disqualifiers.length ?? 0,
+    disqualifiers: candidate?.disqualifiers ?? [],
   });
 
   await insertSkuMatchingPerfEvent({
@@ -962,6 +990,7 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
       variantId: parsed.variantId,
       remoteCatalogState: remoteCatalog.state,
       hasTargetRemote: Boolean(targetRemote),
+      targetError,
     },
   });
 
@@ -978,6 +1007,7 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
     },
     existingMapping,
     targetRemote,
+    targetError,
     candidate,
     fingerprint,
     shopifyReadiness: readiness,
@@ -996,10 +1026,17 @@ export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatc
     remoteProductId: parsed.remoteProductId,
     remoteVariantId: parsed.remoteVariantId,
     remoteInventoryItemId: parsed.remoteInventoryItemId,
+    remoteSku: parsed.remoteSku,
   });
 
+  if (preview.targetError) {
+    throw createSkuMatchingError(preview.targetError.code, preview.targetError.message);
+  }
   if (preview.fingerprint !== parsed.fingerprint) {
-    throw new Error("Match candidate changed since review. Refresh and confirm again.");
+    throw createSkuMatchingError(
+      "stale_candidate",
+      "Match candidate changed since review. Refresh and confirm again.",
+    );
   }
 
   const supabase = createServiceRoleClient();
@@ -1019,7 +1056,8 @@ export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatc
     p_candidate_fingerprint: parsed.fingerprint,
     p_notes: parsed.notes ?? null,
   });
-  if (error) throw new Error(`persist_sku_match failed: ${error.message}`);
+  if (error)
+    throw createSkuMatchingError("persist_failed", `persist_sku_match failed: ${error.message}`);
 
   await insertSkuMatchingPerfEvent({
     workspaceId: auth.userRecord.workspace_id,
@@ -1157,8 +1195,12 @@ export async function acceptExactMatches(rawInput: z.input<typeof acceptExactMat
         remoteProductId: item.remoteProductId,
         remoteVariantId: item.remoteVariantId,
         remoteInventoryItemId: item.remoteInventoryItemId,
+        remoteSku: item.remoteSku,
       });
 
+      if (preview.targetError) {
+        throw createSkuMatchingError(preview.targetError.code, preview.targetError.message);
+      }
       if (!preview.candidate || preview.candidate.confidenceTier !== "deterministic") {
         throw new Error("Only deterministic matches can be bulk accepted.");
       }

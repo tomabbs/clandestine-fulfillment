@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   type ConfidenceTier,
   fetchRemoteCatalogWithTimeout,
+  pickPrimaryBandcampMapping,
   type RankedSkuCandidate,
   type RemoteCatalogFetchState,
   type RemoteCatalogResult,
@@ -122,9 +123,13 @@ interface CanonicalVariantRow {
     | null;
   bandcamp_product_mappings:
     | {
+        id: string;
         bandcamp_album_title: string | null;
+        bandcamp_url: string | null;
         bandcamp_origin_quantities: unknown;
         bandcamp_item_id: number | null;
+        created_at: string;
+        updated_at: string | null;
       }[]
     | null;
 }
@@ -373,9 +378,13 @@ async function loadCanonicalRows(
       product_id,
       warehouse_products!inner(id, title, vendor, org_id),
       bandcamp_product_mappings(
+        id,
         bandcamp_album_title,
+        bandcamp_url,
         bandcamp_origin_quantities,
-        bandcamp_item_id
+        bandcamp_item_id,
+        created_at,
+        updated_at
       )
     `,
     )
@@ -510,9 +519,7 @@ function buildDecisionDraft(input: {
   const product = asSingle(input.canonical.warehouse_products);
   if (!product || !input.canonical.sku) return null;
 
-  const bandcamp = Array.isArray(input.canonical.bandcamp_product_mappings)
-    ? input.canonical.bandcamp_product_mappings[0]
-    : null;
+  const bandcamp = pickPrimaryBandcampMapping(input.canonical.bandcamp_product_mappings);
   const decision = selectDryRunDecision({
     existingMapping: input.existingMapping,
     ranked: input.ranked,
@@ -628,9 +635,7 @@ async function runConnectionDryRun(
       const product = asSingle(canonical.warehouse_products);
       if (!product || !canonical.sku) continue;
 
-      const bandcamp = Array.isArray(canonical.bandcamp_product_mappings)
-        ? canonical.bandcamp_product_mappings[0]
-        : null;
+      const bandcamp = pickPrimaryBandcampMapping(canonical.bandcamp_product_mappings);
       const ranked =
         catalog.state === "ok"
           ? rankSkuCandidates(

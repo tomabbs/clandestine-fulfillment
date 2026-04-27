@@ -64,6 +64,22 @@ export interface RemoteCatalogItem {
   quantity: number | null;
 }
 
+export interface BandcampMappingForSelection {
+  id: string;
+  bandcamp_url: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export type RemoteTargetSelectionResult =
+  | { ok: true; target: RemoteCatalogItem | null }
+  | {
+      ok: false;
+      code: "ambiguous_remote_target";
+      message: string;
+      matches: RemoteCatalogItem[];
+    };
+
 export interface RemoteCatalogResult {
   state: RemoteCatalogFetchState;
   items: RemoteCatalogItem[];
@@ -357,6 +373,74 @@ function classifyCandidate(score: number, disqualifiers: string[]): ConfidenceTi
   return "weak";
 }
 
+function mappingTimestamp(value: BandcampMappingForSelection): number {
+  const timestamp = Date.parse(value.updated_at ?? value.created_at);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+export function pickPrimaryBandcampMapping<T extends BandcampMappingForSelection>(
+  raw: T | T[] | null | undefined,
+): T | null {
+  const mappings = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean);
+  if (mappings.length === 0) return null;
+
+  return (
+    [...mappings].sort((a, b) => {
+      const aHasUrl = Boolean(a.bandcamp_url?.trim());
+      const bHasUrl = Boolean(b.bandcamp_url?.trim());
+      if (aHasUrl !== bHasUrl) return aHasUrl ? -1 : 1;
+
+      const timestampDelta = mappingTimestamp(b) - mappingTimestamp(a);
+      if (timestampDelta !== 0) return timestampDelta;
+
+      return b.id.localeCompare(a.id);
+    })[0] ?? null
+  );
+}
+
+export function selectConnectionScopedRemoteTarget(input: {
+  items: readonly RemoteCatalogItem[];
+  remoteInventoryItemId?: string | null;
+  remoteVariantId?: string | null;
+  remoteProductId?: string | null;
+  remoteSku?: string | null;
+}): RemoteTargetSelectionResult {
+  const byInventoryItem = input.remoteInventoryItemId
+    ? input.items.find((item) => item.remoteInventoryItemId === input.remoteInventoryItemId)
+    : null;
+  if (byInventoryItem) return { ok: true, target: byInventoryItem };
+
+  const byVariant = input.remoteVariantId
+    ? input.items.find((item) => item.remoteVariantId === input.remoteVariantId)
+    : null;
+  if (byVariant) return { ok: true, target: byVariant };
+
+  if (!input.remoteProductId) return { ok: true, target: null };
+
+  const productMatches = input.items.filter(
+    (item) => item.remoteProductId === input.remoteProductId,
+  );
+  if (productMatches.length <= 1) {
+    return { ok: true, target: productMatches[0] ?? null };
+  }
+
+  const normalizedRemoteSku = normalizeSku(input.remoteSku);
+  if (normalizedRemoteSku) {
+    const skuMatches = productMatches.filter(
+      (item) => normalizeSku(item.remoteSku) === normalizedRemoteSku,
+    );
+    if (skuMatches.length === 1) return { ok: true, target: skuMatches[0] ?? null };
+  }
+
+  return {
+    ok: false,
+    code: "ambiguous_remote_target",
+    message:
+      "Multiple variants found without a unique SKU. Please add SKUs in Shopify before matching.",
+    matches: productMatches,
+  };
+}
+
 export function rankSkuCandidates(
   canonical: CanonicalCandidateSignalSource,
   remoteItems: RemoteCatalogItem[],
@@ -579,8 +663,12 @@ export function buildCandidateFingerprint(input: {
   remoteSku: string | null;
   existingMappingId: string | null;
   existingMappingUpdatedAt: string | null;
-  conflictCount: number;
+  conflictCount?: number;
+  disqualifiers?: readonly string[];
 }): string {
+  const conflictCount = input.disqualifiers
+    ? [...input.disqualifiers].sort((a, b) => a.localeCompare(b)).length
+    : (input.conflictCount ?? 0);
   const serialized = JSON.stringify({
     variantId: input.variantId,
     canonicalSku: normalizeSku(input.canonicalSku),
@@ -591,7 +679,7 @@ export function buildCandidateFingerprint(input: {
     remoteSku: normalizeSku(input.remoteSku),
     existingMappingId: input.existingMappingId ?? null,
     existingMappingUpdatedAt: input.existingMappingUpdatedAt ?? null,
-    conflictCount: input.conflictCount,
+    conflictCount,
   });
 
   return createHash("sha256").update(serialized).digest("hex").slice(0, 24);

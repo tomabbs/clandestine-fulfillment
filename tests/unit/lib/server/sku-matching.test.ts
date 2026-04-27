@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { RankSkuEvidenceContext, RemoteCatalogItem } from "@/lib/server/sku-matching";
-import { buildCandidateFingerprint, rankSkuCandidates } from "@/lib/server/sku-matching";
+import {
+  buildCandidateFingerprint,
+  pickPrimaryBandcampMapping,
+  rankSkuCandidates,
+  selectConnectionScopedRemoteTarget,
+} from "@/lib/server/sku-matching";
 
 describe("rankSkuCandidates", () => {
   const canonical = {
@@ -141,6 +146,148 @@ describe("buildCandidateFingerprint", () => {
     });
 
     expect(base).not.toBe(changed);
+  });
+
+  it("is order-insensitive for disqualifier arrays", () => {
+    const first = buildCandidateFingerprint({
+      variantId: "var_1",
+      canonicalSku: "TP-001-LP",
+      canonicalBarcode: null,
+      remoteProductId: "prod_1",
+      remoteVariantId: "var_remote_1",
+      remoteInventoryItemId: null,
+      remoteSku: "TP-001-LP",
+      existingMappingId: null,
+      existingMappingUpdatedAt: null,
+      disqualifiers: ["duplicate_sku", "missing_barcode"],
+    });
+    const second = buildCandidateFingerprint({
+      variantId: "var_1",
+      canonicalSku: "TP-001-LP",
+      canonicalBarcode: null,
+      remoteProductId: "prod_1",
+      remoteVariantId: "var_remote_1",
+      remoteInventoryItemId: null,
+      remoteSku: "TP-001-LP",
+      existingMappingId: null,
+      existingMappingUpdatedAt: null,
+      disqualifiers: ["missing_barcode", "duplicate_sku"],
+    });
+
+    expect(first).toBe(second);
+  });
+});
+
+describe("pickPrimaryBandcampMapping", () => {
+  const base = {
+    id: "00000000-0000-4000-8000-000000000001",
+    bandcamp_url: null,
+    created_at: "2026-04-20T00:00:00.000Z",
+    updated_at: null,
+  };
+
+  it("accepts object, array, and null relationship shapes", () => {
+    expect(pickPrimaryBandcampMapping(base)?.id).toBe(base.id);
+    expect(pickPrimaryBandcampMapping([base])?.id).toBe(base.id);
+    expect(pickPrimaryBandcampMapping(null)).toBeNull();
+  });
+
+  it("prefers URL-bearing rows, then newest timestamp, then id desc", () => {
+    const olderWithUrl = {
+      ...base,
+      id: "00000000-0000-4000-8000-000000000002",
+      bandcamp_url: "https://band.example/older",
+      created_at: "2026-04-21T00:00:00.000Z",
+    };
+    const newerWithoutUrl = {
+      ...base,
+      id: "00000000-0000-4000-8000-000000000003",
+      created_at: "2026-04-22T00:00:00.000Z",
+    };
+    const newestWithUrl = {
+      ...base,
+      id: "00000000-0000-4000-8000-000000000004",
+      bandcamp_url: "https://band.example/newer",
+      updated_at: "2026-04-23T00:00:00.000Z",
+    };
+
+    expect(pickPrimaryBandcampMapping([olderWithUrl, newerWithoutUrl, newestWithUrl])?.id).toBe(
+      newestWithUrl.id,
+    );
+  });
+
+  it("uses deterministic descending id fallback when timestamps tie", () => {
+    const lowId = { ...base, id: "00000000-0000-4000-8000-000000000010" };
+    const highId = { ...base, id: "00000000-0000-4000-8000-000000000011" };
+
+    expect(pickPrimaryBandcampMapping([lowId, highId])?.id).toBe(highId.id);
+  });
+});
+
+describe("selectConnectionScopedRemoteTarget", () => {
+  const productSmall: RemoteCatalogItem = {
+    platform: "shopify",
+    remoteProductId: "prod-1",
+    remoteVariantId: "var-small",
+    remoteInventoryItemId: "inv-small",
+    remoteSku: "SHIRT-S",
+    productTitle: "Label Shirt",
+    variantTitle: "Small",
+    combinedTitle: "Label Shirt - Small",
+    productType: "T-Shirt",
+    productUrl: null,
+    price: 25,
+    barcode: null,
+    quantity: null,
+  };
+  const productMedium = {
+    ...productSmall,
+    remoteVariantId: "var-medium",
+    remoteInventoryItemId: "inv-medium",
+    remoteSku: "SHIRT-M",
+    variantTitle: "Medium",
+    combinedTitle: "Label Shirt - Medium",
+  };
+
+  it("chooses inventory item before variant and product fallbacks", () => {
+    const result = selectConnectionScopedRemoteTarget({
+      items: [productSmall, productMedium],
+      remoteInventoryItemId: "inv-medium",
+      remoteVariantId: "var-small",
+      remoteProductId: "prod-1",
+      remoteSku: "SHIRT-S",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.target?.remoteInventoryItemId).toBe("inv-medium");
+  });
+
+  it("uses remote SKU to disambiguate product-level fallback", () => {
+    const result = selectConnectionScopedRemoteTarget({
+      items: [productSmall, productMedium],
+      remoteProductId: "prod-1",
+      remoteSku: "shirt-m",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.target?.remoteVariantId).toBe("var-medium");
+  });
+
+  it("returns an ambiguity error for SKU-less multi-variant product fallback", () => {
+    const result = selectConnectionScopedRemoteTarget({
+      items: [
+        { ...productSmall, remoteSku: null },
+        { ...productMedium, remoteSku: null },
+      ],
+      remoteProductId: "prod-1",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.code).toBe("ambiguous_remote_target");
+    expect(result.message).toContain("Please add SKUs in Shopify before matching");
   });
 });
 
