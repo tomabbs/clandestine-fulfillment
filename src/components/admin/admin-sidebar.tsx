@@ -84,12 +84,13 @@ const SETTINGS_ITEMS = [
   { title: "Bandcamp Accounts", href: "/admin/settings/bandcamp" },
   { title: "Store Connections", href: "/admin/settings/store-connections" },
   { title: "SKU Matching", href: "/admin/settings/sku-matching" },
-  // Phase 6 Slices 6.B + 6.E — autonomous-matching read surfaces. Both
-  // pages are gated behind `sku_autonomous_ui_enabled` (see the server
-  // components in each route) so they render a stub until ops enables
-  // the flag.
+  // Phase 6 Slices 6.B + 6.E + Phase 7 Slice 7.D — autonomous-matching
+  // read + rollout surfaces. All three pages are gated behind
+  // `sku_autonomous_ui_enabled` (see the server components in each
+  // route) so they render a stub until ops enables the flag.
   { title: "Autonomous Runs", href: "/admin/settings/sku-matching/autonomous-runs" },
   { title: "Identity Matches", href: "/admin/settings/sku-matching/identity-matches" },
+  { title: "Autonomous Rollout", href: "/admin/settings/sku-matching/rollout" },
   { title: "Reconnect Client Stores", href: "/admin/settings/client-store-reconnect" },
   { title: "Store Mapping", href: "/admin/settings/store-mapping" },
   { title: "Carrier Mapping", href: "/admin/settings/carrier-map" },

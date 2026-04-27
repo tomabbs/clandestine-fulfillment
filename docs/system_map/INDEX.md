@@ -32,9 +32,10 @@ Use this index as the first-stop map before planning/building/auditing.
 
 - Staff portal: `src/app/admin/**`, `src/components/admin/**`
 - Client portal: `src/app/portal/**`, `src/components/portal/**`
-- Phase 6 SKU-AUTO admin surfaces (all gated by `sku_autonomous_ui_enabled`):
+- Phase 6 + 7 SKU-AUTO admin surfaces (all gated by `sku_autonomous_ui_enabled`):
   - `/admin/settings/sku-matching/autonomous-runs` — read model over `sku_autonomous_runs` + `sku_autonomous_decisions` (Slice 6.B).
   - `/admin/settings/sku-matching/identity-matches` — read model over `client_store_product_identity_matches` + `sku_outcome_transitions` (Slice 6.E).
+  - `/admin/settings/sku-matching/rollout` — rollout dashboard: flag state, emergency pause, weekly telemetry rollup from `sensor_readings` (`sensor_name='sku_autonomous.telemetry'`), Bandcamp linkage, and canary review lifecycle (Slice 7.D).
   - `/admin/orders/holds` — staff resolution surface for `warehouse_orders.fulfillment_hold='on_hold'` (Slice 6.D).
 - Phase 6 SKU-AUTO portal surface: `/portal/stock-exceptions` — client view of `client_stock_exception` identity rows, gated by `client_stock_exception_reports_enabled` (Slice 6.F).
 

@@ -210,8 +210,7 @@ export function summarizeAutonomousTelemetry(input: TelemetryInput): TelemetrySu
   const runsCancelled = runsByStatus.get("cancelled") ?? 0;
   const runsRunning = runsByStatus.get("running") ?? 0;
   const terminalRuns = runsCompleted + runsFailed + runsCancelled;
-  const runFailureRate =
-    terminalRuns > 0 ? (runsFailed + runsCancelled) / terminalRuns : null;
+  const runFailureRate = terminalRuns > 0 ? (runsFailed + runsCancelled) / terminalRuns : null;
 
   // ── Decision audit completeness ───────────────────────────────────────
   // Only count non-dry-run runs that reached `completed`. Dry-run passes
@@ -229,7 +228,9 @@ export function summarizeAutonomousTelemetry(input: TelemetryInput): TelemetrySu
   const decisionsOutcomeChanged = decisions.filter((d) => d.outcome_changed === true).length;
 
   // ── Transitions ───────────────────────────────────────────────────────
-  const promotionsInWindow = transitions.filter((t) => t.to_state === "auto_live_inventory_alias").length;
+  const promotionsInWindow = transitions.filter(
+    (t) => t.to_state === "auto_live_inventory_alias",
+  ).length;
   const demotionsInWindow = transitions.filter(
     (t) => t.from_state === "auto_live_inventory_alias" && t.to_state === "client_stock_exception",
   ).length;
@@ -331,10 +332,7 @@ export function summarizeAutonomousTelemetry(input: TelemetryInput): TelemetrySu
     reasons.push("decision_audit_incomplete");
   }
 
-  if (
-    runFailureRate !== null &&
-    runFailureRate > TELEMETRY_THRESHOLDS.max_run_failure_rate
-  ) {
+  if (runFailureRate !== null && runFailureRate > TELEMETRY_THRESHOLDS.max_run_failure_rate) {
     reasons.push("run_failure_rate_above_threshold");
   }
 
