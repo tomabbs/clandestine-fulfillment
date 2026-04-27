@@ -105,6 +105,7 @@ domains:
       - supabase/migrations/20260425000001_support_inbox_upgrade.sql
     responsibilities:
       - deterministic ticket queues computed from canonical fields
+      - inbound support email resolver that links Bandcamp fan-message bodies and general customer emails to org/order/shipment context
       - retry-safe message idempotency and draft-preserving collision protection
       - staff triage, assignment, snooze, internal notes, saved replies, and resolution workflow
       - delivery-ledger-backed email and Discogs outbound sends

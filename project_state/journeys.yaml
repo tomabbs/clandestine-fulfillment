@@ -156,6 +156,8 @@ journeys:
       - role/org access enforced
       - floating launcher shows unread support state in admin and portal
       - staff inbox queues derive from canonical fields rather than persisted queue names
+      - inbound Bandcamp fan messages resolve client/order/shipment context from body transaction IDs before falling back to customer email, client login email, and support mappings
+      - support sidebar shows the resolved related order and shipment/customer tracking links when available, including for historical messages whose conversation org was initially wrong
       - reply sends are retry-safe by clientMutationId and hard-block stale replies unless explicitly sent anyway
       - presence indicators reflect online availability in list/detail views
       - staff can assign, set category/priority, snooze, add internal notes, use saved replies, resolve, and review duplicate candidates

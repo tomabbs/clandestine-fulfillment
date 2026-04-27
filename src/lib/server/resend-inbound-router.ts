@@ -13,6 +13,10 @@ import * as Sentry from "@sentry/nextjs";
 import { tasks } from "@trigger.dev/sdk";
 import type { FetchedInboundEmail } from "@/lib/clients/resend-client";
 import type { createServiceRoleClient } from "@/lib/server/supabase-server";
+import {
+  extractSupportEmailAddress,
+  resolveSupportEmailContext,
+} from "@/lib/server/support-email-resolution";
 
 const OPTIONAL_SUPPORT_CONVERSATION_COLUMNS = ["client_last_read_at"] as const;
 const OPTIONAL_SUPPORT_MESSAGE_COLUMNS = ["source", "delivered_via_email"] as const;
@@ -38,7 +42,7 @@ export async function routeInboundEmail({
 }): Promise<RouteResult> {
   // R-4: use the recovered REAL sender (from headers), not the envelope
   // `from` (which is rewritten by Gmail/Workspace forwarding rules).
-  const senderAddress = extractEmailAddress(email.realFrom);
+  const senderAddress = extractSupportEmailAddress(email.realFrom);
   const subjectRaw = email.subject;
   const subjectLower = subjectRaw.toLowerCase();
   const bodyLower = email.text.toLowerCase();
@@ -116,23 +120,33 @@ export async function routeInboundEmail({
     }
   }
 
-  // Strategy 2: sender-address match against support_email_mappings.
-  const { data: emailMapping } = await supabase
-    .from("support_email_mappings")
-    .select("org_id")
-    .eq("email_address", senderAddress)
-    .eq("is_active", true)
-    .maybeSingle();
+  // Strategy 2: sender/body-aware resolver. Bandcamp fan messages come from
+  // noreply@bandcamp.com, so the sender alone is intentionally low-signal.
+  // Prefer the Bandcamp transaction in the body, then customer/order email,
+  // then client login/support mapping email.
+  const resolution = await resolveSupportEmailContext({
+    supabase,
+    workspaceId,
+    senderAddress,
+    subject: email.subject,
+    body: email.text,
+  });
 
-  if (emailMapping) {
-    await createConversationFromEmail(supabase, emailMapping.org_id, {
+  if (resolution.orgId) {
+    await createConversationFromEmail(supabase, resolution.orgId, {
       subject: email.subject,
       body: email.text,
       messageId: email.messageId,
+      sourceChannel: resolution.source === "bandcamp_transaction" ? "bandcamp_fan" : "email",
+      externalOrderId: resolution.order?.id ?? null,
+      externalCustomerHandle: resolution.customerEmail,
     });
     await supabase
       .from("webhook_events")
-      .update({ status: "processed", topic: "support_new_conversation" })
+      .update({
+        status: "processed",
+        topic: "support_new_conversation",
+      })
       .eq("id", webhookEventId);
     return { status: "support_new_conversation" };
   }
@@ -230,7 +244,7 @@ async function dispatchBandcampOrderPoll({
   const recipients = Array.from(
     new Set(
       [...email.to, ...email.cc]
-        .map((addr) => extractEmailAddress(addr))
+        .map((addr) => extractSupportEmailAddress(addr))
         .filter((addr): addr is string => Boolean(addr)),
     ),
   );
@@ -410,21 +424,6 @@ async function recordEmailPerConnectionSensor(
   }
 }
 
-function extractEmailAddress(from: string): string {
-  // Handles:
-  //   "Name <email@example.com>"   → email@example.com
-  //   "email@example.com"          → email@example.com
-  //   "a@x.com, b@y.com"           → a@x.com  (first only — defensive against
-  //                                   recipient-list blobs leaking into the
-  //                                   sender field)
-  if (!from) return "";
-  const angled = from.match(/<([^>]+)>/);
-  if (angled) return angled[1].trim().toLowerCase();
-  // Find FIRST RFC-ish address in the string (handles comma/space separated).
-  const flat = from.match(/[\w.!#$%&'*+\-/=?^_`{|}~]+@[\w.-]+\.[A-Za-z]{2,}/);
-  return (flat ? flat[0] : from.trim()).toLowerCase();
-}
-
 async function appendMessageToConversation(
   supabase: ReturnType<typeof createServiceRoleClient>,
   conversationId: string,
@@ -494,7 +493,14 @@ async function appendMessageToConversation(
 async function createConversationFromEmail(
   supabase: ReturnType<typeof createServiceRoleClient>,
   orgId: string,
-  email: { subject: string; body: string; messageId: string },
+  email: {
+    subject: string;
+    body: string;
+    messageId: string;
+    sourceChannel?: "email" | "bandcamp_fan";
+    externalOrderId?: string | null;
+    externalCustomerHandle?: string | null;
+  },
 ): Promise<void> {
   if (email.messageId) {
     const { data: existingByMessageId } = await supabase
@@ -522,6 +528,9 @@ async function createConversationFromEmail(
       subject: email.subject,
       status: "waiting_on_staff",
       inbound_email_id: email.messageId || null,
+      source_channel: email.sourceChannel ?? "email",
+      external_order_id: email.externalOrderId ?? null,
+      external_customer_handle: email.externalCustomerHandle ?? null,
       client_last_read_at: new Date().toISOString(),
     })
     .select("id")
@@ -539,6 +548,9 @@ async function createConversationFromEmail(
         subject: email.subject,
         status: "waiting_on_staff",
         inbound_email_id: email.messageId || null,
+        source_channel: email.sourceChannel ?? "email",
+        external_order_id: email.externalOrderId ?? null,
+        external_customer_handle: email.externalCustomerHandle ?? null,
       })
       .select("id")
       .single();
@@ -553,6 +565,8 @@ async function createConversationFromEmail(
     workspace_id: wsId,
     sender_type: "client",
     source: "email",
+    source_channel: email.sourceChannel ?? "email",
+    direction: "inbound",
     delivered_via_email: true,
     body: email.body,
     email_message_id: email.messageId || null,

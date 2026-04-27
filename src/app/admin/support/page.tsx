@@ -593,6 +593,85 @@ function ConversationDetail({ conversationId }: { conversationId: string }) {
             </section>
             <Separator />
             <section>
+              <p className="text-xs font-medium uppercase text-muted-foreground">Related order</p>
+              {context?.linkedOrder ? (
+                <div className="mt-2 space-y-2 rounded border bg-background p-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {context.linkedOrder.order_number ?? "Order"}
+                    </span>
+                    <a
+                      className="text-primary"
+                      href={`/admin/orders?search=${encodeURIComponent(
+                        context.linkedOrder.order_number ?? context.linkedOrder.id,
+                      )}`}
+                    >
+                      Open
+                    </a>
+                  </div>
+                  <p className="text-muted-foreground">
+                    {context.linkedOrder.fulfillment_status ?? "status unknown"}
+                    {context.linkedOrder.customer_email
+                      ? ` · ${context.linkedOrder.customer_email}`
+                      : ""}
+                  </p>
+                  {context.linkedOrder.bandcamp_payment_id ? (
+                    <p className="font-mono text-muted-foreground">
+                      Bandcamp {context.linkedOrder.bandcamp_payment_id}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">No related order found.</p>
+              )}
+            </section>
+            <Separator />
+            <section>
+              <p className="text-xs font-medium uppercase text-muted-foreground">
+                Related shipment
+              </p>
+              {context?.linkedShipment ? (
+                <div className="mt-2 space-y-2 rounded border bg-background p-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {context.linkedShipment.status ?? "shipment status unknown"}
+                    </span>
+                    {context.linkedShipment.public_track_token ? (
+                      <a
+                        className="text-primary"
+                        href={`/track/${context.linkedShipment.public_track_token}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Customer page
+                      </a>
+                    ) : null}
+                  </div>
+                  {context.linkedShipment.tracking_number ? (
+                    <p className="font-mono text-muted-foreground">
+                      {context.linkedShipment.carrier ?? "carrier"}{" "}
+                      {context.linkedShipment.tracking_number}
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground">No tracking number yet.</p>
+                  )}
+                  {context.linkedShipment.easypost_tracker_public_url ? (
+                    <a
+                      className="block text-primary"
+                      href={context.linkedShipment.easypost_tracker_public_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Carrier tracking
+                    </a>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">No shipment found yet.</p>
+              )}
+            </section>
+            <Separator />
+            <section>
               <p className="text-xs font-medium uppercase text-muted-foreground">Contacts</p>
               <div className="mt-2 space-y-1 text-xs">
                 {context?.contacts.length ? (

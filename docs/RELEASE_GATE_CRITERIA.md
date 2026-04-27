@@ -328,6 +328,7 @@ Pass criteria:
 Required flows:
 1. Client invite user from admin client settings
 2. Portal support create + reply, plus staff Support Inbox reply from `/admin/support` with collision-safe draft preservation and visible delivery status
+   - Inbound Bandcamp fan-message support tickets must show resolved client context plus related order and shipment/customer tracking links when the body includes a Bandcamp transaction id.
 3. Portal inbound submit
 4. One core admin operational page load (`/admin/inventory` or `/admin/inbound`)
 5. Support omnichannel checks:

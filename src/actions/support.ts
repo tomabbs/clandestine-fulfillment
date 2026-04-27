@@ -9,6 +9,12 @@ import {
   type SupportDeliveryRoute,
 } from "@/lib/server/support-delivery";
 import {
+  resolveSupportEmailContext,
+  type SupportEmailResolution,
+  type SupportResolvedOrder,
+  type SupportResolvedShipment,
+} from "@/lib/server/support-email-resolution";
+import {
   conversationMatchesQueue,
   getSupportQueueFlags,
   type SupportQueueType,
@@ -367,11 +373,19 @@ export async function getConversationDetail(id: string): Promise<{
 
   const org = conversation.organizations as { name: string } | null;
   const assignedUser = conversation.assigned_user as { name: string } | null;
+  const resolved = auth.isStaff
+    ? await resolveConversationSupportContext(createServiceRoleClient(), {
+        workspaceId: auth.workspaceId,
+        conversation: conversation as Record<string, unknown>,
+        messages: (messages ?? []) as Array<{ body?: string | null }>,
+      })
+    : null;
 
   return {
     conversation: {
       ...(conversation as unknown as SupportConversation),
-      org_name: org?.name,
+      org_id: resolved?.org?.id ?? (conversation as { org_id: string }).org_id,
+      org_name: resolved?.org?.name ?? org?.name,
       assigned_name: assignedUser?.name,
     },
     messages: (messages ?? []) as SupportMessage[],
@@ -913,6 +927,8 @@ export async function markConversationRead(conversationId: string): Promise<void
 export async function getSupportClientContext(conversationId: string): Promise<{
   org: { id: string; name: string; status?: string };
   contacts: Array<{ id: string; email_address: string; is_active: boolean }>;
+  linkedOrder: SupportResolvedOrder | null;
+  linkedShipment: SupportResolvedShipment | null;
   recentConversations: Array<{
     id: string;
     subject: string;
@@ -930,24 +946,32 @@ export async function getSupportClientContext(conversationId: string): Promise<{
 
   const { data: conversation, error } = await auth.supabase
     .from("support_conversations")
-    .select("org_id, organizations!inner(id, name)")
+    .select("id, workspace_id, org_id, subject, external_order_id, external_customer_handle")
     .eq("id", conversationId)
     .single();
   if (error || !conversation) throw new Error("Conversation not found");
 
-  const orgs = conversation.organizations as
-    | { id: string; name: string }
-    | { id: string; name: string }[];
-  const org = Array.isArray(orgs) ? orgs[0] : orgs;
+  const { data: messages } = await auth.supabase
+    .from("support_messages")
+    .select("body")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true });
+  const resolved = await resolveConversationSupportContext(createServiceRoleClient(), {
+    workspaceId: auth.workspaceId,
+    conversation: conversation as Record<string, unknown>,
+    messages: (messages ?? []) as Array<{ body?: string | null }>,
+  });
+  const orgId = resolved.org?.id ?? (conversation.org_id as string);
+  const org = resolved.org ?? { id: orgId, name: "Unknown client" };
   const { data: contacts } = await auth.supabase
     .from("support_email_mappings")
     .select("id, email_address, is_active")
-    .eq("org_id", conversation.org_id)
+    .eq("org_id", orgId)
     .order("email_address", { ascending: true });
   const { data: recent } = await auth.supabase
     .from("support_conversations")
     .select("id, subject, status, updated_at")
-    .eq("org_id", conversation.org_id)
+    .eq("org_id", orgId)
     .neq("id", conversationId)
     .order("updated_at", { ascending: false })
     .limit(5);
@@ -955,6 +979,8 @@ export async function getSupportClientContext(conversationId: string): Promise<{
   return {
     org,
     contacts: contacts ?? [],
+    linkedOrder: resolved.resolution?.order ?? null,
+    linkedShipment: resolved.resolution?.shipment ?? null,
     recentConversations: (recent ?? []) as Array<{
       id: string;
       subject: string;
@@ -965,10 +991,10 @@ export async function getSupportClientContext(conversationId: string): Promise<{
     openShipments: [],
     inventoryAlerts: [],
     links: {
-      orgAdminUrl: `/admin/clients/${conversation.org_id}`,
-      ordersUrl: `/admin/orders?org=${conversation.org_id}`,
-      shipmentsUrl: `/admin/shipping?org=${conversation.org_id}`,
-      inventoryUrl: `/admin/inventory?org=${conversation.org_id}`,
+      orgAdminUrl: `/admin/clients/${orgId}`,
+      ordersUrl: `/admin/orders?org=${orgId}`,
+      shipmentsUrl: `/admin/shipping?org=${orgId}`,
+      inventoryUrl: `/admin/inventory?org=${orgId}`,
     },
   };
 }
@@ -1047,6 +1073,42 @@ export async function suggestSupportReply(_params: {
   latestMessage: string;
 }): Promise<{ suggestions: string[] }> {
   return { suggestions: [] };
+}
+
+async function resolveConversationSupportContext(
+  serviceClient: ReturnType<typeof createServiceRoleClient>,
+  params: {
+    workspaceId: string;
+    conversation: Record<string, unknown>;
+    messages: Array<{ body?: string | null }>;
+  },
+): Promise<{
+  org: { id: string; name: string } | null;
+  resolution: SupportEmailResolution | null;
+}> {
+  const combinedBody = params.messages
+    .map((message) => message.body ?? "")
+    .filter(Boolean)
+    .join("\n\n");
+  const resolution = await resolveSupportEmailContext({
+    supabase: serviceClient,
+    workspaceId: params.workspaceId,
+    senderAddress: (params.conversation.external_customer_handle as string | null) ?? null,
+    subject: (params.conversation.subject as string | null) ?? null,
+    body: combinedBody,
+  });
+  const orgId = resolution.orgId ?? (params.conversation.org_id as string | null);
+  if (!orgId) return { org: null, resolution };
+
+  const { data: org } = await serviceClient
+    .from("organizations")
+    .select("id, name")
+    .eq("id", orgId)
+    .maybeSingle();
+  return {
+    org: org ? { id: org.id as string, name: org.name as string } : null,
+    resolution,
+  };
 }
 
 async function ensureMessageDeliveriesAndEnqueue(
