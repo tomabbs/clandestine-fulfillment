@@ -583,13 +583,15 @@ export async function listSkuMatchingClients(): Promise<SkuMatchingClientSummary
 
   if (error) throw new Error(`Client list failed: ${error.message}`);
 
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-    connectionCount: Array.isArray(row.client_store_connections)
-      ? row.client_store_connections.length
-      : 0,
-  }));
+  return toPlainJson(
+    (data ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      connectionCount: Array.isArray(row.client_store_connections)
+        ? row.client_store_connections.length
+        : 0,
+    })),
+  );
 }
 
 export async function listSkuMatchingConnections(input?: {
@@ -625,12 +627,14 @@ export async function listSkuMatchingConnections(input?: {
     }
   }
 
-  return (data ?? []).map((row) =>
-    toConnectionSummary(
-      row as ClientStoreConnection & {
-        organizations?: { name: string } | { name: string }[] | null;
-      },
-      mappingCounts.get(row.id) ?? 0,
+  return toPlainJson(
+    (data ?? []).map((row) =>
+      toConnectionSummary(
+        row as ClientStoreConnection & {
+          organizations?: { name: string } | { name: string }[] | null;
+        },
+        mappingCounts.get(row.id) ?? 0,
+      ),
     ),
   );
 }
@@ -823,7 +827,7 @@ export async function getSkuMatchingWorkspace(
     metadata: { remoteCatalogState: remoteCatalog.state },
   });
 
-  return {
+  return toPlainJson({
     featureEnabled: Boolean(flags.sku_matching_enabled),
     connection: toConnectionSummary(connection, existingMappings.byVariantId.size),
     remoteCatalogState: remoteCatalog.state,
@@ -838,7 +842,7 @@ export async function getSkuMatchingWorkspace(
     canonicalDuplicateConflicts,
     remoteDuplicateConflicts,
     existingSyncConflicts: Array.from(conflictMap.values()),
-  };
+  });
 }
 
 export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInputSchema>): Promise<{
@@ -858,11 +862,11 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
 
   const remoteCatalog = await fetchRemoteCatalogWithTimeout(connection);
   if (remoteCatalog.state !== "ok") {
-    return {
+    return toPlainJson({
       candidates: [],
       remoteCatalogState: remoteCatalog.state,
       remoteCatalogError: remoteCatalog.error,
-    };
+    });
   }
 
   const candidates = rankSkuCandidates(
@@ -885,14 +889,14 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
     remoteCatalog.items,
   );
 
-  return {
+  return toPlainJson({
     candidates,
     remoteCatalogState: remoteCatalog.state,
     remoteCatalogError: remoteCatalog.error,
-  };
+  });
 }
 
-export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchema>) {
+async function previewSkuMatchInternal(rawInput: z.input<typeof previewInputSchema>) {
   const startedAt = Date.now();
   const parsed = previewInputSchema.parse(rawInput);
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
@@ -1016,11 +1020,15 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
   };
 }
 
+export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchema>) {
+  return toPlainJson(await previewSkuMatchInternal(rawInput));
+}
+
 export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatchInputSchema>) {
   const parsed = upsertMatchInputSchema.parse(rawInput);
   const { auth } = await assertSkuMatchingConnection(parsed.connectionId);
 
-  const preview = await previewSkuMatch({
+  const preview = await previewSkuMatchInternal({
     connectionId: parsed.connectionId,
     variantId: parsed.variantId,
     remoteProductId: parsed.remoteProductId,
@@ -1131,17 +1139,19 @@ export async function getShopifyMatchReadiness(rawInput: z.input<typeof previewI
   const parsed = previewInputSchema.parse(rawInput);
   const { connection } = await assertSkuMatchingConnection(parsed.connectionId);
   if (connection.platform !== "shopify") {
-    return {
+    return toPlainJson({
       state: "not_supported",
       available: null,
       message: "Readiness checks only apply to Shopify connections.",
-    };
+    });
   }
 
-  return classifyShopifyReadiness({
-    connection,
-    remoteInventoryItemId: parsed.remoteInventoryItemId ?? null,
-  });
+  return toPlainJson(
+    await classifyShopifyReadiness({
+      connection,
+      remoteInventoryItemId: parsed.remoteInventoryItemId ?? null,
+    }),
+  );
 }
 
 export async function activateShopifyInventoryAtDefaultLocation(
@@ -1189,7 +1199,7 @@ export async function acceptExactMatches(rawInput: z.input<typeof acceptExactMat
   const results: Array<{ variantId: string; success: boolean; error?: string }> = [];
   for (const item of parsed.items) {
     try {
-      const preview = await previewSkuMatch({
+      const preview = await previewSkuMatchInternal({
         connectionId: parsed.connectionId,
         variantId: item.variantId,
         remoteProductId: item.remoteProductId,
@@ -1254,7 +1264,7 @@ export async function acceptExactMatches(rawInput: z.input<typeof acceptExactMat
   });
 
   revalidatePath("/admin/settings/sku-matching");
-  return { success: true, results };
+  return toPlainJson({ success: true, results });
 }
 
 export async function enableSkuMatchingFeatureFlag(): Promise<{ success: true }> {

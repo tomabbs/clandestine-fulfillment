@@ -120,19 +120,22 @@ export function SkuMatchingClient({
       remoteInventoryItemId?: string | null;
       remoteSku?: string | null;
     }) =>
-      previewSkuMatch({
-        connectionId: activeConnectionId,
-        variantId: input.variantId,
-        remoteProductId: input.remoteProductId,
-        remoteVariantId: input.remoteVariantId,
-        remoteInventoryItemId: input.remoteInventoryItemId,
-        remoteSku: input.remoteSku,
-      }),
+      previewSkuMatch(
+        toPlainServerActionInput({
+          connectionId: activeConnectionId,
+          variantId: input.variantId,
+          remoteProductId: input.remoteProductId,
+          remoteVariantId: input.remoteVariantId,
+          remoteInventoryItemId: input.remoteInventoryItemId,
+          remoteSku: input.remoteSku,
+        }),
+      ),
     onError: (error) => setPreviewError(formatActionError(error)),
   });
 
   const upsertMutation = useAppMutation({
-    mutationFn: createOrUpdateSkuMatch,
+    mutationFn: (input: Parameters<typeof createOrUpdateSkuMatch>[0]) =>
+      createOrUpdateSkuMatch(toPlainServerActionInput(input)),
     onSuccess: () => {
       setPreviewOpen(false);
       setPreviewError(null);
@@ -147,17 +150,20 @@ export function SkuMatchingClient({
   });
 
   const deactivateMutation = useAppMutation({
-    mutationFn: deactivateSkuMatch,
+    mutationFn: (input: Parameters<typeof deactivateSkuMatch>[0]) =>
+      deactivateSkuMatch(toPlainServerActionInput(input)),
     onSuccess: () => router.refresh(),
   });
 
   const activateShopifyMutation = useAppMutation({
-    mutationFn: activateShopifyInventoryAtDefaultLocation,
+    mutationFn: (input: Parameters<typeof activateShopifyInventoryAtDefaultLocation>[0]) =>
+      activateShopifyInventoryAtDefaultLocation(toPlainServerActionInput(input)),
     onSuccess: () => router.refresh(),
   });
 
   const bulkAcceptMutation = useAppMutation({
-    mutationFn: acceptExactMatches,
+    mutationFn: (input: Parameters<typeof acceptExactMatches>[0]) =>
+      acceptExactMatches(toPlainServerActionInput(input)),
     onSuccess: () => {
       setSelectedKeys(new Set());
       router.refresh();
