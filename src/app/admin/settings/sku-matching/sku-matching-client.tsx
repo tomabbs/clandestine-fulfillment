@@ -267,7 +267,6 @@ export function SkuMatchingClient({
       );
     } catch (error) {
       setMutationError(formatActionError(error));
-      throw error;
     } finally {
       setPendingRowIds((prev) => {
         const next = new Set(prev);

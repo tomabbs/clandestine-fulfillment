@@ -86,46 +86,43 @@ async function createTestSession(page: Page, email: string, role: string, orgId:
     );
   }
 
-  // Generate a session for this user
-  const { data: session, error: sessionError } = await admin.auth.admin.generateLink({
-    type: "magiclink",
+  const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const password = `test-e2e-${email}`;
+  await admin.auth.admin.updateUserById(authUserId, { password });
+  const { data: signInData, error: signInError } = await anonClient.auth.signInWithPassword({
     email,
+    password,
   });
 
-  if (sessionError || !session) {
-    // Fallback: sign in with password
-    const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const password = `test-e2e-${email}`;
-
-    // Update password first
-    await admin.auth.admin.updateUserById(authUserId, { password });
-
-    const { data: signInData } = await anonClient.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (signInData?.session) {
-      await setSessionCookies(
-        page,
-        signInData.session.access_token,
-        signInData.session.refresh_token,
-      );
-      return;
-    }
+  if (signInError || !signInData.session) {
+    throw new Error(`Failed to sign in test user: ${signInError?.message ?? "missing session"}`);
   }
 
-  // If we got a magic link, exchange the token
-  if (session?.properties?.hashed_token) {
-    // Navigate to the callback URL to set cookies via the app
-    const callbackUrl = `${SUPABASE_URL}/auth/v1/verify?token=${session.properties.hashed_token}&type=magiclink`;
-    await page.goto(callbackUrl);
-  }
+  await setSessionCookies(page, signInData.session.access_token, signInData.session.refresh_token);
 }
 
 async function setSessionCookies(page: Page, accessToken: string, refreshToken: string) {
+  const projectRef = new URL(SUPABASE_URL).hostname.split(".")[0];
+  const storageKey = `sb-${projectRef}-auth-token`;
+  const sessionValue = `base64-${Buffer.from(
+    JSON.stringify({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: "bearer",
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    }),
+  ).toString("base64url")}`;
+
   // Set Supabase auth cookies that @supabase/ssr expects
   await page.context().addCookies([
+    {
+      name: storageKey,
+      value: sessionValue,
+      domain: "localhost",
+      path: "/",
+      sameSite: "Lax",
+    },
     {
       name: "sb-access-token",
       value: accessToken,
