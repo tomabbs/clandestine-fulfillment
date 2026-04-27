@@ -36,6 +36,10 @@ function toPlainServerActionInput<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function remoteProductLinkLabel(platform: string): string {
+  return platform === "shopify" ? "Open Shopify product" : "Open remote product";
+}
+
 function formatUtcDateTime(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
@@ -311,6 +315,29 @@ export function SkuMatchingClient({
                 <div>variant: {row.remoteVariantId ?? "none"}</div>
                 <div>inventory item: {row.remoteInventoryItemId ?? "none"}</div>
                 <div>barcode: {row.barcode ?? "none"}</div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {row.topCandidate?.remote.productUrl ? (
+                    <a
+                      href={row.topCandidate.remote.productUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-foreground underline underline-offset-2"
+                    >
+                      {remoteProductLinkLabel(row.topCandidate.remote.platform)}{" "}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : null}
+                  {row.bandcampUrl ? (
+                    <a
+                      href={row.bandcampUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-foreground underline underline-offset-2"
+                    >
+                      Open Bandcamp product <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -679,6 +706,16 @@ export function SkuMatchingClient({
                     : ""}
                   {previewData.canonical.format ? ` · ${previewData.canonical.format}` : ""}
                 </div>
+                {previewData.canonical.bandcampUrl ? (
+                  <a
+                    href={previewData.canonical.bandcampUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-xs underline underline-offset-2"
+                  >
+                    Open Bandcamp product <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : null}
               </div>
 
               {previewData.targetRemote ? (
@@ -693,6 +730,17 @@ export function SkuMatchingClient({
                       ? ` · inventory ${previewData.targetRemote.remoteInventoryItemId}`
                       : ""}
                   </div>
+                  {previewData.targetRemote.productUrl ? (
+                    <a
+                      href={previewData.targetRemote.productUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs underline underline-offset-2"
+                    >
+                      {remoteProductLinkLabel(previewData.targetRemote.platform)}{" "}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : null}
                   {previewData.candidate && (
                     <div className="mt-2 text-xs text-muted-foreground">
                       {previewData.candidate.reasons.join(" · ") || "No reasons recorded"}

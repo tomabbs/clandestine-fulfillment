@@ -205,6 +205,7 @@ async function fetchShopifyCatalog(
     accessToken: connection.api_key,
   };
 
+  const storefrontBaseUrl = connection.store_url.replace(/\/admin\/?$/, "").replace(/\/$/, "");
   const items: RemoteCatalogItem[] = [];
   for await (const page of iterateAllVariants(ctx, { pageSize: 50 })) {
     for (const row of page) {
@@ -218,7 +219,9 @@ async function fetchShopifyCatalog(
         variantTitle: row.variantTitle,
         combinedTitle: [row.productTitle, row.variantTitle].filter(Boolean).join(" - "),
         productType: row.productType,
-        productUrl: null,
+        productUrl: row.productHandle
+          ? `${storefrontBaseUrl}/products/${encodeURIComponent(row.productHandle)}`
+          : null,
         price: row.price,
         barcode: row.barcode,
         quantity: null,

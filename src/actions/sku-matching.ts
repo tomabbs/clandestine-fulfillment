@@ -114,6 +114,7 @@ type CanonicalVariantRow = {
   bandcamp_product_mappings:
     | {
         bandcamp_album_title: string | null;
+        bandcamp_url: string | null;
         bandcamp_origin_quantities: unknown;
         bandcamp_item_id: number | null;
       }[]
@@ -183,6 +184,7 @@ export interface SkuMatchingRow {
   artist: string | null;
   canonicalTitle: string;
   bandcampTitle: string | null;
+  bandcampUrl: string | null;
   format: string | null;
   variantTitle: string | null;
   barcode: string | null;
@@ -384,6 +386,7 @@ async function getCanonicalRows(
       warehouse_products!inner(id, title, vendor),
       bandcamp_product_mappings(
         bandcamp_album_title,
+        bandcamp_url,
         bandcamp_origin_quantities,
         bandcamp_item_id
       ),
@@ -719,6 +722,7 @@ export async function getSkuMatchingWorkspace(
       artist: product.vendor,
       canonicalTitle: product.title,
       bandcampTitle: bandcamp?.bandcamp_album_title ?? null,
+      bandcampUrl: bandcamp?.bandcamp_url ?? null,
       format: canonical.format_name,
       variantTitle: canonical.title,
       barcode: canonical.barcode,
@@ -966,6 +970,7 @@ export async function previewSkuMatch(rawInput: z.input<typeof previewInputSchem
       artist: product.vendor,
       format: canonical.format_name,
       bandcampTitle: bandcamp?.bandcamp_album_title ?? null,
+      bandcampUrl: bandcamp?.bandcamp_url ?? null,
     },
     existingMapping,
     targetRemote,

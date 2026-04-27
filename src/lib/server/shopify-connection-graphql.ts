@@ -152,6 +152,7 @@ export async function* iterateAllVariants(
 ): AsyncGenerator<
   Array<{
     productId: string;
+    productHandle: string | null;
     productTitle: string;
     productStatus: string;
     productType: string | null;
@@ -173,6 +174,7 @@ export async function* iterateAllVariants(
         edges {
           node {
             id
+            handle
             title
             status
             productType
@@ -203,6 +205,7 @@ export async function* iterateAllVariants(
       edges: Array<{
         node: {
           id: string;
+          handle: string | null;
           title: string;
           status: string;
           productType: string | null;
@@ -232,6 +235,7 @@ export async function* iterateAllVariants(
 
     const flat: Array<{
       productId: string;
+      productHandle: string | null;
       productTitle: string;
       productStatus: string;
       productType: string | null;
@@ -248,6 +252,7 @@ export async function* iterateAllVariants(
       for (const { node: variant } of product.variants.edges) {
         flat.push({
           productId: product.id,
+          productHandle: product.handle?.trim() || null,
           productTitle: product.title,
           productStatus: product.status,
           productType: product.productType ?? null,
