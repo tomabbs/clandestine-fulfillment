@@ -272,6 +272,10 @@ function asSingle<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
+function toPlainJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function mappingRemoteKey(mapping: {
   remote_inventory_item_id?: string | null;
   remote_variant_id?: string | null;
@@ -1030,7 +1034,7 @@ export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatc
   });
 
   revalidatePath("/admin/settings/sku-matching");
-  return { success: true, mapping: data };
+  return { success: true, mapping: toPlainJson(data) };
 }
 
 export async function deactivateSkuMatch(rawInput: z.input<typeof deactivateMatchInputSchema>) {
