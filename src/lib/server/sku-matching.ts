@@ -257,6 +257,7 @@ async function fetchWooCatalog(connection: ClientStoreConnection): Promise<Remot
     consumerKey: connection.api_key,
     consumerSecret: connection.api_secret,
     siteUrl: connection.store_url,
+    preferredAuthMode: connection.preferred_auth_mode ?? null,
   });
 
   return items.map((item) => ({

@@ -21,10 +21,18 @@ export interface StoreSyncClient {
   getOrders(since: string): Promise<RemoteOrder[]>;
 }
 
+export interface StoreReadClient {
+  /** Get the current remote quantity for a SKU */
+  getRemoteQuantity(sku: string): Promise<number | null>;
+  /** Get orders since a given ISO timestamp */
+  getOrders(since: string): Promise<RemoteOrder[]>;
+}
+
 export interface RemoteOrder {
   remoteOrderId: string;
   orderNumber: string;
   createdAt: string;
+  modifiedAt?: string;
   lineItems: Array<{
     sku: string;
     quantity: number;
@@ -69,6 +77,25 @@ export function createStoreSyncClient(
     default:
       throw new Error(`Unsupported platform: ${connection.platform}`);
   }
+}
+
+export function createStoreReadClient(
+  connection: ClientStoreConnection,
+  skuMappings?: Map<string, SkuMappingContext>,
+): StoreReadClient {
+  const fullClient =
+    connection.platform === "shopify"
+      ? createShopifySync(connection)
+      : connection.platform === "squarespace"
+        ? createSquarespaceSync(connection)
+        : connection.platform === "woocommerce"
+          ? createWooCommerceSync(connection, skuMappings)
+          : null;
+  if (!fullClient) throw new Error(`Unsupported platform: ${connection.platform}`);
+  return {
+    getRemoteQuantity: fullClient.getRemoteQuantity,
+    getOrders: fullClient.getOrders,
+  };
 }
 
 // === Shopify sync ===
@@ -390,6 +417,22 @@ function createWooCommerceSync(
     consumerKey: connection.api_key,
     consumerSecret: connection.api_secret,
     siteUrl: connection.store_url,
+    connectionId: connection.id,
+    preferredAuthMode: connection.preferred_auth_mode ?? null,
+    async onPreferredAuthMode(mode: "basic" | "query_param") {
+      try {
+        const { createServiceRoleClient } = await import("@/lib/server/supabase-server");
+        await createServiceRoleClient()
+          .from("client_store_connections")
+          .update({ preferred_auth_mode: mode, updated_at: new Date().toISOString() })
+          .eq("id", connection.id);
+      } catch (err) {
+        console.warn(
+          `[WooCommerceSync] preferred_auth_mode persistence failed for ${connection.id}:`,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    },
   };
 
   return {
@@ -425,12 +468,18 @@ function createWooCommerceSync(
 
     async getOrders(since) {
       const { getOrders } = await import("./woocommerce-client");
-      const orders = await getOrders(credentials, { after: since });
+      const orders = await getOrders(credentials, {
+        modifiedAfter: since,
+        orderby: "modified",
+        order: "asc",
+        perPage: 50,
+      });
 
       return orders.map((o) => ({
         remoteOrderId: String(o.id),
         orderNumber: o.number,
-        createdAt: o.date_created,
+        createdAt: o.date_created_gmt ? `${o.date_created_gmt}Z` : o.date_created,
+        modifiedAt: o.date_modified_gmt ? `${o.date_modified_gmt}Z` : o.date_modified,
         lineItems: o.line_items.map((li) => ({
           sku: li.sku,
           quantity: li.quantity,

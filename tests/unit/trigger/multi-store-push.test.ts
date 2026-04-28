@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isEchoOrder } from "@/trigger/tasks/client-store-order-detect";
+import {
+  buildClientStoreOrderIngestionKey,
+  getPollCursor,
+  isEchoOrder,
+  shouldReconcileRemoteOrder,
+} from "@/trigger/tasks/client-store-order-detect";
 import {
   computeFreshnessState,
   shouldRetryConnection,
@@ -101,5 +106,32 @@ describe("isEchoOrder (Rule #65 echo cancellation)", () => {
     ]);
 
     expect(isEchoOrder(lineItems, lastPushed)).toBe(false);
+  });
+});
+
+describe("client-store-order-detect Woo repair helpers", () => {
+  it("builds one stable idempotency key shared by poll and webhook paths", () => {
+    expect(buildClientStoreOrderIngestionKey("woocommerce", "conn-1", "9876")).toBe(
+      "woocommerce:conn-1:9876",
+    );
+  });
+
+  it("uses a 5-minute overlap from the processed poll watermark", () => {
+    const cursor = getPollCursor(
+      {
+        last_poll_processed_at: "2026-04-28T12:00:00.000Z",
+      } as Parameters<typeof getPollCursor>[0],
+      new Date("2026-04-28T13:00:00.000Z"),
+    );
+    expect(cursor).toBe("2026-04-28T11:55:00.000Z");
+  });
+
+  it("reconciles only when the incoming remote order is newer", () => {
+    expect(shouldReconcileRemoteOrder("2026-04-28T12:00:00.000Z", "2026-04-28T12:01:00.000Z")).toBe(
+      true,
+    );
+    expect(shouldReconcileRemoteOrder("2026-04-28T12:00:00.000Z", "2026-04-28T11:59:00.000Z")).toBe(
+      false,
+    );
   });
 });

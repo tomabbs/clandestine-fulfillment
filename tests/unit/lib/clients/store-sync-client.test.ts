@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
+import {
+  createStoreReadClient,
+  createStoreSyncClient,
+  DormantConnectionError,
+} from "@/lib/clients/store-sync-client";
 import type { ClientStoreConnection } from "@/lib/shared/types";
 
 function makeConnection(overrides: Partial<ClientStoreConnection> = {}): ClientStoreConnection {
@@ -13,11 +17,18 @@ function makeConnection(overrides: Partial<ClientStoreConnection> = {}): ClientS
     api_secret: null,
     webhook_url: null,
     webhook_secret: null,
+    webhook_secret_previous: null,
+    webhook_secret_previous_expires_at: null,
     connection_status: "active",
     last_webhook_at: null,
     last_poll_at: null,
+    last_poll_attempted_at: null,
+    last_poll_succeeded_at: null,
+    last_poll_processed_at: null,
+    consecutive_poll_failures: 0,
     last_error_at: null,
     last_error: null,
+    preferred_auth_mode: null,
     do_not_fanout: false,
     default_location_id: null,
     shopify_app_client_id: null,
@@ -97,6 +108,21 @@ describe("store-sync-client factory", () => {
       expect(typeof client.pushInventory).toBe("function");
       expect(typeof client.getRemoteQuantity).toBe("function");
       expect(typeof client.getOrders).toBe("function");
+    });
+
+    it("keeps outbound sync gated for dormant connections", () => {
+      expect(() => createStoreSyncClient(makeConnection({ do_not_fanout: true }))).toThrow(
+        DormantConnectionError,
+      );
+    });
+  });
+
+  describe("createStoreReadClient", () => {
+    it("allows dormant order polling without exposing pushInventory", () => {
+      const client = createStoreReadClient(makeConnection({ do_not_fanout: true }));
+      expect(typeof client.getOrders).toBe("function");
+      expect(typeof client.getRemoteQuantity).toBe("function");
+      expect("pushInventory" in client).toBe(false);
     });
   });
 });

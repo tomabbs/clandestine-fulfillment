@@ -46,6 +46,63 @@ export async function verifyHmacSignature(
   return mismatch === 0;
 }
 
+export type WooWebhookVerificationResult =
+  | { ok: true; matchedSecret: "current" | "previous" }
+  | {
+      ok: false;
+      reason:
+        | "no_signature"
+        | "no_secret_configured"
+        | "signature_mismatch"
+        | "malformed_signature";
+    };
+
+function looksLikeBase64Signature(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length % 4 !== 0) return false;
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(trimmed);
+}
+
+/**
+ * WooCommerce signs webhooks with base64(HMAC-SHA256(rawBody, secret)).
+ * This helper makes every accept/reject branch explicit so the route never
+ * silently trusts unsigned or misconfigured Woo deliveries.
+ */
+export async function verifyWooWebhookSignature(input: {
+  rawBody: string;
+  signatureHeader: string | null;
+  currentSecret: string | null | undefined;
+  previousSecret?: string | null;
+  previousSecretExpiresAt?: string | null;
+  now?: Date;
+}): Promise<WooWebhookVerificationResult> {
+  const signature = input.signatureHeader?.trim() ?? "";
+  if (!signature) return { ok: false, reason: "no_signature" };
+  if (!looksLikeBase64Signature(signature)) return { ok: false, reason: "malformed_signature" };
+  if (!input.currentSecret) return { ok: false, reason: "no_secret_configured" };
+
+  if (await verifyHmacSignature(input.rawBody, input.currentSecret, signature)) {
+    return { ok: true, matchedSecret: "current" };
+  }
+
+  if (input.previousSecret) {
+    const expiresAt = input.previousSecretExpiresAt
+      ? new Date(input.previousSecretExpiresAt).getTime()
+      : Number.NaN;
+    const previousStillValid =
+      !input.previousSecretExpiresAt ||
+      (!Number.isNaN(expiresAt) && expiresAt >= (input.now ?? new Date()).getTime());
+    if (
+      previousStillValid &&
+      (await verifyHmacSignature(input.rawBody, input.previousSecret, signature))
+    ) {
+      return { ok: true, matchedSecret: "previous" };
+    }
+  }
+
+  return { ok: false, reason: "signature_mismatch" };
+}
+
 /**
  * HRD-24 — per-platform absolute age ceiling for webhook deliveries.
  *

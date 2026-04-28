@@ -39,6 +39,7 @@ import {
   readWebhookBody,
   sanitizeWebhookPayload,
   verifyHmacSignature,
+  verifyWooWebhookSignature,
 } from "@/lib/server/webhook-body";
 
 // F-2: Webhook routes MUST run on the Node.js runtime so node:crypto + the
@@ -72,6 +73,48 @@ function logDedupOutcome(fields: {
   );
 }
 
+function platformWebhookId(request: NextRequest): string | null {
+  return (
+    request.headers.get("X-Shopify-Event-Id") ??
+    request.headers.get("X-Shopify-Webhook-Id") ??
+    request.headers.get("X-WC-Webhook-ID")
+  );
+}
+
+type WebhookRouteSupabase = {
+  from: (table: string) => {
+    insert: (payload: Record<string, unknown>) => unknown;
+  };
+};
+
+async function persistRejectedWebhookEvent(input: {
+  supabase: WebhookRouteSupabase;
+  workspaceId: string;
+  platform: string;
+  connectionId: string;
+  parsedPayload: Record<string, unknown> | null;
+  externalWebhookId: string;
+  dedupKey: string;
+  topic: string | null;
+  status: string;
+  reason: string;
+}) {
+  await input.supabase.from("webhook_events").insert({
+    workspace_id: input.workspaceId,
+    platform: input.platform,
+    external_webhook_id: input.externalWebhookId,
+    dedup_key: input.dedupKey,
+    topic: input.topic,
+    status: input.status,
+    metadata: {
+      connection_id: input.connectionId,
+      payload: sanitizeWebhookPayload(input.parsedPayload),
+      verification_reason: input.reason,
+      rejected_at: new Date().toISOString(),
+    },
+  });
+}
+
 export async function POST(request: NextRequest) {
   const rawBody = await readWebhookBody(request);
 
@@ -89,13 +132,31 @@ export async function POST(request: NextRequest) {
 
   const { data: connection } = await supabase
     .from("client_store_connections")
-    .select("id, workspace_id, platform, webhook_secret")
+    .select(
+      "id, workspace_id, platform, webhook_secret, webhook_secret_previous, webhook_secret_previous_expires_at",
+    )
     .eq("id", connectionId)
     .single();
 
   if (!connection) {
     return NextResponse.json({ error: "connection not found" }, { status: 404 });
   }
+
+  let parsedPayload: Record<string, unknown> | null = null;
+  try {
+    parsedPayload = JSON.parse(rawBody);
+  } catch {
+    parsedPayload = null;
+  }
+
+  const headerWebhookId = platformWebhookId(request);
+  const dedupKey = headerWebhookId
+    ? `${connectionId}:${headerWebhookId}`
+    : canonicalBodyDedupKey(connection.platform, rawBody);
+  const externalWebhookId = headerWebhookId ?? dedupKey;
+
+  const topicHeader =
+    request.headers.get("X-Shopify-Topic") ?? request.headers.get("X-WC-Webhook-Topic");
 
   if (connection.webhook_secret) {
     let signature: string | null = null;
@@ -107,10 +168,35 @@ export async function POST(request: NextRequest) {
         if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
       }
     } else if (connection.platform === "woocommerce") {
-      signature = request.headers.get("X-WC-Webhook-Signature");
-      if (signature) {
-        const valid = await verifyHmacSignature(rawBody, connection.webhook_secret, signature);
-        if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+      const verdict = await verifyWooWebhookSignature({
+        rawBody,
+        signatureHeader: request.headers.get("X-WC-Webhook-Signature"),
+        currentSecret: connection.webhook_secret,
+        previousSecret: connection.webhook_secret_previous,
+        previousSecretExpiresAt: connection.webhook_secret_previous_expires_at,
+      });
+      if (!verdict.ok) {
+        await persistRejectedWebhookEvent({
+          supabase: supabase as unknown as WebhookRouteSupabase,
+          workspaceId: connection.workspace_id,
+          platform: connection.platform,
+          connectionId,
+          parsedPayload,
+          externalWebhookId,
+          dedupKey,
+          topic: topicHeader,
+          status:
+            verdict.reason === "no_signature"
+              ? "signature_missing"
+              : verdict.reason === "malformed_signature"
+                ? "signature_malformed"
+                : "signature_invalid",
+          reason: verdict.reason,
+        });
+        return NextResponse.json(
+          { error: "invalid signature", reason: verdict.reason },
+          { status: verdict.reason === "malformed_signature" ? 400 : 401 },
+        );
       }
     } else if (connection.platform === "squarespace") {
       // Squarespace uses "Squarespace-Signature" header.
@@ -124,6 +210,23 @@ export async function POST(request: NextRequest) {
         if (!valid) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
       }
     }
+  } else if (connection.platform === "woocommerce") {
+    await persistRejectedWebhookEvent({
+      supabase: supabase as unknown as WebhookRouteSupabase,
+      workspaceId: connection.workspace_id,
+      platform: connection.platform,
+      connectionId,
+      parsedPayload,
+      externalWebhookId,
+      dedupKey,
+      topic: topicHeader,
+      status: "connection_misconfigured",
+      reason: "no_secret_configured",
+    });
+    return NextResponse.json(
+      { error: "webhook secret not configured", reason: "no_secret_configured" },
+      { status: 503 },
+    );
   }
 
   // HRD-24: per-platform absolute age ceiling. NOT a 5-min reject (that
@@ -132,12 +235,6 @@ export async function POST(request: NextRequest) {
   // timestamp can be extracted — HRD-01 monotonic guard handles ordering
   // downstream regardless. Returns 401 on stale/future-stamped deliveries
   // BEFORE the dedup insert so suspect rows don't pollute webhook_events.
-  let parsedPayload: Record<string, unknown> | null = null;
-  try {
-    parsedPayload = JSON.parse(rawBody);
-  } catch {
-    parsedPayload = null;
-  }
   const triggeredAtHeader = request.headers.get("X-Shopify-Triggered-At");
   const freshness = checkWebhookFreshness(connection.platform, parsedPayload, {
     triggeredAt: triggeredAtHeader,
@@ -166,18 +263,6 @@ export async function POST(request: NextRequest) {
   // body (sha256). Pre-F-4 used `${connectionId}:${Date.now()}` which made
   // dedup INERT on retry — every retry got a new Date.now() and was
   // accepted as fresh. The hash is stable across retries of the same event.
-  const headerWebhookId =
-    request.headers.get("X-Shopify-Event-Id") ??
-    request.headers.get("X-Shopify-Webhook-Id") ??
-    request.headers.get("X-WC-Webhook-ID");
-  const dedupKey = headerWebhookId
-    ? `${connectionId}:${headerWebhookId}`
-    : canonicalBodyDedupKey(connection.platform, rawBody);
-  const externalWebhookId = headerWebhookId ?? dedupKey;
-
-  const topicHeader =
-    request.headers.get("X-Shopify-Topic") ?? request.headers.get("X-WC-Webhook-Topic");
-
   // HRD-01: stash the platform-emitted timestamp into webhook_events.metadata
   // so the Trigger task's monotonic guard has it available without a second
   // header round-trip. Shopify is the only platform that sends a delivery

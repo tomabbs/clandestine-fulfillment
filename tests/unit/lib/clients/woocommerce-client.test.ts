@@ -10,6 +10,7 @@ import {
   getProductBySku,
   listCatalogItems,
   listProductsPage,
+  redactWooUrl,
   updateStockQuantity,
 } from "@/lib/clients/woocommerce-client";
 
@@ -121,15 +122,15 @@ describe("woocommerce-client", () => {
       );
     });
 
-    it("throws on non-OK response", async () => {
-      mockFetch.mockResolvedValueOnce({
+    it("throws on invalid credentials after both auth methods fail", async () => {
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 401,
         text: async () => "Consumer key is invalid",
       });
 
       await expect(getProductBySku(credentials, "LP-001")).rejects.toThrow(
-        "WooCommerce API error 401",
+        "auth_failed_both_methods",
       );
     });
   });
@@ -332,6 +333,53 @@ describe("woocommerce-client", () => {
 
       const url = mockFetch.mock.calls[0][0] as string;
       expect(url).toBe("https://shop.example.com/wp-json/wc/v3/orders");
+    });
+  });
+
+  describe("auth fallback", () => {
+    it("falls back to query-param auth once on 401 and persists the preference", async () => {
+      const onPreferredAuthMode = vi.fn();
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          text: async () => "Unauthorized",
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => [{ id: 1, name: "Title", sku: "SKU-1" }],
+        });
+
+      await listProductsPage({ ...credentials, onPreferredAuthMode });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(String(mockFetch.mock.calls[1][0])).toContain("consumer_key=ck_test123");
+      expect(String(mockFetch.mock.calls[1][0])).toContain("consumer_secret=cs_test456");
+      expect(onPreferredAuthMode).toHaveBeenCalledWith("query_param");
+    });
+
+    it("distinguishes bad credentials when both auth methods fail", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        text: async () => "Unauthorized",
+      });
+
+      await expect(listProductsPage(credentials)).rejects.toMatchObject({
+        name: "WooCommerceApiError",
+        code: "auth_failed_both_methods",
+        authMethodTried: "both",
+      });
+    });
+
+    it("redacts query-param credentials from URLs", () => {
+      expect(
+        redactWooUrl(
+          "https://woo.test/wp-json/wc/v3/products?consumer_key=ck_live&consumer_secret=cs_live&page=1",
+        ),
+      ).toBe(
+        "https://woo.test/wp-json/wc/v3/products?consumer_key=REDACTED&consumer_secret=REDACTED&page=1",
+      );
     });
   });
 });

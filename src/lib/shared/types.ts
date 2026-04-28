@@ -688,11 +688,18 @@ export interface ClientStoreConnection {
   api_secret: string | null;
   webhook_url: string | null;
   webhook_secret: string | null;
+  webhook_secret_previous?: string | null;
+  webhook_secret_previous_expires_at?: string | null;
   connection_status: ConnectionStatus;
   last_webhook_at: string | null;
   last_poll_at: string | null;
+  last_poll_attempted_at?: string | null;
+  last_poll_succeeded_at?: string | null;
+  last_poll_processed_at?: string | null;
+  consecutive_poll_failures?: number;
   last_error_at: string | null;
   last_error: string | null;
+  preferred_auth_mode?: "basic" | "query_param" | null;
   do_not_fanout: boolean;
   // HRD-05 — staff-selected default Shopify location for inventory ops.
   // Inventory webhooks with location_id !== this value are persisted as

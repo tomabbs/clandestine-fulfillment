@@ -719,6 +719,69 @@ describe("handleInventoryUpdate — Shopify inventory_levels/update", () => {
       expect.objectContaining({ source: "woocommerce", delta: 7 }),
     );
   });
+
+  it("WooCommerce product.updated stock_quantity routes through inventory when SKU is mapped", async () => {
+    seedConnection({ platform: "woocommerce" });
+    state.skuMappings.push({
+      connection_id: CONNECTION_ID,
+      remote_sku: SKU,
+      is_active: true,
+      last_pushed_quantity: null,
+    });
+    state.inventoryLevels.push({
+      workspace_id: WORKSPACE_ID,
+      sku: SKU,
+      available: 3,
+    });
+
+    const eventId = "evt-wc-product-1";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "woocommerce",
+      topic: "product.updated",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: { id: 9876, sku: SKU, stock_quantity: 10 },
+      },
+    });
+
+    const result = await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(result).toMatchObject({ processed: true, sku: SKU, delta: 7 });
+    expect(mockRecordInventoryChange).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "woocommerce", delta: 7 }),
+    );
+  });
+
+  it("WooCommerce product.updated does not write inventory for unmapped SKUs", async () => {
+    seedConnection({ platform: "woocommerce" });
+
+    const eventId = "evt-wc-product-unmapped";
+    state.webhookEvents.set(eventId, {
+      id: eventId,
+      workspace_id: WORKSPACE_ID,
+      platform: "woocommerce",
+      topic: "product.updated",
+      metadata: {
+        connection_id: CONNECTION_ID,
+        payload: { id: 9876, sku: "REMOTE-ONLY", stock_quantity: 10 },
+      },
+    });
+
+    const result = await processClientStoreWebhookTask.run({ webhookEventId: eventId });
+
+    expect(result).toMatchObject({ processed: false, reason: "no_active_mapping" });
+    expect(mockRecordInventoryChange).not.toHaveBeenCalled();
+    expect(state.reviewQueueUpserts[0]).toMatchObject({
+      category: "woo_unmapped_stock_update",
+      group_key: `woo-unmapped-stock:${CONNECTION_ID}:REMOTE-ONLY`,
+    });
+    expect(state.webhookEventStatusUpdates).toContainEqual({
+      id: eventId,
+      status: "sku_mapping_missing",
+    });
+  });
 });
 
 // ─── handleInventoryUpdate — Phase 4 SKU-AUTO-24 demotion-rehydrate ───

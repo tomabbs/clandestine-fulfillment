@@ -367,7 +367,18 @@ export async function testStoreConnection(
         if (!conn.api_key || !conn.api_secret) throw new Error("Missing credentials");
         const { listProductsPage } = await import("@/lib/clients/woocommerce-client");
         await listProductsPage(
-          { consumerKey: conn.api_key, consumerSecret: conn.api_secret, siteUrl: conn.store_url },
+          {
+            consumerKey: conn.api_key,
+            consumerSecret: conn.api_secret,
+            siteUrl: conn.store_url,
+            preferredAuthMode: conn.preferred_auth_mode,
+            onPreferredAuthMode: async (mode) => {
+              await serviceClient
+                .from("client_store_connections")
+                .update({ preferred_auth_mode: mode, updated_at: now })
+                .eq("id", conn.id);
+            },
+          },
           { perPage: 20 },
         );
         break;
@@ -491,6 +502,13 @@ export async function autoDiscoverSkus(
         consumerKey: conn.api_key,
         consumerSecret: conn.api_secret,
         siteUrl: conn.store_url,
+        preferredAuthMode: conn.preferred_auth_mode,
+        onPreferredAuthMode: async (mode: "basic" | "query_param") => {
+          await serviceClient
+            .from("client_store_connections")
+            .update({ preferred_auth_mode: mode, updated_at: new Date().toISOString() })
+            .eq("id", conn.id);
+        },
       };
       const { listCatalogItems } = await import("@/lib/clients/woocommerce-client");
       const items = await listCatalogItems(credentials);

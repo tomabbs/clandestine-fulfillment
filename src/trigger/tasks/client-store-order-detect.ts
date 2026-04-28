@@ -12,9 +12,8 @@
  */
 
 import { schedules, tasks } from "@trigger.dev/sdk";
-import { createStoreSyncClient } from "@/lib/clients/store-sync-client";
+import { createStoreReadClient, type RemoteOrder } from "@/lib/clients/store-sync-client";
 import { getAllWorkspaceIds } from "@/lib/server/auth-context";
-import { shouldFanoutToConnection } from "@/lib/server/client-store-fanout-gate";
 import {
   type IngressSensorWarning,
   runHoldIngressSafely,
@@ -33,6 +32,43 @@ export function isEchoOrder(
     const lastPushed = lastPushedQuantities.get(item.sku);
     return lastPushed !== undefined && item.quantity === lastPushed;
   });
+}
+
+const POLL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const POLL_OVERLAP_MS = 5 * 60 * 1000;
+
+export function buildClientStoreOrderIngestionKey(
+  platform: string,
+  connectionId: string,
+  externalOrderId: string,
+): string {
+  return `${platform}:${connectionId}:${externalOrderId}`;
+}
+
+export function getOrderModifiedAt(order: RemoteOrder): string {
+  return order.modifiedAt ?? order.createdAt;
+}
+
+export function getPollCursor(connection: ClientStoreConnection, now: Date = new Date()): string {
+  const base =
+    connection.last_poll_processed_at ??
+    connection.last_poll_succeeded_at ??
+    connection.last_poll_at ??
+    new Date(now.getTime() - POLL_LOOKBACK_MS).toISOString();
+  const baseMs = new Date(base).getTime();
+  if (Number.isNaN(baseMs)) return new Date(now.getTime() - POLL_LOOKBACK_MS).toISOString();
+  return new Date(baseMs - POLL_OVERLAP_MS).toISOString();
+}
+
+export function shouldReconcileRemoteOrder(
+  existingModifiedAt: string | null | undefined,
+  incomingModifiedAt: string,
+): boolean {
+  if (!existingModifiedAt) return true;
+  const existingMs = new Date(existingModifiedAt).getTime();
+  const incomingMs = new Date(incomingModifiedAt).getTime();
+  if (Number.isNaN(incomingMs)) return false;
+  return Number.isNaN(existingMs) || incomingMs > existingMs;
 }
 
 export const clientStoreOrderDetectTask = schedules.task({
@@ -62,21 +98,15 @@ export const clientStoreOrderDetectTask = schedules.task({
         // Discogs handled by discogs-client-order-sync (OAuth 1.0a + Redis rate limiter)
         if (connection.platform === "discogs") continue;
 
-        // Phase 0.8 — single dormancy gate. Order polling counts as fanout
-        // because the stored order will trigger downstream pushes back to the
-        // client store. Drop polling on dormant connections at the source.
-        const fanoutDecision = shouldFanoutToConnection(connection);
-        if (!fanoutDecision.allow) {
-          console.log(
-            `[client-store-order-detect] skip ${connection.platform} ${connection.id} (reason=${fanoutDecision.reason})`,
-          );
-          continue;
-        }
-
         try {
-          const since =
-            connection.last_poll_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-          const client = createStoreSyncClient(connection);
+          const attemptAt = new Date().toISOString();
+          await supabase
+            .from("client_store_connections")
+            .update({ last_poll_attempted_at: attemptAt, updated_at: attemptAt })
+            .eq("id", connection.id);
+
+          const since = getPollCursor(connection);
+          const client = createStoreReadClient(connection);
           const remoteOrders = await client.getOrders(since);
 
           // Get last_pushed_quantity for echo detection (Rule #65)
@@ -92,30 +122,58 @@ export const clientStoreOrderDetectTask = schedules.task({
           );
 
           for (const order of remoteOrders) {
-            // Check for duplicate
+            const modifiedAt = getOrderModifiedAt(order);
+            const ingestionIdempotencyKey = buildClientStoreOrderIngestionKey(
+              connection.platform,
+              connection.id,
+              order.remoteOrderId,
+            );
+
+            // Check for duplicate via the shared poll/webhook idempotency key.
             const { data: existing } = await supabase
               .from("warehouse_orders")
-              .select("id")
+              .select("id, external_order_modified_at")
               .eq("workspace_id", workspaceId)
-              .eq("external_order_id", order.remoteOrderId)
-              .eq("source", connection.platform)
-              .single();
+              .eq("ingestion_idempotency_key", ingestionIdempotencyKey)
+              .maybeSingle();
 
-            if (existing) continue;
+            if (existing) {
+              if (
+                shouldReconcileRemoteOrder(
+                  existing.external_order_modified_at as string | null,
+                  modifiedAt,
+                )
+              ) {
+                await supabase
+                  .from("warehouse_orders")
+                  .update({
+                    order_number: order.orderNumber,
+                    line_items: order.lineItems,
+                    external_order_modified_at: modifiedAt,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", existing.id);
+              }
+              await advancePollWatermark(supabase, connection.id, modifiedAt);
+              continue;
+            }
 
             // Rule #65: Echo cancellation
             if (isEchoOrder(order.lineItems, lastPushedMap)) {
               echoesCancelled++;
+              await advancePollWatermark(supabase, connection.id, modifiedAt);
               continue;
             }
 
             // Create order + items
-            const { data: newOrder } = await supabase
+            const { data: newOrder, error: insertError } = await supabase
               .from("warehouse_orders")
               .insert({
                 workspace_id: workspaceId,
                 org_id: connection.org_id,
                 external_order_id: order.remoteOrderId,
+                ingestion_idempotency_key: ingestionIdempotencyKey,
+                external_order_modified_at: modifiedAt,
                 order_number: order.orderNumber,
                 source: connection.platform,
                 line_items: order.lineItems,
@@ -124,6 +182,35 @@ export const clientStoreOrderDetectTask = schedules.task({
               })
               .select("id")
               .single();
+
+            if (insertError?.code === "23505") {
+              const { data: racedOrder } = await supabase
+                .from("warehouse_orders")
+                .select("id, external_order_modified_at")
+                .eq("workspace_id", workspaceId)
+                .eq("ingestion_idempotency_key", ingestionIdempotencyKey)
+                .maybeSingle();
+              if (
+                racedOrder &&
+                shouldReconcileRemoteOrder(
+                  racedOrder.external_order_modified_at as string | null,
+                  modifiedAt,
+                )
+              ) {
+                await supabase
+                  .from("warehouse_orders")
+                  .update({
+                    order_number: order.orderNumber,
+                    line_items: order.lineItems,
+                    external_order_modified_at: modifiedAt,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", racedOrder.id);
+              }
+              await advancePollWatermark(supabase, connection.id, modifiedAt);
+              continue;
+            }
+            if (insertError) throw insertError;
 
             if (newOrder) {
               const orderItems = order.lineItems.map((li) => ({
@@ -204,6 +291,7 @@ export const clientStoreOrderDetectTask = schedules.task({
                   }
                 }
               }
+              await advancePollWatermark(supabase, connection.id, modifiedAt);
             }
           }
 
@@ -212,11 +300,29 @@ export const clientStoreOrderDetectTask = schedules.task({
             .from("client_store_connections")
             .update({
               last_poll_at: new Date().toISOString(),
+              last_poll_succeeded_at: new Date().toISOString(),
+              consecutive_poll_failures: 0,
+              last_error: null,
+              last_error_at: null,
               updated_at: new Date().toISOString(),
             })
             .eq("id", connection.id);
         } catch (error) {
           errors++;
+          const now = new Date().toISOString();
+          const priorFailures =
+            typeof connection.consecutive_poll_failures === "number"
+              ? connection.consecutive_poll_failures
+              : 0;
+          await supabase
+            .from("client_store_connections")
+            .update({
+              consecutive_poll_failures: priorFailures + 1,
+              last_error_at: now,
+              last_error: error instanceof Error ? error.message : String(error),
+              updated_at: now,
+            })
+            .eq("id", connection.id);
           console.error(
             `[client-store-order-detect] Failed for connection ${connection.id}:`,
             error instanceof Error ? error.message : error,
@@ -228,6 +334,20 @@ export const clientStoreOrderDetectTask = schedules.task({
     return { ordersCreated, echoesCancelled, holdsApplied, alertsEnqueued, errors };
   },
 });
+
+async function advancePollWatermark(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  connectionId: string,
+  modifiedAt: string,
+): Promise<void> {
+  await supabase
+    .from("client_store_connections")
+    .update({
+      last_poll_processed_at: modifiedAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", connectionId);
+}
 
 /**
  * Best-effort persistence of `runHoldIngressSafely` sensor warnings.

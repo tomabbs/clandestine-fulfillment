@@ -11,7 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createStoreConnection,
   disableStoreConnection,
@@ -55,6 +55,54 @@ function ConnectionStatusBadge({ status }: { status: ConnectionStatus }) {
     <Badge variant={cfg.variant} className="gap-1">
       <Icon className="h-3 w-3" /> {status.replace(/_/g, " ")}
     </Badge>
+  );
+}
+
+function WooWebhookChecklist({ conn }: { conn: StoreConnectionRow }) {
+  const [origin, setOrigin] = useState("");
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+  const callbackUrl = `${origin}/api/webhooks/client-store?platform=woocommerce&connection_id=${conn.id}`;
+  return (
+    <div className="md:col-span-3 rounded-md border border-dashed bg-muted/30 p-3 text-xs">
+      <p className="font-medium text-sm">WooCommerce webhook checklist</p>
+      <p className="mt-1 text-muted-foreground">
+        Register these topics in WooCommerce Admin now; programmatic registration is deferred until
+        the auth fallback is proven on this connection.
+      </p>
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        <div>
+          <p className="font-medium">Callback URL</p>
+          <p className="font-mono break-all">{callbackUrl}</p>
+        </div>
+        <div>
+          <p className="font-medium">Required topics</p>
+          <p className="font-mono break-words">
+            order.created, order.updated, product.created, product.updated
+          </p>
+        </div>
+      </div>
+      <div className="mt-2 grid gap-2 md:grid-cols-3">
+        <ConnectionMetric
+          label="Last webhook"
+          value={conn.last_webhook_at ? new Date(conn.last_webhook_at).toLocaleString() : "Never"}
+        />
+        <ConnectionMetric
+          label="Poll succeeded"
+          value={
+            conn.last_poll_succeeded_at
+              ? new Date(conn.last_poll_succeeded_at).toLocaleString()
+              : "Never"
+          }
+        />
+        <ConnectionMetric
+          label="Poll failures"
+          value={String(conn.consecutive_poll_failures ?? 0)}
+          danger={(conn.consecutive_poll_failures ?? 0) > 0}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -237,6 +285,7 @@ export function StoreConnectionsClient({
                     value={conn.last_error ?? "None"}
                     danger={Boolean(conn.last_error)}
                   />
+                  {conn.platform === "woocommerce" && <WooWebhookChecklist conn={conn} />}
                 </div>
               )}
               renderActions={({ row: conn }) => (

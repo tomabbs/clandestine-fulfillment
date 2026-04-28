@@ -37,6 +37,7 @@ vi.mock("@/lib/server/webhook-body", async () => {
     sanitizeWebhookPayload: real.sanitizeWebhookPayload,
     interpretDedupError: real.interpretDedupError,
     canonicalBodyDedupKey: real.canonicalBodyDedupKey,
+    verifyWooWebhookSignature: real.verifyWooWebhookSignature,
   };
 });
 
@@ -556,6 +557,76 @@ describe("POST /api/webhooks/client-store", () => {
     const json = await res.json();
     expect(json.status).toBe("unknown_dedup_failure");
     expect(mockTrigger).not.toHaveBeenCalled();
+  });
+
+  it("WooCommerce: unsigned webhook is rejected and not enqueued", async () => {
+    const { insertCalls } = setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "woocommerce",
+        webhook_secret: "secret",
+      },
+      insertResult: "ok",
+    });
+
+    const res = await POST(
+      makeRequest(
+        { id: 1, date_modified_gmt: "2026-04-28T12:00:00" },
+        {
+          platform: "woocommerce",
+          headers: {
+            "X-Shopify-Hmac-SHA256": "",
+            "X-Shopify-Topic": "",
+            "X-Shopify-Webhook-Id": "",
+            "X-WC-Webhook-ID": "woo-wh-1",
+            "X-WC-Webhook-Topic": "product.updated",
+          },
+        },
+      ),
+    );
+
+    expect(res.status).toBe(401);
+    expect(mockTrigger).not.toHaveBeenCalled();
+    expect(insertCalls[0]?.payload).toMatchObject({
+      platform: "woocommerce",
+      status: "signature_missing",
+    });
+  });
+
+  it("WooCommerce: missing webhook secret is treated as connection misconfiguration", async () => {
+    const { insertCalls } = setupSupabaseMock({
+      connection: {
+        id: CONNECTION_ID,
+        workspace_id: WORKSPACE_ID,
+        platform: "woocommerce",
+        webhook_secret: null,
+      },
+      insertResult: "ok",
+    });
+
+    const res = await POST(
+      makeRequest(
+        { id: 1, date_modified_gmt: "2026-04-28T12:00:00" },
+        {
+          platform: "woocommerce",
+          headers: {
+            "X-Shopify-Hmac-SHA256": "",
+            "X-Shopify-Topic": "",
+            "X-Shopify-Webhook-Id": "",
+            "X-WC-Webhook-ID": "woo-wh-2",
+            "X-WC-Webhook-Topic": "product.updated",
+          },
+        },
+      ),
+    );
+
+    expect(res.status).toBe(503);
+    expect(mockTrigger).not.toHaveBeenCalled();
+    expect(insertCalls[0]?.payload).toMatchObject({
+      platform: "woocommerce",
+      status: "connection_misconfigured",
+    });
   });
 
   it("F-3: emits structured `webhook_dedup` log line with sqlState + dedup_kind on every non-fresh outcome", async () => {

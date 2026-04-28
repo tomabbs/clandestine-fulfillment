@@ -50,6 +50,20 @@ Pass criteria:
 - all commands exit with status `0`
 - no new failing tests
 
+WooCommerce connection repair focused gate (2026-04-28):
+
+```bash
+pnpm exec vitest run tests/unit/lib/server/webhook-body-woo.test.ts tests/unit/lib/clients/woocommerce-client.test.ts tests/unit/lib/clients/store-sync-client.test.ts tests/unit/webhooks/client-store-webhook.test.ts tests/unit/trigger/multi-store-push.test.ts tests/unit/trigger/process-client-store-webhook.test.ts
+pnpm typecheck
+```
+
+Pass criteria:
+- Woo webhook HMAC policy rejects unsigned/malformed/mismatched deliveries and accepts current/non-expired previous secrets.
+- Woo REST auth fallback only retries Basic Auth failures over HTTPS, persists `preferred_auth_mode='query_param'` on success, and redacts credentials.
+- `client-store-order-detect` can read through `createStoreReadClient()` while outbound fanout stays gated, uses modified-time overlap polling, and advances `last_poll_processed_at` only after successful per-order processing.
+- Webhook and poll order ingestion share `ingestion_idempotency_key` and only reconcile when `external_order_modified_at` is newer.
+- Woo stock webhooks require active SKU mappings; unmapped stock updates create review queue items and do not write inventory.
+
 Note: `scripts/ci-use-server-exports-guard.sh` runs BEFORE `pnpm build`. It
 AST-parses every `src/**/*.{ts,tsx}` file that carries the `"use server"`
 directive and fails fast (~200ms) if any module exports anything other than

@@ -126,7 +126,13 @@ export const processClientStoreWebhookTask = task({
       result = await handleRefund(supabase, event, webhookData, connectionId);
     } else if (topic.includes("cancel")) {
       result = await handleOrderCancelled(supabase, event, webhookData, connectionId);
-    } else if (topic.includes("inventory") || topic.includes("stock")) {
+    } else if (
+      topic.includes("inventory") ||
+      topic.includes("stock") ||
+      (platform === "woocommerce" &&
+        topic.includes("product") &&
+        typeof webhookData.stock_quantity === "number")
+    ) {
       result = await handleInventoryUpdate(supabase, event, webhookData, connectionId);
     } else if (topic.includes("order")) {
       result = await handleOrderCreated(supabase, event, webhookData, connectionId);
@@ -448,30 +454,81 @@ async function handleInventoryUpdate(
       return { processed: true, reason: "echo_cancelled", sku };
     }
   } else {
-    // WooCommerce / Squarespace / unknown — preserve existing payload shape.
+    // WooCommerce / Squarespace / unknown payload shape. Woo product stock
+    // updates commonly emit `stock_quantity`; older inventory topics may emit
+    // `quantity`.
     const payloadSku = (data.sku as string) ?? "";
-    const payloadQuantity = data.quantity as number | undefined;
+    const payloadQuantity =
+      typeof data.stock_quantity === "number"
+        ? data.stock_quantity
+        : typeof data.quantity === "number"
+          ? data.quantity
+          : undefined;
     if (!payloadSku || payloadQuantity === undefined) {
       return { processed: false, reason: "missing_sku_or_quantity" };
     }
-    sku = payloadSku;
     newQuantity = payloadQuantity;
 
     if (connectionId) {
       const { data: mapping } = await supabase
         .from("client_store_sku_mappings")
-        .select("last_pushed_quantity")
+        .select(
+          "last_pushed_quantity, variant_id, is_active, warehouse_product_variants!inner(sku)",
+        )
         .eq("connection_id", connectionId)
-        .eq("remote_sku", sku)
+        .eq("remote_sku", payloadSku)
         .maybeSingle();
+
+      if (platform === "woocommerce" && (!mapping || mapping.is_active === false)) {
+        const { data: connection } = await supabase
+          .from("client_store_connections")
+          .select("org_id")
+          .eq("id", connectionId)
+          .maybeSingle();
+        await supabase.from("warehouse_review_queue").upsert(
+          {
+            workspace_id: workspaceId,
+            org_id: connection?.org_id ?? null,
+            category: "woo_unmapped_stock_update",
+            severity: "medium",
+            title: `WooCommerce stock update skipped for unmapped SKU ${payloadSku}`,
+            description:
+              "Woo product stock webhook had a numeric stock_quantity, but no active client_store_sku_mappings row exists for this connection/SKU.",
+            metadata: {
+              connection_id: connectionId,
+              remote_sku: payloadSku,
+              stock_quantity: newQuantity,
+              webhook_event_id: eventId,
+              remote_product_id: data.id ?? data.product_id ?? null,
+              remote_variation_id: data.variation_id ?? null,
+            },
+            status: "open",
+            group_key: `woo-unmapped-stock:${connectionId}:${payloadSku}`,
+            occurrence_count: 1,
+          },
+          { onConflict: "group_key", ignoreDuplicates: false },
+        );
+        await supabase
+          .from("webhook_events")
+          .update({ status: "sku_mapping_missing" })
+          .eq("id", eventId);
+        return { processed: false, reason: "no_active_mapping", sku: payloadSku };
+      }
 
       if (mapping && mapping.last_pushed_quantity === newQuantity) {
         await supabase
           .from("webhook_events")
           .update({ status: "echo_cancelled" })
           .eq("id", eventId);
-        return { processed: true, reason: "echo_cancelled", sku };
+        return { processed: true, reason: "echo_cancelled", sku: payloadSku };
       }
+
+      const warehouseSku = (
+        mapping?.warehouse_product_variants as unknown as { sku: string } | null
+      )?.sku;
+      sku = platform === "woocommerce" && warehouseSku ? warehouseSku : payloadSku;
+    } else {
+      sku = payloadSku;
     }
   }
 
@@ -552,6 +609,26 @@ async function persistIngressWarnings(
   }
 }
 
+function wooOrGenericModifiedAt(data: Record<string, unknown>): string {
+  if (typeof data.date_modified_gmt === "string") return `${data.date_modified_gmt}Z`;
+  if (typeof data.updated_at === "string") return data.updated_at;
+  if (typeof data.date_modified === "string") return data.date_modified;
+  if (typeof data.modifiedOn === "string") return data.modifiedOn;
+  if (typeof data.created_at === "string") return data.created_at;
+  return new Date().toISOString();
+}
+
+function shouldReconcileRemoteOrder(
+  existingModifiedAt: string | null | undefined,
+  incomingModifiedAt: string,
+): boolean {
+  if (!existingModifiedAt) return true;
+  const existingMs = new Date(existingModifiedAt).getTime();
+  const incomingMs = new Date(incomingModifiedAt).getTime();
+  if (Number.isNaN(incomingMs)) return false;
+  return Number.isNaN(existingMs) || incomingMs > existingMs;
+}
+
 async function handleOrderCreated(
   supabase: ReturnType<typeof createServiceRoleClient>,
   event: Record<string, unknown>,
@@ -559,18 +636,55 @@ async function handleOrderCreated(
   connectionId: string | undefined,
 ) {
   const workspaceId = event.workspace_id as string;
-  const remoteOrderId = (data.id as string) ?? (data.order_id as string) ?? "";
+  const platform = event.platform as string;
+  const remoteOrderId = String(data.id ?? data.order_id ?? "");
+  const externalOrderModifiedAt = wooOrGenericModifiedAt(data);
+  const ingestionIdempotencyKey =
+    connectionId && remoteOrderId
+      ? `${platform}:${connectionId}:${remoteOrderId}`
+      : remoteOrderId
+        ? `${platform}:unknown:${remoteOrderId}`
+        : null;
   const lineItems = (data.line_items as Array<Record<string, unknown>>) ?? [];
 
   // Check for duplicate
-  const { data: existing } = await supabase
-    .from("warehouse_orders")
-    .select("id")
-    .eq("workspace_id", workspaceId)
-    .eq("external_order_id", remoteOrderId)
-    .single();
+  const { data: existing } = ingestionIdempotencyKey
+    ? await supabase
+        .from("warehouse_orders")
+        .select("id, external_order_modified_at")
+        .eq("workspace_id", workspaceId)
+        .eq("ingestion_idempotency_key", ingestionIdempotencyKey)
+        .maybeSingle()
+    : await supabase
+        .from("warehouse_orders")
+        .select("id, external_order_modified_at")
+        .eq("workspace_id", workspaceId)
+        .eq("external_order_id", remoteOrderId)
+        .maybeSingle();
 
-  if (existing) return { processed: true, reason: "duplicate_order" };
+  if (existing) {
+    if (
+      shouldReconcileRemoteOrder(
+        existing.external_order_modified_at as string | null,
+        externalOrderModifiedAt,
+      )
+    ) {
+      await supabase
+        .from("warehouse_orders")
+        .update({
+          order_number:
+            (data.number as string) ??
+            (data.order_number as string) ??
+            (data.name as string) ??
+            null,
+          line_items: lineItems,
+          external_order_modified_at: externalOrderModifiedAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+    }
+    return { processed: true, reason: "duplicate_order", orderId: existing.id };
+  }
 
   // Get org from connection
   let orgId: string | null = null;
@@ -585,20 +699,27 @@ async function handleOrderCreated(
 
   if (!orgId) return { processed: false, reason: "no_org_id" };
 
-  const platform = event.platform as string;
-  const { data: newOrder } = await supabase
+  const { data: newOrder, error: insertError } = await supabase
     .from("warehouse_orders")
     .insert({
       workspace_id: workspaceId,
       org_id: orgId,
       external_order_id: remoteOrderId,
-      order_number: (data.order_number as string) ?? (data.name as string) ?? null,
+      ingestion_idempotency_key: ingestionIdempotencyKey,
+      external_order_modified_at: externalOrderModifiedAt,
+      order_number:
+        (data.number as string) ?? (data.order_number as string) ?? (data.name as string) ?? null,
       source: platform,
       line_items: lineItems,
       updated_at: new Date().toISOString(),
     })
     .select("id")
     .single();
+
+  if (insertError?.code === "23505") {
+    return { processed: true, reason: "duplicate_order_race" };
+  }
+  if (insertError) throw insertError;
 
   if (newOrder && lineItems.length > 0) {
     const items = lineItems.map((li) => {

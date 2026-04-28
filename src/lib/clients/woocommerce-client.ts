@@ -12,6 +12,32 @@ export interface WooCommerceCredentials {
   consumerKey: string;
   consumerSecret: string;
   siteUrl: string;
+  connectionId?: string;
+  preferredAuthMode?: WooAuthMode | null;
+  onPreferredAuthMode?: (mode: WooAuthMode) => Promise<void> | void;
+}
+
+export type WooAuthMode = "basic" | "query_param";
+
+export type WooApiErrorCode =
+  | "auth_failed"
+  | "auth_failed_both_methods"
+  | "rest_api_disabled"
+  | "rate_limited"
+  | "not_found"
+  | "server_error"
+  | "network";
+
+export class WooCommerceApiError extends Error {
+  constructor(
+    message: string,
+    public readonly code: WooApiErrorCode,
+    public readonly status: number | null,
+    public readonly authMethodTried: WooAuthMode | "both" | null,
+  ) {
+    super(message);
+    this.name = "WooCommerceApiError";
+  }
 }
 
 export interface WooCatalogItem {
@@ -64,6 +90,8 @@ const wooOrderSchema = z.object({
   status: z.string(),
   date_created: z.string(),
   date_modified: z.string(),
+  date_created_gmt: z.string().nullish(),
+  date_modified_gmt: z.string().nullish(),
   total: z.string(),
   currency: z.string(),
   line_items: z.array(
@@ -93,6 +121,83 @@ function buildAuthHeader(credentials: WooCommerceCredentials): string {
   return `Basic ${encoded}`;
 }
 
+export function redactWooUrl(url: string): string {
+  return url
+    .replace(/([?&]consumer_key=)[^&]+/g, "$1REDACTED")
+    .replace(/([?&]consumer_secret=)[^&]+/g, "$1REDACTED");
+}
+
+function appendQueryAuth(url: string, credentials: WooCommerceCredentials): string {
+  const next = new URL(url);
+  next.searchParams.set("consumer_key", credentials.consumerKey);
+  next.searchParams.set("consumer_secret", credentials.consumerSecret);
+  return next.toString();
+}
+
+function classifyWooFailure(status: number, body: string): WooApiErrorCode {
+  if (status === 401 || status === 403) return "auth_failed";
+  if (status === 404) {
+    const lower = body.toLowerCase();
+    if (lower.includes("<html") || lower.includes("rest_no_route")) return "rest_api_disabled";
+    return "not_found";
+  }
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "server_error";
+  return "server_error";
+}
+
+function buildWooError(input: {
+  status: number;
+  body: string;
+  url: string;
+  authMode: WooAuthMode | "both";
+  code?: WooApiErrorCode;
+}): WooCommerceApiError {
+  const code = input.code ?? classifyWooFailure(input.status, input.body);
+  return new WooCommerceApiError(
+    `WooCommerce API error ${input.status} (${code}, auth=${input.authMode}) at ${redactWooUrl(input.url)}: ${input.body.slice(0, 500)}`,
+    code,
+    input.status,
+    input.authMode,
+  );
+}
+
+async function tryWooFetch(
+  url: string,
+  credentials: WooCommerceCredentials,
+  authMode: WooAuthMode,
+  options?: RequestInit,
+): Promise<Response | WooCommerceApiError> {
+  const targetUrl = authMode === "query_param" ? appendQueryAuth(url, credentials) : url;
+  try {
+    const res = await fetch(targetUrl, {
+      ...options,
+      headers: {
+        ...(authMode === "basic" ? { Authorization: buildAuthHeader(credentials) } : {}),
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    });
+    if (res.ok) return res;
+    const body = await res.text().catch(() => "");
+    return buildWooError({
+      status: res.status,
+      body,
+      url: targetUrl,
+      authMode,
+    });
+  } catch (err) {
+    return new WooCommerceApiError(
+      `WooCommerce API network error at ${redactWooUrl(targetUrl)}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      "network",
+      null,
+      authMode,
+    );
+  }
+}
+
 async function wooFetch(
   credentials: WooCommerceCredentials,
   path: string,
@@ -101,21 +206,33 @@ async function wooFetch(
   const baseUrl = credentials.siteUrl.replace(/\/$/, "");
   const url = `${baseUrl}/wp-json/wc/v3${path}`;
 
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: buildAuthHeader(credentials),
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  });
+  const primaryMode = credentials.preferredAuthMode ?? "basic";
+  const primary = await tryWooFetch(url, credentials, primaryMode, options);
+  if (!(primary instanceof WooCommerceApiError)) return primary;
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`WooCommerce API error ${res.status}: ${body}`);
+  const canFallback =
+    primaryMode === "basic" &&
+    primary.code === "auth_failed" &&
+    credentials.siteUrl.toLowerCase().startsWith("https://");
+  if (!canFallback) throw primary;
+
+  const fallback = await tryWooFetch(url, credentials, "query_param", options);
+  if (!(fallback instanceof WooCommerceApiError)) {
+    await credentials.onPreferredAuthMode?.("query_param");
+    return fallback;
   }
 
-  return res;
+  if (fallback.code === "auth_failed") {
+    throw buildWooError({
+      status: fallback.status ?? 403,
+      body: fallback.message,
+      url,
+      authMode: "both",
+      code: "auth_failed_both_methods",
+    });
+  }
+
+  throw fallback;
 }
 
 function normalizeWooSku(value: string | null | undefined): string | null {
@@ -296,13 +413,24 @@ export async function updateStockQuantity(
 
 export async function getOrders(
   credentials: WooCommerceCredentials,
-  params?: { after?: string; page?: number; perPage?: number; status?: string },
+  params?: {
+    after?: string;
+    modifiedAfter?: string;
+    page?: number;
+    perPage?: number;
+    status?: string;
+    orderby?: "date" | "id" | "include" | "title" | "slug" | "modified";
+    order?: "asc" | "desc";
+  },
 ): Promise<WooOrder[]> {
   const searchParams = new URLSearchParams();
   if (params?.after) searchParams.set("after", params.after);
+  if (params?.modifiedAfter) searchParams.set("modified_after", params.modifiedAfter);
   if (params?.page) searchParams.set("page", String(params.page));
   if (params?.perPage) searchParams.set("per_page", String(params.perPage));
   if (params?.status) searchParams.set("status", params.status);
+  if (params?.orderby) searchParams.set("orderby", params.orderby);
+  if (params?.order) searchParams.set("order", params.order);
 
   const qs = searchParams.toString();
   const path = `/orders${qs ? `?${qs}` : ""}`;
