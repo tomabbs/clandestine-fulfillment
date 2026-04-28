@@ -51,4 +51,29 @@ describe("sku-matching Server Action source contract", () => {
     expect(source).toContain("includeShopifyReadiness: false");
     expect(source).toContain("emitPerfEvent: false");
   });
+
+  it("loads canonical variants through connection org coverage, not a single owner org", () => {
+    expect(source).toContain('from("client_store_connection_org_coverage")');
+    expect(source).toContain("coveredOrgIds");
+    expect(source).toContain('.in("warehouse_products.org_id", orgIds)');
+    expect(source).not.toContain("getCanonicalRows(connection.workspace_id, connection.org_id)");
+  });
+
+  it("returns canonical org provenance in workspace rows and preview payloads", () => {
+    expect(source).toContain("canonicalOrgId: product.org_id");
+    expect(source).toContain("canonicalOrgName");
+    expect(source).toContain("orgName: connection.coveredOrgNamesById.get(product.org_id)");
+  });
+
+  it("filters the connection picker through included-label coverage rows", () => {
+    expect(source).toContain('.eq("org_id", input.orgId)');
+    expect(source).toContain("coveredConnectionIds");
+    expect(source).toContain('query.in("id", coveredConnectionIds)');
+    expect(source).not.toContain('query = query.eq("org_id", input.orgId)');
+  });
+
+  it("checks variant coverage for non-preview side effects", () => {
+    expect(source).toContain("getCoveredVariantSku");
+    expect(source).toContain("Variant not found for this connection");
+  });
 });

@@ -92,6 +92,8 @@ function workspace(overrides: Partial<SkuMatchingWorkspaceData> = {}): SkuMatchi
       {
         variantId: "33333333-3333-4333-8333-333333333333",
         productId: "44444444-4444-4444-8444-444444444444",
+        canonicalOrgId: "55555555-5555-4555-8555-555555555555",
+        canonicalOrgName: "Northern Spy Records",
         canonicalSku: "NS-001",
         artist: "Northern Spy",
         canonicalTitle: "Northern Spy Product",

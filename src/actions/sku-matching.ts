@@ -125,11 +125,13 @@ type CanonicalVariantRow = {
         id: string;
         title: string;
         vendor: string | null;
+        org_id: string;
       }
     | {
         id: string;
         title: string;
         vendor: string | null;
+        org_id: string;
       }[]
     | null;
   bandcamp_product_mappings:
@@ -189,6 +191,18 @@ type CandidateRejectionRow = {
   scope: "connection" | "variant";
 };
 
+type ConnectionCoverageRow = {
+  org_id: string;
+  coverage_role: "primary" | "included_label";
+  organizations: { name: string } | { name: string }[] | null;
+};
+
+type SkuMatchingConnectionContext = ClientStoreConnection & {
+  organizations?: { name: string } | { name: string }[] | null;
+  coveredOrgIds: string[];
+  coveredOrgNamesById: Map<string, string>;
+};
+
 export type SkuRemoteCatalogSearchResult = RemoteCatalogItem;
 
 export interface SkuMatchingConnectionSummary {
@@ -212,6 +226,8 @@ export interface SkuMatchingClientSummary {
 export interface SkuMatchingRow {
   variantId: string;
   productId: string;
+  canonicalOrgId: string;
+  canonicalOrgName: string;
   canonicalSku: string;
   artist: string | null;
   canonicalTitle: string;
@@ -492,37 +508,65 @@ function classifyInitialShopifyReadiness(input: {
 
 async function assertSkuMatchingConnection(connectionId: string): Promise<{
   auth: Awaited<ReturnType<typeof requireAuth>>;
-  connection: ClientStoreConnection & {
-    organizations?: { name: string } | { name: string }[] | null;
-  };
+  connection: SkuMatchingConnectionContext;
 }> {
   const auth = await requireAuth();
   if (!auth.isStaff) throw new Error("Staff access required");
   const supabase = createServiceRoleClient();
-  const { data, error } = await supabase
-    .from("client_store_connections")
-    .select("*, organizations(name)")
-    .eq("id", connectionId)
-    .eq("workspace_id", auth.userRecord.workspace_id)
-    .single();
+  const [{ data, error }, coverageResult] = await Promise.all([
+    supabase
+      .from("client_store_connections")
+      .select("*, organizations(name)")
+      .eq("id", connectionId)
+      .eq("workspace_id", auth.userRecord.workspace_id)
+      .single(),
+    supabase
+      .from("client_store_connection_org_coverage")
+      .select("org_id, coverage_role, organizations(name)")
+      .eq("connection_id", connectionId)
+      .eq("workspace_id", auth.userRecord.workspace_id)
+      .order("coverage_role", { ascending: false }),
+  ]);
 
   if (error || !data) throw new Error("Connection not found");
   if (!SUPPORTED_PLATFORMS.includes(data.platform as (typeof SUPPORTED_PLATFORMS)[number])) {
     throw new Error(`Unsupported platform for SKU matching: ${data.platform}`);
   }
+  if (coverageResult.error) {
+    throw new Error(`Connection coverage load failed: ${coverageResult.error.message}`);
+  }
+
+  const coverageRows = (coverageResult.data ?? []) as ConnectionCoverageRow[];
+  const coveredOrgIds = coverageRows.map((row) => row.org_id);
+  const coveredOrgNamesById = new Map(
+    coverageRows.map((row) => [
+      row.org_id,
+      asSingle(row.organizations)?.name ??
+        (row.org_id === data.org_id ? "Primary org" : "Covered org"),
+    ]),
+  );
+
+  if (coveredOrgIds.length === 0) {
+    throw new Error("Connection coverage not found");
+  }
 
   return {
     auth,
-    connection: data as ClientStoreConnection & {
-      organizations?: { name: string } | { name: string }[] | null;
+    connection: {
+      ...(data as ClientStoreConnection & {
+        organizations?: { name: string } | { name: string }[] | null;
+      }),
+      coveredOrgIds,
+      coveredOrgNamesById,
     },
   };
 }
 
 async function getCanonicalRows(
   workspaceId: string,
-  orgId: string,
+  orgIds: string[],
 ): Promise<CanonicalVariantRow[]> {
+  if (orgIds.length === 0) return [];
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
     .from("warehouse_product_variants")
@@ -539,7 +583,7 @@ async function getCanonicalRows(
       bandcamp_option_title,
       is_preorder,
       product_id,
-      warehouse_products!inner(id, title, vendor),
+      warehouse_products!inner(id, title, vendor, org_id),
       bandcamp_product_mappings(
         id,
         bandcamp_album_title,
@@ -553,11 +597,30 @@ async function getCanonicalRows(
     `,
     )
     .eq("workspace_id", workspaceId)
-    .eq("warehouse_products.org_id", orgId)
+    .in("warehouse_products.org_id", orgIds)
     .order("sku", { ascending: true });
 
   if (error) throw new Error(`Canonical variant load failed: ${error.message}`);
   return (data ?? []) as CanonicalVariantRow[];
+}
+
+async function getCoveredVariantSku(input: {
+  workspaceId: string;
+  variantId: string;
+  coveredOrgIds: string[];
+}): Promise<string | null> {
+  if (input.coveredOrgIds.length === 0) return null;
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("warehouse_product_variants")
+    .select("sku, warehouse_products!inner(org_id)")
+    .eq("id", input.variantId)
+    .eq("workspace_id", input.workspaceId)
+    .in("warehouse_products.org_id", input.coveredOrgIds)
+    .maybeSingle();
+
+  if (error) throw new Error(`Variant coverage check failed: ${error.message}`);
+  return data?.sku ?? null;
 }
 
 async function getExistingMappings(
@@ -743,6 +806,20 @@ export async function listSkuMatchingConnections(input?: {
   if (!auth.isStaff) throw new Error("Staff access required");
 
   const supabase = createServiceRoleClient();
+  let coveredConnectionIds: string[] | null = null;
+  if (input?.orgId) {
+    const { data: coverageRows, error: coverageError } = await supabase
+      .from("client_store_connection_org_coverage")
+      .select("connection_id")
+      .eq("workspace_id", auth.userRecord.workspace_id)
+      .eq("org_id", input.orgId);
+
+    if (coverageError)
+      throw new Error(`Connection coverage filter failed: ${coverageError.message}`);
+    coveredConnectionIds = (coverageRows ?? []).map((row) => row.connection_id);
+    if (coveredConnectionIds.length === 0) return [];
+  }
+
   let query = supabase
     .from("client_store_connections")
     .select("*, organizations(name)")
@@ -750,7 +827,7 @@ export async function listSkuMatchingConnections(input?: {
     .in("platform", [...SUPPORTED_PLATFORMS])
     .order("created_at", { ascending: false });
 
-  if (input?.orgId) query = query.eq("org_id", input.orgId);
+  if (coveredConnectionIds) query = query.in("id", coveredConnectionIds);
 
   const { data, error } = await query;
   if (error) throw new Error(`Connection list failed: ${error.message}`);
@@ -798,7 +875,7 @@ export async function getSkuMatchingWorkspace(
   ] = await Promise.all([
     getWorkspaceFlags(auth.userRecord.workspace_id),
     fetchRemoteCatalogWithTimeout(connection),
-    getCanonicalRows(connection.workspace_id, connection.org_id),
+    getCanonicalRows(connection.workspace_id, connection.coveredOrgIds),
     getExistingMappings(connection.id),
     getExistingSkuConflicts(connection.workspace_id),
     loadConflictSummaries(connection.workspace_id, connection.id),
@@ -899,10 +976,14 @@ export async function getSkuMatchingWorkspace(
     else needsReviewCount.value += 1;
 
     const discogsOverlay = discogs.get(canonical.id) ?? null;
+    const canonicalOrgName =
+      connection.coveredOrgNamesById.get(product.org_id) ?? "Unknown covered org";
 
     rows.push({
       variantId: canonical.id,
       productId: canonical.product_id,
+      canonicalOrgId: product.org_id,
+      canonicalOrgName,
       canonicalSku: canonical.sku,
       artist: product.vendor,
       canonicalTitle: product.title,
@@ -1006,7 +1087,7 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
 }> {
   const parsed = previewInputSchema.parse(rawInput);
   const { connection } = await assertSkuMatchingConnection(parsed.connectionId);
-  const canonicalRows = await getCanonicalRows(connection.workspace_id, connection.org_id);
+  const canonicalRows = await getCanonicalRows(connection.workspace_id, connection.coveredOrgIds);
   const canonical = canonicalRows.find((row) => row.id === parsed.variantId);
   if (!canonical) throw new Error("Variant not found for this connection");
 
@@ -1098,6 +1179,14 @@ export async function rejectSkuMatchCandidate(
   }
 
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
+  if (parsed.scope === "variant" && parsed.variantId) {
+    const coveredSku = await getCoveredVariantSku({
+      workspaceId: connection.workspace_id,
+      variantId: parsed.variantId,
+      coveredOrgIds: connection.coveredOrgIds,
+    });
+    if (!coveredSku) throw new Error("Variant not found for this connection");
+  }
   const remoteCatalog = await fetchRemoteCatalogWithTimeout(connection);
   if (remoteCatalog.state !== "ok") {
     throw createSkuMatchingError(
@@ -1177,7 +1266,7 @@ async function previewSkuMatchInternal(
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
 
   const [canonicalRows, existingMappings, remoteCatalog] = await Promise.all([
-    getCanonicalRows(connection.workspace_id, connection.org_id),
+    getCanonicalRows(connection.workspace_id, connection.coveredOrgIds),
     getExistingMappings(connection.id),
     fetchRemoteCatalogWithTimeout(connection),
   ]);
@@ -1278,6 +1367,8 @@ async function previewSkuMatchInternal(
   return {
     canonical: {
       variantId: canonical.id,
+      orgId: product.org_id,
+      orgName: connection.coveredOrgNamesById.get(product.org_id) ?? "Unknown covered org",
       sku: canonical.sku,
       barcode: canonical.barcode,
       title: product.title,
@@ -1456,19 +1547,18 @@ export async function activateShopifyInventoryAtDefaultLocation(
     throw new Error("Missing or invalid Shopify inventory item id.");
   }
 
-  const supabase = createServiceRoleClient();
-  const { data: variant, error } = await supabase
-    .from("warehouse_product_variants")
-    .select("sku")
-    .eq("id", parsed.variantId)
-    .maybeSingle();
-  if (error || !variant) throw new Error("Variant not found");
+  const sku = await getCoveredVariantSku({
+    workspaceId: connection.workspace_id,
+    variantId: parsed.variantId,
+    coveredOrgIds: connection.coveredOrgIds,
+  });
+  if (!sku) throw new Error("Variant not found for this connection");
 
   await activateShopifyInventoryAtLocation({
     connection,
     inventoryItemId,
     locationId,
-    sku: variant.sku,
+    sku,
   });
 
   revalidatePath("/admin/settings/sku-matching");

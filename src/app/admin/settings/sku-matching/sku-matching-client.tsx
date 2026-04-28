@@ -436,6 +436,7 @@ export function SkuMatchingClient({
               <Badge variant="outline" className="font-mono">
                 {row.canonicalSku}
               </Badge>
+              <Badge variant="outline">{row.canonicalOrgName}</Badge>
               <StatusBadge status={row.rowStatus} />
               <ConfidenceBadge
                 value={row.matchConfidence ?? row.topCandidate?.confidenceTier ?? null}
@@ -888,6 +889,7 @@ export function SkuMatchingClient({
                 </div>
                 <div className="mt-1 break-words text-xs text-muted-foreground">
                   SKU {previewData.canonical.sku}
+                  {` · ${previewData.canonical.orgName}`}
                   {previewData.canonical.barcode
                     ? ` · barcode ${previewData.canonical.barcode}`
                     : ""}

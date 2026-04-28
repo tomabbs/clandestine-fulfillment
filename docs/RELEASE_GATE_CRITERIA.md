@@ -64,6 +64,22 @@ Pass criteria:
 - Webhook and poll order ingestion share `ingestion_idempotency_key` and only reconcile when `external_order_modified_at` is newer.
 - Woo stock webhooks require active SKU mappings; unmapped stock updates create review queue items and do not write inventory.
 
+Northern Spy Label Group SKU Matching focused gate (2026-04-28):
+
+```bash
+supabase migration list --linked
+supabase db push --yes
+pnpm vitest run tests/unit/actions/sku-matching.test.ts tests/unit/migrations/client-store-connection-org-coverage.test.ts
+pnpm check
+pnpm typecheck
+```
+
+Pass criteria:
+- `client_store_connection_org_coverage` exists with staff-only RLS, exactly one `primary` row per connection, primary org equality with `client_store_connections.org_id`, and auto-primary creation for new connections.
+- Northern Spy Shopify connection `93225922-357f-4607-a5a4-2c1ad3a9beac` has coverage for Northern Spy Records, Egghunt Records, NNA Tapes, and Across the Horizon.
+- `persist_sku_match` rejects direct RPC attempts to map variants whose product org is not covered by the connection.
+- `src/actions/sku-matching.ts` uses the same covered-org set for workspace load, preview, accept, bulk accept, and connection filtering; row/preview payloads include visible canonical org provenance.
+
 Note: `scripts/ci-use-server-exports-guard.sh` runs BEFORE `pnpm build`. It
 AST-parses every `src/**/*.{ts,tsx}` file that carries the `"use server"`
 directive and fails fast (~200ms) if any module exports anything other than
