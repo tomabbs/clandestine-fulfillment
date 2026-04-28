@@ -21,8 +21,6 @@ import { useSupportPresence } from "@/lib/hooks/use-support-presence";
 import { queryKeys } from "@/lib/shared/query-keys";
 import { CACHE_TIERS } from "@/lib/shared/query-tiers";
 
-const OPEN_STATE_KEY = "support_launcher_open";
-
 export function SupportLauncher({
   supportPath,
 }: {
@@ -36,17 +34,6 @@ export function SupportLauncher({
   const [newBody, setNewBody] = useState("");
   const [hasNewAlert, setHasNewAlert] = useState(false);
   const previousUnreadRef = useRef(0);
-
-  useEffect(() => {
-    const persisted = window.localStorage.getItem(OPEN_STATE_KEY);
-    if (persisted === "1") {
-      setOpen(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(OPEN_STATE_KEY, open ? "1" : "0");
-  }, [open]);
 
   const { data: viewer } = useAppQuery({
     queryKey: queryKeys.support.viewerContext(),
@@ -98,7 +85,6 @@ export function SupportLauncher({
     }
     if (unreadCount > previousUnreadRef.current) {
       setHasNewAlert(true);
-      setOpen(true);
     }
     previousUnreadRef.current = unreadCount;
   }, [open, unreadCount]);

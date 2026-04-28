@@ -1,5 +1,6 @@
 version: 1
-updated_at: 2026-04-28  # SKU matching review drawer now has a manual remote catalog search workflow. Staff can search by title/SKU/artist/barcode/product ID, preview a selected remote product/variant, confirm it as a manual match through `persist_sku_match`, and suppress a bad repeated remote candidate via `sku_match_candidate_rejections` so it stops ranking across the connection. Prior update preserved below.
+updated_at: 2026-04-28  # Support launcher refresh behavior fixed. The floating admin/portal support chat starts minimized on every page load, does not restore an open state from localStorage/sessionStorage, and does not auto-open when unread support messages arrive; unread activity remains visible through the badge/pulse cue until the user opens it. Prior update preserved below.
+prior_update: 2026-04-28  # SKU matching review drawer now has a manual remote catalog search workflow. Staff can search by title/SKU/artist/barcode/product ID, preview a selected remote product/variant, confirm it as a manual match through `persist_sku_match`, and suppress a bad repeated remote candidate via `sku_match_candidate_rejections` so it stops ranking across the connection. Prior update preserved below.
 prior_update: 2026-04-27  # SKU matching Accept/Confirm fix verified by browser smoke. The live alias scope trigger no longer dereferences missing `client_store_sku_mappings.org_id`, so `persist_sku_match` succeeds for Accept best match and Confirm match. Accept errors now show once at page level instead of also tripping the row action fallback. Prior update preserved below.
 prior_update: 2026-04-27  # SKU matching navigation performance hardening. Workspace load no longer performs per-row Shopify location-readiness GraphQL checks; it parallelizes independent bootstrap reads and defers stocked-at-default-location checks to the selected-row preview drawer. Prior update preserved below.
 prior_update: 2026-04-27  # SKU matching Server Action boundary hardening. Preview responses, Accept inputs, Confirm inputs, bulk-accept inputs, deactivate inputs, and Shopify activation inputs are JSON-plain at the client/action boundary; accept paths use an internal preview helper so no exported Server Action payload is re-entered server-side. Prior update preserved below.
@@ -172,6 +173,7 @@ journeys:
       - create and reply paths return readable errors
       - role/org access enforced
       - floating launcher shows unread support state in admin and portal
+      - floating launcher starts minimized after refresh and unread updates never auto-open the panel
       - staff inbox queues derive from canonical fields rather than persisted queue names
       - inbound Bandcamp fan messages resolve client/order/shipment context from body transaction IDs before falling back to customer email, client login email, and support mappings
       - support sidebar shows the resolved related order and shipment/customer tracking links when available, including for historical messages whose conversation org was initially wrong

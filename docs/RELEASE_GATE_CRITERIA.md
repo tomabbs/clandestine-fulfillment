@@ -337,6 +337,7 @@ Required flows:
 4. One core admin operational page load (`/admin/inventory` or `/admin/inbound`)
 5. Support omnichannel checks:
    - floating launcher unread count updates
+   - floating launcher remains minimized after refresh and does not auto-open for unread activity
    - presence indicators show online/offline state
    - email reply lands in existing conversation timeline
 
