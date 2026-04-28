@@ -1166,8 +1166,13 @@ export async function rejectSkuMatchCandidate(
   return toPlainJson({ rejected: true, alreadyExists: error?.code === "23505", remoteKey });
 }
 
-async function previewSkuMatchInternal(rawInput: z.input<typeof previewInputSchema>) {
+async function previewSkuMatchInternal(
+  rawInput: z.input<typeof previewInputSchema>,
+  options: { includeShopifyReadiness?: boolean; emitPerfEvent?: boolean } = {},
+) {
   const startedAt = Date.now();
+  const includeShopifyReadiness = options.includeShopifyReadiness ?? true;
+  const emitPerfEvent = options.emitPerfEvent ?? true;
   const parsed = previewInputSchema.parse(rawInput);
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
 
@@ -1228,7 +1233,7 @@ async function previewSkuMatchInternal(rawInput: z.input<typeof previewInputSche
 
   const existingMapping = existingMappings.byVariantId.get(parsed.variantId) ?? null;
   const readiness =
-    connection.platform === "shopify"
+    includeShopifyReadiness && connection.platform === "shopify"
       ? await classifyShopifyReadiness({
           connection,
           remoteInventoryItemId:
@@ -1253,20 +1258,22 @@ async function previewSkuMatchInternal(rawInput: z.input<typeof previewInputSche
     disqualifiers: candidate?.disqualifiers ?? [],
   });
 
-  await insertSkuMatchingPerfEvent({
-    workspaceId: connection.workspace_id,
-    connectionId: connection.id,
-    actorId: auth.userRecord.id,
-    eventType: "preview_open",
-    durationMs: Date.now() - startedAt,
-    conflictCount: candidate?.disqualifiers.length ?? 0,
-    metadata: {
-      variantId: parsed.variantId,
-      remoteCatalogState: remoteCatalog.state,
-      hasTargetRemote: Boolean(targetRemote),
-      targetError,
-    },
-  });
+  if (emitPerfEvent) {
+    await insertSkuMatchingPerfEvent({
+      workspaceId: connection.workspace_id,
+      connectionId: connection.id,
+      actorId: auth.userRecord.id,
+      eventType: "preview_open",
+      durationMs: Date.now() - startedAt,
+      conflictCount: candidate?.disqualifiers.length ?? 0,
+      metadata: {
+        variantId: parsed.variantId,
+        remoteCatalogState: remoteCatalog.state,
+        hasTargetRemote: Boolean(targetRemote),
+        targetError,
+      },
+    });
+  }
 
   return {
     canonical: {
@@ -1298,14 +1305,20 @@ export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatc
   const parsed = upsertMatchInputSchema.parse(rawInput);
   const { auth } = await assertSkuMatchingConnection(parsed.connectionId);
 
-  const preview = await previewSkuMatchInternal({
-    connectionId: parsed.connectionId,
-    variantId: parsed.variantId,
-    remoteProductId: parsed.remoteProductId,
-    remoteVariantId: parsed.remoteVariantId,
-    remoteInventoryItemId: parsed.remoteInventoryItemId,
-    remoteSku: parsed.remoteSku,
-  });
+  const preview = await previewSkuMatchInternal(
+    {
+      connectionId: parsed.connectionId,
+      variantId: parsed.variantId,
+      remoteProductId: parsed.remoteProductId,
+      remoteVariantId: parsed.remoteVariantId,
+      remoteInventoryItemId: parsed.remoteInventoryItemId,
+      remoteSku: parsed.remoteSku,
+    },
+    {
+      emitPerfEvent: false,
+      includeShopifyReadiness: false,
+    },
+  );
 
   if (preview.targetError) {
     throw createSkuMatchingError(preview.targetError.code, preview.targetError.message);

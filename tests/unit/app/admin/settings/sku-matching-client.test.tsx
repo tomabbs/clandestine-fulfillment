@@ -4,12 +4,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const routerPush = vi.fn();
 const routerRefresh = vi.fn();
+const toastError = vi.fn();
+const toastSuccess = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: routerPush,
     refresh: routerRefresh,
   }),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => toastError(...args),
+    success: (...args: unknown[]) => toastSuccess(...args),
+  },
 }));
 
 const createOrUpdateSkuMatch = vi.fn();
@@ -206,6 +215,17 @@ describe("SkuMatchingClient", () => {
 
     await screen.findByText("SKU match action failed");
     expect(screen.getAllByText("persist_failed: RPC unavailable").length).toBeGreaterThan(0);
+    expect(toastError).toHaveBeenCalledWith("SKU match rejected — persist_failed: RPC unavailable");
+  });
+
+  it("optimistically removes accepted rows and shows a saved toast", async () => {
+    createOrUpdateSkuMatch.mockResolvedValueOnce({ success: true });
+    renderClient();
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept best match" }));
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("SKU match saved"));
+    expect(screen.queryByRole("button", { name: "Accept best match" })).toBeNull();
   });
 
   it("renders dense row content while below the page-local virtualization threshold", () => {

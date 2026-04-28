@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   acceptExactMatches,
   activateShopifyInventoryAtDefaultLocation,
@@ -122,8 +123,17 @@ export function SkuMatchingClient({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingRowIds, setPendingRowIds] = useState<Set<string>>(new Set());
+  const [acceptedVariantIds, setAcceptedVariantIds] = useState<Set<string>>(new Set());
   const [remoteSearchQuery, setRemoteSearchQuery] = useState("");
   const [manualSelectedRemoteKey, setManualSelectedRemoteKey] = useState<string | null>(null);
+
+  function refreshWorkspaceSoon() {
+    if (typeof window === "undefined") {
+      router.refresh();
+      return;
+    }
+    window.setTimeout(() => router.refresh(), 0);
+  }
 
   const enableFlagMutation = useAppMutation({
     mutationFn: () => enableSkuMatchingFeatureFlag(),
@@ -166,16 +176,19 @@ export function SkuMatchingClient({
   const upsertMutation = useAppMutation({
     mutationFn: (input: Parameters<typeof createOrUpdateSkuMatch>[0]) =>
       createOrUpdateSkuMatch(toPlainServerActionInput(input)),
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
+      setAcceptedVariantIds((prev) => new Set(prev).add(variables.variantId));
       setPreviewOpen(false);
       setPreviewError(null);
       setMutationError(null);
-      router.refresh();
+      toast.success("SKU match saved");
+      refreshWorkspaceSoon();
     },
     onError: (error) => {
       const message = formatActionError(error);
       setMutationError(message);
       if (previewOpen) setPreviewError(message);
+      toast.error(`SKU match rejected — ${message}`);
     },
   });
 
@@ -192,12 +205,14 @@ export function SkuMatchingClient({
       setPreviewOpen(false);
       setPreviewError(null);
       setMutationError(null);
-      router.refresh();
+      toast.success("Candidate marked not a match");
+      refreshWorkspaceSoon();
     },
     onError: (error) => {
       const message = formatActionError(error);
       setMutationError(message);
       setPreviewError(message);
+      toast.error(`Candidate rejection failed — ${message}`);
     },
   });
 
@@ -216,12 +231,14 @@ export function SkuMatchingClient({
     },
   });
 
-  const needsReviewRows = workspace.rows.filter((row) =>
-    [
-      "needs_review_no_candidate",
-      "needs_review_low_confidence",
-      "needs_review_multiple_candidates",
-    ].includes(row.rowStatus),
+  const needsReviewRows = workspace.rows.filter(
+    (row) =>
+      !acceptedVariantIds.has(row.variantId) &&
+      [
+        "needs_review_no_candidate",
+        "needs_review_low_confidence",
+        "needs_review_multiple_candidates",
+      ].includes(row.rowStatus),
   );
   const matchedRows = workspace.rows.filter((row) => row.rowStatus === "matched_active");
 
@@ -248,6 +265,7 @@ export function SkuMatchingClient({
     setPreviewError(null);
     setMutationError(null);
     setPendingRowIds(new Set());
+    setAcceptedVariantIds(new Set());
     setRemoteSearchQuery("");
     setManualSelectedRemoteKey(null);
     previewMutation.reset();

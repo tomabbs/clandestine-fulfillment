@@ -46,4 +46,9 @@ describe("sku-matching Server Action source contract", () => {
     expect(source).toContain('.from("sku_match_candidate_rejections").insert');
     expect(source).toContain("isRemoteRejected(item, rejections");
   });
+
+  it("does not run Shopify readiness during accept persistence validation", () => {
+    expect(source).toContain("includeShopifyReadiness: false");
+    expect(source).toContain("emitPerfEvent: false");
+  });
 });
