@@ -282,7 +282,8 @@ describe("SkuMatchingClient", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     await screen.findByText("Search remote catalog");
-    expect(screen.getByRole("dialog").className).toContain("max-h-[calc(100vh-2rem)]");
+    expect(screen.getByRole("dialog").className).toContain("max-h-[calc(100dvh-1rem)]");
+    expect(screen.getByRole("dialog").className).toContain("overflow-x-hidden");
     fireEvent.change(screen.getByPlaceholderText(/album title/i), {
       target: { value: "Correct Remote Title" },
     });

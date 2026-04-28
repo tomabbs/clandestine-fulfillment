@@ -851,7 +851,7 @@ export function SkuMatchingClient({
       </Tabs>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-4xl overflow-y-auto">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Preview match</DialogTitle>
           </DialogHeader>
@@ -859,14 +859,14 @@ export function SkuMatchingClient({
           {previewMutation.isPending ? (
             <div className="py-8 text-sm text-muted-foreground">Loading preview...</div>
           ) : previewData ? (
-            <div className="space-y-4 text-sm">
-              <div className="rounded-md border bg-card p-4">
-                <div className="font-medium">
+            <div className="min-w-0 space-y-4 text-sm">
+              <div className="min-w-0 overflow-hidden rounded-md border bg-card p-4">
+                <div className="break-words font-medium">
                   {previewData.canonical.artist
                     ? `${previewData.canonical.artist} - ${previewData.canonical.title}`
                     : previewData.canonical.title}
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
+                <div className="mt-1 break-words text-xs text-muted-foreground">
                   SKU {previewData.canonical.sku}
                   {previewData.canonical.barcode
                     ? ` · barcode ${previewData.canonical.barcode}`
@@ -885,7 +885,7 @@ export function SkuMatchingClient({
                 ) : null}
               </div>
 
-              <div className="rounded-md border bg-card p-4">
+              <div className="min-w-0 overflow-hidden rounded-md border bg-card p-4">
                 <div className="font-medium">Search remote catalog</div>
                 <div className="mt-1 text-xs text-muted-foreground">
                   Search by title, SKU, artist, barcode, product ID, variant ID, or inventory item
@@ -893,6 +893,7 @@ export function SkuMatchingClient({
                 </div>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                   <Input
+                    className="min-w-0"
                     value={remoteSearchQuery}
                     onChange={(event) => setRemoteSearchQuery(event.target.value)}
                     onKeyDown={(event) => {
@@ -913,7 +914,7 @@ export function SkuMatchingClient({
                   </Button>
                 </div>
                 {remoteSearchMutation.data ? (
-                  <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+                  <div className="mt-3 max-h-80 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
                     {remoteSearchMutation.data.results.length === 0 ? (
                       <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
                         No remote catalog results matched that search.
@@ -924,19 +925,19 @@ export function SkuMatchingClient({
                         return (
                           <div
                             key={remoteSearchResultKey(item)}
-                            className={`rounded-md border p-3 ${selected ? "border-primary bg-primary/5" : ""}`}
+                            className={`min-w-0 overflow-hidden rounded-md border p-3 ${selected ? "border-primary bg-primary/5" : ""}`}
                           >
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                               <div className="min-w-0">
-                                <div className="font-medium">{item.combinedTitle}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">
+                                <div className="break-words font-medium">{item.combinedTitle}</div>
+                                <div className="mt-1 break-all text-xs text-muted-foreground">
                                   product {item.remoteProductId}
                                   {item.remoteVariantId ? ` · variant ${item.remoteVariantId}` : ""}
                                   {item.remoteInventoryItemId
                                     ? ` · inventory ${item.remoteInventoryItemId}`
                                     : ""}
                                 </div>
-                                <div className="mt-1 text-xs text-muted-foreground">
+                                <div className="mt-1 break-words text-xs text-muted-foreground">
                                   {item.remoteSku ? `SKU ${item.remoteSku}` : "No remote SKU"}
                                   {item.barcode ? ` · barcode ${item.barcode}` : ""}
                                   {item.productType ? ` · ${item.productType}` : ""}
@@ -946,6 +947,7 @@ export function SkuMatchingClient({
                                 type="button"
                                 size="sm"
                                 variant={selected ? "default" : "outline"}
+                                className="shrink-0"
                                 onClick={() => previewRemoteSearchResult(item)}
                               >
                                 {selected ? "Selected" : "Preview this match"}
@@ -964,9 +966,11 @@ export function SkuMatchingClient({
                   {previewData.targetError.message}
                 </div>
               ) : previewData.targetRemote ? (
-                <div className="rounded-md border bg-card p-4">
-                  <div className="font-medium">{previewData.targetRemote.combinedTitle}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
+                <div className="min-w-0 overflow-hidden rounded-md border bg-card p-4">
+                  <div className="break-words font-medium">
+                    {previewData.targetRemote.combinedTitle}
+                  </div>
+                  <div className="mt-1 break-all text-xs text-muted-foreground">
                     product {previewData.targetRemote.remoteProductId}
                     {previewData.targetRemote.remoteVariantId
                       ? ` · variant ${previewData.targetRemote.remoteVariantId}`
@@ -1030,7 +1034,7 @@ export function SkuMatchingClient({
                 </div>
               )}
 
-              <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap gap-2 border-t bg-background/95 p-4 backdrop-blur">
+              <div className="sticky bottom-0 z-10 flex min-w-0 flex-wrap gap-2 rounded-md border bg-background/95 p-3 backdrop-blur">
                 <Button
                   disabled={
                     !previewData.targetRemote ||
