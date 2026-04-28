@@ -2,10 +2,12 @@
 
 import {
   AlertTriangle,
+  Ban,
   CheckCircle2,
   ExternalLink,
   Link2,
   RefreshCw,
+  Search,
   ShieldAlert,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -17,16 +19,20 @@ import {
   deactivateSkuMatch,
   enableSkuMatchingFeatureFlag,
   previewSkuMatch,
+  rejectSkuMatchCandidate,
   type SkuMatchingClientSummary,
   type SkuMatchingConnectionSummary,
   type SkuMatchingRow,
   type SkuMatchingWorkspaceData,
+  type SkuRemoteCatalogSearchResult,
+  searchSkuRemoteCatalog,
 } from "@/actions/sku-matching";
 import { BlockList } from "@/components/shared/block-list";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppMutation } from "@/lib/hooks/use-app-query";
 
@@ -46,6 +52,16 @@ function formatActionError(error: unknown): string {
 
 function remoteProductLinkLabel(platform: string): string {
   return platform === "shopify" ? "Open Shopify product" : "Open remote product";
+}
+
+function remoteSearchResultKey(item: SkuRemoteCatalogSearchResult): string {
+  return (
+    item.remoteInventoryItemId ??
+    item.remoteVariantId ??
+    item.remoteProductId ??
+    item.remoteSku ??
+    item.combinedTitle
+  );
 }
 
 function formatUtcDateTime(value: string | null | undefined): string {
@@ -106,6 +122,8 @@ export function SkuMatchingClient({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [pendingRowIds, setPendingRowIds] = useState<Set<string>>(new Set());
+  const [remoteSearchQuery, setRemoteSearchQuery] = useState("");
+  const [manualSelectedRemoteKey, setManualSelectedRemoteKey] = useState<string | null>(null);
 
   const enableFlagMutation = useAppMutation({
     mutationFn: () => enableSkuMatchingFeatureFlag(),
@@ -133,6 +151,18 @@ export function SkuMatchingClient({
     onError: (error) => setPreviewError(formatActionError(error)),
   });
 
+  const remoteSearchMutation = useAppMutation({
+    mutationFn: (input: { query: string }) =>
+      searchSkuRemoteCatalog(
+        toPlainServerActionInput({
+          connectionId: activeConnectionId,
+          query: input.query,
+          limit: 25,
+        }),
+      ),
+    onError: (error) => setPreviewError(formatActionError(error)),
+  });
+
   const upsertMutation = useAppMutation({
     mutationFn: (input: Parameters<typeof createOrUpdateSkuMatch>[0]) =>
       createOrUpdateSkuMatch(toPlainServerActionInput(input)),
@@ -153,6 +183,22 @@ export function SkuMatchingClient({
     mutationFn: (input: Parameters<typeof deactivateSkuMatch>[0]) =>
       deactivateSkuMatch(toPlainServerActionInput(input)),
     onSuccess: () => router.refresh(),
+  });
+
+  const rejectCandidateMutation = useAppMutation({
+    mutationFn: (input: Parameters<typeof rejectSkuMatchCandidate>[0]) =>
+      rejectSkuMatchCandidate(toPlainServerActionInput(input)),
+    onSuccess: () => {
+      setPreviewOpen(false);
+      setPreviewError(null);
+      setMutationError(null);
+      router.refresh();
+    },
+    onError: (error) => {
+      const message = formatActionError(error);
+      setMutationError(message);
+      setPreviewError(message);
+    },
   });
 
   const activateShopifyMutation = useAppMutation({
@@ -191,6 +237,10 @@ export function SkuMatchingClient({
   );
 
   const previewData = previewMutation.data;
+  const manualPreviewSelected = Boolean(
+    previewData?.targetRemote &&
+      manualSelectedRemoteKey === remoteSearchResultKey(previewData.targetRemote),
+  );
 
   useEffect(() => {
     setSelectedKeys(new Set());
@@ -198,12 +248,15 @@ export function SkuMatchingClient({
     setPreviewError(null);
     setMutationError(null);
     setPendingRowIds(new Set());
+    setRemoteSearchQuery("");
+    setManualSelectedRemoteKey(null);
     previewMutation.reset();
+    remoteSearchMutation.reset();
     upsertMutation.reset();
     if (activeConnectionId && typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "auto" });
     }
-  }, [activeConnectionId, previewMutation.reset, upsertMutation.reset]);
+  }, [activeConnectionId, previewMutation.reset, remoteSearchMutation.reset, upsertMutation.reset]);
 
   useEffect(() => {
     const rowCount = workspace.rows.length + workspace.remoteOnlyRows.length;
@@ -227,6 +280,9 @@ export function SkuMatchingClient({
 
   function openPreview(row: SkuMatchingRow) {
     setPreviewError(null);
+    setRemoteSearchQuery("");
+    setManualSelectedRemoteKey(null);
+    remoteSearchMutation.reset();
     setPreviewOpen(true);
     previewMutation.mutate({
       variantId: row.variantId,
@@ -234,6 +290,31 @@ export function SkuMatchingClient({
       remoteVariantId: row.remoteVariantId,
       remoteInventoryItemId: row.remoteInventoryItemId,
       remoteSku: row.remoteSku,
+    });
+  }
+
+  function runRemoteSearch() {
+    const query = remoteSearchQuery.trim();
+    if (query.length < 2) {
+      setPreviewError("Enter at least 2 characters to search the remote catalog.");
+      return;
+    }
+    setPreviewError(null);
+    remoteSearchMutation.mutate({ query });
+  }
+
+  function previewRemoteSearchResult(item: SkuRemoteCatalogSearchResult) {
+    const variantId = previewData?.canonical.variantId;
+    if (!variantId) return;
+    setPreviewError(null);
+    const selectedKey = remoteSearchResultKey(item);
+    setManualSelectedRemoteKey(selectedKey);
+    previewMutation.mutate({
+      variantId,
+      remoteProductId: item.remoteProductId,
+      remoteVariantId: item.remoteVariantId,
+      remoteInventoryItemId: item.remoteInventoryItemId,
+      remoteSku: item.remoteSku,
     });
   }
 
@@ -770,7 +851,7 @@ export function SkuMatchingClient({
       </Tabs>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Preview match</DialogTitle>
           </DialogHeader>
@@ -801,6 +882,80 @@ export function SkuMatchingClient({
                   >
                     Open Bandcamp product <ExternalLink className="h-3 w-3" />
                   </a>
+                ) : null}
+              </div>
+
+              <div className="rounded-md border bg-card p-4">
+                <div className="font-medium">Search remote catalog</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Search by title, SKU, artist, barcode, product ID, variant ID, or inventory item
+                  ID.
+                </div>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={remoteSearchQuery}
+                    onChange={(event) => setRemoteSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        runRemoteSearch();
+                      }
+                    }}
+                    placeholder="e.g. album title, NS-001, barcode, gid://shopify/Product/..."
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={remoteSearchMutation.isPending}
+                    onClick={runRemoteSearch}
+                  >
+                    <Search className="mr-1 h-4 w-4" /> Search
+                  </Button>
+                </div>
+                {remoteSearchMutation.data ? (
+                  <div className="mt-3 space-y-2">
+                    {remoteSearchMutation.data.results.length === 0 ? (
+                      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                        No remote catalog results matched that search.
+                      </div>
+                    ) : (
+                      remoteSearchMutation.data.results.map((item) => {
+                        const selected = manualSelectedRemoteKey === remoteSearchResultKey(item);
+                        return (
+                          <div
+                            key={remoteSearchResultKey(item)}
+                            className={`rounded-md border p-3 ${selected ? "border-primary bg-primary/5" : ""}`}
+                          >
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="font-medium">{item.combinedTitle}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  product {item.remoteProductId}
+                                  {item.remoteVariantId ? ` · variant ${item.remoteVariantId}` : ""}
+                                  {item.remoteInventoryItemId
+                                    ? ` · inventory ${item.remoteInventoryItemId}`
+                                    : ""}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {item.remoteSku ? `SKU ${item.remoteSku}` : "No remote SKU"}
+                                  {item.barcode ? ` · barcode ${item.barcode}` : ""}
+                                  {item.productType ? ` · ${item.productType}` : ""}
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={selected ? "default" : "outline"}
+                                onClick={() => previewRemoteSearchResult(item)}
+                              >
+                                {selected ? "Selected" : "Preview this match"}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 ) : null}
               </div>
 
@@ -893,15 +1048,28 @@ export function SkuMatchingClient({
                           previewData.targetRemote?.remoteInventoryItemId ?? null,
                         remoteSku: previewData.targetRemote?.remoteSku ?? null,
                         fingerprint: previewData.fingerprint,
-                        matchMethod:
-                          previewData.candidate?.matchMethod === "manual"
+                        matchMethod: manualPreviewSelected
+                          ? "manual"
+                          : previewData.candidate?.matchMethod === "manual"
                             ? "manual"
                             : (previewData.candidate?.matchMethod ?? "manual"),
-                        matchConfidence: previewData.candidate?.confidenceTier ?? "possible",
-                        matchReasons: [...(previewData.candidate?.reasons ?? [])],
+                        matchConfidence: manualPreviewSelected
+                          ? "strong"
+                          : (previewData.candidate?.confidenceTier ?? "possible"),
+                        matchReasons: manualPreviewSelected
+                          ? [
+                              "Manual remote catalog selection",
+                              ...(previewData.candidate?.reasons ?? []),
+                            ]
+                          : [...(previewData.candidate?.reasons ?? [])],
                         candidateSnapshot: {
                           remoteTitle: previewData.targetRemote?.combinedTitle ?? null,
-                          reasons: [...(previewData.candidate?.reasons ?? [])],
+                          reasons: manualPreviewSelected
+                            ? [
+                                "Manual remote catalog selection",
+                                ...(previewData.candidate?.reasons ?? []),
+                              ]
+                            : [...(previewData.candidate?.reasons ?? [])],
                           disqualifiers: [...(previewData.candidate?.disqualifiers ?? [])],
                           score: previewData.candidate?.score ?? 0,
                         },
@@ -912,6 +1080,30 @@ export function SkuMatchingClient({
                 >
                   <Link2 className="mr-1 h-4 w-4" /> Confirm match
                 </Button>
+                {previewData.targetRemote && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={rejectCandidateMutation.isPending}
+                    onClick={() =>
+                      rejectCandidateMutation.mutate({
+                        connectionId: activeConnectionId,
+                        variantId: previewData.canonical.variantId,
+                        remoteProductId: previewData.targetRemote?.remoteProductId ?? null,
+                        remoteVariantId: previewData.targetRemote?.remoteVariantId ?? null,
+                        remoteInventoryItemId:
+                          previewData.targetRemote?.remoteInventoryItemId ?? null,
+                        remoteSku: previewData.targetRemote?.remoteSku ?? null,
+                        scope: "connection",
+                        reason: "manual_not_match",
+                        notes:
+                          "Suppressed from SKU matching review drawer because staff marked it as not a match.",
+                      })
+                    }
+                  >
+                    <Ban className="mr-1 h-4 w-4" /> Not a match
+                  </Button>
+                )}
                 {previewData.existingMapping?.id && (
                   <Button
                     variant="ghost"

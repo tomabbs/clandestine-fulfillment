@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const routerPush = vi.fn();
@@ -13,6 +13,9 @@ vi.mock("next/navigation", () => ({
 }));
 
 const createOrUpdateSkuMatch = vi.fn();
+const previewSkuMatch = vi.fn();
+const rejectSkuMatchCandidate = vi.fn();
+const searchSkuRemoteCatalog = vi.fn();
 
 vi.mock("@/actions/sku-matching", () => ({
   acceptExactMatches: vi.fn(),
@@ -20,7 +23,9 @@ vi.mock("@/actions/sku-matching", () => ({
   createOrUpdateSkuMatch: (...args: unknown[]) => createOrUpdateSkuMatch(...args),
   deactivateSkuMatch: vi.fn(),
   enableSkuMatchingFeatureFlag: vi.fn(),
-  previewSkuMatch: vi.fn(),
+  previewSkuMatch: (...args: unknown[]) => previewSkuMatch(...args),
+  rejectSkuMatchCandidate: (...args: unknown[]) => rejectSkuMatchCandidate(...args),
+  searchSkuRemoteCatalog: (...args: unknown[]) => searchSkuRemoteCatalog(...args),
 }));
 
 import type { SkuMatchingWorkspaceData } from "@/actions/sku-matching";
@@ -139,6 +144,36 @@ function renderClient(data = workspace()) {
 beforeEach(() => {
   vi.clearAllMocks();
   window.scrollTo = vi.fn();
+  previewSkuMatch.mockResolvedValue({
+    canonical: {
+      variantId: workspace().rows[0].variantId,
+      sku: "NS-001",
+      barcode: null,
+      title: "Northern Spy Product",
+      artist: "Northern Spy",
+      format: "LP",
+      bandcampTitle: "Northern Spy Product",
+      bandcampUrl: "https://northernspy.bandcamp.com/album/product",
+    },
+    existingMapping: null,
+    targetRemote: candidate.remote,
+    targetError: null,
+    candidate,
+    fingerprint: "fingerprint-1",
+    shopifyReadiness: null,
+    remoteCatalogState: "ok",
+    remoteCatalogError: null,
+  });
+  searchSkuRemoteCatalog.mockResolvedValue({
+    results: [],
+    remoteCatalogState: "ok",
+    remoteCatalogError: null,
+  });
+  rejectSkuMatchCandidate.mockResolvedValue({
+    rejected: true,
+    alreadyExists: false,
+    remoteKey: candidate.remote.remoteInventoryItemId,
+  });
 });
 
 describe("SkuMatchingClient", () => {
@@ -184,5 +219,118 @@ describe("SkuMatchingClient", () => {
 
     expect(screen.getByText("NS-000")).toBeTruthy();
     expect(screen.getByText("NS-249")).toBeTruthy();
+  });
+
+  it("lets staff search the remote catalog from the review drawer and confirm a selected result", async () => {
+    const manualRemote = {
+      ...candidate.remote,
+      remoteProductId: "gid://shopify/Product/2",
+      remoteVariantId: "gid://shopify/ProductVariant/2",
+      remoteInventoryItemId: "gid://shopify/InventoryItem/2",
+      remoteSku: "REAL-001",
+      productTitle: "Correct Remote Title",
+      combinedTitle: "Correct Remote Title - LP",
+    };
+    searchSkuRemoteCatalog.mockResolvedValueOnce({
+      results: [manualRemote],
+      remoteCatalogState: "ok",
+      remoteCatalogError: null,
+    });
+    previewSkuMatch.mockResolvedValueOnce({
+      canonical: {
+        variantId: workspace().rows[0].variantId,
+        sku: "NS-001",
+        barcode: null,
+        title: "Northern Spy Product",
+        artist: "Northern Spy",
+        format: "LP",
+        bandcampTitle: "Northern Spy Product",
+        bandcampUrl: "https://northernspy.bandcamp.com/album/product",
+      },
+      existingMapping: null,
+      targetRemote: candidate.remote,
+      targetError: null,
+      candidate,
+      fingerprint: "fingerprint-1",
+      shopifyReadiness: null,
+      remoteCatalogState: "ok",
+      remoteCatalogError: null,
+    });
+    previewSkuMatch.mockResolvedValueOnce({
+      canonical: {
+        variantId: workspace().rows[0].variantId,
+        sku: "NS-001",
+        barcode: null,
+        title: "Northern Spy Product",
+        artist: "Northern Spy",
+        format: "LP",
+        bandcampTitle: "Northern Spy Product",
+        bandcampUrl: "https://northernspy.bandcamp.com/album/product",
+      },
+      existingMapping: null,
+      targetRemote: manualRemote,
+      targetError: null,
+      candidate: { ...candidate, remote: manualRemote, matchMethod: "manual" },
+      fingerprint: "manual-fingerprint",
+      shopifyReadiness: null,
+      remoteCatalogState: "ok",
+      remoteCatalogError: null,
+    });
+    createOrUpdateSkuMatch.mockResolvedValueOnce({ mapping_id: "mapping-1" });
+
+    renderClient();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await screen.findByText("Search remote catalog");
+    fireEvent.change(screen.getByPlaceholderText(/album title/i), {
+      target: { value: "Correct Remote Title" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    await screen.findByText("Correct Remote Title - LP");
+    fireEvent.click(screen.getByRole("button", { name: "Preview this match" }));
+    await screen.findByText(/REAL-001/);
+    fireEvent.click(screen.getByRole("button", { name: /Confirm match/i }));
+
+    expect(searchSkuRemoteCatalog).toHaveBeenCalledWith({
+      connectionId: connection.id,
+      query: "Correct Remote Title",
+      limit: 25,
+    });
+    await waitFor(() =>
+      expect(createOrUpdateSkuMatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          remoteProductId: manualRemote.remoteProductId,
+          remoteVariantId: manualRemote.remoteVariantId,
+          remoteInventoryItemId: manualRemote.remoteInventoryItemId,
+          remoteSku: manualRemote.remoteSku,
+          matchMethod: "manual",
+          matchConfidence: "strong",
+        }),
+      ),
+    );
+  });
+
+  it("marks the current remote candidate as not a match from the review drawer", async () => {
+    renderClient();
+
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    await screen.findByText("Search remote catalog");
+    fireEvent.click(screen.getByRole("button", { name: /Not a match/i }));
+
+    await waitFor(() =>
+      expect(rejectSkuMatchCandidate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionId: connection.id,
+          variantId: workspace().rows[0].variantId,
+          remoteProductId: candidate.remote.remoteProductId,
+          remoteVariantId: candidate.remote.remoteVariantId,
+          remoteInventoryItemId: candidate.remote.remoteInventoryItemId,
+          remoteSku: candidate.remote.remoteSku,
+          scope: "connection",
+          reason: "manual_not_match",
+        }),
+      ),
+    );
   });
 });

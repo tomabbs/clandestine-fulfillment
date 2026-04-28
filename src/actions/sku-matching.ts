@@ -22,7 +22,7 @@ import {
 import { createServiceRoleClient } from "@/lib/server/supabase-server";
 import { getWorkspaceFlags, invalidateWorkspaceFlags } from "@/lib/server/workspace-flags";
 import type { ClientStoreConnection } from "@/lib/shared/types";
-import { normalizeSku } from "@/lib/shared/utils";
+import { normalizeProductText, normalizeSku } from "@/lib/shared/utils";
 
 const SUPPORTED_PLATFORMS = ["shopify", "woocommerce", "squarespace"] as const;
 
@@ -88,6 +88,24 @@ const acceptExactMatchesInputSchema = z.object({
       }),
     )
     .max(200),
+});
+
+const searchRemoteCatalogInputSchema = z.object({
+  connectionId: z.string().uuid(),
+  query: z.string().trim().min(2).max(120),
+  limit: z.number().int().min(1).max(50).default(25),
+});
+
+const rejectCandidateInputSchema = z.object({
+  connectionId: z.string().uuid(),
+  variantId: z.string().uuid().nullable().optional(),
+  remoteProductId: z.string().min(1).nullable().optional(),
+  remoteVariantId: z.string().min(1).nullable().optional(),
+  remoteInventoryItemId: z.string().min(1).nullable().optional(),
+  remoteSku: z.string().max(255).nullable().optional(),
+  scope: z.enum(["connection", "variant"]).default("connection"),
+  reason: z.string().min(1).max(160).default("manual_not_match"),
+  notes: z.string().max(1000).nullable().optional(),
 });
 
 type CanonicalVariantRow = {
@@ -164,6 +182,14 @@ type ConflictSummaryRow = {
   row_count: number | null;
   reason: string | null;
 };
+
+type CandidateRejectionRow = {
+  remote_key: string;
+  variant_id: string | null;
+  scope: "connection" | "variant";
+};
+
+export type SkuRemoteCatalogSearchResult = RemoteCatalogItem;
 
 export interface SkuMatchingConnectionSummary {
   id: string;
@@ -306,6 +332,111 @@ function mappingRemoteKey(mapping: {
     normalizeSku(mapping.remote_sku ?? mapping.remoteSku) ??
     ""
   );
+}
+
+async function getCandidateRejections(connectionId: string): Promise<{
+  connectionRemoteKeys: Set<string>;
+  variantRemoteKeys: Map<string, Set<string>>;
+}> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("sku_match_candidate_rejections")
+    .select("remote_key, variant_id, scope")
+    .eq("connection_id", connectionId);
+
+  if (error) throw new Error(`Candidate rejection load failed: ${error.message}`);
+
+  const connectionRemoteKeys = new Set<string>();
+  const variantRemoteKeys = new Map<string, Set<string>>();
+  for (const row of (data ?? []) as CandidateRejectionRow[]) {
+    if (row.scope === "connection") {
+      connectionRemoteKeys.add(row.remote_key);
+      continue;
+    }
+    if (!row.variant_id) continue;
+    const existing = variantRemoteKeys.get(row.variant_id) ?? new Set<string>();
+    existing.add(row.remote_key);
+    variantRemoteKeys.set(row.variant_id, existing);
+  }
+
+  return { connectionRemoteKeys, variantRemoteKeys };
+}
+
+function isRemoteRejected(
+  item: RemoteCatalogItem,
+  rejections: Awaited<ReturnType<typeof getCandidateRejections>>,
+  variantId?: string,
+): boolean {
+  const key = mappingRemoteKey(item);
+  if (!key) return false;
+  if (rejections.connectionRemoteKeys.has(key)) return true;
+  return variantId ? (rejections.variantRemoteKeys.get(variantId)?.has(key) ?? false) : false;
+}
+
+function searchRemoteCatalogItems(
+  items: RemoteCatalogItem[],
+  query: string,
+  limit: number,
+): RemoteCatalogItem[] {
+  const rawNeedle = query.trim().toLowerCase();
+  const normalizedNeedle = normalizeProductText(query);
+  const normalizedSkuNeedle = normalizeSku(query);
+  const normalizedBarcodeNeedle = query.replace(/\D/g, "");
+
+  return items
+    .map((item) => {
+      const rawFields = [
+        item.remoteProductId,
+        item.remoteVariantId,
+        item.remoteInventoryItemId,
+        item.remoteSku,
+        item.barcode,
+        item.productTitle,
+        item.variantTitle,
+        item.combinedTitle,
+        item.productType,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase());
+      const normalizedTextFields = [
+        item.productTitle,
+        item.variantTitle,
+        item.combinedTitle,
+        item.productType,
+      ]
+        .map(normalizeProductText)
+        .filter((value): value is string => Boolean(value));
+
+      let score = 0;
+      if (
+        normalizedSkuNeedle &&
+        normalizeSku(item.remoteSku) &&
+        normalizeSku(item.remoteSku) === normalizedSkuNeedle
+      ) {
+        score += 100;
+      }
+      if (
+        normalizedBarcodeNeedle &&
+        item.barcode &&
+        item.barcode.replace(/\D/g, "") === normalizedBarcodeNeedle
+      ) {
+        score += 95;
+      }
+      if (rawFields.some((field) => field === rawNeedle)) score += 80;
+      if (rawFields.some((field) => field.includes(rawNeedle))) score += 35;
+      if (
+        normalizedNeedle &&
+        normalizedTextFields.some((field) => field.includes(normalizedNeedle))
+      ) {
+        score += 30;
+      }
+
+      return { item, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.item.combinedTitle.localeCompare(b.item.combinedTitle))
+    .slice(0, limit)
+    .map(({ item }) => item);
 }
 
 function classifyRowStatus(input: {
@@ -656,15 +787,23 @@ export async function getSkuMatchingWorkspace(
   const startedAt = Date.now();
   const parsed = connectionInputSchema.parse(rawInput);
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
-  const [flags, remoteCatalog, canonicalRows, existingMappings, conflictMap, conflictSummaries] =
-    await Promise.all([
-      getWorkspaceFlags(auth.userRecord.workspace_id),
-      fetchRemoteCatalogWithTimeout(connection),
-      getCanonicalRows(connection.workspace_id, connection.org_id),
-      getExistingMappings(connection.id),
-      getExistingSkuConflicts(connection.workspace_id),
-      loadConflictSummaries(connection.workspace_id, connection.id),
-    ]);
+  const [
+    flags,
+    remoteCatalog,
+    canonicalRows,
+    existingMappings,
+    conflictMap,
+    conflictSummaries,
+    rejections,
+  ] = await Promise.all([
+    getWorkspaceFlags(auth.userRecord.workspace_id),
+    fetchRemoteCatalogWithTimeout(connection),
+    getCanonicalRows(connection.workspace_id, connection.org_id),
+    getExistingMappings(connection.id),
+    getExistingSkuConflicts(connection.workspace_id),
+    loadConflictSummaries(connection.workspace_id, connection.id),
+    getCandidateRejections(connection.id),
+  ]);
   const discogs = await getDiscogsOverlays(
     connection.workspace_id,
     canonicalRows.map((row) => row.id),
@@ -713,7 +852,11 @@ export async function getSkuMatchingWorkspace(
       bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
     };
 
-    const ranked = rankSkuCandidates(canonicalSignal, remoteCatalog.items);
+    const rankableRemoteItems =
+      remoteCatalog.state === "ok"
+        ? remoteCatalog.items.filter((item) => !isRemoteRejected(item, rejections, canonical.id))
+        : [];
+    const ranked = rankSkuCandidates(canonicalSignal, rankableRemoteItems);
 
     const topCandidate = ranked[0] ?? null;
     const existingTargetSelection =
@@ -816,6 +959,7 @@ export async function getSkuMatchingWorkspace(
 
   if (remoteCatalog.state === "ok") {
     for (const item of remoteCatalog.items) {
+      if (isRemoteRejected(item, rejections)) continue;
       const key = mappingRemoteKey(item);
       if (!key || existingMappings.remoteKeys.has(key)) continue;
       remoteOnlyCount.value += 1;
@@ -870,7 +1014,10 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
   const bandcamp = pickPrimaryBandcampMapping(canonical.bandcamp_product_mappings);
   if (!product) throw new Error("Variant has no canonical product");
 
-  const remoteCatalog = await fetchRemoteCatalogWithTimeout(connection);
+  const [remoteCatalog, rejections] = await Promise.all([
+    fetchRemoteCatalogWithTimeout(connection),
+    getCandidateRejections(connection.id),
+  ]);
   if (remoteCatalog.state !== "ok") {
     return toPlainJson({
       candidates: [],
@@ -896,7 +1043,7 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
       bandcampOptionTitle: canonical.bandcamp_option_title,
       bandcampOriginQuantities: bandcamp?.bandcamp_origin_quantities ?? null,
     },
-    remoteCatalog.items,
+    remoteCatalog.items.filter((item) => !isRemoteRejected(item, rejections, canonical.id)),
   );
 
   return toPlainJson({
@@ -904,6 +1051,119 @@ export async function getSkuMatchCandidates(rawInput: z.input<typeof previewInpu
     remoteCatalogState: remoteCatalog.state,
     remoteCatalogError: remoteCatalog.error,
   });
+}
+
+export async function searchSkuRemoteCatalog(
+  rawInput: z.input<typeof searchRemoteCatalogInputSchema>,
+): Promise<{
+  results: SkuRemoteCatalogSearchResult[];
+  remoteCatalogState: RemoteCatalogFetchState;
+  remoteCatalogError: string | null;
+}> {
+  const parsed = searchRemoteCatalogInputSchema.parse(rawInput);
+  const { connection } = await assertSkuMatchingConnection(parsed.connectionId);
+  const [remoteCatalog, rejections] = await Promise.all([
+    fetchRemoteCatalogWithTimeout(connection),
+    getCandidateRejections(connection.id),
+  ]);
+
+  if (remoteCatalog.state !== "ok") {
+    return toPlainJson({
+      results: [],
+      remoteCatalogState: remoteCatalog.state,
+      remoteCatalogError: remoteCatalog.error,
+    });
+  }
+
+  return toPlainJson({
+    results: searchRemoteCatalogItems(
+      remoteCatalog.items.filter((item) => !isRemoteRejected(item, rejections)),
+      parsed.query,
+      parsed.limit,
+    ),
+    remoteCatalogState: remoteCatalog.state,
+    remoteCatalogError: remoteCatalog.error,
+  });
+}
+
+export async function rejectSkuMatchCandidate(
+  rawInput: z.input<typeof rejectCandidateInputSchema>,
+): Promise<{ rejected: true; alreadyExists: boolean; remoteKey: string }> {
+  const parsed = rejectCandidateInputSchema.parse(rawInput);
+  if (parsed.scope === "variant" && !parsed.variantId) {
+    throw createSkuMatchingError(
+      "variant_required",
+      "A variant id is required for row-only rejection.",
+    );
+  }
+
+  const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
+  const remoteCatalog = await fetchRemoteCatalogWithTimeout(connection);
+  if (remoteCatalog.state !== "ok") {
+    throw createSkuMatchingError(
+      "remote_catalog_unavailable",
+      remoteCatalog.error ?? `Remote catalog is ${remoteCatalog.state}.`,
+    );
+  }
+
+  const targetSelection = selectConnectionScopedRemoteTarget({
+    items: remoteCatalog.items,
+    remoteInventoryItemId: parsed.remoteInventoryItemId,
+    remoteVariantId: parsed.remoteVariantId,
+    remoteProductId: parsed.remoteProductId,
+    remoteSku: parsed.remoteSku,
+  });
+  if (!targetSelection.ok) {
+    throw createSkuMatchingError(targetSelection.code, targetSelection.message);
+  }
+  if (!targetSelection.target) {
+    throw createSkuMatchingError("remote_target_not_found", "Remote candidate was not found.");
+  }
+
+  const remoteKey = mappingRemoteKey(targetSelection.target);
+  if (!remoteKey) {
+    throw createSkuMatchingError(
+      "remote_key_missing",
+      "Remote candidate has no stable identity key.",
+    );
+  }
+
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase.from("sku_match_candidate_rejections").insert({
+    workspace_id: auth.userRecord.workspace_id,
+    connection_id: parsed.connectionId,
+    variant_id: parsed.scope === "variant" ? parsed.variantId : null,
+    scope: parsed.scope,
+    remote_key: remoteKey,
+    remote_product_id: targetSelection.target.remoteProductId,
+    remote_variant_id: targetSelection.target.remoteVariantId,
+    remote_inventory_item_id: targetSelection.target.remoteInventoryItemId,
+    remote_sku: targetSelection.target.remoteSku,
+    remote_title: targetSelection.target.combinedTitle,
+    reason: parsed.reason,
+    notes: parsed.notes ?? null,
+    rejected_by: auth.userRecord.id,
+  });
+
+  if (error && error.code !== "23505") {
+    throw createSkuMatchingError("reject_failed", `Candidate rejection failed: ${error.message}`);
+  }
+
+  await insertSkuMatchingPerfEvent({
+    workspaceId: auth.userRecord.workspace_id,
+    connectionId: parsed.connectionId,
+    actorId: auth.userRecord.id,
+    eventType: "candidate_reject",
+    metadata: {
+      remoteKey,
+      scope: parsed.scope,
+      variantId: parsed.scope === "variant" ? parsed.variantId : null,
+      alreadyExists: error?.code === "23505",
+    },
+  });
+  revalidatePath("/admin/settings/sku-matching");
+
+  return toPlainJson({ rejected: true, alreadyExists: error?.code === "23505", remoteKey });
 }
 
 async function previewSkuMatchInternal(rawInput: z.input<typeof previewInputSchema>) {

@@ -39,4 +39,11 @@ describe("sku-matching Server Action source contract", () => {
     expect(source).not.toContain('.from("client_store_sku_mappings").insert');
     expect(source).not.toContain('.from("client_store_sku_mappings").update');
   });
+
+  it("keeps manual candidate rejection out of the live alias table", () => {
+    expect(source).toContain("searchSkuRemoteCatalog");
+    expect(source).toContain("rejectSkuMatchCandidate");
+    expect(source).toContain('.from("sku_match_candidate_rejections").insert');
+    expect(source).toContain("isRemoteRejected(item, rejections");
+  });
 });
