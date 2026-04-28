@@ -851,7 +851,7 @@ export function SkuMatchingClient({
       </Tabs>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-h-[calc(100vh-2rem)] max-w-4xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Preview match</DialogTitle>
           </DialogHeader>
@@ -913,7 +913,7 @@ export function SkuMatchingClient({
                   </Button>
                 </div>
                 {remoteSearchMutation.data ? (
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
                     {remoteSearchMutation.data.results.length === 0 ? (
                       <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
                         No remote catalog results matched that search.
@@ -1030,7 +1030,7 @@ export function SkuMatchingClient({
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2">
+              <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap gap-2 border-t bg-background/95 p-4 backdrop-blur">
                 <Button
                   disabled={
                     !previewData.targetRemote ||
