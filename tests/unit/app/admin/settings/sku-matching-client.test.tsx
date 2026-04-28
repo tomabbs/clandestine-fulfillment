@@ -21,6 +21,12 @@ vi.mock("sonner", () => ({
   },
 }));
 
+vi.mock("@/components/ui/sonner", () => ({
+  Toaster: (props: { position?: string }) => (
+    <div data-position={props.position} data-testid="sku-matching-toaster" />
+  ),
+}));
+
 const createOrUpdateSkuMatch = vi.fn();
 const previewSkuMatch = vi.fn();
 const rejectSkuMatchCandidate = vi.fn();
@@ -199,6 +205,7 @@ describe("SkuMatchingClient", () => {
   it("renders Shopify and Bandcamp comparison links", () => {
     renderClient();
 
+    expect(screen.getByTestId("sku-matching-toaster").dataset.position).toBe("top-center");
     expect(
       (screen.getByRole("link", { name: /Open Shopify product/i }) as HTMLAnchorElement).href,
     ).toBe(candidate.remote.productUrl);

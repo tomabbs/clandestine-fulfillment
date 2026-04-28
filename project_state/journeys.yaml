@@ -65,7 +65,7 @@ journeys:
       - Shopify rows surface readiness before approval and can activate inventory at the selected default location without changing quantity
       - live alias writes pass the shared scope trigger even though client_store_sku_mappings has no org_id column; optional org checks are JSONB-derived and workspace/variant checks still apply
       - Accept best match failures surface once via the page-level action alert; successful Accept smoke testing has no visible action errors, console errors, or non-aborted network failures
-      - Accept best match validates stale fingerprints without running Shopify readiness checks, removes the row optimistically, refreshes the workspace in the background, and shows saved/rejected toast feedback
+      - Accept best match validates stale fingerprints without running Shopify readiness checks, removes the row optimistically, refreshes the workspace in the background, and shows saved/rejected feedback through a viewport-fixed SKU matching toaster
       - review drawer can search the remote catalog by title, SKU, artist/vendor, barcode, product ID, variant ID, and inventory item ID
       - remote search results are height-bounded, internally scrollable, and force-wrap long Shopify IDs so a long result set cannot trap or horizontally clip the preview/confirm workflow
       - selected remote search results re-preview the exact remote product/variant before Confirm match persists a manual strong alias through persist_sku_match
