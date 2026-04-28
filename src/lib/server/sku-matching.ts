@@ -87,6 +87,15 @@ export interface RemoteCatalogResult {
   fetchedAt: string | null;
 }
 
+export const REMOTE_CATALOG_TIMEOUTS_MS = {
+  shopify: 30_000,
+  // Northern Spy's Woo catalog is small in item count but slow per page
+  // (~2.5s/page before variations), so 20s falsely marks a healthy store
+  // as timed out during SKU review bootstrap.
+  woocommerce: 55_000,
+  squarespace: 15_000,
+} as const;
+
 export interface CanonicalCandidateSignalSource {
   variantId: string;
   sku: string;
@@ -304,12 +313,6 @@ async function fetchSquarespaceCatalog(
 export async function fetchRemoteCatalogWithTimeout(
   connection: ClientStoreConnection,
 ): Promise<RemoteCatalogResult> {
-  const timeoutsMs: Record<string, number> = {
-    shopify: 30_000,
-    woocommerce: 20_000,
-    squarespace: 15_000,
-  };
-
   if (
     connection.platform !== "shopify" &&
     connection.platform !== "woocommerce" &&
@@ -326,10 +329,13 @@ export async function fetchRemoteCatalogWithTimeout(
   try {
     const items =
       connection.platform === "shopify"
-        ? await withTimeout(fetchShopifyCatalog(connection), timeoutsMs.shopify)
+        ? await withTimeout(fetchShopifyCatalog(connection), REMOTE_CATALOG_TIMEOUTS_MS.shopify)
         : connection.platform === "woocommerce"
-          ? await withTimeout(fetchWooCatalog(connection), timeoutsMs.woocommerce)
-          : await withTimeout(fetchSquarespaceCatalog(connection), timeoutsMs.squarespace);
+          ? await withTimeout(fetchWooCatalog(connection), REMOTE_CATALOG_TIMEOUTS_MS.woocommerce)
+          : await withTimeout(
+              fetchSquarespaceCatalog(connection),
+              REMOTE_CATALOG_TIMEOUTS_MS.squarespace,
+            );
 
     return {
       state: "ok",

@@ -3,9 +3,16 @@ import type { RankSkuEvidenceContext, RemoteCatalogItem } from "@/lib/server/sku
 import {
   buildCandidateFingerprint,
   pickPrimaryBandcampMapping,
+  REMOTE_CATALOG_TIMEOUTS_MS,
   rankSkuCandidates,
   selectConnectionScopedRemoteTarget,
 } from "@/lib/server/sku-matching";
+
+describe("remote catalog timeouts", () => {
+  it("gives WooCommerce enough budget for slower paginated catalogs", () => {
+    expect(REMOTE_CATALOG_TIMEOUTS_MS.woocommerce).toBeGreaterThanOrEqual(55_000);
+  });
+});
 
 describe("rankSkuCandidates", () => {
   const canonical = {
