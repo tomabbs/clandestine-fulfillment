@@ -26,8 +26,10 @@ import { normalizeProductText, normalizeSku } from "@/lib/shared/utils";
 
 const SUPPORTED_PLATFORMS = ["shopify", "woocommerce", "squarespace"] as const;
 
-const connectionInputSchema = z.object({
+const skuMatchingWorkspaceInputSchema = z.object({
   connectionId: z.string().uuid(),
+  /** When set and included in connection coverage, load canonical rows for that warehouse org only. */
+  catalogOrgId: z.string().uuid().optional(),
 });
 
 const previewInputSchema = z.object({
@@ -201,6 +203,11 @@ type SkuMatchingConnectionContext = ClientStoreConnection & {
   organizations?: { name: string } | { name: string }[] | null;
   coveredOrgIds: string[];
   coveredOrgNamesById: Map<string, string>;
+  coverageLabels: Array<{
+    orgId: string;
+    name: string;
+    role: ConnectionCoverageRow["coverage_role"];
+  }>;
 };
 
 export type SkuRemoteCatalogSearchResult = RemoteCatalogItem;
@@ -261,6 +268,16 @@ export interface SkuMatchingRow {
 export interface SkuMatchingWorkspaceData {
   featureEnabled: boolean;
   connection: SkuMatchingConnectionSummary;
+  /** Warehouse orgs authorized to match onto this storefront (primary + included labels). */
+  coverageLabels: Array<{
+    orgId: string;
+    name: string;
+    role: "primary" | "included_label";
+  }>;
+  /** Whether canonical rows are filtered to `activeCatalogOrgId` or merged from all coverage orgs. */
+  catalogScope: "all_covered_orgs" | "single_org";
+  /** Present when URL `orgId` narrows canonical rows to one covered org; null when merging all labels. */
+  activeCatalogOrgId: string | null;
   remoteCatalogState: RemoteCatalogFetchState;
   remoteCatalogError: string | null;
   fetchedAt: string | null;
@@ -545,6 +562,11 @@ async function assertSkuMatchingConnection(connectionId: string): Promise<{
         (row.org_id === data.org_id ? "Primary org" : "Covered org"),
     ]),
   );
+  const coverageLabels = coverageRows.map((row) => ({
+    orgId: row.org_id,
+    name: asSingle(row.organizations)?.name ?? coveredOrgNamesById.get(row.org_id) ?? "Unknown org",
+    role: row.coverage_role,
+  }));
 
   if (coveredOrgIds.length === 0) {
     throw new Error("Connection coverage not found");
@@ -558,6 +580,7 @@ async function assertSkuMatchingConnection(connectionId: string): Promise<{
       }),
       coveredOrgIds,
       coveredOrgNamesById,
+      coverageLabels,
     },
   };
 }
@@ -859,11 +882,17 @@ export async function listSkuMatchingConnections(input?: {
 }
 
 export async function getSkuMatchingWorkspace(
-  rawInput: z.input<typeof connectionInputSchema>,
+  rawInput: z.input<typeof skuMatchingWorkspaceInputSchema>,
 ): Promise<SkuMatchingWorkspaceData> {
   const startedAt = Date.now();
-  const parsed = connectionInputSchema.parse(rawInput);
+  const parsed = skuMatchingWorkspaceInputSchema.parse(rawInput);
   const { auth, connection } = await assertSkuMatchingConnection(parsed.connectionId);
+  const narrowedCatalogOrgId =
+    parsed.catalogOrgId && connection.coveredOrgIds.includes(parsed.catalogOrgId)
+      ? parsed.catalogOrgId
+      : null;
+  const canonicalOrgIds =
+    narrowedCatalogOrgId !== null ? [narrowedCatalogOrgId] : connection.coveredOrgIds;
   const [
     flags,
     remoteCatalog,
@@ -875,7 +904,7 @@ export async function getSkuMatchingWorkspace(
   ] = await Promise.all([
     getWorkspaceFlags(auth.userRecord.workspace_id),
     fetchRemoteCatalogWithTimeout(connection),
-    getCanonicalRows(connection.workspace_id, connection.coveredOrgIds),
+    getCanonicalRows(connection.workspace_id, canonicalOrgIds),
     getExistingMappings(connection.id),
     getExistingSkuConflicts(connection.workspace_id),
     loadConflictSummaries(connection.workspace_id, connection.id),
@@ -1065,6 +1094,10 @@ export async function getSkuMatchingWorkspace(
   return toPlainJson({
     featureEnabled: Boolean(flags.sku_matching_enabled),
     connection: toConnectionSummary(connection, existingMappings.byVariantId.size),
+    coverageLabels: connection.coverageLabels,
+    catalogScope:
+      narrowedCatalogOrgId !== null ? ("single_org" as const) : ("all_covered_orgs" as const),
+    activeCatalogOrgId: narrowedCatalogOrgId,
     remoteCatalogState: remoteCatalog.state,
     remoteCatalogError: remoteCatalog.error,
     fetchedAt: remoteCatalog.fetchedAt,

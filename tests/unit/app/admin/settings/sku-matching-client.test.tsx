@@ -85,6 +85,15 @@ function workspace(overrides: Partial<SkuMatchingWorkspaceData> = {}): SkuMatchi
   return {
     featureEnabled: true,
     connection,
+    coverageLabels: [
+      {
+        orgId: "55555555-5555-4555-8555-555555555555",
+        name: "Northern Spy Records",
+        role: "primary",
+      },
+    ],
+    catalogScope: "all_covered_orgs",
+    activeCatalogOrgId: null,
     remoteCatalogState: "ok",
     remoteCatalogError: null,
     fetchedAt: "2026-04-27T10:00:00.000Z",
@@ -197,7 +206,7 @@ describe("SkuMatchingClient", () => {
   it("clears connectionId from the URL when the client changes", () => {
     renderClient();
 
-    fireEvent.change(screen.getByLabelText("Client"), {
+    fireEvent.change(screen.getByLabelText(/Client \(warehouse label\)/i), {
       target: { value: "55555555-5555-4555-8555-555555555555" },
     });
 

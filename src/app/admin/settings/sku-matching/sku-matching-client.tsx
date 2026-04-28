@@ -632,12 +632,13 @@ export function SkuMatchingClient({
 
       <div className="grid gap-3 md:grid-cols-4">
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Client</span>
+          <span className="text-muted-foreground">Client (warehouse label)</span>
           <select
             className="h-9 w-full rounded-md border bg-background px-3"
-            value={selectedOrgId ?? workspace.connection.orgId}
+            value={selectedOrgId ?? ""}
             onChange={(event) => navigate({ orgId: event.target.value, connectionId: null })}
           >
+            <option value="">All warehouse labels — merged SKU view</option>
             {clients.map((client) => (
               <option key={client.id} value={client.id}>
                 {client.name}
@@ -672,6 +673,42 @@ export function SkuMatchingClient({
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-md border bg-muted/30 px-4 py-3 text-sm">
+        <div className="font-medium text-foreground">Canonical catalogs on this connection</div>
+        <p className="mt-1 text-muted-foreground">
+          This storefront fetches <span className="font-medium text-foreground">one</span> remote
+          product catalog from the connection above. Rows below warehouse-map from each covered
+          label ({workspace.coverageLabels.length}). Use Client to narrow to one label or keep{" "}
+          <span className="font-medium text-foreground">
+            All warehouse labels — merged SKU view
+          </span>
+          .
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {workspace.coverageLabels.map((label) => (
+            <Badge key={label.orgId} variant={label.role === "primary" ? "default" : "secondary"}>
+              {label.name}
+              {label.role === "included_label" ? " · included label" : " · primary"}
+            </Badge>
+          ))}
+        </div>
+        {workspace.catalogScope === "single_org" && workspace.activeCatalogOrgId ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Filtered:</span> showing canonical SKU
+            rows for{" "}
+            {workspace.coverageLabels.find((x) => x.orgId === workspace.activeCatalogOrgId)?.name ??
+              "this label"}{" "}
+            only.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Merged view:</span> every covered
+            label&apos;s canonical rows are merged into the lists and summary counts for this
+            workspace load.
+          </p>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">

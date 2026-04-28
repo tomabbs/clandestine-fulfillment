@@ -13,13 +13,13 @@ export default async function SkuMatchingPage({
 }) {
   try {
     const params = (await searchParams) ?? {};
-    const orgId = typeof params.orgId === "string" ? params.orgId : undefined;
+    const catalogOrgId = typeof params.orgId === "string" ? params.orgId : undefined;
     const requestedConnectionId =
       typeof params.connectionId === "string" ? params.connectionId : undefined;
 
     const [clients, connections] = await Promise.all([
       listSkuMatchingClients(),
-      listSkuMatchingConnections({ orgId }),
+      listSkuMatchingConnections({ orgId: catalogOrgId }),
     ]);
 
     if (connections.length === 0) {
@@ -38,14 +38,17 @@ export default async function SkuMatchingPage({
         ? requestedConnectionId
         : connections[0].id;
 
-    const workspace = await getSkuMatchingWorkspace({ connectionId: activeConnectionId });
+    const workspace = await getSkuMatchingWorkspace({
+      connectionId: activeConnectionId,
+      catalogOrgId,
+    });
 
     return (
       <SkuMatchingClient
         clients={clients}
         connections={connections}
         workspace={workspace}
-        selectedOrgId={orgId ?? null}
+        selectedOrgId={catalogOrgId ?? null}
       />
     );
   } catch (error) {

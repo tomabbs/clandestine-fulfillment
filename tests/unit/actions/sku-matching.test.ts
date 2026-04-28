@@ -65,6 +65,13 @@ describe("sku-matching Server Action source contract", () => {
     expect(source).toContain("orgName: connection.coveredOrgNamesById.get(product.org_id)");
   });
 
+  it("narrows workspace canonical rows when catalogOrgId is covered", () => {
+    expect(source).toContain("skuMatchingWorkspaceInputSchema");
+    expect(source).toContain("catalogOrgId");
+    expect(source).toContain("narrowedCatalogOrgId");
+    expect(source).toContain("canonicalOrgIds");
+  });
+
   it("filters the connection picker through included-label coverage rows", () => {
     expect(source).toContain('.eq("org_id", input.orgId)');
     expect(source).toContain("coveredConnectionIds");
