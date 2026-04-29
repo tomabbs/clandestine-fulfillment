@@ -58,15 +58,21 @@ const NAV_ITEMS = [
   { title: "Manual Count", href: "/admin/inventory/manual-count", icon: ClipboardList },
   { title: "Locations", href: "/admin/inventory/locations", icon: Warehouse },
   { title: "Inbound", href: "/admin/inbound", icon: PackagePlus },
-  // Phase 2.3 — single "Orders" entry (was previously a dual sidebar with
-  // /admin/shipstation-orders, now 301-redirected to /admin/orders).
-  // /admin/orders-legacy is intentionally NOT in the sidebar — ops only.
+  // Order Pages Transition Phase 6 — explicit Direct vs Mirror entries.
+  // /admin/orders renders Direct or Mirror based on workspaces.flags.orders_route_mode
+  // (Phase 0). The dedicated /admin/orders/shipstation route always renders
+  // the ShipStation cockpit so staff have a stable URL during the transition.
   { title: "Orders", href: "/admin/orders", icon: ShoppingCart },
+  { title: "ShipStation Mirror", href: "/admin/orders/shipstation", icon: ShoppingCart },
   // Phase 6 Slice 6.D — fulfillment-hold resolution surface. Separate
   // from "Orders" (which doesn't surface on_hold rows in the default
   // cockpit view) so staff can triage held orders without filtering the
   // main orders table.
   { title: "Order Holds", href: "/admin/orders/holds", icon: AlertCircle },
+  // Order Pages Transition Phase 0 — staff-only diagnostics surface for
+  // the Direct ↔ ShipStation Mirror transition. Includes the route-mode
+  // rollback control (super_admin / warehouse_manager only).
+  { title: "Order Diagnostics", href: "/admin/orders/diagnostics", icon: AlertCircle },
   { title: "Mail-Order", href: "/admin/mail-order", icon: Store },
   { title: "Catalog", href: "/admin/catalog", icon: Library },
   { title: "Clients", href: "/admin/clients", icon: Users },

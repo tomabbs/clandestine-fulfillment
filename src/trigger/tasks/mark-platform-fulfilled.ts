@@ -19,6 +19,7 @@
 import { logger, task } from "@trigger.dev/sdk";
 import OAuth from "oauth-1.0a";
 import { releaseOrderItems } from "@/lib/server/inventory-commitments";
+import { openWriteback, recordBlockedWriteback } from "@/lib/server/platform-fulfillment-writeback";
 import {
   fetchFulfillmentOrdersForOrder,
   runFulfillmentCreateMutation,
@@ -78,13 +79,41 @@ export const markPlatformFulfilledTask = task({
 
     if (!order) return { skipped: true, reason: "order_not_found" };
 
-    // Bandcamp handled separately by bandcamp-mark-shipped cron
-    if (order.source === "bandcamp")
+    // Bandcamp handled separately by bandcamp-mark-shipped cron. Record a
+    // blocked writeback so Direct Orders renders the explicit reason instead
+    // of "no writeback row found".
+    if (order.source === "bandcamp") {
+      await recordBlockedWriteback({
+        supabase,
+        workspaceId: order.workspace_id as string,
+        warehouseOrderId: order.id as string,
+        platform: "bandcamp",
+        status: "blocked_bandcamp_generic_path",
+        reason: "bandcamp-mark-shipped cron handles Bandcamp writeback; generic path blocked.",
+      });
       return { skipped: true, reason: "bandcamp_handled_separately" };
+    }
     if (order.source === "manual") return { skipped: true, reason: "manual_order" };
 
-    const platformOrderId = (order.metadata as Record<string, string> | null)?.platform_order_id;
-    if (!platformOrderId) return { skipped: true, reason: "no_platform_order_id_in_metadata" };
+    // Phase 5b — accept warehouse_orders.external_order_id as a fallback
+    // when metadata.platform_order_id is absent (legacy/historical rows
+    // ingested before metadata.platform_order_id was canonical).
+    const platformOrderId =
+      (order.metadata as Record<string, string> | null)?.platform_order_id ??
+      (order.external_order_id as string | null) ??
+      null;
+    if (!platformOrderId) {
+      await recordBlockedWriteback({
+        supabase,
+        workspaceId: order.workspace_id as string,
+        warehouseOrderId: order.id as string,
+        platform: order.source as string,
+        status: "blocked_missing_identity",
+        reason:
+          "Missing metadata.platform_order_id AND warehouse_orders.external_order_id; cannot writeback.",
+      });
+      return { skipped: true, reason: "no_platform_order_id_in_metadata" };
+    }
 
     const { data: connection } = await supabase
       .from("client_store_connections")
@@ -131,18 +160,39 @@ export const markPlatformFulfilledTask = task({
     // to derive the remaining quantity per SKU.
     const { data: orderItems } = await supabase
       .from("warehouse_order_items")
-      .select("sku, quantity, fulfilled_quantity")
+      .select("id, sku, quantity, fulfilled_quantity")
       .eq("warehouse_order_id", order_id);
 
     const requiredSkus = new Map<string, number>();
+    const writebackLines: Array<{ warehouseOrderItemId: string; quantity: number }> = [];
     for (const item of orderItems ?? []) {
       const sku = item.sku as string | null;
       if (!sku) continue;
       const ordered = Number(item.quantity ?? 0);
       const fulfilled = Number(item.fulfilled_quantity ?? 0);
       const remaining = Math.max(0, ordered - fulfilled);
-      if (remaining > 0) requiredSkus.set(sku, remaining);
+      if (remaining > 0) {
+        requiredSkus.set(sku, remaining);
+        writebackLines.push({
+          warehouseOrderItemId: item.id as string,
+          quantity: remaining,
+        });
+      }
     }
+
+    // Phase 5b — open writeback ledger BEFORE the platform call so a crash
+    // mid-call leaves an `in_progress` row visible on Direct Orders.
+    const ledger = await openWriteback({
+      supabase,
+      workspaceId: order.workspace_id as string,
+      warehouseOrderId: order.id as string,
+      shipmentId: null,
+      platform: order.source as string,
+      connectionId: (connection as { id: string }).id ?? null,
+      externalOrderId: platformOrderId,
+      lines: writebackLines,
+      requestSummary: { tracking_number, carrier },
+    });
 
     try {
       switch (order.source) {
@@ -174,6 +224,8 @@ export const markPlatformFulfilledTask = task({
         .from("warehouse_orders")
         .update({ platform_fulfillment_status: "confirmed", updated_at: new Date().toISOString() })
         .eq("id", order_id);
+
+      await ledger.recordAll({ status: "succeeded" });
 
       // Phase 5 §9.6 D1.b — release every open commit for this
       // order. Fulfillment confirmation = stock has physically left
@@ -229,6 +281,18 @@ export const markPlatformFulfilledTask = task({
         .from("warehouse_orders")
         .update({ platform_fulfillment_status: "failed", updated_at: new Date().toISOString() })
         .eq("id", order_id);
+
+      // Treat repeated transport failures (>=3) as terminal so retry storms
+      // don't keep flapping the order-level status.
+      const isTerminal = err instanceof ShopifyFulfillmentError && err.selectionFailure !== null;
+      await ledger.recordAll({
+        status: isTerminal ? "failed_terminal" : "failed_retryable",
+        errorCode:
+          err instanceof ShopifyFulfillmentError
+            ? (err.selectionFailure ?? "shopify_user_error")
+            : "platform_error",
+        errorMessage: msg.slice(0, 500),
+      });
 
       // B-2: persist the raw GraphQL `userErrors[]` and selection-failure
       // diagnostics on the review queue row so debugging never has to

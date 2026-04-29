@@ -337,6 +337,7 @@ export async function POST(req: NextRequest) {
           location: buildLocation(d.tracking_location),
           event_time: d.datetime ?? null,
           source: "easypost",
+          tracking_source: "easypost",
           provider_event_id: providerEventId,
         });
       }

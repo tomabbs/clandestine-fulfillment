@@ -90,6 +90,7 @@ export async function POST(request: NextRequest) {
         location: buildLocation(latestCheckpoint),
         event_time: (latestCheckpoint.checkpoint_time as string) ?? null,
         source: "aftership",
+        tracking_source: "aftership",
       });
     }
 

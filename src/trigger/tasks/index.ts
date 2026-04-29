@@ -62,6 +62,25 @@ export { multiStoreInventoryPushTask } from "./multi-store-inventory-push";
 // and webhook signature spikes. Writes sensor_readings rows + escalates
 // to Sentry/Slack when signature failure thresholds are exceeded.
 export { notificationFailureSensorTask } from "./notification-failure-sensor";
+// Order Pages Transition Phase 1 — resumable Identity v2 backfill.
+//   Walks `warehouse_orders` rows where connection_id IS NULL, resolves
+//   identity using the same pure resolver the live-ingest stamping
+//   helper will use, and writes back connection_id /
+//   ingestion_idempotency_key_v2 / identity_resolution_status. Pinned
+//   to the dedicated `order-identity-backfill` queue (concurrencyLimit 1)
+//   so it cannot starve real-time inventory work.
+export { orderIdentityBackfillTask } from "./order-identity-backfill";
+// Order Pages Transition Phase 2 — order_mirror_links bridge worker.
+//   Walks warehouse_orders + shipstation_orders, calls the pure
+//   decideMirrorLink helper, and upserts diagnostic-grade link rows.
+//   Pinned to the `shipstation` queue.
+export { orderMirrorLinksBridgeTask } from "./order-mirror-links-bridge";
+// Order Pages Transition Phase 0 — one-shot historical mislink audit.
+//   Flags Pirate Ship shipments whose parent warehouse_orders.created_at
+//   is more than 180 days BEFORE the shipment date. Surfaces every
+//   candidate as a `pirate_ship_potential_mislink` review row; never
+//   auto-unlinks. Pinned to the shared `shipstation` queue.
+export { pirateShipHistoricalLinkAuditTask } from "./pirate-ship-historical-link-audit";
 export { pirateShipImportTask } from "./pirate-ship-import";
 export { preorderFulfillmentTask, preorderReleaseVariantTask } from "./preorder-fulfillment";
 export { preorderSetupTask } from "./preorder-setup";

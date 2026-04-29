@@ -87,7 +87,7 @@ Migrated domains as of `scoped_query_key_hardening_36769ea7`:
 
 - `shipping-v2` — admin + portal shipping pages.
 - `billing-v2` — admin + portal billing pages.
-- `orders-v2` — admin orders cockpit (drawer subcomponents included).
+- `orders-v2` — admin orders cockpit (drawer subcomponents included). **Order Pages Transition expansion (2026-04-29):** the `orders` family now contains six sub-families — `direct.list(scope, filters?)`, `direct.detail(scope, orderId)`, `shipstationMirror.list(scope, filters?)`, `shipstationMirror.detail(scope, orderId)`, `mirrorLinks.byWarehouseOrder(scope, warehouseOrderId)`, `mirrorLinks.byShipstationOrder(scope, shipstationOrderId)`, `transitionDiagnostics(scope)`, `writebackStatus(scope, warehouseOrderId)`, plus the legacy `cockpitList(scope, filters?)` shim aliased to `shipstationMirror.list`. Mutations route through `invalidateOrderSurfaces({workspaceId, kinds:[…]})` (`src/lib/server/invalidate-order-surfaces.ts`) — every `OrderSurfaceKind` (`direct.list | direct.detail | shipstation.list | shipstation.detail | mirrorLinks | transitionDiagnostics | writebackStatus | holds | preorderPending`) maps to the matching `revalidatePath` calls. CI guard `scripts/ci-checks/orders-no-direct-revalidate.sh` rejects any `revalidatePath('/admin/orders…')` outside the helper. The `/admin/orders` page is `dynamic = "force-dynamic"` so the `orders_route_mode` flag flip is honored on the next request without ISR confusion.
 - `auth-context-v2` — bootstrap reads that RETURN workspaceId/userContext
   (cannot embed those in their own keys).
 

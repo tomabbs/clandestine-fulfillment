@@ -148,6 +148,13 @@ Canonical catalog of request boundaries used for planning/build/audit.
   - `src/actions/inbound.ts`
   - `src/actions/shipping.ts`
   - `src/actions/orders.ts`
+  - `src/actions/staff-orders.ts` (Order Pages Transition Phase 3 — Direct Orders staff read model; explicit `DirectOrderDTO` / `DirectOrderDetailDTO`; staff-only via `requireStaff()`; uses Phase 1 trigram indexes for search; hydrates items, shipments, tracking events with `tracking_source`, mirror links from the Phase 2 bridge, and Phase 5b platform fulfillment writebacks per order)
+  - `src/actions/order-route-mode.ts` (Order Pages Transition Phase 0 — `getOrdersRouteMode(workspaceId)` reads `workspaces.flags.orders_route_mode` (`direct | shipstation_mirror`) plus the legacy `shipstation_unified_shipping` value; `flipOrdersRouteMode` is staff-gated to `super_admin`/`warehouse_manager`, writes a `warehouse_review_queue` row with `category='order_route_mode_change'`, then calls `invalidateOrderSurfaces`)
+  - `src/actions/order-transition-diagnostics.ts` (Order Pages Transition Phase 0 — staff-only `getOrderTransitionDiagnostics()` aggregates direct/mirror counts by 30/90 day windows, identity backfill counts, mirror link confidence histogram, hold counts, preorder-pending counts by surface, writeback statuses, shipments by `label_source`, Pirate Ship potential mislink count, open route-flip / identity / Pirate Ship review queue items)
+  - `src/actions/order-identity-backfill.ts` (Order Pages Transition Phase 1 — `enqueueIdentityBackfill()` triggers the resumable `order-identity-backfill` Trigger task; `resolveIdentityReview()` lets `super_admin` / `warehouse_manager` resolve `warehouse_order_identity_review_queue` rows; both invalidate Direct Orders surfaces via `invalidateOrderSurfaces`)
+  - `src/actions/order-mirror-links.ts` (Order Pages Transition Phase 2 — `enqueueMirrorLinksBridge()` staff-gated trigger of the `order-mirror-links-bridge` task; invalidates `transitionDiagnostics` + `mirrorLinks` cache)
+  - `src/actions/preorder-pending.ts` (Order Pages Transition Phase 4a — `getPreorderPending()` reads from the unified `preorder_pending_orders` SQL view; returns combined rows + per-surface counts)
+  - `src/actions/order-holds.ts` (Phase 4b: bulk + single hold release; refactored 2026-04-29 to call `invalidateOrderSurfaces({kinds:['holds','direct.detail','direct.list']})` instead of direct `revalidatePath`)
   - `src/actions/scanning.ts`
   - `src/actions/mail-orders.ts`
 - Key exports:
@@ -168,6 +175,8 @@ Canonical catalog of request boundaries used for planning/build/audit.
 - File: `src/actions/shipstation-orders.ts`
 - Key exports:
   - `getShipStationOrders({ status?, page?, pageSize? })` — live read from ShipStation `/orders` API, no DB write; staff-only
+  - **Unified staff Orders cockpit (2026-04-28):** when `workspaces.flags.shipstation_unified_shipping`, `/admin/orders` loads **`getShipStationOrdersDb` → `shipstation_orders` + `shipstation_order_items`** (see `src/app/admin/orders/page.tsx`). This is the ShipStation mirror—not a per-native-channel SQL union over `warehouse_orders`. Multi-channel visibility depends on orders existing in ShipStation first; see `TRUTH_LAYER.md` § Operational cutover semantics + `docs/RELEASE_GATE_CRITERIA.md` § Operational cutover — user-facing claims vs system contracts.
+  - `refreshShipStationOrdersFromSS({ windowMinutes })` — staff mutation to pull recent SS orders into the mirror for cockpit refresh.
 - Admin page: `/admin/shipstation-orders` — team's working order queue during bridge period
 - Pirate Ship import surfaced from Shipping Log header → `/admin/shipping/pirate-ship`
 

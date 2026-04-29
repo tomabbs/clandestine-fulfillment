@@ -1,8 +1,8 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod/v4";
 import { requireStaff } from "@/lib/server/auth-context";
+import { invalidateOrderSurfaces } from "@/lib/server/invalidate-order-surfaces";
 import {
   type HoldRpcClient,
   type ReleaseOrderFulfillmentHoldResult,
@@ -308,7 +308,11 @@ export async function releaseOrderHold(
     };
   }
 
-  revalidatePath("/admin/orders/holds");
+  await invalidateOrderSurfaces({
+    workspaceId,
+    warehouseOrderId: input.orderId,
+    kinds: ["holds", "direct.detail", "direct.list"],
+  });
 
   return {
     ok: true,
@@ -425,7 +429,10 @@ export async function releaseOrderHoldsBulk(
     }
   }
 
-  revalidatePath("/admin/orders/holds");
+  await invalidateOrderSurfaces({
+    workspaceId,
+    kinds: ["holds", "direct.list"],
+  });
 
   return { succeeded, failed };
 }

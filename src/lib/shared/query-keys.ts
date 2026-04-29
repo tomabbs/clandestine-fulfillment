@@ -220,6 +220,57 @@ export const queryKeysV2 = {
     /** Workspace-wide list of staff users that can be assigned to orders. */
     assignableStaff: (scope: QueryScope) =>
       ["orders-v2", ...scopePrefix(scope), "assignable-staff"] as const,
+    /**
+     * Order Pages Transition — Direct / Unified Orders read model over
+     * `warehouse_orders`. Distinct family from `cockpitList` so an
+     * invalidation on one surface doesn't tank the cache for the other.
+     */
+    direct: {
+      list: (scope: QueryScope, filters?: object) =>
+        ["orders-v2", ...scopePrefix(scope), "direct-list", filters] as const,
+      detail: (scope: QueryScope, warehouseOrderId: string) =>
+        ["orders-v2", ...scopePrefix(scope), "direct-detail", warehouseOrderId] as const,
+    },
+    /**
+     * Order Pages Transition — explicit alias for the existing cockpit
+     * key so consumers that opt into the new naming converge over time.
+     * `cockpitList` above is preserved as a one-release shim.
+     */
+    shipstationMirror: {
+      list: (scope: QueryScope, filters?: object) =>
+        ["orders-v2", ...scopePrefix(scope), "cockpit-list", filters] as const,
+      detail: (scope: QueryScope, shipstationOrderId: string) =>
+        [
+          "orders-v2",
+          ...scopePrefix(scope),
+          "shipstation-mirror-detail",
+          shipstationOrderId,
+        ] as const,
+    },
+    /**
+     * Order Pages Transition — diagnostic-first bridge between
+     * `warehouse_orders` and `shipstation_orders`. Staff/service-only
+     * for the first release.
+     */
+    mirrorLinks: {
+      byWarehouseOrder: (scope: QueryScope, warehouseOrderId: string) =>
+        ["orders-v2", ...scopePrefix(scope), "mirror-links-by-direct", warehouseOrderId] as const,
+      byShipstationOrder: (scope: QueryScope, shipstationOrderId: string) =>
+        ["orders-v2", ...scopePrefix(scope), "mirror-links-by-mirror", shipstationOrderId] as const,
+    },
+    /**
+     * Order Pages Transition — diagnostics surface at
+     * /admin/orders/diagnostics. Aggregates direct vs mirror counts,
+     * identity health, tracking parity, writeback parity, and the
+     * pirate-ship historical-link audit signal.
+     */
+    transitionDiagnostics: (scope: QueryScope) =>
+      ["orders-v2", ...scopePrefix(scope), "transition-diagnostics"] as const,
+    /**
+     * Order Pages Transition — per-order writeback status (Phase 5b).
+     */
+    writebackStatus: (scope: QueryScope, warehouseOrderId: string) =>
+      ["orders-v2", ...scopePrefix(scope), "writeback-status", warehouseOrderId] as const,
   },
   /**
    * Auth/bootstrap context — the data needed to build a QueryScope itself.

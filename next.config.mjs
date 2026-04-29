@@ -29,11 +29,18 @@ const nextConfig = {
   },
   async redirects() {
     return [
-      // Phase 2.3 — old ShipStation Orders URL → new unified Orders cockpit.
-      // 301 (permanent) so SS deep links and bookmarks transparently follow.
+      // Order Pages Transition Phase 6 — old ShipStation Orders URL now
+      // points at the dedicated ShipStation Mirror route so legacy bookmarks
+      // and deep links land on the cockpit they remember instead of the
+      // (potentially flipped) primary /admin/orders page.
       {
         source: "/admin/shipstation-orders",
-        destination: "/admin/orders",
+        destination: "/admin/orders/shipstation",
+        permanent: true,
+      },
+      {
+        source: "/admin/shipstation-orders/:path*",
+        destination: "/admin/orders/shipstation/:path*",
         permanent: true,
       },
     ];

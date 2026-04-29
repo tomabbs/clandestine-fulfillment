@@ -57,6 +57,15 @@ export const workspaceFlagsSchema = z
     non_warehouse_order_client_alerts_enabled: z.boolean().optional(),
     sku_autonomous_ui_enabled: z.boolean().optional(),
     client_stock_exception_reports_enabled: z.boolean().optional(),
+    // Order Pages Transition Phase 0 — per-workspace route-mode flag for
+    // /admin/orders. 'direct' renders the Direct/Unified Orders page over
+    // warehouse_orders; 'shipstation_mirror' renders the existing
+    // OrdersCockpit (ShipStation mirror) so an operator can roll back a
+    // single workspace mid-incident without a deploy. When unset, the
+    // existing `shipstation_unified_shipping` flag controls the route
+    // (back-compat). The legacy flag is read-only kept until dormancy
+    // (Deferred Items in the plan), then dropped.
+    orders_route_mode: z.enum(["direct", "shipstation_mirror"]).optional(),
   })
   .strict();
 
@@ -153,6 +162,26 @@ export interface WorkspaceFlags {
    * reading the reports.
    */
   client_stock_exception_reports_enabled?: boolean;
+  /**
+   * Order Pages Transition Phase 0 — per-workspace route-mode flag.
+   *
+   * - `direct` (post-cutover target): `/admin/orders` renders the Direct /
+   *   Unified Orders page over `warehouse_orders`. `/admin/orders/shipstation`
+   *   keeps the cockpit alive for ShipStation-specific workflows.
+   * - `shipstation_mirror` (rollback): `/admin/orders` renders the existing
+   *   `OrdersCockpit` over `shipstation_orders` so an operator can roll
+   *   back per workspace during an incident.
+   * - unset: the legacy `shipstation_unified_shipping` flag controls the
+   *   route (back-compat). The legacy flag will be retired once
+   *   `orders_route_mode` has been canonical for one full release cycle
+   *   (tracked in Deferred Items in the order-transition plan).
+   *
+   * Reads MUST go through the existing `getWorkspaceFlags()` helper. Both
+   * `/admin/orders` and `/admin/orders/shipstation` route handlers MUST
+   * declare `export const dynamic = 'force-dynamic'` so the App Router data
+   * cache cannot serve a stale flag value mid-incident.
+   */
+  orders_route_mode?: "direct" | "shipstation_mirror";
 }
 
 const cache = new Map<string, { flags: WorkspaceFlags; expiresAt: number }>();
