@@ -70,6 +70,8 @@ Northern Spy Label Group SKU Matching focused gate (2026-04-28):
 supabase migration list --linked
 supabase db push --yes
 pnpm vitest run tests/unit/actions/sku-matching.test.ts tests/unit/migrations/client-store-connection-org-coverage.test.ts
+# Optional — requires INTEGRATION_TEST_SUPABASE_URL + INTEGRATION_TEST_SERVICE_ROLE_KEY:
+# pnpm test:integration tests/integration/persist-sku-match-org-coverage.test.ts
 pnpm check
 pnpm typecheck
 ```
@@ -79,6 +81,30 @@ Pass criteria:
 - Northern Spy Shopify connection `93225922-357f-4607-a5a4-2c1ad3a9beac` has coverage for Northern Spy Records, Egghunt Records, NNA Tapes, and Across the Horizon.
 - `persist_sku_match` rejects direct RPC attempts to map variants whose product org is not covered by the connection.
 - `src/actions/sku-matching.ts` uses the same covered-org set for workspace load, preview, accept, bulk accept, and connection filtering; row/preview payloads include visible canonical org provenance.
+
+### Operational cutover — user-facing claims vs system contracts (2026-04-28)
+
+Use this subsection when communicating “everything wired up” near go-live:
+
+- **Orders cockpit semantics:** Unified staff fulfillment triage assumes **ShipStation as the ingestion hub**. The cockpit calls **`getShipStationOrdersDb` → `shipstation_orders`**. Operators who need “every Shopify/Bandcamp/Woo order” must validate that those orders **land in ShipStation** (and sync into `shipstation_orders`) or reach for **`warehouse_orders` / portal / mail-order** surfaces—not the ShipStation cockpit rowset alone.
+- **Inventory “done” semantics:** Prefer **megaplan spot-check artifacts**, Channels webhook/SKU health cards, **`sku_matching_perf_events` / drift sensors**, and `warehouse_review_queue` clearances over a single SKU-count metric. SKU Mapping completion removes an entire class of unmapped SKU errors but does **not** alone guarantee instantaneous cross-system quantity equality.
+- **Runtime proof stack:** Beyond unit/migration guards, **`pnpm test:integration`** (when `INTEGRATION_TEST_SUPABASE_URL` + `INTEGRATION_TEST_SERVICE_ROLE_KEY` are set) includes `tests/integration/persist-sku-match-org-coverage.test.ts` asserting `persist_sku_match` rejects variants whose **`warehouse_products.org_id` is absent from `client_store_connection_org_coverage`** for that connection.
+
+### Operational cutover — staging smoke (ShipStation + EasyPost) (2026-04-28)
+
+Run once per staging environment before proclaiming postage + SS mirroring healthy:
+
+**ShipStation mirrors**
+
+1. Confirm `shipstation_orders` / `shipstation_order_items` receive rows after a known test order in SS (poll or ingest task completes).
+2. From `/admin/orders`: **Refresh from ShipStation** (calls `refreshShipStationOrdersFromSS`) and verify the cockpit row reflects the external order identifiers.
+3. Open `/admin/shipping` — confirm **`warehouse_shipments`** rows associate with **`warehouse_orders`** / SS order links as expected for the transition model.
+
+**EasyPost**
+
+1. Env: `EASYPOST_API_KEY`, webhook signing (`EASYPOST_WEBHOOK_SECRET` / rotation policy per `scripts/check-webhook-secrets.sh`), and `workspaces.flags.easypost_buy_enabled` as intended.
+2. Carrier map completeness for services you actually buy (`/admin/settings/carrier-map`).
+3. Buy a staging label → confirm **`warehouse_shipments`** row **`label_source = 'easypost'`**, tracker webhook updates land on `/api/webhooks/easypost`, and **`post-label-purchase` / `easypost-register-tracker`** fire per `docs/system_map/TRIGGER_TASK_CATALOG.md`.
 
 Note: `scripts/ci-use-server-exports-guard.sh` runs BEFORE `pnpm build`. It
 AST-parses every `src/**/*.{ts,tsx}` file that carries the `"use server"`

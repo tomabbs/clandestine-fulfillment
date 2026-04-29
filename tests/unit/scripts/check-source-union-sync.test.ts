@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts/check-source-union-sync.ts");
+const TSX_CLI = join(REPO_ROOT, "node_modules/tsx/dist/cli.mjs");
 
 function makeSandbox(): { cwd: string } {
   const cwd = mkdtempSync(join(tmpdir(), "source-union-sync-test-"));
@@ -42,7 +43,7 @@ function writeMigration(cwd: string, name: string, values: string[]) {
 
 function runGuard(cwd: string): { code: number; stdout: string; stderr: string } {
   try {
-    const stdout = execFileSync("npx", ["tsx", SCRIPT], { cwd, encoding: "utf8" });
+    const stdout = execFileSync(process.execPath, [TSX_CLI, SCRIPT], { cwd, encoding: "utf8" });
     return { code: 0, stdout, stderr: "" };
   } catch (err) {
     const e = err as { status?: number; stdout?: Buffer | string; stderr?: Buffer | string };

@@ -9,7 +9,8 @@
  * full motivation + history.
  *
  * We can't easily intercept the guard's filesystem reads from
- * Vitest, so we shell out to `npx tsx`, write fake source trees
+ * Vitest, so we shell out to `tsx` (local `node_modules` install; avoids
+ * `npx tsx` flaky cache in CI), write fake source trees
  * to a tmpdir, point the script at that tmpdir via `cwd`, and
  * assert on exit code + stderr for each violation class and each
  * allowed pattern.
@@ -26,6 +27,7 @@ import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const SCRIPT = join(REPO_ROOT, "scripts/check-use-server-exports.ts");
+const TSX_CLI = join(REPO_ROOT, "node_modules/tsx/dist/cli.mjs");
 
 function makeSandbox(): { cwd: string } {
   const cwd = mkdtempSync(join(tmpdir(), "check-use-server-exports-test-"));
@@ -41,7 +43,7 @@ function writeFile(cwd: string, relPath: string, body: string): void {
 
 function runGuard(cwd: string): { code: number; stdout: string; stderr: string } {
   try {
-    const stdout = execFileSync("npx", ["tsx", SCRIPT], { cwd, encoding: "utf8" });
+    const stdout = execFileSync(process.execPath, [TSX_CLI, SCRIPT], { cwd, encoding: "utf8" });
     return { code: 0, stdout, stderr: "" };
   } catch (err) {
     const e = err as { status?: number; stdout?: Buffer | string; stderr?: Buffer | string };

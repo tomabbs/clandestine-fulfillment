@@ -50,6 +50,7 @@ Use this index as the first-stop map before planning/building/auditing.
 
 - Migrations: `supabase/migrations/**`
 - SQL checks: `scripts/sql/prod_parity_checks.sql`, `scripts/sql/webhook_health_snapshot.sql`
+- Operational cutover sample queries (read-only templates): `scripts/sql/operational-cutover-readiness-samples.sql`
 
 ### Quality Gates
 
