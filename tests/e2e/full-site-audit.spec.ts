@@ -75,7 +75,7 @@ const STAFF_ROUTES: Array<{ path: string; heading: RegExp }> = [
   { path: "/admin/reports/top-sellers", heading: /top sellers/i },
   { path: "/admin/mail-order", heading: /mail.?order/i },
   { path: "/admin/shipstation-orders", heading: /shipstation|orders/i },
-  { path: "/admin/orders/shipstation", heading: /shipstation|orders/i },
+  { path: "/admin/orders/shipstation", heading: /shipstation|orders|fulfillment/i },
   { path: "/admin/orders/diagnostics", heading: /diagnostics/i },
   { path: "/admin/orders/holds", heading: /holds|orders/i },
   { path: "/admin/discogs", heading: /discogs/i },
