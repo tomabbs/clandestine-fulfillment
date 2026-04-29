@@ -29,7 +29,7 @@ import { requireStaff } from "@/lib/server/auth-context";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fake supabase query-builder chain. Supports the methods the actions call:
-// select / eq / in / gte / lte / order / range / maybeSingle. Every method
+// select / eq / in / gte / lte / order / limit / range / maybeSingle. Every method
 // records its call for assertion, and terminal methods return the programmed
 // result.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +57,7 @@ function makeQueryBuilder(terminal: TerminalShape) {
     gte: rec("gte"),
     lte: rec("lte"),
     order: rec("order"),
+    limit: rec("limit"),
     range: (from: number, to: number) => {
       calls.push({ method: "range", args: [from, to] });
       return resolved;
@@ -85,12 +86,15 @@ describe("listOrderHolds", () => {
   });
 
   it("returns paginated on_hold rows and computes per-reason grouping", async () => {
+    const { builder: filterBuilder, calls: filterCalls } = makeQueryBuilder({
+      data: [{ order_id: "o-1" }, { order_id: "o-2" }, { order_id: "o-3" }],
+      error: null,
+    });
     const { builder, calls } = makeQueryBuilder({
       data: [
         {
           id: "o-1",
           workspace_id: "ws-1",
-          connection_id: "c-1",
           external_order_id: "ext-1",
           order_number: "1001",
           fulfillment_hold: "on_hold",
@@ -104,7 +108,6 @@ describe("listOrderHolds", () => {
         {
           id: "o-2",
           workspace_id: "ws-1",
-          connection_id: "c-1",
           external_order_id: "ext-2",
           order_number: "1002",
           fulfillment_hold: "on_hold",
@@ -118,7 +121,6 @@ describe("listOrderHolds", () => {
         {
           id: "o-3",
           workspace_id: "ws-1",
-          connection_id: "c-2",
           external_order_id: "ext-3",
           order_number: "1003",
           fulfillment_hold: "on_hold",
@@ -133,7 +135,18 @@ describe("listOrderHolds", () => {
       count: 3,
       error: null,
     });
-    mockFrom.mockReturnValueOnce(builder);
+    const { builder: hydrateBuilder } = makeQueryBuilder({
+      data: [
+        { order_id: "o-1", connection_id: "c-1" },
+        { order_id: "o-2", connection_id: "c-1" },
+        { order_id: "o-3", connection_id: "c-2" },
+      ],
+      error: null,
+    });
+    mockFrom
+      .mockReturnValueOnce(filterBuilder)
+      .mockReturnValueOnce(builder)
+      .mockReturnValueOnce(hydrateBuilder);
 
     const result = await listOrderHolds({
       reason: "unknown_remote_sku",
@@ -143,22 +156,35 @@ describe("listOrderHolds", () => {
     });
 
     expect(requireStaff).toHaveBeenCalledOnce();
-    expect(mockFrom).toHaveBeenCalledWith("warehouse_orders");
+    expect(mockFrom).toHaveBeenNthCalledWith(1, "order_fulfillment_hold_events");
+    expect(mockFrom).toHaveBeenNthCalledWith(2, "warehouse_orders");
+    expect(mockFrom).toHaveBeenNthCalledWith(3, "order_fulfillment_hold_events");
 
     const expectedEqCalls = [
       ["workspace_id", "ws-1"],
       ["fulfillment_hold", "on_hold"],
       ["fulfillment_hold_reason", "unknown_remote_sku"],
-      ["connection_id", "8eb6eccc-2bcb-4d8f-8e21-8ee27d6d7e10"],
     ];
     for (const args of expectedEqCalls) {
       expect(
         calls.find((c) => c.method === "eq" && JSON.stringify(c.args) === JSON.stringify(args)),
       ).toBeTruthy();
     }
+    expect(
+      filterCalls.find(
+        (c) =>
+          c.method === "eq" &&
+          JSON.stringify(c.args) ===
+            JSON.stringify(["connection_id", "8eb6eccc-2bcb-4d8f-8e21-8ee27d6d7e10"]),
+      ),
+    ).toBeTruthy();
+    expect(calls.find((c) => c.method === "in")).toMatchObject({
+      args: ["id", ["o-1", "o-2", "o-3"]],
+    });
     expect(calls.find((c) => c.method === "range")).toMatchObject({ args: [0, 9] });
 
     expect(result.rows).toHaveLength(3);
+    expect(result.rows.map((row) => row.connection_id)).toEqual(["c-1", "c-1", "c-2"]);
     expect(result.total).toBe(3);
     expect(result.groupedByReason).toEqual({
       unknown_remote_sku: 2,
@@ -179,6 +205,19 @@ describe("listOrderHolds", () => {
     const { builder } = makeQueryBuilder({ data: null, count: 0, error: { message: "db-boom" } });
     mockFrom.mockReturnValueOnce(builder);
     await expect(listOrderHolds()).rejects.toThrow(/listOrderHolds failed: db-boom/);
+  });
+
+  it("returns an empty page when a connection filter has no hold events", async () => {
+    const { builder } = makeQueryBuilder({ data: [], error: null });
+    mockFrom.mockReturnValueOnce(builder);
+
+    const result = await listOrderHolds({
+      connectionId: "8eb6eccc-2bcb-4d8f-8e21-8ee27d6d7e10",
+    });
+
+    expect(result.rows).toEqual([]);
+    expect(result.total).toBe(0);
+    expect(mockFrom).toHaveBeenCalledTimes(1);
   });
 });
 

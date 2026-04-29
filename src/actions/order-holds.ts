@@ -105,10 +105,36 @@ export async function listOrderHolds(
   const input = listOrderHoldsInputSchema.parse(rawInput);
   const supabase = await createServerSupabaseClient();
 
+  let connectionOrderIds: string[] | null = null;
+  if (input.connectionId !== undefined) {
+    const { data: eventRows, error: eventError } = await supabase
+      .from("order_fulfillment_hold_events")
+      .select("order_id")
+      .eq("workspace_id", workspaceId)
+      .eq("connection_id", input.connectionId)
+      .eq("event_type", "hold_applied")
+      .limit(5000);
+    if (eventError) {
+      throw new Error(`listOrderHolds connection filter failed: ${eventError.message}`);
+    }
+    connectionOrderIds = Array.from(
+      new Set((eventRows ?? []).map((row) => row.order_id as string)),
+    );
+    if (connectionOrderIds.length === 0) {
+      return {
+        rows: [],
+        total: 0,
+        limit: input.limit,
+        offset: input.offset,
+        groupedByReason: {},
+      };
+    }
+  }
+
   let query = supabase
     .from("warehouse_orders")
     .select(
-      "id, workspace_id, connection_id, external_order_id, order_number, fulfillment_hold, fulfillment_hold_reason, fulfillment_hold_at, fulfillment_hold_cycle_id, fulfillment_hold_metadata, fulfillment_hold_client_alerted_at, created_at",
+      "id, workspace_id, external_order_id, order_number, fulfillment_hold, fulfillment_hold_reason, fulfillment_hold_at, fulfillment_hold_cycle_id, fulfillment_hold_metadata, fulfillment_hold_client_alerted_at, created_at",
       { count: "exact" },
     )
     .eq("workspace_id", workspaceId)
@@ -117,8 +143,8 @@ export async function listOrderHolds(
   if (input.reason !== undefined) {
     query = query.eq("fulfillment_hold_reason", input.reason);
   }
-  if (input.connectionId !== undefined) {
-    query = query.eq("connection_id", input.connectionId);
+  if (connectionOrderIds) {
+    query = query.in("id", connectionOrderIds);
   }
   if (input.heldAfter !== undefined) {
     query = query.gte("fulfillment_hold_at", input.heldAfter);
@@ -136,6 +162,7 @@ export async function listOrderHolds(
   }
 
   const rows = (data ?? []) as OrderHoldListRow[];
+  await hydrateHoldConnectionIds(supabase, workspaceId, rows);
 
   // Compute per-reason grouping across the PAGE. The UI treats this as
   // a summary of the current view; a true workspace-wide count per
@@ -153,6 +180,36 @@ export async function listOrderHolds(
     offset: input.offset,
     groupedByReason,
   };
+}
+
+async function hydrateHoldConnectionIds(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  workspaceId: string,
+  rows: OrderHoldListRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const { data, error } = await supabase
+    .from("order_fulfillment_hold_events")
+    .select("order_id, connection_id")
+    .eq("workspace_id", workspaceId)
+    .eq("event_type", "hold_applied")
+    .in(
+      "order_id",
+      rows.map((row) => row.id),
+    )
+    .order("created_at", { ascending: false });
+  if (error) {
+    throw new Error(`listOrderHolds connection hydration failed: ${error.message}`);
+  }
+  const byOrder = new Map<string, string | null>();
+  for (const event of data ?? []) {
+    const orderId = event.order_id as string;
+    if (byOrder.has(orderId)) continue;
+    byOrder.set(orderId, (event.connection_id as string | null) ?? null);
+  }
+  for (const row of rows) {
+    row.connection_id = byOrder.get(row.id) ?? null;
+  }
 }
 
 const releaseOrderHoldInputSchema = z
