@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { computeEffectiveBandcampAvailableByOption } from "@/lib/server/bandcamp-effective-available";
 import {
+  type MusicFormat,
   type MusicVariantDescriptors,
   parseMusicVariantDescriptors,
 } from "@/lib/server/music-variant-descriptors";
@@ -87,6 +88,9 @@ export interface RemoteCatalogResult {
   fetchedAt: string | null;
 }
 
+/** Staff review: disqualifier when parsed physical medium disagrees with warehouse format. */
+export const PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER = "physical_format_mismatch";
+
 export const REMOTE_CATALOG_TIMEOUTS_MS = {
   shopify: 30_000,
   // Northern Spy's Woo catalog is small in item count but slow per page
@@ -111,6 +115,79 @@ export interface CanonicalCandidateSignalSource {
   bandcampOptionId: number | null;
   bandcampOptionTitle: string | null;
   bandcampOriginQuantities: unknown;
+}
+
+/** Vinyl sizes + LP share one fulfillment bucket vs cassette / CD / digital / apparel. */
+export type PhysicalMediaFamily =
+  | "vinyl"
+  | "cassette"
+  | "cd"
+  | "digital"
+  | "apparel"
+  | "other"
+  | "unknown";
+
+export function physicalMediaFamily(format: MusicFormat): PhysicalMediaFamily {
+  switch (format) {
+    case "lp":
+    case "7inch":
+    case "10inch":
+    case "12inch":
+      return "vinyl";
+    case "cassette":
+      return "cassette";
+    case "cd":
+      return "cd";
+    case "digital":
+      return "digital";
+    case "shirt":
+    case "hoodie":
+      return "apparel";
+    case "unknown":
+      return "unknown";
+    default:
+      return "other";
+  }
+}
+
+/** True when both sides have a definite medium and buckets differ (LP vs cassette, CD vs vinyl, …). */
+export function physicalMediumFamiliesDisagree(a: MusicFormat, b: MusicFormat): boolean {
+  const fa = physicalMediaFamily(a);
+  const fb = physicalMediaFamily(b);
+  if (fa === "unknown" || fb === "unknown") return false;
+  if (fa === "other" || fb === "other") return false;
+  return fa !== fb;
+}
+
+export function skuMatchingCanonicalDescriptorTitle(
+  canonical: CanonicalCandidateSignalSource,
+): string {
+  return [
+    canonical.format,
+    canonical.title,
+    canonical.bandcampTitle,
+    canonical.variantTitle,
+    canonical.optionValue,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" - ");
+}
+
+export function skuMatchingRemoteDescriptorTitle(remote: RemoteCatalogItem): string {
+  return [remote.productTitle, remote.variantTitle, remote.productType]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" - ");
+}
+
+export function skuMatchingPhysicalFormatMismatch(
+  canonical: CanonicalCandidateSignalSource,
+  remote: RemoteCatalogItem,
+): boolean {
+  const cDesc = parseMusicVariantDescriptors({
+    title: skuMatchingCanonicalDescriptorTitle(canonical),
+  });
+  const rDesc = parseMusicVariantDescriptors({ title: skuMatchingRemoteDescriptorTitle(remote) });
+  return physicalMediumFamiliesDisagree(cDesc.format, rDesc.format);
 }
 
 export interface RankedSkuCandidate {
@@ -613,6 +690,11 @@ export function rankSkuCandidates(
         disqualifiers.push("title_only_or_weaker_match");
       }
 
+      if (skuMatchingPhysicalFormatMismatch(canonical, remote)) {
+        disqualifiers.push(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER);
+        reasons.push("Physical medium differs from warehouse (LP vs cassette, CD vs vinyl, etc.)");
+      }
+
       const confidenceTier = classifyCandidate(score, disqualifiers);
       if (
         matchMethod === "manual" &&
@@ -690,9 +772,16 @@ export function rankSkuCandidates(
       };
     })
     .filter((candidate) => candidate.score > 0 || candidate.disqualifiers.length > 0)
-    .sort(
-      (a, b) => b.score - a.score || a.remote.combinedTitle.localeCompare(b.remote.combinedTitle),
-    );
+    .sort((a, b) => {
+      const formatClash = (r: RankedSkuCandidate) =>
+        r.disqualifiers.includes(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER);
+      const clashA = formatClash(a);
+      const clashB = formatClash(b);
+      if (clashA !== clashB) return clashA ? 1 : -1;
+      const byScore = b.score - a.score;
+      if (byScore !== 0) return byScore;
+      return a.remote.combinedTitle.localeCompare(b.remote.combinedTitle);
+    });
 
   return ranked;
 }

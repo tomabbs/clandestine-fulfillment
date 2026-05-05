@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { RankSkuEvidenceContext, RemoteCatalogItem } from "@/lib/server/sku-matching";
 import {
   buildCandidateFingerprint,
+  PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER,
   pickPrimaryBandcampMapping,
   REMOTE_CATALOG_TIMEOUTS_MS,
   rankSkuCandidates,
   selectConnectionScopedRemoteTarget,
   shouldExcludeShopifyVariantFromSkuMatchingCatalog,
+  skuMatchingPhysicalFormatMismatch,
 } from "@/lib/server/sku-matching";
 
 describe("remote catalog timeouts", () => {
@@ -84,6 +86,94 @@ describe("shouldExcludeShopifyVariantFromSkuMatchingCatalog", () => {
         variantTitle: "Shell A",
       }),
     ).toBe(false);
+  });
+});
+
+describe("skuMatchingPhysicalFormatMismatch", () => {
+  const lpCanonical = {
+    variantId: "var_warehouse",
+    sku: "ALB-LP",
+    barcode: "9990001112223",
+    artist: "Zenizen",
+    title: "P.O.C (Proof of Concept)",
+    bandcampTitle: null,
+    format: "LP",
+    variantTitle: "Black Vinyl",
+    optionValue: null,
+    isPreorder: false,
+    price: 25,
+    bandcampOptionId: null,
+    bandcampOptionTitle: null,
+    bandcampOriginQuantities: null,
+  } as const;
+
+  it("flags cassette listing when warehouse format is LP", () => {
+    const clash = skuMatchingPhysicalFormatMismatch(lpCanonical, {
+      platform: "shopify",
+      remoteProductId: "gid://shopify/Product/C",
+      remoteVariantId: "gid://shopify/ProductVariant/C",
+      remoteInventoryItemId: null,
+      remoteSku: "ALB-LP",
+      productTitle: "Zenizen — P.O.C (Proof of Concept) Cassette",
+      variantTitle: "Default Title",
+      combinedTitle: "Zenizen — P.O.C (Proof of Concept) Cassette",
+      productType: "Cassette",
+      productUrl: null,
+      price: 25,
+      barcode: "9990001112223",
+      quantity: 0,
+    });
+    expect(clash).toBe(true);
+  });
+
+  it("does not flag two vinyl-shaped listings (LP vs twelve inch)", () => {
+    const ok = skuMatchingPhysicalFormatMismatch(lpCanonical, {
+      platform: "shopify",
+      remoteProductId: "gid://shopify/Product/V",
+      remoteVariantId: "gid://shopify/ProductVariant/V",
+      remoteInventoryItemId: null,
+      remoteSku: "ALB-LP",
+      productTitle: "Zenizen — P.O.C LP",
+      variantTitle: "12 inch vinyl",
+      combinedTitle: "Zenizen — P.O.C LP - 12 inch vinyl",
+      productType: "Vinyl",
+      productUrl: null,
+      price: 25,
+      barcode: null,
+      quantity: null,
+    });
+    expect(ok).toBe(false);
+  });
+
+  it("prefers vinyl-aligned remote over cassette when barcode and score tie high", () => {
+    const sharedBarcode = lpCanonical.barcode;
+    const cassette: RemoteCatalogItem = {
+      platform: "shopify",
+      remoteProductId: "gid://shopify/Product/CAS",
+      remoteVariantId: "gid://shopify/ProductVariant/CAS",
+      remoteInventoryItemId: null,
+      remoteSku: "ALB-LP",
+      productTitle: "Zenizen — P.O.C Cassette",
+      variantTitle: null,
+      combinedTitle: "Zenizen — P.O.C Cassette",
+      productType: "Music",
+      productUrl: null,
+      price: 25,
+      barcode: sharedBarcode,
+      quantity: 0,
+    };
+    const vinyl: RemoteCatalogItem = {
+      ...cassette,
+      remoteProductId: "gid://shopify/Product/VIN",
+      remoteVariantId: "gid://shopify/ProductVariant/VIN",
+      productTitle: "Zenizen — P.O.C Vinyl LP",
+      combinedTitle: "Zenizen — P.O.C Vinyl LP",
+      barcode: sharedBarcode,
+    };
+    const ranked = rankSkuCandidates(lpCanonical, [cassette, vinyl]);
+    expect(ranked[0]?.remote.remoteProductId).toBe(vinyl.remoteProductId);
+    expect(ranked[0]?.disqualifiers.includes(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER)).toBe(false);
+    expect(ranked[1]?.disqualifiers).toContain(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER);
   });
 });
 
