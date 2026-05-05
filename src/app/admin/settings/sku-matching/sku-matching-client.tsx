@@ -11,7 +11,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   acceptExactMatches,
@@ -118,6 +118,7 @@ export function SkuMatchingClient({
 }) {
   const router = useRouter();
   const activeConnectionId = workspace.connection.id;
+  const [isRefreshing, startRefreshTransition] = useTransition();
   const [tab, setTab] = useState<TabKey>("needs-review");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -134,6 +135,28 @@ export function SkuMatchingClient({
       return;
     }
     window.setTimeout(() => router.refresh(), 0);
+  }
+
+  function forceRefreshWorkspace() {
+    setMutationError(null);
+    setPreviewError(null);
+    setSelectedKeys(new Set());
+    setPendingRowIds(new Set());
+    setAcceptedVariantIds(new Set());
+    previewMutation.reset();
+    remoteSearchMutation.reset();
+    upsertMutation.reset();
+
+    startRefreshTransition(() => {
+      router.replace(
+        buildQuery({
+          connectionId: activeConnectionId,
+          orgId: selectedOrgId,
+          refresh: String(Date.now()),
+        }),
+      );
+      router.refresh();
+    });
   }
 
   const enableFlagMutation = useAppMutation({
@@ -739,8 +762,14 @@ export function SkuMatchingClient({
                   "The remote catalog could not be fetched for matching.")}
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={() => router.refresh()}>
-            <RefreshCw className="mr-1 h-4 w-4" /> Refresh
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={isRefreshing}
+            onClick={forceRefreshWorkspace}
+          >
+            <RefreshCw className={`mr-1 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+            {isRefreshing ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
       </div>

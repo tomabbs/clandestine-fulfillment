@@ -6,6 +6,8 @@ import {
 } from "@/actions/sku-matching";
 import { SkuMatchingClient } from "./sku-matching-client";
 
+export const dynamic = "force-dynamic";
+
 export default async function SkuMatchingPage({
   searchParams,
 }: {
