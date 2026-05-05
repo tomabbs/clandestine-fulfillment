@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod/v4";
-import { requireAuth } from "@/lib/server/auth-context";
+import { requireAuth, requireStaff } from "@/lib/server/auth-context";
 import {
   estimateOrderVolume,
   getInventoryLevelsAtLocation,
@@ -48,10 +48,12 @@ const createConnectionSchema = z.object({
 });
 
 const updateConnectionSchema = z.object({
-  storeUrl: z.string().url().optional(),
-  webhookUrl: z.string().url().nullable().optional(),
-  webhookSecret: z.string().nullable().optional(),
+  storeUrl: z.string().url(),
+  webhookUrl: z.union([z.string().url(), z.null()]).optional(),
+  webhookSecret: z.union([z.string().min(1), z.null()]).optional(),
 });
+
+const connectionIdSchema = z.string().uuid();
 
 // === Server Actions ===
 
@@ -171,28 +173,102 @@ export async function createStoreConnection(rawData: {
 }
 
 /**
- * Edit connection details.
+ * Staff-only: edit store URL, optional webhook callback URL, and optional
+ * webhook signing secret (omit `webhookSecret` to leave unchanged; pass `null`
+ * to clear).
  */
 export async function updateStoreConnection(
   connectionId: string,
-  rawData: { storeUrl?: string; webhookUrl?: string | null; webhookSecret?: string | null },
+  rawData: { storeUrl: string; webhookUrl?: string | null; webhookSecret?: string | null },
 ): Promise<{ success: true }> {
-  await requireAuth();
+  const staff = await requireStaff();
+  const id = connectionIdSchema.parse(connectionId);
   const data = updateConnectionSchema.parse(rawData);
 
   const serviceClient = createServiceRoleClient();
 
+  const { data: row, error: fetchError } = await serviceClient
+    .from("client_store_connections")
+    .select("workspace_id")
+    .eq("id", id)
+    .single();
+  if (fetchError || !row) throw new Error("Connection not found");
+  if (row.workspace_id !== staff.workspaceId) {
+    throw new Error("Forbidden — connection not in your workspace");
+  }
+
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (data.storeUrl !== undefined) update.store_url = data.storeUrl;
+  update.store_url = data.storeUrl;
   if (data.webhookUrl !== undefined) update.webhook_url = data.webhookUrl;
   if (data.webhookSecret !== undefined) update.webhook_secret = data.webhookSecret;
 
   const { error } = await serviceClient
     .from("client_store_connections")
     .update(update)
-    .eq("id", connectionId);
+    .eq("id", id)
+    .eq("workspace_id", staff.workspaceId);
 
   if (error) throw new Error(`Failed to update connection: ${error.message}`);
+
+  return { success: true };
+}
+
+/**
+ * Staff-only: permanently remove a store connection. Respects the same
+ * cutover guard as `disableStoreConnection`. Child rows with ON DELETE CASCADE
+ * are removed; identity v2 order refs null out via migration
+ * `20260429000005_connection_delete_null_order_refs.sql`.
+ */
+export async function deleteStoreConnection(connectionId: string): Promise<{ success: true }> {
+  const staff = await requireStaff();
+  const id = connectionIdSchema.parse(connectionId);
+  const serviceClient = createServiceRoleClient();
+
+  const { data: connection, error: fetchError } = await serviceClient
+    .from("client_store_connections")
+    .select("workspace_id, cutover_state, platform, store_url")
+    .eq("id", id)
+    .single();
+  if (fetchError || !connection) throw new Error("Connection not found");
+  if (connection.workspace_id !== staff.workspaceId) {
+    throw new Error("Forbidden — connection not in your workspace");
+  }
+
+  if (connection.cutover_state === "shadow" || connection.cutover_state === "direct") {
+    throw new Error(
+      `Cannot delete connection — cutover_state='${connection.cutover_state}'. ` +
+        `Roll back cutover_state to 'legacy' before deleting.`,
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  const { data: deleted, error: deleteError } = await serviceClient
+    .from("client_store_connections")
+    .delete()
+    .eq("id", id)
+    .eq("workspace_id", staff.workspaceId)
+    .select("id")
+    .maybeSingle();
+
+  if (deleteError) throw new Error(`Failed to delete connection: ${deleteError.message}`);
+  if (!deleted) throw new Error("Connection not found or already removed");
+
+  await serviceClient.from("channel_sync_log").insert({
+    workspace_id: connection.workspace_id,
+    channel: "multi-store",
+    sync_type: "connection_deleted",
+    status: "completed",
+    items_processed: 1,
+    started_at: now,
+    completed_at: now,
+    metadata: {
+      connection_id: id,
+      platform: connection.platform,
+      store_url: connection.store_url,
+      actor_user_id: staff.userId,
+    },
+  });
 
   return { success: true };
 }
@@ -301,15 +377,19 @@ export async function reactivateClientStoreConnection(input: {
  * violation that surfaces as a confusing generic 500.
  */
 export async function disableStoreConnection(connectionId: string): Promise<{ success: true }> {
-  await requireAuth();
+  const staff = await requireStaff();
+  const id = connectionIdSchema.parse(connectionId);
   const serviceClient = createServiceRoleClient();
 
   const { data: connection, error: fetchError } = await serviceClient
     .from("client_store_connections")
-    .select("cutover_state")
-    .eq("id", connectionId)
+    .select("workspace_id, cutover_state")
+    .eq("id", id)
     .single();
   if (fetchError || !connection) throw new Error("Connection not found");
+  if (connection.workspace_id !== staff.workspaceId) {
+    throw new Error("Forbidden — connection not in your workspace");
+  }
 
   if (connection.cutover_state === "shadow" || connection.cutover_state === "direct") {
     throw new Error(
@@ -326,7 +406,8 @@ export async function disableStoreConnection(connectionId: string): Promise<{ su
       do_not_fanout: true,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", connectionId);
+    .eq("id", id)
+    .eq("workspace_id", staff.workspaceId);
 
   if (error) throw new Error(`Failed to disable connection: ${error.message}`);
 

@@ -77,6 +77,7 @@ vi.mock("@/lib/server/shopify-connection-graphql", () => ({
 import {
   autoDiscoverShopifySkus,
   createStoreConnection,
+  deleteStoreConnection,
   disableStoreConnection,
   getSkuMappings,
   getStoreConnectionOrganizations,
@@ -86,7 +87,9 @@ import {
   updateStoreConnection,
 } from "@/actions/store-connections";
 // Import after mocks
-import { requireAuth } from "@/lib/server/auth-context";
+import { requireAuth, requireStaff } from "@/lib/server/auth-context";
+
+const ADMIN_CONN_ID = "11111111-1111-4111-8111-111111111111";
 
 describe("store-connections server actions", () => {
   beforeEach(() => {
@@ -109,6 +112,7 @@ describe("store-connections server actions", () => {
       },
       isStaff: true,
     });
+    vi.mocked(requireStaff).mockResolvedValue({ userId: "user-1", workspaceId: "ws-1" });
   });
 
   // === Auth tests ===
@@ -130,16 +134,16 @@ describe("store-connections server actions", () => {
       ).rejects.toThrow("Unauthorized");
     });
 
-    it("updateStoreConnection throws when unauthenticated", async () => {
-      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
+    it("updateStoreConnection throws when staff gate fails", async () => {
+      vi.mocked(requireStaff).mockRejectedValueOnce(new Error("Authentication required"));
       await expect(
-        updateStoreConnection("conn-1", { storeUrl: "https://new.example.com" }),
-      ).rejects.toThrow("Unauthorized");
+        updateStoreConnection(ADMIN_CONN_ID, { storeUrl: "https://new.example.com" }),
+      ).rejects.toThrow("Authentication required");
     });
 
-    it("disableStoreConnection throws when unauthenticated", async () => {
-      vi.mocked(requireAuth).mockRejectedValueOnce(new Error("Unauthorized"));
-      await expect(disableStoreConnection("conn-1")).rejects.toThrow("Unauthorized");
+    it("disableStoreConnection throws when staff gate fails", async () => {
+      vi.mocked(requireStaff).mockRejectedValueOnce(new Error("Staff access required"));
+      await expect(disableStoreConnection(ADMIN_CONN_ID)).rejects.toThrow("Staff access required");
     });
 
     it("getSkuMappings throws when unauthenticated", async () => {
@@ -348,20 +352,21 @@ describe("store-connections server actions", () => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockReturnValue({
             single: vi.fn().mockResolvedValue({
-              data: { cutover_state: "legacy" },
+              data: { cutover_state: "legacy", workspace_id: "ws-1" },
               error: null,
             }),
           }),
         }),
       });
 
-      const mockEq = vi.fn().mockResolvedValue({ error: null });
+      const wsEq = vi.fn().mockResolvedValue({ error: null });
+      const mockEq = vi.fn().mockReturnValue({ eq: wsEq });
       const mockUpdate = vi.fn().mockReturnValue({ eq: mockEq });
       mockServiceFrom.mockReturnValueOnce({
         update: mockUpdate,
       });
 
-      const result = await disableStoreConnection("conn-1");
+      const result = await disableStoreConnection(ADMIN_CONN_ID);
 
       expect(result).toEqual({ success: true });
       expect(mockUpdate).toHaveBeenCalledWith(
@@ -370,6 +375,8 @@ describe("store-connections server actions", () => {
           do_not_fanout: true,
         }),
       );
+      expect(mockEq).toHaveBeenCalledWith("id", ADMIN_CONN_ID);
+      expect(wsEq).toHaveBeenCalledWith("workspace_id", "ws-1");
     });
 
     // Phase 3 D1 — defensive guard. The DB CHECK constraint
@@ -383,7 +390,7 @@ describe("store-connections server actions", () => {
     ] as const)("throws when cutover_state=%s without performing the update", async (state) => {
       const mockSelectEq = vi.fn().mockReturnValue({
         single: vi.fn().mockResolvedValue({
-          data: { cutover_state: state },
+          data: { cutover_state: state, workspace_id: "ws-1" },
           error: null,
         }),
       });
@@ -391,7 +398,7 @@ describe("store-connections server actions", () => {
         select: vi.fn().mockReturnValue({ eq: mockSelectEq }),
       });
 
-      await expect(disableStoreConnection("conn-1")).rejects.toThrow(
+      await expect(disableStoreConnection(ADMIN_CONN_ID)).rejects.toThrow(
         /Roll back cutover_state to 'legacy'/,
       );
       // Only the lookup .from() call should have happened — no update.
@@ -406,7 +413,151 @@ describe("store-connections server actions", () => {
           }),
         }),
       });
-      await expect(disableStoreConnection("conn-1")).rejects.toThrow("Connection not found");
+      await expect(disableStoreConnection(ADMIN_CONN_ID)).rejects.toThrow("Connection not found");
+    });
+
+    it("throws when connection is outside the staff workspace", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: { cutover_state: "legacy", workspace_id: "other-ws" },
+              error: null,
+            }),
+          }),
+        }),
+      });
+      await expect(disableStoreConnection(ADMIN_CONN_ID)).rejects.toThrow(/Forbidden/);
+      expect(mockServiceFrom).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // === updateStoreConnection ===
+
+  describe("updateStoreConnection", () => {
+    it("updates when workspace matches", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: { workspace_id: "ws-1" },
+              error: null,
+            }),
+          }),
+        }),
+      });
+      const wsEq = vi.fn().mockResolvedValue({ error: null });
+      const idEq = vi.fn().mockReturnValue({ eq: wsEq });
+      const mockUpdate = vi.fn().mockReturnValue({ eq: idEq });
+      mockServiceFrom.mockReturnValueOnce({ update: mockUpdate });
+
+      await updateStoreConnection(ADMIN_CONN_ID, {
+        storeUrl: "https://new.example.com",
+        webhookUrl: null,
+        webhookSecret: "sec",
+      });
+
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          store_url: "https://new.example.com",
+          webhook_url: null,
+          webhook_secret: "sec",
+        }),
+      );
+      expect(idEq).toHaveBeenCalledWith("id", ADMIN_CONN_ID);
+      expect(wsEq).toHaveBeenCalledWith("workspace_id", "ws-1");
+    });
+
+    it("throws when workspace mismatches", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: { workspace_id: "other" },
+              error: null,
+            }),
+          }),
+        }),
+      });
+      await expect(
+        updateStoreConnection(ADMIN_CONN_ID, { storeUrl: "https://new.example.com" }),
+      ).rejects.toThrow(/Forbidden/);
+      expect(mockServiceFrom).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects invalid connection id", async () => {
+      await expect(
+        updateStoreConnection("not-a-uuid", { storeUrl: "https://x.example.com" }),
+      ).rejects.toThrow();
+    });
+  });
+
+  // === deleteStoreConnection ===
+
+  describe("deleteStoreConnection", () => {
+    it("deletes scoped row and writes channel_sync_log", async () => {
+      const mockInsert = vi.fn().mockResolvedValue({ error: null });
+      mockServiceFrom
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({
+                data: {
+                  workspace_id: "ws-1",
+                  cutover_state: "legacy",
+                  platform: "woocommerce",
+                  store_url: "https://site.example.com",
+                },
+                error: null,
+              }),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({
+          delete: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                  maybeSingle: vi.fn().mockResolvedValue({
+                    data: { id: ADMIN_CONN_ID },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }),
+        })
+        .mockReturnValueOnce({ insert: mockInsert });
+
+      const result = await deleteStoreConnection(ADMIN_CONN_ID);
+      expect(result).toEqual({ success: true });
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sync_type: "connection_deleted",
+          channel: "multi-store",
+          status: "completed",
+        }),
+      );
+    });
+
+    it("throws when cutover_state blocks delete", async () => {
+      mockServiceFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: {
+                workspace_id: "ws-1",
+                cutover_state: "shadow",
+                platform: "shopify",
+                store_url: "https://a.myshopify.com",
+              },
+              error: null,
+            }),
+          }),
+        }),
+      });
+      await expect(deleteStoreConnection(ADMIN_CONN_ID)).rejects.toThrow(/Roll back cutover_state/);
+      expect(mockServiceFrom).toHaveBeenCalledTimes(1);
     });
   });
 

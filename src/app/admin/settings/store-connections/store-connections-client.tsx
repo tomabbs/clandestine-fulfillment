@@ -4,27 +4,43 @@ import {
   Activity,
   CheckCircle2,
   Globe,
+  Pencil,
   Plug,
   Plus,
   Search,
   ShieldAlert,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   createStoreConnection,
+  deleteStoreConnection,
   disableStoreConnection,
   type getStoreConnections,
   testStoreConnection,
+  updateStoreConnection,
 } from "@/actions/store-connections";
 import { ConfigureShopifyAppDialog } from "@/components/admin/configure-shopify-app-dialog";
 import { BlockList } from "@/components/shared/block-list";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Toaster } from "@/components/ui/sonner";
 import { useAppMutation } from "@/lib/hooks/use-app-query";
 import type { ConnectionStatus, StorePlatform } from "@/lib/shared/types";
 
@@ -120,11 +136,29 @@ export function StoreConnectionsClient({
   const [testingId, setTestingId] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [configureShopifyId, setConfigureShopifyId] = useState<string | null>(null);
+  const [editingConn, setEditingConn] = useState<StoreConnectionRow | null>(null);
+  const [editForm, setEditForm] = useState({
+    storeUrl: "",
+    webhookUrl: "",
+    webhookSecret: "",
+    clearWebhookSecret: false,
+  });
+  const [deleteTarget, setDeleteTarget] = useState<StoreConnectionRow | null>(null);
   const [newConn, setNewConn] = useState({
     orgId: "",
     platform: "" as StorePlatform | "",
     storeUrl: "",
   });
+
+  const openEditDialog = (conn: StoreConnectionRow) => {
+    setEditingConn(conn);
+    setEditForm({
+      storeUrl: conn.store_url,
+      webhookUrl: conn.webhook_url ?? "",
+      webhookSecret: "",
+      clearWebhookSecret: false,
+    });
+  };
 
   const testMutation = useAppMutation({
     mutationFn: (id: string) => testStoreConnection(id),
@@ -135,6 +169,28 @@ export function StoreConnectionsClient({
   const disableMutation = useAppMutation({
     mutationFn: (id: string) => disableStoreConnection(id),
     onSuccess: () => router.refresh(),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Disable failed"),
+  });
+
+  const updateMutation = useAppMutation({
+    mutationFn: (args: { id: string; payload: Parameters<typeof updateStoreConnection>[1] }) =>
+      updateStoreConnection(args.id, args.payload),
+    onSuccess: () => {
+      setEditingConn(null);
+      toast.success("Connection updated");
+      router.refresh();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Update failed"),
+  });
+
+  const deleteMutation = useAppMutation({
+    mutationFn: (id: string) => deleteStoreConnection(id),
+    onSuccess: () => {
+      setDeleteTarget(null);
+      toast.success("Connection deleted");
+      router.refresh();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
   });
 
   const createMutation = useAppMutation({
@@ -170,6 +226,13 @@ export function StoreConnectionsClient({
   }
 
   const canCreate = newConn.orgId && newConn.platform && newConn.storeUrl.startsWith("http");
+  const webhookUrlTrimmed = editForm.webhookUrl.trim();
+  const webhookUrlOk = webhookUrlTrimmed === "" || /^https?:\/\/.+/i.test(webhookUrlTrimmed);
+  const canSaveEdit =
+    Boolean(editingConn) &&
+    editForm.storeUrl.trim().startsWith("http") &&
+    webhookUrlOk &&
+    !(editForm.clearWebhookSecret && editForm.webhookSecret.trim().length > 0);
 
   return (
     <div className="p-6 space-y-4">
@@ -289,7 +352,10 @@ export function StoreConnectionsClient({
                 </div>
               )}
               renderActions={({ row: conn }) => (
-                <div className="flex gap-1">
+                <div className="flex flex-wrap gap-1 justify-end">
+                  <Button variant="outline" size="sm" onClick={() => openEditDialog(conn)}>
+                    <Pencil className="h-3.5 w-3.5 mr-1" aria-hidden /> Edit
+                  </Button>
                   {conn.platform === "shopify" && (
                     <Button
                       variant="outline"
@@ -320,6 +386,15 @@ export function StoreConnectionsClient({
                       Disable
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => setDeleteTarget(conn)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" aria-hidden /> Delete
+                  </Button>
                 </div>
               )}
             />
@@ -351,6 +426,146 @@ export function StoreConnectionsClient({
             />
           );
         })()}
+
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete store connection?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently remove{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.store_url}</span>? Active
+              SKU mappings and integration rows tied to this connection will be deleted (database
+              cascade). Warehouse orders keep history but lose{" "}
+              <code className="text-xs">connection_id</code> linkage after the delete runs.
+              {deleteTarget && deleteTarget.sku_mapping_count > 0 ? (
+                <>
+                  {" "}
+                  This connection currently has <strong>{deleteTarget.sku_mapping_count}</strong>{" "}
+                  SKU mapping
+                  {deleteTarget.sku_mapping_count === 1 ? "" : "s"}.
+                </>
+              ) : null}
+              {deleteTarget &&
+              (deleteTarget.cutover_state === "shadow" ||
+                deleteTarget.cutover_state === "direct") ? (
+                <>
+                  {" "}
+                  <span className="text-destructive font-medium">
+                    Cutover must be rolled back to &apos;legacy&apos; before deletion.
+                  </span>
+                </>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={Boolean(
+                !deleteTarget ||
+                  deleteMutation.isPending ||
+                  (deleteTarget &&
+                    (deleteTarget.cutover_state === "shadow" ||
+                      deleteTarget.cutover_state === "direct")),
+              )}
+              onClick={() => {
+                if (!deleteTarget) return;
+                deleteMutation.mutate(deleteTarget.id);
+              }}
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={Boolean(editingConn)} onOpenChange={(open) => !open && setEditingConn(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit store connection</DialogTitle>
+          </DialogHeader>
+          {editingConn ? (
+            <div className="space-y-3 pt-2">
+              <div>
+                <Label htmlFor="edit-url">Store URL</Label>
+                <Input
+                  id="edit-url"
+                  type="url"
+                  className="mt-1 font-mono text-xs"
+                  value={editForm.storeUrl}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, storeUrl: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-webhook-url">Webhook callback URL (optional)</Label>
+                <Input
+                  id="edit-webhook-url"
+                  type="url"
+                  className="mt-1 font-mono text-xs"
+                  placeholder="https://…"
+                  value={editForm.webhookUrl}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, webhookUrl: e.target.value }))}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave empty to clear. WooCommerce signing uses the webhook secret fields below
+                  when set.
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="edit-webhook-secret">Webhook signing secret (optional)</Label>
+                <Input
+                  id="edit-webhook-secret"
+                  type="password"
+                  autoComplete="new-password"
+                  className="mt-1 font-mono text-xs"
+                  placeholder="Leave blank to keep unchanged"
+                  value={editForm.webhookSecret}
+                  disabled={editForm.clearWebhookSecret}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, webhookSecret: e.target.value }))
+                  }
+                />
+              </div>
+              <label className="flex items-start gap-2 text-sm cursor-pointer select-none">
+                <Checkbox
+                  checked={editForm.clearWebhookSecret}
+                  onCheckedChange={(checked) => {
+                    const isClear = Boolean(checked);
+                    setEditForm((prev) => ({
+                      ...prev,
+                      clearWebhookSecret: isClear,
+                      webhookSecret: isClear ? "" : prev.webhookSecret,
+                    }));
+                  }}
+                />
+                <span>Clear stored webhook signing secret</span>
+              </label>
+              <Button
+                className="w-full"
+                disabled={!canSaveEdit || updateMutation.isPending || !editingConn}
+                onClick={() => {
+                  if (!editingConn) return;
+                  const wu = editForm.webhookUrl.trim();
+                  const payload: Parameters<typeof updateStoreConnection>[1] = {
+                    storeUrl: editForm.storeUrl.trim(),
+                    webhookUrl: wu === "" ? null : wu,
+                  };
+                  if (editForm.clearWebhookSecret) payload.webhookSecret = null;
+                  else if (editForm.webhookSecret.trim()) {
+                    payload.webhookSecret = editForm.webhookSecret.trim();
+                  }
+                  updateMutation.mutate({ id: editingConn.id, payload });
+                }}
+              >
+                {updateMutation.isPending ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
         <DialogContent>
@@ -418,6 +633,8 @@ export function StoreConnectionsClient({
           </div>
         </DialogContent>
       </Dialog>
+
+      <Toaster closeButton position="top-center" richColors />
     </div>
   );
 }
