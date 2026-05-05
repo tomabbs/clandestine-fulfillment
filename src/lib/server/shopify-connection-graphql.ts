@@ -159,8 +159,10 @@ export async function* iterateAllVariants(
     variantId: string;
     variantTitle: string | null;
     /**
-     * From `InventoryItem.requiresShipping` (Shopify removed this from `ProductVariant`).
-     * False for digital/intangible — SKU matching omits those rows.
+     * Reserved for SKU-matching digital filtering; always `null` today.
+     * Shopify Admin GraphQL has removed/churned `requiresShipping` on both
+     * `ProductVariant` and (in some pins) queryable `InventoryItem`, which
+     * hard-failed entire catalog walks — title heuristics cover digital rows.
      */
     requiresShipping: boolean | null;
     sku: string | null;
@@ -194,7 +196,6 @@ export async function* iterateAllVariants(
                   inventoryItem {
                     id
                     tracked
-                    requiresShipping
                   }
                 }
               }
@@ -223,11 +224,7 @@ export async function* iterateAllVariants(
                 sku: string | null;
                 barcode: string | null;
                 price: string | null;
-                inventoryItem: {
-                  id: string;
-                  tracked: boolean | null;
-                  requiresShipping: boolean | null;
-                } | null;
+                inventoryItem: { id: string; tracked: boolean | null } | null;
               };
             }>;
           };
@@ -269,7 +266,7 @@ export async function* iterateAllVariants(
           productType: product.productType ?? null,
           variantId: variant.id,
           variantTitle: variant.title?.trim() || null,
-          requiresShipping: variant.inventoryItem?.requiresShipping ?? null,
+          requiresShipping: null,
           sku: variant.sku?.trim() || null,
           barcode: variant.barcode?.trim() || null,
           price:

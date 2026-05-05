@@ -66,6 +66,16 @@ describe("shouldExcludeShopifyVariantFromSkuMatchingCatalog", () => {
     ).toBe(false);
   });
 
+  it("excludes when variant text ends with spaced dash Digital (Shopify listing shape)", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: null,
+        productTitle: "caught-in-pointers",
+        variantTitle: "LP - Digital",
+      }),
+    ).toBe(true);
+  });
+
   it("includes rows when shipping requirement is unknown but titles are neutral", () => {
     expect(
       shouldExcludeShopifyVariantFromSkuMatchingCatalog({

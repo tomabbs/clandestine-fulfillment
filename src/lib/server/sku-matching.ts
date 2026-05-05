@@ -212,12 +212,15 @@ function classifyRemoteCatalogError(error: unknown): {
 /**
  * Shopify digital/intangible variants must not enter the SKU Matching remote
  * candidate set — overlapping barcodes with physical LPs/cassettes produces
- * false top candidates. Uses `requiresShipping` from Admin API plus modest
- * title heuristics for mis-flagged variants.
+ * false top candidates.
  *
- * `requiresShipping` is read from Shopify `InventoryItem` (not `ProductVariant`).
+ * We do **not** rely on GraphQL `requiresShipping` anymore: Shopify has
+ * removed/churned that field across `ProductVariant` / queryable `InventoryItem`,
+ * which previously caused whole-catalog fetch failures for staff review.
+ * Filtering uses title-shape heuristics; `requiresShipping === false` is still
+ * honored when a caller supplies it (tests / future REST enrichment).
  *
- * Exported for unit tests (`iterateAllVariants` supplies `requiresShipping`).
+ * Exported for unit tests (`iterateAllVariants` passes `requiresShipping: null`).
  */
 export function shouldExcludeShopifyVariantFromSkuMatchingCatalog(row: {
   requiresShipping: boolean | null;
@@ -227,7 +230,10 @@ export function shouldExcludeShopifyVariantFromSkuMatchingCatalog(row: {
   if (row.requiresShipping === false) return true;
   const vt = row.variantTitle?.trim().toLowerCase() ?? "";
   if (vt === "digital") return true;
-  if (/\s-\sDigital$/i.test(row.productTitle.trim())) return true;
+  const product = row.productTitle.trim();
+  if (/\s-\sDigital$/i.test(product)) return true;
+  const combined = `${product} ${row.variantTitle?.trim() ?? ""}`.trim();
+  if (/\s-\sDigital$/i.test(combined)) return true;
   return false;
 }
 
