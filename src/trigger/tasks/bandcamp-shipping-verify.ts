@@ -117,7 +117,8 @@ export async function runBandcampShippingVerify(): Promise<VerifyResult> {
     .limit(MAX_SHIPMENTS_PER_RUN);
   if (directPrimaryIds.length > 0) {
     // PostgREST `not.in` syntax: surround the list in parentheses.
-    legacyQuery = legacyQuery.not("workspace_id", "in", `(${directPrimaryIds.join(",")})`);
+    // biome-ignore lint/suspicious/noExplicitAny: chaining `.not(..., "in", ...)` blows TS2589 in Next/Vercel; runtime filter is correct.
+    legacyQuery = (legacyQuery as any).not("workspace_id", "in", `(${directPrimaryIds.join(",")})`);
   }
   const { data: legacyRows, error: legacyErr } = await legacyQuery;
 
