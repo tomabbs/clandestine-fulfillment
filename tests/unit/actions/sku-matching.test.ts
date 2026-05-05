@@ -36,8 +36,16 @@ describe("sku-matching Server Action source contract", () => {
   it("continues to persist accepts through the RPC boundary", () => {
     expect(source).toContain('supabase.rpc("persist_sku_match"');
     expect(source).toContain("p_candidate_fingerprint: parsed.fingerprint");
+    expect(source).toContain("persist_sku_match returned no mapping id");
+    expect(source).toContain("persist_verify_failed");
+    expect(source).toContain('.eq("is_active", true)');
     expect(source).not.toContain('.from("client_store_sku_mappings").insert');
     expect(source).not.toContain('.from("client_store_sku_mappings").update');
+  });
+
+  it("counts active saved aliases as matched even when Shopify readiness is incomplete", () => {
+    expect(source).toContain("if (existingMapping?.is_active) matchedCount.value += 1;");
+    expect(source).toContain('rowStatus === "shopify_not_ready"');
   });
 
   it("keeps manual candidate rejection out of the live alias table", () => {

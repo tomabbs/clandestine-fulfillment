@@ -999,7 +999,7 @@ export async function getSkuMatchingWorkspace(
       shopifyReadyState,
     });
 
-    if (rowStatus === "matched_active") matchedCount.value += 1;
+    if (existingMapping?.is_active) matchedCount.value += 1;
     else if (rowStatus.startsWith("conflict_") || rowStatus === "shopify_not_ready")
       conflictCount.value += 1;
     else needsReviewCount.value += 1;
@@ -1474,6 +1474,29 @@ export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatc
   if (error)
     throw createSkuMatchingError("persist_failed", `persist_sku_match failed: ${error.message}`);
 
+  if (!data) {
+    throw createSkuMatchingError("persist_failed", "persist_sku_match returned no mapping id.");
+  }
+
+  const { data: persistedMapping, error: verifyError } = await supabase
+    .from("client_store_sku_mappings")
+    .select(
+      "id, variant_id, connection_id, remote_product_id, remote_variant_id, remote_inventory_item_id, remote_sku, is_active, updated_at, match_method, match_confidence, matched_at, matched_by",
+    )
+    .eq("id", data)
+    .eq("workspace_id", auth.userRecord.workspace_id)
+    .eq("connection_id", parsed.connectionId)
+    .eq("variant_id", parsed.variantId)
+    .eq("is_active", true)
+    .single();
+
+  if (verifyError || !persistedMapping) {
+    throw createSkuMatchingError(
+      "persist_verify_failed",
+      `SKU match write did not produce an active mapping: ${verifyError?.message ?? "not found"}`,
+    );
+  }
+
   await insertSkuMatchingPerfEvent({
     workspaceId: auth.userRecord.workspace_id,
     connectionId: parsed.connectionId,
@@ -1487,7 +1510,7 @@ export async function createOrUpdateSkuMatch(rawInput: z.input<typeof upsertMatc
   });
 
   revalidatePath("/admin/settings/sku-matching");
-  return { success: true, mapping: toPlainJson(data) };
+  return { success: true, mapping: toPlainJson(persistedMapping) };
 }
 
 export async function deactivateSkuMatch(rawInput: z.input<typeof deactivateMatchInputSchema>) {

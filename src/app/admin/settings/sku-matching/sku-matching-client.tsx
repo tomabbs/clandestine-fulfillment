@@ -264,7 +264,9 @@ export function SkuMatchingClient({
         "needs_review_multiple_candidates",
       ].includes(row.rowStatus),
   );
-  const matchedRows = workspace.rows.filter((row) => row.rowStatus === "matched_active");
+  const matchedRows = workspace.rows.filter(
+    (row) => row.rowStatus === "matched_active" || Boolean(row.existingMappingId),
+  );
 
   const bulkAcceptableRows = useMemo(
     () =>
@@ -283,6 +285,7 @@ export function SkuMatchingClient({
       manualSelectedRemoteKey === remoteSearchResultKey(previewData.targetRemote),
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset callbacks can change after mutation state updates; this cleanup must run only when switching connections.
   useEffect(() => {
     setSelectedKeys(new Set());
     setPreviewOpen(false);
@@ -298,7 +301,7 @@ export function SkuMatchingClient({
     if (activeConnectionId && typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "auto" });
     }
-  }, [activeConnectionId, previewMutation.reset, remoteSearchMutation.reset, upsertMutation.reset]);
+  }, [activeConnectionId]);
 
   useEffect(() => {
     const rowCount = workspace.rows.length + workspace.remoteOnlyRows.length;
