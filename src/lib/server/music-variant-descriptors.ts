@@ -106,6 +106,7 @@ const FORMAT_PATTERNS: Array<{ re: RegExp; format: MusicFormat; size?: string }>
   { re: /(^|[^0-9])12[\s-]*in(?:ch|\.)?(?![0-9a-z])/i, format: "12inch", size: "12in" },
   // Cassette / tape
   { re: /\bcassette\b/i, format: "cassette" },
+  { re: /\bcs\b/i, format: "cassette" },
   { re: /\btape\b/i, format: "cassette" },
   // CD / compact disc
   { re: /\bcd\b/i, format: "cd" },

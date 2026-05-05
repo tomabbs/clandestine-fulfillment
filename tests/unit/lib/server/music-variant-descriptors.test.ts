@@ -81,6 +81,11 @@ describe("parseMusicVariantDescriptors", () => {
       expect(result.format).toBe("cassette");
     });
 
+    it("parses CS as cassette", () => {
+      const result = parseMusicVariantDescriptors({ title: "Artist — Album CS" });
+      expect(result.format).toBe("cassette");
+    });
+
     it("parses CD", () => {
       const result = parseMusicVariantDescriptors({ title: "Artist — Album CD" });
       expect(result.format).toBe("cd");

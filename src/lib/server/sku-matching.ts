@@ -159,16 +159,81 @@ export function physicalMediumFamiliesDisagree(a: MusicFormat, b: MusicFormat): 
   return fa !== fb;
 }
 
+const TITLE_TOKEN_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "the",
+  "of",
+  "for",
+  "to",
+  "records",
+  "record",
+  "recordings",
+  "label",
+  "music",
+  "lp",
+  "vinyl",
+  "cassette",
+  "cs",
+  "cd",
+  "compact",
+  "disc",
+  "digital",
+  "download",
+  "default",
+  "title",
+  "variant",
+  "blue",
+  "black",
+  "white",
+  "clear",
+  "red",
+  "green",
+  "yellow",
+  "orange",
+  "purple",
+  "pink",
+]);
+
+function normalizedTokens(value: string | null | undefined): string[] {
+  return normalizeProductText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+export function skuMatchingTitleTokens(canonical: CanonicalCandidateSignalSource): string[] {
+  const preferredTitle = canonical.bandcampTitle?.trim() || canonical.title;
+  const artistTokens = new Set(normalizedTokens(canonical.artist));
+  const seen = new Set<string>();
+
+  return normalizedTokens(preferredTitle).filter((token) => {
+    if (token.length < 3) return false;
+    if (TITLE_TOKEN_STOP_WORDS.has(token)) return false;
+    if (artistTokens.has(token)) return false;
+    if (seen.has(token)) return false;
+    seen.add(token);
+    return true;
+  });
+}
+
+function remoteContainsTitleToken(remote: RemoteCatalogItem, tokens: readonly string[]): boolean {
+  if (tokens.length === 0) return false;
+  const remoteTokens = new Set(
+    normalizedTokens([remote.productTitle, remote.variantTitle, remote.productType].join(" ")),
+  );
+  return tokens.some((token) => remoteTokens.has(token));
+}
+
 export function skuMatchingCanonicalDescriptorTitle(
   canonical: CanonicalCandidateSignalSource,
 ): string {
-  return [
-    canonical.format,
-    canonical.title,
-    canonical.bandcampTitle,
-    canonical.variantTitle,
-    canonical.optionValue,
-  ]
+  // `warehouse_product_variants.format_name` is the canonical physical format.
+  // Do not mix in variant text here: rows can carry stale/contradictory option
+  // labels such as "BLUE CASSETTE" while the warehouse format is LP.
+  if (canonical.format?.trim()) return canonical.format.trim();
+  return [canonical.title, canonical.bandcampTitle, canonical.variantTitle, canonical.optionValue]
     .filter((value): value is string => Boolean(value?.trim()))
     .join(" - ");
 }
@@ -469,13 +534,9 @@ export async function fetchRemoteCatalogWithTimeout(
 }
 
 function buildCanonicalTitles(canonical: CanonicalCandidateSignalSource): string[] {
-  return [
-    canonical.bandcampTitle,
-    canonical.title,
-    canonical.variantTitle,
-    canonical.optionValue,
-    canonical.bandcampOptionTitle,
-  ].filter((value): value is string => Boolean(value?.trim()));
+  return [canonical.bandcampTitle, canonical.title].filter((value): value is string =>
+    Boolean(value?.trim()),
+  );
 }
 
 function hasBandcampOptionStock(canonical: CanonicalCandidateSignalSource): boolean {
@@ -572,6 +633,7 @@ export function rankSkuCandidates(
   const normalizedArtist = normalizeProductText(canonical.artist);
   const normalizedFormat = normalizeProductText(canonical.format);
   const canonicalTitles = buildCanonicalTitles(canonical).map(normalizeProductText).filter(Boolean);
+  const canonicalTitleTokens = skuMatchingTitleTokens(canonical);
   const optionHasStock = hasBandcampOptionStock(canonical);
 
   const canonicalDescriptors = evidenceContext
@@ -631,26 +693,38 @@ export function rankSkuCandidates(
         }
       }
 
-      const titleMatched = canonicalTitles.some(
+      const exactTitleMatched = canonicalTitles.some(
         (title) =>
           normalizedRemoteTitle.includes(title) ||
           normalizedRemoteProductTitle.includes(title) ||
           normalizedRemoteVariantTitle.includes(title),
       );
+      const titleTokenMatched = remoteContainsTitleToken(remote, canonicalTitleTokens);
+      const titleMatched = exactTitleMatched || titleTokenMatched;
       if (titleMatched) {
         score += 30;
-        reasons.push("Title / Bandcamp title aligns");
+        reasons.push(exactTitleMatched ? "Title / Bandcamp title aligns" : "Title word overlaps");
       }
 
-      if (normalizedFormat) {
-        const formatMatched =
-          normalizedRemoteTitle.includes(normalizedFormat) ||
+      const canonicalDescriptor = parseMusicVariantDescriptors({
+        title: skuMatchingCanonicalDescriptorTitle(canonical),
+      });
+      const remoteDescriptor = parseMusicVariantDescriptors({
+        title: skuMatchingRemoteDescriptorTitle(remote),
+      });
+      const samePhysicalFamily =
+        physicalMediaFamily(canonicalDescriptor.format) !== "unknown" &&
+        physicalMediaFamily(remoteDescriptor.format) !== "unknown" &&
+        physicalMediaFamily(canonicalDescriptor.format) ===
+          physicalMediaFamily(remoteDescriptor.format);
+      const rawFormatMatched =
+        normalizedFormat &&
+        (normalizedRemoteTitle.includes(normalizedFormat) ||
           normalizedRemoteVariantTitle.includes(normalizedFormat) ||
-          normalizedRemoteType.includes(normalizedFormat);
-        if (formatMatched) {
-          score += 16;
-          reasons.push("Format / type aligns");
-        }
+          normalizedRemoteType.includes(normalizedFormat));
+      if (samePhysicalFamily || rawFormatMatched) {
+        score += 16;
+        reasons.push(samePhysicalFamily ? "Physical format family aligns" : "Format / type aligns");
       }
 
       const optionNeedle = normalizeProductText(
@@ -688,6 +762,10 @@ export function rankSkuCandidates(
 
       if (!titleMatched && !normalizedRemoteSku && !normalizedRemoteBarcode) {
         disqualifiers.push("title_only_or_weaker_match");
+      }
+
+      if (!titleMatched && !normalizedRemoteSku && !normalizedRemoteBarcode) {
+        disqualifiers.push("no_title_token_overlap");
       }
 
       if (skuMatchingPhysicalFormatMismatch(canonical, remote)) {

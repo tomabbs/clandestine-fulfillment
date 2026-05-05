@@ -9,6 +9,7 @@ import {
   selectConnectionScopedRemoteTarget,
   shouldExcludeShopifyVariantFromSkuMatchingCatalog,
   skuMatchingPhysicalFormatMismatch,
+  skuMatchingTitleTokens,
 } from "@/lib/server/sku-matching";
 
 describe("remote catalog timeouts", () => {
@@ -126,6 +127,32 @@ describe("skuMatchingPhysicalFormatMismatch", () => {
     expect(clash).toBe(true);
   });
 
+  it("uses warehouse format as authoritative when variant text contradicts it", () => {
+    const contradictoryCanonical = {
+      ...lpCanonical,
+      variantTitle: "BLUE CASSETTE",
+      optionValue: "BLUE CASSETTE",
+    };
+
+    const clash = skuMatchingPhysicalFormatMismatch(contradictoryCanonical, {
+      platform: "shopify",
+      remoteProductId: "gid://shopify/Product/C2",
+      remoteVariantId: "gid://shopify/ProductVariant/C2",
+      remoteInventoryItemId: null,
+      remoteSku: "669158569175",
+      productTitle: "blueblue - cassette",
+      variantTitle: null,
+      combinedTitle: "blueblue - cassette",
+      productType: null,
+      productUrl: null,
+      price: 15,
+      barcode: "669158569175",
+      quantity: 0,
+    });
+
+    expect(clash).toBe(true);
+  });
+
   it("does not flag two vinyl-shaped listings (LP vs twelve inch)", () => {
     const ok = skuMatchingPhysicalFormatMismatch(lpCanonical, {
       platform: "shopify",
@@ -174,6 +201,92 @@ describe("skuMatchingPhysicalFormatMismatch", () => {
     expect(ranked[0]?.remote.remoteProductId).toBe(vinyl.remoteProductId);
     expect(ranked[0]?.disqualifiers.includes(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER)).toBe(false);
     expect(ranked[1]?.disqualifiers).toContain(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER);
+  });
+
+  it("extracts title words from release title but ignores artist/format/color filler", () => {
+    const tokens = skuMatchingTitleTokens({
+      ...lpCanonical,
+      artist: "Leaving Records",
+      title: "LEAVING RECORDS - Arushi Jain - Delight LP",
+      bandcampTitle: "Delight",
+      variantTitle: "BLACK VINYL",
+    });
+
+    expect(tokens).toContain("delight");
+    expect(tokens).not.toContain("leaving");
+    expect(tokens).not.toContain("lp");
+    expect(tokens).not.toContain("black");
+  });
+
+  it("matches Delight LP to delight vinyl through title token + vinyl family", () => {
+    const delightCanonical = {
+      ...lpCanonical,
+      sku: "AJ-D-C",
+      barcode: "196922756078",
+      artist: "Leaving Records",
+      title: "LEAVING RECORDS - Arushi Jain - Delight LP",
+      bandcampTitle: "Delight",
+      format: "LP",
+      variantTitle: "Default Title",
+      price: 24,
+    };
+    const ranked = rankSkuCandidates(delightCanonical, [
+      {
+        platform: "shopify",
+        remoteProductId: "gid://shopify/Product/8103646036209",
+        remoteVariantId: "gid://shopify/ProductVariant/44264446263537",
+        remoteInventoryItemId: "gid://shopify/InventoryItem/46365080223985",
+        remoteSku: "196922743917",
+        productTitle: "delight",
+        variantTitle: "VINYL",
+        combinedTitle: "delight - VINYL",
+        productType: "Vinyl",
+        productUrl: null,
+        price: 24,
+        barcode: "196922743917",
+        quantity: 0,
+      },
+    ]);
+
+    expect(ranked[0]?.score).toBeGreaterThanOrEqual(46);
+    expect(ranked[0]?.reasons).toContain("Title / Bandcamp title aligns");
+    expect(ranked[0]?.reasons).toContain("Physical format family aligns");
+    expect(ranked[0]?.disqualifiers).not.toContain(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER);
+  });
+
+  it("does not treat cassette color/format text as a title match for an LP release", () => {
+    const textureCanonical = {
+      ...lpCanonical,
+      sku: "BDW-TI-BC",
+      barcode: null,
+      artist: "Leaving Records",
+      title: "LEAVING RECORDS - Brin & Dustin Wong - Texture II LP",
+      bandcampTitle: "Texture II",
+      format: "LP",
+      variantTitle: "BLUE CASSETTE",
+      optionValue: "BLUE CASSETTE",
+      price: 15,
+    };
+    const ranked = rankSkuCandidates(textureCanonical, [
+      {
+        platform: "shopify",
+        remoteProductId: "gid://shopify/Product/BLUEBLUE",
+        remoteVariantId: "gid://shopify/ProductVariant/BLUEBLUE",
+        remoteInventoryItemId: null,
+        remoteSku: "669158569175",
+        productTitle: "blueblue",
+        variantTitle: "cassette",
+        combinedTitle: "blueblue - cassette",
+        productType: null,
+        productUrl: null,
+        price: 15,
+        barcode: "669158569175",
+        quantity: 0,
+      },
+    ]);
+
+    expect(ranked[0]?.reasons).not.toContain("Title word overlaps");
+    expect(ranked[0]?.disqualifiers).toContain(PHYSICAL_FORMAT_MISMATCH_DISQUALIFIER);
   });
 });
 
