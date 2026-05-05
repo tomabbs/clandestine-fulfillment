@@ -13,7 +13,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { type Page, expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { setupStaffSession } from "./helpers/auth";
 
 type ConsoleIssue = { type: string; text: string; location?: string };
@@ -42,11 +42,7 @@ const audit: { routes: RouteAudit[] } = { routes: [] };
 test.describe.configure({ mode: "serial" });
 test.setTimeout(120_000);
 
-async function visit(
-  page: Page,
-  targetPath: string,
-  landmark?: RegExp,
-): Promise<RouteAudit> {
+async function visit(page: Page, targetPath: string, landmark?: RegExp): Promise<RouteAudit> {
   const consoleIssues: ConsoleIssue[] = [];
   const pageErrors: string[] = [];
   const networkIssues: NetworkIssue[] = [];
@@ -124,9 +120,7 @@ async function visit(
     page.off("response", onResponse as never);
   }
 
-  const has5xx = networkIssues.some(
-    (n) => n.kind === "http_error" && (n.status ?? 0) >= 500,
-  );
+  const has5xx = networkIssues.some((n) => n.kind === "http_error" && (n.status ?? 0) >= 500);
   const hydrationMismatches = consoleIssues.filter(
     (i) => i.type === "error" && /hydrat/i.test(i.text),
   ).length;
@@ -177,8 +171,7 @@ test.afterAll(async () => {
       );
       if (fivexx.length) {
         detail.push("  - 5xx:");
-        for (const n of fivexx.slice(0, 6))
-          detail.push(`    - ${n.method} ${n.status} ${n.url}`);
+        for (const n of fivexx.slice(0, 6)) detail.push(`    - ${n.method} ${n.status} ${n.url}`);
       }
       const errConsole = r.consoleIssues.filter((c) => c.type === "error");
       if (errConsole.length) {
@@ -220,12 +213,12 @@ test("transition: /admin/orders/diagnostics renders diagnostics", async ({ page 
   await expect(
     main.getByRole("heading", { name: /Order Pages Transition.*Diagnostics/i }),
   ).toBeVisible({ timeout: 5_000 });
-  await expect(
-    main.getByRole("heading", { name: /Mirror-links bridge/i }),
-  ).toBeVisible({ timeout: 5_000 });
-  await expect(
-    main.getByRole("heading", { name: /Identity v2 backfill/i }),
-  ).toBeVisible({ timeout: 5_000 });
+  await expect(main.getByRole("heading", { name: /Mirror-links bridge/i })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect(main.getByRole("heading", { name: /Identity v2 backfill/i })).toBeVisible({
+    timeout: 5_000,
+  });
   await expect(main.getByRole("heading", { name: /Route mode/i })).toBeVisible({
     timeout: 5_000,
   });
@@ -235,15 +228,12 @@ test("transition: legacy /admin/shipstation-orders 301s to /admin/orders/shipsta
   page,
 }) => {
   const responses: { url: string; status: number }[] = [];
-  page.on("response", (res) =>
-    responses.push({ url: res.url(), status: res.status() }),
-  );
+  page.on("response", (res) => responses.push({ url: res.url(), status: res.status() }));
   await page.goto("/admin/shipstation-orders", { waitUntil: "domcontentloaded" });
   expect(page.url()).toContain("/admin/orders/shipstation");
   // We expect at least one 301/308 in the chain.
   const redirected = responses.some(
-    (r) =>
-      (r.status === 301 || r.status === 308) && /\/admin\/shipstation-orders/.test(r.url),
+    (r) => (r.status === 301 || r.status === 308) && /\/admin\/shipstation-orders/.test(r.url),
   );
   expect(redirected, "expected 301/308 redirect from legacy route").toBe(true);
 });
@@ -277,11 +267,11 @@ test("transition: Direct list + detail page (route_mode=direct)", async ({ page 
         break;
       }
     }
-    test.skip(
-      !firstHref,
-      "No Direct Orders rows in this workspace (warehouse_orders empty?)",
-    );
-    const r2 = await visit(page, firstHref!);
+    if (!firstHref) {
+      test.skip(true, "No Direct Orders rows in this workspace (warehouse_orders empty?)");
+      return;
+    }
+    const r2 = await visit(page, firstHref);
     audit.routes.push(r2);
     expect(r2.pageErrors).toEqual([]);
     expect(r2.status).toBe(200);
@@ -303,9 +293,7 @@ test("transition: Direct list + detail page (route_mode=direct)", async ({ page 
       .locator('textarea, input[type="text"]')
       .first()
       .fill("smoke-test transition restore");
-    await page
-      .getByRole("button", { name: /Set to shipstation_mirror/i })
-      .click();
+    await page.getByRole("button", { name: /Set to shipstation_mirror/i }).click();
     await expect(page.getByText(/Route mode set to shipstation_mirror/i)).toBeVisible({
       timeout: 8_000,
     });
