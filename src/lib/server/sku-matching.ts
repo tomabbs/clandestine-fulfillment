@@ -215,6 +215,8 @@ function classifyRemoteCatalogError(error: unknown): {
  * false top candidates. Uses `requiresShipping` from Admin API plus modest
  * title heuristics for mis-flagged variants.
  *
+ * `requiresShipping` is read from Shopify `InventoryItem` (not `ProductVariant`).
+ *
  * Exported for unit tests (`iterateAllVariants` supplies `requiresShipping`).
  */
 export function shouldExcludeShopifyVariantFromSkuMatchingCatalog(row: {

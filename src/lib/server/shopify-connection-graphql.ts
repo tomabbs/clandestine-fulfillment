@@ -158,7 +158,10 @@ export async function* iterateAllVariants(
     productType: string | null;
     variantId: string;
     variantTitle: string | null;
-    /** False for Shopify digital variants / intangible goods — used by SKU matching to omit them. */
+    /**
+     * From `InventoryItem.requiresShipping` (Shopify removed this from `ProductVariant`).
+     * False for digital/intangible — SKU matching omits those rows.
+     */
     requiresShipping: boolean | null;
     sku: string | null;
     barcode: string | null;
@@ -185,13 +188,13 @@ export async function* iterateAllVariants(
                 node {
                   id
                   title
-                  requiresShipping
                   sku
                   barcode
                   price
                   inventoryItem {
                     id
                     tracked
+                    requiresShipping
                   }
                 }
               }
@@ -217,11 +220,14 @@ export async function* iterateAllVariants(
               node: {
                 id: string;
                 title: string | null;
-                requiresShipping: boolean | null;
                 sku: string | null;
                 barcode: string | null;
                 price: string | null;
-                inventoryItem: { id: string; tracked: boolean | null } | null;
+                inventoryItem: {
+                  id: string;
+                  tracked: boolean | null;
+                  requiresShipping: boolean | null;
+                } | null;
               };
             }>;
           };
@@ -263,7 +269,7 @@ export async function* iterateAllVariants(
           productType: product.productType ?? null,
           variantId: variant.id,
           variantTitle: variant.title?.trim() || null,
-          requiresShipping: variant.requiresShipping ?? null,
+          requiresShipping: variant.inventoryItem?.requiresShipping ?? null,
           sku: variant.sku?.trim() || null,
           barcode: variant.barcode?.trim() || null,
           price:
