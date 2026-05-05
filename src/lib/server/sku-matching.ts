@@ -209,6 +209,26 @@ function classifyRemoteCatalogError(error: unknown): {
   return { state: "api_error", message };
 }
 
+/**
+ * Shopify digital/intangible variants must not enter the SKU Matching remote
+ * candidate set — overlapping barcodes with physical LPs/cassettes produces
+ * false top candidates. Uses `requiresShipping` from Admin API plus modest
+ * title heuristics for mis-flagged variants.
+ *
+ * Exported for unit tests (`iterateAllVariants` supplies `requiresShipping`).
+ */
+export function shouldExcludeShopifyVariantFromSkuMatchingCatalog(row: {
+  requiresShipping: boolean | null;
+  productTitle: string;
+  variantTitle: string | null;
+}): boolean {
+  if (row.requiresShipping === false) return true;
+  const vt = row.variantTitle?.trim().toLowerCase() ?? "";
+  if (vt === "digital") return true;
+  if (/\s-\sDigital$/i.test(row.productTitle.trim())) return true;
+  return false;
+}
+
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -234,6 +254,15 @@ async function fetchShopifyCatalog(
   const items: RemoteCatalogItem[] = [];
   for await (const page of iterateAllVariants(ctx, { pageSize: 50 })) {
     for (const row of page) {
+      if (
+        shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+          requiresShipping: row.requiresShipping,
+          productTitle: row.productTitle,
+          variantTitle: row.variantTitle,
+        })
+      ) {
+        continue;
+      }
       items.push({
         platform: "shopify",
         remoteProductId: row.productId,

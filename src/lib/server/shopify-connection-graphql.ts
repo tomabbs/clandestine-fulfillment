@@ -158,6 +158,8 @@ export async function* iterateAllVariants(
     productType: string | null;
     variantId: string;
     variantTitle: string | null;
+    /** False for Shopify digital variants / intangible goods — used by SKU matching to omit them. */
+    requiresShipping: boolean | null;
     sku: string | null;
     barcode: string | null;
     price: number | null;
@@ -183,6 +185,7 @@ export async function* iterateAllVariants(
                 node {
                   id
                   title
+                  requiresShipping
                   sku
                   barcode
                   price
@@ -214,6 +217,7 @@ export async function* iterateAllVariants(
               node: {
                 id: string;
                 title: string | null;
+                requiresShipping: boolean | null;
                 sku: string | null;
                 barcode: string | null;
                 price: string | null;
@@ -241,6 +245,7 @@ export async function* iterateAllVariants(
       productType: string | null;
       variantId: string;
       variantTitle: string | null;
+      requiresShipping: boolean | null;
       sku: string | null;
       barcode: string | null;
       price: number | null;
@@ -258,6 +263,7 @@ export async function* iterateAllVariants(
           productType: product.productType ?? null,
           variantId: variant.id,
           variantTitle: variant.title?.trim() || null,
+          requiresShipping: variant.requiresShipping ?? null,
           sku: variant.sku?.trim() || null,
           barcode: variant.barcode?.trim() || null,
           price:

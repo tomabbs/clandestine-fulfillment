@@ -6,11 +6,74 @@ import {
   REMOTE_CATALOG_TIMEOUTS_MS,
   rankSkuCandidates,
   selectConnectionScopedRemoteTarget,
+  shouldExcludeShopifyVariantFromSkuMatchingCatalog,
 } from "@/lib/server/sku-matching";
 
 describe("remote catalog timeouts", () => {
   it("gives WooCommerce enough budget for slower paginated catalogs", () => {
     expect(REMOTE_CATALOG_TIMEOUTS_MS.woocommerce).toBeGreaterThanOrEqual(55_000);
+  });
+});
+
+describe("shouldExcludeShopifyVariantFromSkuMatchingCatalog", () => {
+  it("excludes Shopify variants with requiresShipping false", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: false,
+        productTitle: "Album LP",
+        variantTitle: "Default Title",
+      }),
+    ).toBe(true);
+  });
+
+  it("includes physical variants when requiresShipping is true", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: true,
+        productTitle: "Album LP",
+        variantTitle: "Black Vinyl",
+      }),
+    ).toBe(false);
+  });
+
+  it("excludes variants explicitly titled Digital (case-insensitive)", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: true,
+        productTitle: "caught-in-pointers",
+        variantTitle: "Digital",
+      }),
+    ).toBe(true);
+  });
+
+  it("excludes mis-flagged listings when product title ends with dash Digital", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: null,
+        productTitle: "Artist - Album - Digital",
+        variantTitle: "Default Title",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not exclude merely having 'digital' mid-title", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: true,
+        productTitle: "Artist - Digitally sourced LP",
+        variantTitle: "Black",
+      }),
+    ).toBe(false);
+  });
+
+  it("includes rows when shipping requirement is unknown but titles are neutral", () => {
+    expect(
+      shouldExcludeShopifyVariantFromSkuMatchingCatalog({
+        requiresShipping: null,
+        productTitle: "Tape edition",
+        variantTitle: "Shell A",
+      }),
+    ).toBe(false);
   });
 });
 
