@@ -37,7 +37,17 @@ export type InventorySource =
   // audit row (no quantity change) so admin can grep when an SKU was activated
   // at a given timestamp without joining external_sync_events. CHECK constraint
   // extended in supabase/migrations/20260422000001_direct_shopify_metadata.sql.
-  | "inventory_activate";
+  | "inventory_activate"
+  // Inventory sync cutover (2026-05-06): first-class full-catalog physical
+  // count imports. Baseline rows use recordInventoryChange() with
+  // fanout.suppress=true so they update Postgres/Redis truth without enqueuing
+  // one external push per workbook row.
+  | "baseline_import"
+  // Staff-created label fulfillment orders. Label order rows live in
+  // warehouse_orders with source='label_order'; their inventory movements use
+  // this source so portal/activity/reports can distinguish them from storefront
+  // sales and generic manual adjustments.
+  | "label_order";
 
 export type ReviewSeverity = "low" | "medium" | "high" | "critical";
 
@@ -88,7 +98,8 @@ export type OrderSource =
   | "woocommerce"
   | "squarespace"
   | "discogs"
-  | "manual";
+  | "manual"
+  | "label_order";
 
 export type MailOrderSource = "clandestine_shopify" | "clandestine_discogs";
 

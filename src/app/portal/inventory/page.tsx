@@ -3,11 +3,7 @@
 import { ChevronsUpDown, ExternalLink, Minus, Package, Plus } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import {
-  getClientInventoryLevels,
-  getInventoryDetail,
-  updateInventoryBuffer,
-} from "@/actions/inventory";
+import { getClientInventoryLevels, getInventoryDetail } from "@/actions/inventory";
 import { BlockList } from "@/components/shared/block-list";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DEFAULT_PAGE_SIZE, PaginationBar } from "@/components/shared/pagination-bar";
@@ -169,33 +165,8 @@ export default function InventoryPage() {
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
                 Buffer
               </p>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground px-1"
-                  title="Reduce buffer"
-                  onClick={async () => {
-                    const cur = row.safetyStock ?? 3;
-                    const next = Math.max(0, cur - 1);
-                    await updateInventoryBuffer(row.sku, next === 3 ? null : next);
-                  }}
-                >
-                  <Minus className="h-3 w-3" />
-                </button>
-                <span className="font-mono text-sm w-6 text-center">{row.safetyStock ?? 3}</span>
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground px-1"
-                  title="Increase buffer"
-                  onClick={async () => {
-                    const cur = row.safetyStock ?? 3;
-                    const next = Math.min(20, cur + 1);
-                    await updateInventoryBuffer(row.sku, next === 3 ? null : next);
-                  }}
-                >
-                  <Plus className="h-3 w-3" />
-                </button>
-              </div>
+              <p className="font-mono text-sm">{row.safetyStock ?? 3}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Staff-managed</p>
             </div>
             <MetricCard label="Format" value={row.formatName ?? "—"} />
           </div>

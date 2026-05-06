@@ -23,6 +23,12 @@ const SOURCE_LABELS: Record<string, string> = {
   inbound: "Inbound shipment",
   preorder: "Pre-order allocation",
   backfill: "Inventory backfill",
+  baseline_import: "Baseline count import",
+  label_order: "Label order",
+  manual_inventory_count: "Manual inventory count",
+  cycle_count: "Cycle count",
+  inventory_activate: "Shopify inventory activation",
+  reconcile: "Inventory reconciliation",
 };
 
 function getSourceLabel(source: string): string {
@@ -47,6 +53,12 @@ function getReferenceId(source: string, metadata: Record<string, unknown>): stri
   }
   if (source === "manual" && metadata.reason) {
     return String(metadata.reason);
+  }
+  if (source === "baseline_import" && metadata.cycle_id) {
+    return `Baseline ${String(metadata.cycle_id)}`;
+  }
+  if (source === "label_order" && metadata.order_number) {
+    return `Label order ${String(metadata.order_number)}`;
   }
   return null;
 }

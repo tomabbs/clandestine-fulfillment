@@ -211,6 +211,7 @@ export function isStockStableFor(
   window: keyof typeof STABILITY_WINDOWS_MS,
   signal: StockSignal,
   history: StockHistoryReadings,
+  referenceNow: Date = new Date(),
 ): boolean {
   if (signal.tier === "fresh_remote_unbounded") {
     // Unbounded never participates in a numeric tiebreak; stability is
@@ -222,7 +223,7 @@ export function isStockStableFor(
   const readings = Array.isArray(history?.readings) ? history.readings : [];
   if (readings.length === 0) return false;
 
-  const cutoffMs = Date.now() - STABILITY_WINDOWS_MS[window];
+  const cutoffMs = referenceNow.getTime() - STABILITY_WINDOWS_MS[window];
 
   const inWindow = readings.filter((r) => {
     const t = new Date(r.observedAt).getTime();

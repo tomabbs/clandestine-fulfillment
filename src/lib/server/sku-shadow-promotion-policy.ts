@@ -191,7 +191,7 @@ export function shouldPromoteShadow(
   // informative.
   const stabilityPasses =
     candidate.stockSignal !== null &&
-    isStockStableFor("promotion", candidate.stockSignal, candidate.stabilityHistory);
+    isStockStableFor("promotion", candidate.stockSignal, candidate.stabilityHistory, now);
 
   if (!stabilityPasses) {
     disqualifiers.push("stability_gate_failed");

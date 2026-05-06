@@ -3,14 +3,34 @@
 set -uo pipefail
 
 RUN_E2E=0
+RUN_INVENTORY_SYNC_PREFLIGHT=0
+INVENTORY_WORKSPACE_ID=""
+INVENTORY_CONNECTION_ID=""
+INVENTORY_ORG_ID=""
+MARKDOWN_PREFLIGHT=0
 for arg in "$@"; do
   case "$arg" in
     --with-e2e)
       RUN_E2E=1
       ;;
+    --inventory-sync-preflight)
+      RUN_INVENTORY_SYNC_PREFLIGHT=1
+      ;;
+    --workspace-id=*)
+      INVENTORY_WORKSPACE_ID="${arg#*=}"
+      ;;
+    --connection-id=*)
+      INVENTORY_CONNECTION_ID="${arg#*=}"
+      ;;
+    --org-id=*)
+      INVENTORY_ORG_ID="${arg#*=}"
+      ;;
+    --preflight-markdown)
+      MARKDOWN_PREFLIGHT=1
+      ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: bash scripts/release-gate.sh [--with-e2e]"
+      echo "Usage: bash scripts/release-gate.sh [--with-e2e] [--inventory-sync-preflight --workspace-id=<uuid> [--connection-id=<uuid>] [--org-id=<uuid>] [--preflight-markdown]]"
       exit 2
       ;;
   esac
@@ -52,6 +72,26 @@ run_cmd "ShipStation v2 inventory batch guard" bash scripts/check-v2-inventory-b
 run_cmd "InventorySource ↔ DB CHECK sync guard" npx tsx scripts/check-source-union-sync.ts
 run_cmd "SKU identity rows not read in fanout guard" bash scripts/ci-checks/sku-identity-no-fanout.sh
 run_cmd "SKU alias single-writer guard (SKU-AUTO-2)" bash scripts/ci-checks/sku-aliases-single-writer.sh
+
+if [ "$RUN_INVENTORY_SYNC_PREFLIGHT" -eq 1 ]; then
+  step "Section A.1: Inventory sync cutover preflight"
+  if [ -z "$INVENTORY_WORKSPACE_ID" ]; then
+    echo "  -> [FAIL] Inventory sync preflight requires --workspace-id=<uuid>"
+    FAILURES+=("Inventory sync preflight missing workspace id")
+  else
+    PREFLIGHT_ARGS=(scripts/inventory-sync-preflight.ts --strict --workspace-id "$INVENTORY_WORKSPACE_ID")
+    if [ -n "$INVENTORY_CONNECTION_ID" ]; then
+      PREFLIGHT_ARGS+=(--connection-id "$INVENTORY_CONNECTION_ID")
+    fi
+    if [ -n "$INVENTORY_ORG_ID" ]; then
+      PREFLIGHT_ARGS+=(--org-id "$INVENTORY_ORG_ID")
+    fi
+    if [ "$MARKDOWN_PREFLIGHT" -eq 1 ]; then
+      PREFLIGHT_ARGS+=(--markdown)
+    fi
+    run_cmd "Inventory sync cutover preflight" npx tsx "${PREFLIGHT_ARGS[@]}"
+  fi
+fi
 
 step "Section B: Focused reliability regression tests"
 run_cmd "Support/inbound/invite envelope tests" pnpm vitest run tests/unit/actions/support-envelope.test.ts tests/unit/actions/inbound-create-envelope.test.ts tests/unit/actions/users-invite-envelope.test.ts

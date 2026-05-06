@@ -44,16 +44,53 @@ export const sensorCheckTask = schedules.task({
         // false zeros for consumers that treat those fields as authoritative.
         const { data: sample } = await supabase
           .from("warehouse_inventory_levels")
-          .select("sku, available, committed, incoming")
+          .select("sku, variant_id, available, committed, incoming")
           .eq("workspace_id", workspaceId)
           .limit(100);
 
+        const sampleSkus = (sample ?? []).map((row) => row.sku);
+        const { data: existingObservations } =
+          sampleSkus.length > 0
+            ? await supabase
+                .from("redis_pg_drift_observations")
+                .select("sku, first_observed_at, max_abs_drift, sample_count")
+                .eq("workspace_id", workspaceId)
+                .in("sku", sampleSkus)
+            : { data: [] };
+        const observationsBySku = new Map(
+          (existingObservations ?? []).map((row) => [row.sku, row] as const),
+        );
+
         let mismatches = 0;
         let healed = 0;
+        let criticalDrift = 0;
         for (const row of sample ?? []) {
           const redis = await getInventory(row.sku);
           if (redis.available !== row.available) {
             mismatches++;
+            const absDrift = Math.abs(redis.available - row.available);
+            const existing = observationsBySku.get(row.sku);
+            const firstObservedAt = existing?.first_observed_at ?? new Date().toISOString();
+            const driftAgeMs = Date.now() - new Date(firstObservedAt).getTime();
+            const status = absDrift >= 50 || driftAgeMs >= 5 * 60_000 ? "critical" : "warning";
+            if (status === "critical") criticalDrift++;
+            await supabase.from("redis_pg_drift_observations").upsert(
+              {
+                workspace_id: workspaceId,
+                variant_id: row.variant_id,
+                sku: row.sku,
+                first_observed_at: firstObservedAt,
+                last_observed_at: new Date().toISOString(),
+                redis_available: redis.available,
+                postgres_available: row.available,
+                max_abs_drift: Math.max(absDrift, existing?.max_abs_drift ?? 0),
+                sample_count: (existing?.sample_count ?? 0) + 1,
+                status,
+                metadata: { sensor_name: "inv.redis_postgres_drift" },
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "workspace_id,sku" },
+            );
             if (healed < 50) {
               // Auto-heal: align all three Redis fields to Postgres source of truth
               await setInventory(row.sku, {
@@ -63,13 +100,56 @@ export const sensorCheckTask = schedules.task({
               });
               healed++;
             }
+          } else {
+            await supabase
+              .from("redis_pg_drift_observations")
+              .update({
+                status: "resolved",
+                last_observed_at: new Date().toISOString(),
+                redis_available: redis.available,
+                postgres_available: row.available,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("workspace_id", workspaceId)
+              .eq("sku", row.sku)
+              .neq("status", "resolved");
           }
+        }
+
+        if (criticalDrift > 0) {
+          await supabase
+            .from("workspaces")
+            .update({ inventory_sync_paused: true })
+            .eq("id", workspaceId);
+          await supabase.from("warehouse_review_queue").upsert(
+            {
+              workspace_id: workspaceId,
+              category: "redis_pg_drift_circuit_breaker",
+              severity: "critical",
+              title: "Redis/Postgres drift circuit breaker paused inventory fanout",
+              description:
+                "Persistent or massive Redis/Postgres drift was observed during sensor-check. inventory_sync_paused was enabled before stale quantities could be pushed outward.",
+              metadata: {
+                critical_drift_count: criticalDrift,
+                mismatches,
+                auto_healed: healed,
+                sensor_name: "inv.redis_postgres_drift",
+              },
+              group_key: `redis-pg-drift-circuit-breaker:${workspaceId}`,
+            },
+            { onConflict: "group_key" },
+          );
         }
 
         readings.push({
           sensorName: "inv.redis_postgres_drift",
-          status: driftStatus(mismatches),
-          value: { sample_size: sample?.length ?? 0, mismatches, auto_healed: healed },
+          status: criticalDrift > 0 ? "critical" : driftStatus(mismatches),
+          value: {
+            sample_size: sample?.length ?? 0,
+            mismatches,
+            auto_healed: healed,
+            critical_drift: criticalDrift,
+          },
           message:
             mismatches === 0
               ? "No drift detected"

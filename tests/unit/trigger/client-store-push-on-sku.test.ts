@@ -20,6 +20,7 @@
  *     does NOT write `last_pushed_*`)
  *   - Squarespace + WooCommerce go through legacy dispatcher
  *   - Legacy dispatcher push failure marks ledger error + rethrows
+ *   - alias fanout resolves by mapping/variant identity, not remote_sku=warehouse SKU
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -354,6 +355,32 @@ describe("clientStorePushOnSkuTask (Pass 2 — Shopify CAS branch)", () => {
     expect(mockSetCas).not.toHaveBeenCalled();
     // Critical: must NOT silently drop into the legacy dispatcher.
     expect(mockPushInventory).not.toHaveBeenCalled();
+  });
+
+  it("resolves alias mappings by mapping/variant identity when remote SKU differs from warehouse SKU", async () => {
+    setResults({
+      client_store_connections: { data: makeConnection() },
+      client_store_sku_mappings: {
+        data: makeMapping({ id: "mapping_alias", remote_sku: "REMOTE-LP-001" }),
+      },
+    });
+
+    const result = await runTask({
+      ...basePayload(),
+      sku: "WAREHOUSE-LP-001",
+      variantId: "44444444-4444-4444-4444-444444444444",
+      mappingId: "mapping_alias",
+    });
+
+    expect(result.status).toBe("ok");
+    expect(mockBegin).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sku: "WAREHOUSE-LP-001",
+        request_body: expect.objectContaining({ remote_sku: "REMOTE-LP-001" }),
+      }),
+    );
+    expect(mockSetCas).toHaveBeenCalledTimes(1);
   });
 
   it("skips when computeEffectiveSellable reports variant_not_found", async () => {

@@ -90,6 +90,18 @@ Use this subsection when communicating “everything wired up” near go-live:
 - **Inventory “done” semantics:** Prefer **megaplan spot-check artifacts**, Channels webhook/SKU health cards, **`sku_matching_perf_events` / drift sensors**, and `warehouse_review_queue` clearances over a single SKU-count metric. SKU Mapping completion removes an entire class of unmapped SKU errors but does **not** alone guarantee instantaneous cross-system quantity equality.
 - **Runtime proof stack:** Beyond unit/migration guards, **`pnpm test:integration`** (when `INTEGRATION_TEST_SUPABASE_URL` + `INTEGRATION_TEST_SERVICE_ROLE_KEY` are set) includes `tests/integration/persist-sku-match-org-coverage.test.ts` asserting `persist_sku_match` rejects variants whose **`warehouse_products.org_id` is absent from `client_store_connection_org_coverage`** for that connection.
 
+### Inventory sync cutover preflight (2026-05-06)
+
+Before widening `fanout_rollout_percent` or unpausing inventory sync for a Shopify/Bandcamp cutover, run the release-gate preflight against the target workspace and connection:
+
+```bash
+bash scripts/release-gate.sh --inventory-sync-preflight --workspace-id=<workspace_uuid> --connection-id=<shopify_connection_uuid> --org-id=<org_uuid> --preflight-markdown
+```
+
+The preflight is strict by default inside `release-gate.sh` and blocks on missing Shopify `default_location_id`, inactive/default-location inventory items for matched SKUs, critical Redis/Postgres drift observations, dormant fanout flags, problematic Bandcamp push modes, and open high/critical review queue items. Baseline count imports must be applied with `scripts/import-inventory-master.ts --apply --cycle-id=<stable_cycle>` so every delta goes through `recordInventoryChange({ source:'baseline_import', fanout:{ suppress:true } })`; external convergence is then verified by the preflight, spot checks, and staged rollout rather than by per-row importer pushes.
+
+Baseline imports must also have an operator-declared count window. The approved v1 path is a sales freeze from `counted_at` through import completion. If sales cannot freeze, release approval requires a movement replay ledger for `[counted_at, imported_at]` with original source IDs/correlation IDs preserved for Shopify webhooks, Bandcamp sale polls, ShipStation notifications, and label orders. WooCommerce connections are v1-deferred unless mapped and explicitly passing readiness gates; deferred Woo must remain `do_not_fanout=true` and `cutover_state='legacy'`.
+
 ### Operational cutover — staging smoke (ShipStation + EasyPost) (2026-04-28)
 
 Run once per staging environment before proclaiming postage + SS mirroring healthy:

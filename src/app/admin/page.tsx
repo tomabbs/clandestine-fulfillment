@@ -40,21 +40,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setHydrated(true);
-    // #region agent log
-    fetch("http://127.0.0.1:7909/ingest/f0fcee9d-53f1-4c20-a5f9-ad4d1d8a804b", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "551ae1" },
-      body: JSON.stringify({
-        sessionId: "551ae1",
-        runId: "dashboard-presence-check",
-        hypothesisId: "H1",
-        location: "src/app/admin/page.tsx:DashboardPage",
-        message: "Dashboard bundle with Bandcamp Product Detection code mounted",
-        data: { hasBandcampProductDetectionCard: true },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }, []);
 
   if (!hydrated) {
@@ -165,24 +150,6 @@ function BandcampProductDetectionCard() {
   });
 
   useEffect(() => {
-    // #region agent log
-    fetch("http://127.0.0.1:7909/ingest/f0fcee9d-53f1-4c20-a5f9-ad4d1d8a804b", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "551ae1" },
-      body: JSON.stringify({
-        sessionId: "551ae1",
-        runId: "dashboard-presence-check",
-        hypothesisId: "H2",
-        location: "src/app/admin/page.tsx:BandcampProductDetectionCard",
-        message: "Bandcamp Product Detection card component mounted",
-        data: { isLoading },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [isLoading]);
-
-  useEffect(() => {
     if (!data) return;
     // #region agent log
     fetch("http://127.0.0.1:7909/ingest/f0fcee9d-53f1-4c20-a5f9-ad4d1d8a804b", {
@@ -190,14 +157,16 @@ function BandcampProductDetectionCard() {
       headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "551ae1" },
       body: JSON.stringify({
         sessionId: "551ae1",
-        runId: "post-fix-dashboard-browser",
+        runId: "post-newness-fix-dashboard",
         hypothesisId: "VERIFY",
         location: "src/app/admin/page.tsx:BandcampProductDetectionCard",
-        message: "Bandcamp Product Detection card rendered with dashboard data",
+        message: "Bandcamp Product Detection rendered corrected recent-date buckets",
         data: {
           summary: data.summary,
-          newProductCount: data.newProducts.length,
-          preorderSignalCount: data.preorderSignals.length,
+          recentProductTitles: data.newProducts.map((item) => ({
+            title: item.title,
+            date: item.bandcampProductDate,
+          })),
         },
         timestamp: Date.now(),
       }),
@@ -232,7 +201,7 @@ function BandcampProductDetectionCard() {
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2">
-              <MiniMetric label="New / 30d" value={summary?.newProductsInWindow ?? 0} />
+              <MiniMetric label="Recent BC" value={summary?.newProductsInWindow ?? 0} />
               <MiniMetric
                 label="Upcoming BC"
                 value={summary?.currentUpcoming ?? 0}
@@ -261,16 +230,16 @@ function BandcampProductDetectionCard() {
             )}
 
             <DetectionSection
-              title={`New Bandcamp products (${newProducts.length})`}
+              title={`Recent Bandcamp products (${newProducts.length})`}
               items={newProducts.slice(0, 6).map((item) => ({
                 id: item.id,
                 title: item.title,
-                meta: [item.sku, item.bandcampSubdomain, formatShortDate(item.createdAt)]
+                meta: [item.sku, item.bandcampSubdomain, formatShortDate(item.bandcampProductDate)]
                   .filter(Boolean)
                   .join(" · "),
                 href: item.bandcampUrl,
               }))}
-              emptyText="No new Bandcamp products in the last 30 days."
+              emptyText="No recent Bandcamp release/new dates in the last 30 days."
             />
 
             {staleSignals.length > 0 && (

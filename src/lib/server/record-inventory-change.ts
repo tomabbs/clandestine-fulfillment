@@ -10,6 +10,17 @@ interface RecordInventoryChangeParams {
   correlationId: string;
   metadata?: Record<string, unknown>;
   /**
+   * Explicit per-call fanout control for controlled bulk writes.
+   *
+   * Baseline imports update warehouse truth row-by-row but must not enqueue a
+   * storefront/Bandcamp/ShipStation push for every workbook row. A final
+   * reconciliation sweep pushes the post-import state instead.
+   */
+  fanout?: {
+    suppress: boolean;
+    reason?: string;
+  };
+  /**
    * Phase 3 D4 — originating client_store_connections.id when this event
    * came from a storefront webhook. Plumbed through to fanoutInventoryChange
    * so the per-connection echo override (`connection_echo_overrides`) can
@@ -46,8 +57,16 @@ interface RecordInventoryChangeResult {
 export async function recordInventoryChange(
   params: RecordInventoryChangeParams,
 ): Promise<RecordInventoryChangeResult> {
-  const { workspaceId, sku, delta, source, correlationId, metadata, originatingConnectionId } =
-    params;
+  const {
+    workspaceId,
+    sku,
+    delta,
+    source,
+    correlationId,
+    metadata,
+    fanout,
+    originatingConnectionId,
+  } = params;
   // Phase 3 D4 — back-compat: pull connection_id from metadata if the caller
   // hasn't surfaced it explicitly. Existing webhook handlers already write
   // `metadata: { connection_id }` so this gives the per-connection echo
@@ -91,6 +110,10 @@ export async function recordInventoryChange(
       err,
     );
     return { success: false, newQuantity: null, alreadyProcessed: false };
+  }
+
+  if (fanout?.suppress) {
+    return { success: true, newQuantity: redisResult, alreadyProcessed: false };
   }
 
   try {

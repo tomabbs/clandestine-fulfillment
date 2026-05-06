@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Mock dependencies
 const mockAdjustInventory = vi.fn();
 const mockRpc = vi.fn();
+const mockFanoutInventoryChange = vi.fn();
 
 vi.mock("@/lib/clients/redis-inventory", () => ({
   adjustInventory: (...args: unknown[]) => mockAdjustInventory(...args),
@@ -14,12 +15,22 @@ vi.mock("@/lib/server/supabase-server", () => ({
   }),
 }));
 
+vi.mock("@/lib/server/inventory-fanout", () => ({
+  fanoutInventoryChange: (...args: unknown[]) => mockFanoutInventoryChange(...args),
+}));
+
 import { recordInventoryChange } from "@/lib/server/record-inventory-change";
 
 describe("recordInventoryChange", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => {});
+    mockFanoutInventoryChange.mockResolvedValue({
+      storeConnectionsPushed: 0,
+      bandcampPushed: false,
+      shopifyPushed: false,
+      shipstationV2Enqueued: false,
+    });
   });
 
   const baseParams = {
@@ -121,6 +132,34 @@ describe("recordInventoryChange", () => {
         "record_inventory_change_txn",
         expect.objectContaining({ p_metadata: {} }),
       );
+    });
+
+    it("suppresses fanout when fanout.suppress=true", async () => {
+      mockAdjustInventory.mockResolvedValue(12);
+      mockRpc.mockResolvedValue({ error: null });
+
+      const result = await recordInventoryChange({
+        workspaceId: "ws-1",
+        sku: "SKU-001",
+        delta: 4,
+        source: "baseline_import",
+        correlationId: "baseline-count:ws-1:cycle-1:variant-1",
+        fanout: { suppress: true, reason: "baseline_import_bulk_apply" },
+      });
+
+      expect(result).toEqual({
+        success: true,
+        newQuantity: 12,
+        alreadyProcessed: false,
+      });
+      expect(mockRpc).toHaveBeenCalledWith(
+        "record_inventory_change_txn",
+        expect.objectContaining({
+          p_source: "baseline_import",
+          p_correlation_id: "baseline-count:ws-1:cycle-1:variant-1",
+        }),
+      );
+      expect(mockFanoutInventoryChange).not.toHaveBeenCalled();
     });
   });
 

@@ -47,6 +47,23 @@ curl -X POST https://api.trigger.dev/api/v1/tasks/redis-backfill/trigger \
 
 The task runs weekly on Tuesday 3 AM EST automatically. It skips SKUs with live writes during the backfill window to prevent race conditions.
 
+## Physical inventory baseline import window
+
+**Trigger**: Quarterly/semiannual warehouse count or first inventory-sync cutover baseline.
+
+Preferred path is a sales freeze for the target label/org while the count is taken and imported:
+
+1. Keep `workspaces.inventory_sync_paused=true` and target connections at `do_not_fanout=true`.
+2. Record `counted_at`, `import_started_at`, and `import_completed_at` in the operator log and import report notes.
+3. Pause or hide purchase paths for the target label where practical before counting begins.
+4. Run `scripts/import-inventory-master.ts --dry-run` and resolve rejects, especially duplicate SKUs, wrong workspace rows, active count sessions, and bundle-parent rows.
+5. Apply with a stable `--cycle-id` and `--import-run-id`; every applied row uses `recordInventoryChange({ source:'baseline_import', fanout:{ suppress:true } })`.
+6. Run the inventory sync preflight and spot checks before enabling any outbound fanout.
+
+If sales cannot be frozen, do not treat the workbook as a complete final state by itself. Build a movement replay ledger for `[counted_at, imported_at]` plus a small overlap for late webhooks/polls. Reuse original source identities and correlation IDs for Shopify webhooks, Bandcamp sale polls, ShipStation shipment notifications, and label orders; check `warehouse_inventory_activity`, `webhook_events`, and `warehouse_orders` before replaying so partially processed movement cannot double-decrement. Bandcamp sale polling must either be paused for the target connection during import or included explicitly in the replay ledger.
+
+WooCommerce stays out of v1 inventory-sync cutover unless its connection is mapped and passes the same readiness gates as Shopify. Deferred Woo connections must remain `do_not_fanout=true` and `cutover_state='legacy'`.
+
 ## Disable a broken client store connection
 
 1. Go to Admin > Settings > Store Connections

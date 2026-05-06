@@ -6,6 +6,32 @@ export type BandcampPreorderSignalKind =
   | "needs_release_date"
   | "not_preorder";
 
+export function isRecentBandcampProduct(input: {
+  today: string;
+  windowStart: string;
+  bandcampReleaseDate: string | null | undefined;
+  bandcampNewDate: string | null | undefined;
+}) {
+  return getRecentBandcampProductDate(input) !== null;
+}
+
+export function getRecentBandcampProductDate(input: {
+  today: string;
+  windowStart: string;
+  bandcampReleaseDate: string | null | undefined;
+  bandcampNewDate: string | null | undefined;
+}) {
+  const releaseDate = extractDateOnly(input.bandcampReleaseDate);
+  const newDate = extractDateOnly(input.bandcampNewDate);
+  const candidates = [releaseDate, newDate].filter((date): date is string => Boolean(date));
+  const matching = candidates
+    .filter((date) => date >= input.windowStart && date <= input.today)
+    .sort()
+    .at(-1);
+
+  return matching ?? null;
+}
+
 export function classifyBandcampPreorderSignal(input: {
   today: string;
   bandcampReleaseDate: string | null | undefined;

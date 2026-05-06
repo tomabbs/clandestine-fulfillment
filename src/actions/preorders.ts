@@ -9,6 +9,8 @@
 import { tasks } from "@trigger.dev/sdk";
 import {
   classifyBandcampPreorderSignal,
+  getRecentBandcampProductDate,
+  isRecentBandcampProduct,
   summarizeBandcampPreorderSignals,
 } from "@/lib/server/bandcamp-preorder-dashboard";
 import { createServerSupabaseClient } from "@/lib/server/supabase-server";
@@ -112,16 +114,19 @@ export async function getBandcampProductDetectionDashboard(filters?: {
   const today = getTodayNY();
   const newProductDays = filters?.newProductDays ?? 30;
   const limit = Math.min(filters?.limit ?? 20, 100);
-  const since = new Date(Date.now() - newProductDays * 24 * 60 * 60 * 1000).toISOString();
+  const windowStart = getDateDaysAgo(today, newProductDays);
 
   const { data: newProducts } = await supabase
     .from("bandcamp_product_mappings")
     .select(
       "id, variant_id, created_at, bandcamp_subdomain, bandcamp_album_title, bandcamp_url, bandcamp_release_date, bandcamp_new_date, bandcamp_is_preorder, scrape_status, consecutive_failures",
     )
-    .gte("created_at", since)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .or(
+      `and(bandcamp_release_date.gte.${windowStart}T00:00:00Z,bandcamp_release_date.lte.${today}T23:59:59Z),and(bandcamp_new_date.gte.${windowStart},bandcamp_new_date.lte.${today})`,
+    )
+    .order("bandcamp_release_date", { ascending: false, nullsFirst: false })
+    .order("bandcamp_new_date", { ascending: false, nullsFirst: false })
+    .limit(limit * 2);
 
   const { data: signalRows } = await supabase
     .from("bandcamp_product_mappings")
@@ -177,22 +182,39 @@ export async function getBandcampProductDetectionDashboard(filters?: {
     };
   });
 
-  const newProductItems = ((newProducts ?? []) as BandcampMappingSignalRow[]).map((row) => {
-    const variant = variantById.get(row.variant_id);
-    return {
-      id: row.id,
-      variantId: row.variant_id,
-      sku: variant?.sku ?? null,
-      title: row.bandcamp_album_title ?? variant?.title ?? "Untitled Bandcamp item",
-      bandcampSubdomain: row.bandcamp_subdomain,
-      bandcampUrl: row.bandcamp_url,
-      createdAt: row.created_at,
-      bandcampReleaseDate: row.bandcamp_release_date,
-      bandcampNewDate: row.bandcamp_new_date,
-      bandcampIsPreorder: row.bandcamp_is_preorder,
-      scrapeStatus: row.scrape_status,
-    };
-  });
+  const newProductItems = ((newProducts ?? []) as BandcampMappingSignalRow[])
+    .filter((row) =>
+      isRecentBandcampProduct({
+        today,
+        windowStart,
+        bandcampReleaseDate: row.bandcamp_release_date,
+        bandcampNewDate: row.bandcamp_new_date,
+      }),
+    )
+    .slice(0, limit)
+    .map((row) => {
+      const variant = variantById.get(row.variant_id);
+      const bandcampProductDate = getRecentBandcampProductDate({
+        today,
+        windowStart,
+        bandcampReleaseDate: row.bandcamp_release_date,
+        bandcampNewDate: row.bandcamp_new_date,
+      });
+      return {
+        id: row.id,
+        variantId: row.variant_id,
+        sku: variant?.sku ?? null,
+        title: row.bandcamp_album_title ?? variant?.title ?? "Untitled Bandcamp item",
+        bandcampSubdomain: row.bandcamp_subdomain,
+        bandcampUrl: row.bandcamp_url,
+        detectedAt: row.created_at,
+        bandcampProductDate,
+        bandcampReleaseDate: row.bandcamp_release_date,
+        bandcampNewDate: row.bandcamp_new_date,
+        bandcampIsPreorder: row.bandcamp_is_preorder,
+        scrapeStatus: row.scrape_status,
+      };
+    });
 
   return {
     today,
@@ -205,6 +227,12 @@ export async function getBandcampProductDetectionDashboard(filters?: {
       ...summarizeBandcampPreorderSignals(signalItems),
     },
   };
+}
+
+function getDateDaysAgo(today: string, days: number) {
+  const date = new Date(`${today}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
 }
 
 export async function manualRelease(variantId: string) {

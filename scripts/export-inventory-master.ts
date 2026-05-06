@@ -634,7 +634,7 @@ async function main() {
     { Field: "", Value: "" },
     { Field: "REIMPORT BEHAVIOUR (when the import script lands)", Value: "" },
     { Field: "Match key", Value: "Primary: _variant_id. Fallback: workspace_id + SKU." },
-    { Field: "What gets written", Value: "NEW COUNT → recordInventoryChange() with delta = NEW COUNT - System Available, source='manual_inventory_count'." },
+    { Field: "What gets written", Value: "NEW COUNT → recordInventoryChange() with delta = NEW COUNT - current DB available, source='baseline_import', fanout.suppress=true." },
     { Field: "Other editable columns", Value: "Format, Artist, Title, Variant Detail, Vendor, Price, Cost, Barcode, Weight, Tags, Notes will be diffed and applied if changed." },
     { Field: "Locations", Value: "Editing the 'Warehouse Locations' cell rebuilds warehouse_variant_locations for that variant. New location names auto-create rows in warehouse_locations." },
     { Field: "Skipped fields", Value: "All columns prefixed with _ are read-only context for matching/audit." },

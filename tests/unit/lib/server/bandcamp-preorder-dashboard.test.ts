@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyBandcampPreorderSignal,
+  getRecentBandcampProductDate,
+  isRecentBandcampProduct,
   summarizeBandcampPreorderSignals,
 } from "@/lib/server/bandcamp-preorder-dashboard";
 
@@ -65,5 +67,45 @@ describe("bandcamp preorder dashboard helpers", () => {
       staleHistorical: 1,
       needsReleaseDate: 1,
     });
+  });
+
+  it("treats Bandcamp release/new dates, not mapping creation time, as recent product evidence", () => {
+    expect(
+      isRecentBandcampProduct({
+        today,
+        windowStart: "2026-04-06",
+        bandcampReleaseDate: "2026-04-24T00:00:00+00:00",
+        bandcampNewDate: "2018-02-01",
+      }),
+    ).toBe(true);
+
+    expect(
+      isRecentBandcampProduct({
+        today,
+        windowStart: "2026-04-06",
+        bandcampReleaseDate: "2018-04-24T00:00:00+00:00",
+        bandcampNewDate: "2026-04-08",
+      }),
+    ).toBe(true);
+
+    expect(
+      isRecentBandcampProduct({
+        today,
+        windowStart: "2026-04-06",
+        bandcampReleaseDate: null,
+        bandcampNewDate: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("displays the qualifying recent Bandcamp-origin date", () => {
+    expect(
+      getRecentBandcampProductDate({
+        today,
+        windowStart: "2026-04-06",
+        bandcampReleaseDate: "2018-04-24T00:00:00+00:00",
+        bandcampNewDate: "2026-04-08",
+      }),
+    ).toBe("2026-04-08");
   });
 });

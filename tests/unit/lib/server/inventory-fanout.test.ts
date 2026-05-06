@@ -126,7 +126,7 @@ describe("inventory-fanout — CF-2 cross-tenant filter (source-level guard)", (
     "utf8",
   );
 
-  it('scopes client_store_sku_mappings lookup with .eq("workspace_id", workspaceId)', () => {
+  it("scopes client_store_sku_mappings lookup with workspace and canonical variant filters", () => {
     // Find the actual query block (the `.from("client_store_sku_mappings")`
     // call, not the comment that mentions the table name) and verify all
     // three filters live in the same chain. If any disappear the assertion
@@ -136,7 +136,7 @@ describe("inventory-fanout — CF-2 cross-tenant filter (source-level guard)", (
     expect(idx).toBeGreaterThan(-1);
     const block = src.slice(idx, idx + 800);
     expect(block).toMatch(/\.eq\("workspace_id",\s*workspaceId\)/);
-    expect(block).toMatch(/\.eq\("remote_sku",\s*sku\)/);
+    expect(block).toMatch(/\.eq\("variant_id",\s*variant\.id\)/);
     expect(block).toMatch(/\.eq\("is_active",\s*true\)/);
   });
 });

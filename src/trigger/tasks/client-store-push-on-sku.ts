@@ -115,6 +115,11 @@ function toShopifyInventoryItemGid(value: string): string {
 export interface ClientStorePushOnSkuPayload {
   workspaceId: string;
   connectionId: string;
+  /** Canonical warehouse variant id. New focused fanout path sends this. */
+  variantId?: string;
+  /** Preferred live alias row id. Prevents remote SKU reuse from changing target identity. */
+  mappingId?: string;
+  /** Canonical warehouse SKU. Kept for sellable calculation and legacy callers. */
   sku: string;
   /**
    * Stable per-logical-operation. e.g. `fanout:{sku}:{ts}`,
@@ -158,7 +163,8 @@ export type ClientStorePushOnSkuResult =
         | "skipped_unknown_platform"
         | "skipped_ledger_duplicate"
         | "skipped_unchanged_quantity"
-        | "skipped_unknown_variant";
+        | "skipped_unknown_variant"
+        | "skipped_critical_redis_pg_drift";
       connectionId: string;
       sku: string;
       reason: string;
@@ -200,7 +206,16 @@ export const clientStorePushOnSkuTask = task({
   queue: clientStorePushQueue,
   maxDuration: 60,
   run: async (payload: ClientStorePushOnSkuPayload): Promise<ClientStorePushOnSkuResult> => {
-    const { workspaceId, connectionId, sku, correlationId, reason, metadata } = payload;
+    const {
+      workspaceId,
+      connectionId,
+      variantId,
+      mappingId,
+      sku,
+      correlationId,
+      reason,
+      metadata,
+    } = payload;
     const supabase = createServiceRoleClient();
 
     // 1) fanout-guard
@@ -282,6 +297,22 @@ export const clientStorePushOnSkuTask = task({
       };
     }
 
+    const { data: criticalDrift } = await supabase
+      .from("redis_pg_drift_observations")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("sku", sku)
+      .eq("status", "critical")
+      .limit(1);
+    if ((criticalDrift ?? []).length > 0) {
+      return {
+        status: "skipped_critical_redis_pg_drift",
+        connectionId,
+        sku,
+        reason: "critical_redis_pg_drift",
+      };
+    }
+
     // HRD-05 invariant for Shopify: refuse to push without an explicit
     // staff-chosen location. The store-sync-client falls back to "first
     // location reported by Shopify" which silently differs from the
@@ -299,20 +330,57 @@ export const clientStorePushOnSkuTask = task({
       };
     }
 
-    // 4) mapping lookup — both `remote_sku` (the storefront's SKU) AND
-    //    variant_id resolution. `remote_inventory_item_id` is required
-    //    for the Pass 2 Shopify CAS branch (skipped with a dedicated
-    //    status if NULL — see step 5b).
-    const { data: mapping } = await supabase
-      .from("client_store_sku_mappings")
-      .select(
-        "id, variant_id, remote_product_id, remote_variant_id, remote_inventory_item_id, remote_sku, last_pushed_quantity, safety_stock",
-      )
-      .eq("connection_id", conn.id)
-      .eq("workspace_id", workspaceId)
-      .eq("is_active", true)
-      .eq("remote_sku", sku)
-      .maybeSingle();
+    // 4) mapping lookup — identity-first. Prefer the explicit mapping id from
+    // inventory-fanout; fall back to (connection, variant_id); only legacy
+    // payloads without a variant id use remote_sku=sku.
+    const mappingSelect =
+      "id, variant_id, remote_product_id, remote_variant_id, remote_inventory_item_id, remote_sku, last_pushed_quantity, safety_stock";
+    let mapping: {
+      id: string;
+      variant_id: string;
+      remote_product_id: string | null;
+      remote_variant_id: string | null;
+      remote_inventory_item_id: string | null;
+      remote_sku: string;
+      last_pushed_quantity: number | null;
+      safety_stock: number | null;
+    } | null = null;
+
+    if (mappingId) {
+      const { data } = await supabase
+        .from("client_store_sku_mappings")
+        .select(mappingSelect)
+        .eq("id", mappingId)
+        .eq("connection_id", conn.id)
+        .eq("workspace_id", workspaceId)
+        .eq("is_active", true)
+        .maybeSingle();
+      mapping = data;
+    }
+
+    if (!mapping && variantId) {
+      const { data } = await supabase
+        .from("client_store_sku_mappings")
+        .select(mappingSelect)
+        .eq("connection_id", conn.id)
+        .eq("workspace_id", workspaceId)
+        .eq("is_active", true)
+        .eq("variant_id", variantId)
+        .maybeSingle();
+      mapping = data;
+    }
+
+    if (!mapping && !variantId) {
+      const { data } = await supabase
+        .from("client_store_sku_mappings")
+        .select(mappingSelect)
+        .eq("connection_id", conn.id)
+        .eq("workspace_id", workspaceId)
+        .eq("is_active", true)
+        .eq("remote_sku", sku)
+        .maybeSingle();
+      mapping = data;
+    }
 
     if (!mapping) {
       logger.info("[client-store-push-on-sku] no active mapping — skipping", {

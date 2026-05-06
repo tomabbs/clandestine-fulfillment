@@ -272,6 +272,25 @@ export async function fanoutInventoryChange(
         .eq("sku", sku)
         .single();
 
+      const { data: criticalDrift } = await supabase
+        .from("redis_pg_drift_observations")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .eq("sku", sku)
+        .eq("status", "critical")
+        .limit(1);
+      if ((criticalDrift ?? []).length > 0) {
+        console.warn(
+          `[fanout] skipped SKU=${sku}; critical Redis/Postgres drift observation is open`,
+        );
+        return {
+          storeConnectionsPushed: 0,
+          bandcampPushed: false,
+          shopifyPushed: false,
+          shipstationV2Enqueued: false,
+        };
+      }
+
       // Phase 1 §9.2 D2/D3 — enqueue the per-SKU Clandestine Shopify push
       // instead of inlining `inventoryAdjustQuantities`. The 5-min crons
       // (`multi-store-inventory-push`, `bandcamp-inventory-push`) stay as
@@ -318,18 +337,29 @@ export async function fanoutInventoryChange(
         }
       }
 
-      // CF-2 (Phase 0.5): scope `client_store_sku_mappings` lookup to the
-      // originating workspace. Pre-fix the query matched on `(is_active,
-      // remote_sku)` only, so two workspaces sharing a SKU on different
-      // connections would both fanout — a cross-tenant write. The mappings
-      // table has its own `workspace_id` column (migration
-      // `20260316000011_store_connections.sql`).
-      const { data: skuMappings } = await supabase
-        .from("client_store_sku_mappings")
-        .select("connection_id")
-        .eq("workspace_id", workspaceId)
-        .eq("is_active", true)
-        .eq("remote_sku", sku);
+      // Inventory sync cutover alias fix: focused client-store fanout must be
+      // canonical-variant driven. Remote SKUs can differ from warehouse SKUs,
+      // and the same remote SKU can legitimately appear on separate
+      // connections. The task receives mapping identity so it writes the
+      // mapping's remote target, not whatever happens to match remote_sku=sku.
+      let skuMappings: Array<{
+        id: string;
+        connection_id: string;
+        variant_id: string;
+      }> = [];
+      if (variant?.id) {
+        const { data } = await supabase
+          .from("client_store_sku_mappings")
+          .select("id, connection_id, variant_id")
+          .eq("workspace_id", workspaceId)
+          .eq("is_active", true)
+          .eq("variant_id", variant.id);
+        skuMappings = (data ?? []) as Array<{
+          id: string;
+          connection_id: string;
+          variant_id: string;
+        }>;
+      }
 
       const { data: bandcampMappings } = await supabase
         .from("bandcamp_product_mappings")
@@ -353,14 +383,15 @@ export async function fanoutInventoryChange(
       // Trigger.dev cloud transient enqueue failures here, or per-SKU
       // tasks that exhausted their retry budget downstream).
       if (targets.pushToStores && guard.shouldFanout("client_store", effectiveCorrelationId)) {
-        for (const mapping of skuMappings ?? []) {
-          const m = mapping as { connection_id: string };
+        for (const mapping of skuMappings) {
           try {
             const payload: ClientStorePushOnSkuPayload = {
               workspaceId,
-              connectionId: m.connection_id,
+              connectionId: mapping.connection_id,
+              variantId: mapping.variant_id,
+              mappingId: mapping.id,
               sku,
-              correlationId: `${effectiveCorrelationId}:${m.connection_id}`,
+              correlationId: `${effectiveCorrelationId}:${mapping.connection_id}:${mapping.id}`,
               reason: source ? `fanout:${source}` : "fanout",
               metadata: {
                 origin: "inventory-fanout",
@@ -374,12 +405,12 @@ export async function fanoutInventoryChange(
               tags: { fanout_target: "client_store", sku },
               extra: {
                 workspaceId,
-                connectionId: m.connection_id,
+                connectionId: mapping.connection_id,
                 correlationId: effectiveCorrelationId,
               },
             });
             console.error(
-              `[fanout] client-store enqueue failed for SKU=${sku} connection=${m.connection_id}:`,
+              `[fanout] client-store enqueue failed for SKU=${sku} connection=${mapping.connection_id}:`,
               err instanceof Error ? err.message : err,
             );
           }
