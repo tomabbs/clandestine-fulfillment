@@ -367,7 +367,7 @@ function StatCard({
 
 function UpcomingReleasesCard() {
   const { data, isLoading } = useAppQuery<Awaited<ReturnType<typeof getPreorderProducts>>>({
-    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 5 }),
+    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 6 }),
     queryFn: () => getPreorderProducts({ pageSize: 100 }),
     tier: CACHE_TIERS.SESSION,
   });

@@ -30,8 +30,8 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     .select(
       `
       id, workspace_id, sku, title, format_name, street_date, is_preorder, product_id, bandcamp_option_title,
-      warehouse_products!inner(title, org_id, shopify_product_id),
-      bandcamp_product_mappings(bandcamp_url, bandcamp_type_name, bandcamp_album_title, bandcamp_member_band_id, raw_api_data)
+      warehouse_products!inner(title, vendor, org_id, shopify_product_id),
+      bandcamp_product_mappings(bandcamp_url, bandcamp_subdomain, bandcamp_type_name, bandcamp_album_title, bandcamp_member_band_id, raw_api_data)
     `,
       { count: "exact" },
     )
@@ -82,10 +82,12 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
   const enriched = variants.map((v) => {
     const product = v.warehouse_products as unknown as {
       title: string;
+      vendor: string | null;
       org_id: string;
     };
     const bandcampMapping = firstRelated<{
       bandcamp_url: string | null;
+      bandcamp_subdomain: string | null;
       bandcamp_type_name: string | null;
       bandcamp_album_title: string | null;
       bandcamp_member_band_id: number | null;
@@ -98,6 +100,14 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     const bandcampPackageTitle = stringFromRecord(bandcampMapping?.raw_api_data, "title");
     const bandcampOptionTitle = v.bandcamp_option_title?.trim() || null;
     const bandcampSoldUnits = resolveBandcampSoldUnits(bandcampMapping?.raw_api_data);
+    const artistName = resolveReleaseArtistName({
+      productTitle: product.title,
+      productVendor: product.vendor,
+      albumTitle: bandcampMapping?.bandcamp_album_title,
+      bandcampSubdomain:
+        bandcampMapping?.bandcamp_subdomain ??
+        stringFromRecord(bandcampMapping?.raw_api_data, "subdomain"),
+    });
 
     return {
       id: v.id,
@@ -112,7 +122,7 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
       }),
       bandcampUrl: bandcampMapping?.bandcamp_url ?? null,
       productTitle: resolveBandcampPackageTitle({
-        artistTitle: product.title,
+        artistName,
         bandcampAlbumTitle: bandcampMapping?.bandcamp_album_title,
         packageTitle: bandcampPackageTitle,
         optionTitle: bandcampOptionTitle,
@@ -570,14 +580,58 @@ function resolveBandcampSoldUnits(value: Record<string, unknown> | null | undefi
   }, 0);
 }
 
+function resolveReleaseArtistName(input: {
+  productTitle: string | null | undefined;
+  productVendor: string | null | undefined;
+  albumTitle: string | null | undefined;
+  bandcampSubdomain: string | null | undefined;
+}) {
+  const productTitle = input.productTitle?.trim();
+  const albumTitle = input.albumTitle?.trim();
+  if (productTitle && albumTitle) {
+    const albumNeedle = normalizeDemandMatchText(albumTitle);
+    const titleParts = productTitle.split(/\s[-–—]\s/);
+    if (titleParts.length >= 2) {
+      const [candidate, ...rest] = titleParts;
+      const restText = normalizeDemandMatchText(rest.join(" "));
+      if (candidate?.trim() && restText.includes(albumNeedle)) return candidate.trim();
+    }
+  }
+
+  const vendor = input.productVendor?.trim();
+  if (vendor && !isLikelyLabelName(vendor)) return vendor;
+
+  const subdomain = input.bandcampSubdomain?.trim();
+  if (subdomain) return titleCaseCompactName(subdomain);
+
+  return null;
+}
+
+function isLikelyLabelName(value: string) {
+  return /\b(records?|recordings|label|tapes|music|distro|distribution)\b/i.test(value);
+}
+
+function titleCaseCompactName(value: string) {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function resolveBandcampPackageTitle(input: {
-  artistTitle: string | null | undefined;
+  artistName: string | null | undefined;
   bandcampAlbumTitle: string | null | undefined;
   packageTitle: string | null | undefined;
   optionTitle: string | null | undefined;
   fallbackTitle: string | null | undefined;
 }) {
-  const baseTitle = input.bandcampAlbumTitle?.trim() || input.artistTitle?.trim() || null;
+  const albumTitle = input.bandcampAlbumTitle?.trim() || null;
+  const artistName = input.artistName?.trim() || null;
+  const baseTitle =
+    [artistName, albumTitle].filter(Boolean).join(" - ") || albumTitle || artistName;
   const packageTitle = input.packageTitle?.trim();
   const optionTitle = input.optionTitle?.trim();
   const suffix = packageTitle || optionTitle || input.fallbackTitle?.trim() || null;
