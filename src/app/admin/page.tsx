@@ -151,6 +151,8 @@ function BandcampProductDetectionCard() {
 
   const summary = data?.summary;
   const newProducts = data?.newProducts ?? [];
+  const currentUpcomingSignals =
+    data?.preorderSignals.filter((item) => item.signalKind === "current_upcoming") ?? [];
   const dashboardMisses = data?.preorderSignals.filter((item) => item.dashboardMiss) ?? [];
   const staleSignals =
     data?.preorderSignals.filter((item) => item.signalKind === "stale_historical") ?? [];
@@ -203,6 +205,26 @@ function BandcampProductDetectionCard() {
                 }))}
               />
             )}
+
+            <DetectionSection
+              title={`Upcoming Bandcamp preorders (${currentUpcomingSignals.length})`}
+              items={currentUpcomingSignals.slice(0, 8).map((item) => ({
+                id: item.id,
+                title: item.title,
+                meta: [
+                  item.sku,
+                  item.bandcampSubdomain,
+                  formatLabeledBandcampDate(
+                    item.bandcampReleaseDate ?? item.variantStreetDate,
+                    "release",
+                  ),
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+                href: item.bandcampUrl,
+              }))}
+              emptyText="No upcoming Bandcamp preorder signals."
+            />
 
             <DetectionSection
               title={`Recently listed/released Bandcamp products (${newProducts.length})`}
@@ -352,8 +374,8 @@ function StatCard({
 
 function UpcomingReleasesCard() {
   const { data, isLoading } = useAppQuery<Awaited<ReturnType<typeof getPreorderProducts>>>({
-    queryKey: queryKeys.products.list({ preorders: true }),
-    queryFn: () => getPreorderProducts({ pageSize: 30 }),
+    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 2 }),
+    queryFn: () => getPreorderProducts({ pageSize: 100 }),
     tier: CACHE_TIERS.SESSION,
   });
 
@@ -369,12 +391,12 @@ function UpcomingReleasesCard() {
 
   const variants = data?.variants ?? [];
   const today = new Date();
-  const thirtyDaysOut = new Date();
-  thirtyDaysOut.setDate(thirtyDaysOut.getDate() + 30);
+  const ninetyDaysOut = new Date();
+  ninetyDaysOut.setDate(ninetyDaysOut.getDate() + 90);
 
   const upcoming = variants.filter(
     (v) =>
-      v.streetDate && new Date(v.streetDate) >= today && new Date(v.streetDate) <= thirtyDaysOut,
+      v.streetDate && new Date(v.streetDate) >= today && new Date(v.streetDate) <= ninetyDaysOut,
   );
   const overdue = variants.filter((v) => v.streetDate && new Date(v.streetDate) < today);
 
@@ -385,7 +407,7 @@ function UpcomingReleasesCard() {
           <Disc3 className="h-5 w-5 text-muted-foreground" />
           <div>
             <CardTitle className="text-base">Upcoming Releases</CardTitle>
-            <CardDescription>Pre-orders in the next 30 days</CardDescription>
+            <CardDescription>Pre-orders in the next 90 days</CardDescription>
           </div>
         </div>
       </CardHeader>
