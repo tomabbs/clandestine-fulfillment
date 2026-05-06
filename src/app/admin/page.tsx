@@ -144,35 +144,10 @@ export default function DashboardPage() {
 
 function BandcampProductDetectionCard() {
   const { data, isLoading } = useAppQuery<BandcampProductDetection>({
-    queryKey: queryKeys.bandcamp.mappings("product-detection-dashboard"),
+    queryKey: queryKeys.bandcamp.mappings("product-detection-dashboard-release-date-v2"),
     queryFn: () => getBandcampProductDetectionDashboard({ newProductDays: 30, limit: 12 }),
     tier: CACHE_TIERS.SESSION,
   });
-
-  useEffect(() => {
-    if (!data) return;
-    // #region agent log
-    fetch("http://127.0.0.1:7909/ingest/f0fcee9d-53f1-4c20-a5f9-ad4d1d8a804b", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "551ae1" },
-      body: JSON.stringify({
-        sessionId: "551ae1",
-        runId: "post-newness-fix-dashboard",
-        hypothesisId: "VERIFY",
-        location: "src/app/admin/page.tsx:BandcampProductDetectionCard",
-        message: "Bandcamp Product Detection rendered corrected recent-date buckets",
-        data: {
-          summary: data.summary,
-          recentProductTitles: data.newProducts.map((item) => ({
-            title: item.title,
-            date: item.bandcampProductDate,
-          })),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-  }, [data]);
 
   const summary = data?.summary;
   const newProducts = data?.newProducts ?? [];
@@ -230,16 +205,23 @@ function BandcampProductDetectionCard() {
             )}
 
             <DetectionSection
-              title={`Recent Bandcamp products (${newProducts.length})`}
+              title={`Recently listed/released Bandcamp products (${newProducts.length})`}
               items={newProducts.slice(0, 6).map((item) => ({
                 id: item.id,
                 title: item.title,
-                meta: [item.sku, item.bandcampSubdomain, formatShortDate(item.bandcampProductDate)]
+                meta: [
+                  item.sku,
+                  item.bandcampSubdomain,
+                  formatLabeledBandcampDate(
+                    item.bandcampProductDate,
+                    item.bandcampProductDateSource,
+                  ),
+                ]
                   .filter(Boolean)
                   .join(" · "),
                 href: item.bandcampUrl,
               }))}
-              emptyText="No recent Bandcamp release/new dates in the last 30 days."
+              emptyText="No recent Bandcamp listing/release dates in the last 30 days."
             />
 
             {staleSignals.length > 0 && (
@@ -330,7 +312,16 @@ function DetectionSection({
 
 function formatShortDate(value: string | null | undefined) {
   if (!value) return null;
-  return new Date(value).toLocaleDateString();
+  return new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString();
+}
+
+function formatLabeledBandcampDate(
+  value: string | null | undefined,
+  source: "release" | "listed" | null | undefined,
+) {
+  const date = formatShortDate(value);
+  if (!date) return null;
+  return `${source === "release" ? "release" : "listed"} ${date}`;
 }
 
 function StatCard({

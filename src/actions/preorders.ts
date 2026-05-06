@@ -10,6 +10,7 @@ import { tasks } from "@trigger.dev/sdk";
 import {
   classifyBandcampPreorderSignal,
   getRecentBandcampProductDate,
+  getRecentBandcampProductDateEvidence,
   isRecentBandcampProduct,
   summarizeBandcampPreorderSignals,
 } from "@/lib/server/bandcamp-preorder-dashboard";
@@ -191,10 +192,25 @@ export async function getBandcampProductDetectionDashboard(filters?: {
         bandcampNewDate: row.bandcamp_new_date,
       }),
     )
+    .filter(
+      (row) =>
+        classifyBandcampPreorderSignal({
+          today,
+          bandcampReleaseDate: row.bandcamp_release_date,
+          bandcampNewDate: row.bandcamp_new_date,
+          bandcampIsPreorder: row.bandcamp_is_preorder,
+        }) !== "current_upcoming",
+    )
     .slice(0, limit)
     .map((row) => {
       const variant = variantById.get(row.variant_id);
       const bandcampProductDate = getRecentBandcampProductDate({
+        today,
+        windowStart,
+        bandcampReleaseDate: row.bandcamp_release_date,
+        bandcampNewDate: row.bandcamp_new_date,
+      });
+      const bandcampProductDateEvidence = getRecentBandcampProductDateEvidence({
         today,
         windowStart,
         bandcampReleaseDate: row.bandcamp_release_date,
@@ -209,6 +225,7 @@ export async function getBandcampProductDetectionDashboard(filters?: {
         bandcampUrl: row.bandcamp_url,
         detectedAt: row.created_at,
         bandcampProductDate,
+        bandcampProductDateSource: bandcampProductDateEvidence?.source ?? null,
         bandcampReleaseDate: row.bandcamp_release_date,
         bandcampNewDate: row.bandcamp_new_date,
         bandcampIsPreorder: row.bandcamp_is_preorder,

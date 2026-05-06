@@ -12,7 +12,7 @@ export function isRecentBandcampProduct(input: {
   bandcampReleaseDate: string | null | undefined;
   bandcampNewDate: string | null | undefined;
 }) {
-  return getRecentBandcampProductDate(input) !== null;
+  return getRecentBandcampProductDateEvidence(input) !== null;
 }
 
 export function getRecentBandcampProductDate(input: {
@@ -21,12 +21,24 @@ export function getRecentBandcampProductDate(input: {
   bandcampReleaseDate: string | null | undefined;
   bandcampNewDate: string | null | undefined;
 }) {
+  return getRecentBandcampProductDateEvidence(input)?.date ?? null;
+}
+
+export function getRecentBandcampProductDateEvidence(input: {
+  today: string;
+  windowStart: string;
+  bandcampReleaseDate: string | null | undefined;
+  bandcampNewDate: string | null | undefined;
+}): { date: string; source: "release" | "listed" } | null {
   const releaseDate = extractDateOnly(input.bandcampReleaseDate);
   const newDate = extractDateOnly(input.bandcampNewDate);
-  const candidates = [releaseDate, newDate].filter((date): date is string => Boolean(date));
+  const candidates = [
+    releaseDate ? { date: releaseDate, source: "release" as const } : null,
+    newDate ? { date: newDate, source: "listed" as const } : null,
+  ].filter((date): date is { date: string; source: "release" | "listed" } => Boolean(date));
   const matching = candidates
-    .filter((date) => date >= input.windowStart && date <= input.today)
-    .sort()
+    .filter((candidate) => candidate.date >= input.windowStart && candidate.date <= input.today)
+    .sort((a, b) => a.date.localeCompare(b.date))
     .at(-1);
 
   return matching ?? null;
