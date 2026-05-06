@@ -28,7 +28,7 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     .from("warehouse_product_variants")
     .select(
       `
-      id, sku, title, street_date, is_preorder, product_id,
+      id, sku, title, format_name, street_date, is_preorder, product_id,
       warehouse_products!inner(title, org_id, shopify_product_id)
     `,
       { count: "exact" },
@@ -39,16 +39,27 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
 
   if (!variants) return { variants: [], total: 0 };
 
-  // Get order counts per variant SKU
+  // Get pending preorder demand per variant SKU. Count units, not line rows, and exclude
+  // orders that are already fulfilled/cancelled so the release list reflects remaining work.
   const skus = variants.map((v) => v.sku);
-  const { data: orderCounts } = await supabase
+  const { data: orderItems } = await supabase
     .from("warehouse_order_items")
-    .select("sku, order_id")
+    .select("sku, quantity, warehouse_orders!inner(is_preorder, fulfillment_status)")
     .in("sku", skus);
 
-  const countBySku = new Map<string, number>();
-  for (const item of orderCounts ?? []) {
-    countBySku.set(item.sku, (countBySku.get(item.sku) ?? 0) + 1);
+  const pendingUnitsBySku = new Map<string, number>();
+  for (const item of orderItems ?? []) {
+    const order = item.warehouse_orders as unknown as {
+      is_preorder: boolean | null;
+      fulfillment_status: string | null;
+    };
+    if (
+      !order?.is_preorder ||
+      ["fulfilled", "cancelled"].includes(order.fulfillment_status ?? "")
+    ) {
+      continue;
+    }
+    pendingUnitsBySku.set(item.sku, (pendingUnitsBySku.get(item.sku) ?? 0) + item.quantity);
   }
 
   // Get inventory levels per SKU
@@ -67,18 +78,19 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
       title: string;
       org_id: string;
     };
-    const orderCount = countBySku.get(v.sku) ?? 0;
+    const pendingUnits = pendingUnitsBySku.get(v.sku) ?? 0;
     const available = inventoryBySku.get(v.sku) ?? 0;
 
     return {
       id: v.id,
       sku: v.sku,
       variantTitle: v.title,
+      formatName: v.format_name,
       productTitle: product.title,
       streetDate: v.street_date,
-      orderCount,
+      pendingUnits,
       availableStock: available,
-      isShortRisk: orderCount > available,
+      isShortRisk: pendingUnits > available,
     };
   });
 
@@ -95,6 +107,7 @@ type BandcampMappingSignalRow = {
   bandcamp_release_date: string | null;
   bandcamp_new_date: string | null;
   bandcamp_is_preorder: boolean | null;
+  bandcamp_type_name: string | null;
   scrape_status: string | null;
   consecutive_failures: number | null;
 };
@@ -103,6 +116,7 @@ type VariantPreorderProbe = {
   id: string;
   sku: string | null;
   title: string | null;
+  format_name: string | null;
   is_preorder: boolean | null;
   street_date: string | null;
 };
@@ -120,7 +134,7 @@ export async function getBandcampProductDetectionDashboard(filters?: {
   const { data: newProducts } = await supabase
     .from("bandcamp_product_mappings")
     .select(
-      "id, variant_id, created_at, bandcamp_subdomain, bandcamp_album_title, bandcamp_url, bandcamp_release_date, bandcamp_new_date, bandcamp_is_preorder, scrape_status, consecutive_failures",
+      "id, variant_id, created_at, bandcamp_subdomain, bandcamp_album_title, bandcamp_url, bandcamp_release_date, bandcamp_new_date, bandcamp_is_preorder, bandcamp_type_name, scrape_status, consecutive_failures",
     )
     .or(
       `and(bandcamp_release_date.gte.${windowStart}T00:00:00Z,bandcamp_release_date.lte.${today}T23:59:59Z),and(bandcamp_new_date.gte.${windowStart},bandcamp_new_date.lte.${today})`,
@@ -132,7 +146,7 @@ export async function getBandcampProductDetectionDashboard(filters?: {
   const { data: signalRows } = await supabase
     .from("bandcamp_product_mappings")
     .select(
-      "id, variant_id, created_at, bandcamp_subdomain, bandcamp_album_title, bandcamp_url, bandcamp_release_date, bandcamp_new_date, bandcamp_is_preorder, scrape_status, consecutive_failures",
+      "id, variant_id, created_at, bandcamp_subdomain, bandcamp_album_title, bandcamp_url, bandcamp_release_date, bandcamp_new_date, bandcamp_is_preorder, bandcamp_type_name, scrape_status, consecutive_failures",
     )
     .or(
       `bandcamp_release_date.gt.${today}T00:00:00Z,bandcamp_new_date.gt.${today},bandcamp_is_preorder.eq.true`,
@@ -149,7 +163,7 @@ export async function getBandcampProductDetectionDashboard(filters?: {
     const chunk = variantIds.slice(i, i + 200);
     const { data: variants } = await supabase
       .from("warehouse_product_variants")
-      .select("id, sku, title, is_preorder, street_date")
+      .select("id, sku, title, format_name, is_preorder, street_date")
       .in("id", chunk);
     for (const variant of (variants ?? []) as VariantPreorderProbe[]) {
       variantById.set(variant.id, variant);
@@ -168,6 +182,7 @@ export async function getBandcampProductDetectionDashboard(filters?: {
       id: row.id,
       variantId: row.variant_id,
       sku: variant?.sku ?? null,
+      formatName: variant?.format_name ?? row.bandcamp_type_name ?? null,
       title: row.bandcamp_album_title ?? variant?.title ?? "Untitled Bandcamp item",
       bandcampSubdomain: row.bandcamp_subdomain,
       bandcampUrl: row.bandcamp_url,
@@ -220,6 +235,7 @@ export async function getBandcampProductDetectionDashboard(filters?: {
         id: row.id,
         variantId: row.variant_id,
         sku: variant?.sku ?? null,
+        formatName: variant?.format_name ?? row.bandcamp_type_name ?? null,
         title: row.bandcamp_album_title ?? variant?.title ?? "Untitled Bandcamp item",
         bandcampSubdomain: row.bandcamp_subdomain,
         bandcampUrl: row.bandcamp_url,

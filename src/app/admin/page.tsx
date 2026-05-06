@@ -144,15 +144,13 @@ export default function DashboardPage() {
 
 function BandcampProductDetectionCard() {
   const { data, isLoading } = useAppQuery<BandcampProductDetection>({
-    queryKey: queryKeys.bandcamp.mappings("product-detection-dashboard-release-date-v2"),
+    queryKey: queryKeys.bandcamp.mappings("product-detection-dashboard-format-v3"),
     queryFn: () => getBandcampProductDetectionDashboard({ newProductDays: 30, limit: 12 }),
     tier: CACHE_TIERS.SESSION,
   });
 
   const summary = data?.summary;
   const newProducts = data?.newProducts ?? [];
-  const currentUpcomingSignals =
-    data?.preorderSignals.filter((item) => item.signalKind === "current_upcoming") ?? [];
   const dashboardMisses = data?.preorderSignals.filter((item) => item.dashboardMiss) ?? [];
   const staleSignals =
     data?.preorderSignals.filter((item) => item.signalKind === "stale_historical") ?? [];
@@ -164,7 +162,7 @@ function BandcampProductDetectionCard() {
           <PackagePlus className="h-5 w-5 text-muted-foreground" />
           <div>
             <CardTitle className="text-base">Bandcamp Product Detection</CardTitle>
-            <CardDescription>New products and preorder scrape signals</CardDescription>
+            <CardDescription>Exceptions and recent Bandcamp listing signals</CardDescription>
           </div>
         </div>
       </CardHeader>
@@ -180,8 +178,8 @@ function BandcampProductDetectionCard() {
             <div className="grid grid-cols-3 gap-2">
               <MiniMetric label="Recent BC" value={summary?.newProductsInWindow ?? 0} />
               <MiniMetric
-                label="Upcoming BC"
-                value={summary?.currentUpcoming ?? 0}
+                label="Missing releases"
+                value={summary?.dashboardMisses ?? 0}
                 highlight={(summary?.dashboardMisses ?? 0) > 0}
               />
               <MiniMetric
@@ -198,7 +196,12 @@ function BandcampProductDetectionCard() {
                 items={dashboardMisses.map((item) => ({
                   id: item.id,
                   title: item.title,
-                  meta: [item.sku, item.bandcampSubdomain, item.bandcampReleaseDate?.slice(0, 10)]
+                  meta: [
+                    item.sku,
+                    formatFormatName(item.formatName),
+                    item.bandcampSubdomain,
+                    item.bandcampReleaseDate?.slice(0, 10),
+                  ]
                     .filter(Boolean)
                     .join(" · "),
                   href: item.bandcampUrl,
@@ -207,32 +210,13 @@ function BandcampProductDetectionCard() {
             )}
 
             <DetectionSection
-              title={`Upcoming Bandcamp preorders (${currentUpcomingSignals.length})`}
-              items={currentUpcomingSignals.slice(0, 8).map((item) => ({
-                id: item.id,
-                title: item.title,
-                meta: [
-                  item.sku,
-                  item.bandcampSubdomain,
-                  formatLabeledBandcampDate(
-                    item.bandcampReleaseDate ?? item.variantStreetDate,
-                    "release",
-                  ),
-                ]
-                  .filter(Boolean)
-                  .join(" · "),
-                href: item.bandcampUrl,
-              }))}
-              emptyText="No upcoming Bandcamp preorder signals."
-            />
-
-            <DetectionSection
               title={`Recently listed/released Bandcamp products (${newProducts.length})`}
               items={newProducts.slice(0, 6).map((item) => ({
                 id: item.id,
                 title: item.title,
                 meta: [
                   item.sku,
+                  formatFormatName(item.formatName),
                   item.bandcampSubdomain,
                   formatLabeledBandcampDate(
                     item.bandcampProductDate,
@@ -252,7 +236,12 @@ function BandcampProductDetectionCard() {
                 items={staleSignals.slice(0, 4).map((item) => ({
                   id: item.id,
                   title: item.title,
-                  meta: [item.sku, item.bandcampSubdomain, item.bandcampReleaseDate?.slice(0, 10)]
+                  meta: [
+                    item.sku,
+                    formatFormatName(item.formatName),
+                    item.bandcampSubdomain,
+                    item.bandcampReleaseDate?.slice(0, 10),
+                  ]
                     .filter(Boolean)
                     .join(" · "),
                   href: item.bandcampUrl,
@@ -344,6 +333,10 @@ function formatLabeledBandcampDate(
   const date = formatShortDate(value);
   if (!date) return null;
   return `${source === "release" ? "release" : "listed"} ${date}`;
+}
+
+function formatFormatName(value: string | null | undefined) {
+  return value?.trim() || null;
 }
 
 function StatCard({
@@ -465,8 +458,10 @@ function PreorderList({
           <div className="min-w-0 flex-1">
             <span className="font-medium truncate block">{v.productTitle}</span>
             <span className="text-xs text-muted-foreground">
-              {v.streetDate ? new Date(`${v.streetDate}T12:00:00`).toLocaleDateString() : "—"}{" "}
-              &middot; {v.orderCount} orders &middot; {v.availableStock} avail
+              {[v.sku, formatFormatName(v.formatName), formatShortDate(v.streetDate)]
+                .filter(Boolean)
+                .join(" · ")}{" "}
+              &middot; {v.pendingUnits} pending units &middot; {v.availableStock} avail
               {v.isShortRisk && <span className="text-destructive ml-1">SHORT</span>}
             </span>
           </div>
