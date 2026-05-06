@@ -367,7 +367,7 @@ function StatCard({
 
 function UpcomingReleasesCard() {
   const { data, isLoading } = useAppQuery<Awaited<ReturnType<typeof getPreorderProducts>>>({
-    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 2 }),
+    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 3 }),
     queryFn: () => getPreorderProducts({ pageSize: 100 }),
     tier: CACHE_TIERS.SESSION,
   });
@@ -476,9 +476,9 @@ function PreorderList({
               {formatPendingDemand({
                 localOrderCount: v.pendingOrderCount,
                 localUnitCount: v.pendingUnits,
-                liveOrderCount: v.liveBandcampOrderCount,
-                liveUnitCount: v.liveBandcampUnitCount,
-                liveOrderNumbers: v.liveBandcampOrderNumbers,
+                liveOrderCount: v.liveBandcampOrderCount ?? 0,
+                liveUnitCount: v.liveBandcampUnitCount ?? 0,
+                liveOrderNumbers: v.liveBandcampOrderNumbers ?? [],
               })}{" "}
               &middot; {v.availableStock} avail
               {v.isShortRisk && <span className="text-destructive ml-1">SHORT</span>}
@@ -504,15 +504,16 @@ function formatPendingDemand({
   localUnitCount: number;
   liveOrderCount: number;
   liveUnitCount: number;
-  liveOrderNumbers: string[];
+  liveOrderNumbers?: string[];
 }) {
   const orderCount = liveOrderCount || localOrderCount;
   const unitCount = liveOrderCount ? liveUnitCount : localUnitCount;
   const source = liveOrderCount ? "live BC" : "synced";
   const orderLabel = orderCount === 1 ? "order" : "orders";
   const unitLabel = unitCount === 1 ? "unit" : "units";
-  const sample = liveOrderNumbers.slice(0, 3).join(", ");
-  const more = liveOrderNumbers.length > 3 ? `, +${liveOrderNumbers.length - 3} more` : "";
+  const orderNumbers = liveOrderNumbers ?? [];
+  const sample = orderNumbers.slice(0, 3).join(", ");
+  const more = orderNumbers.length > 3 ? `, +${orderNumbers.length - 3} more` : "";
   const numbers = sample ? ` (${sample}${more})` : "";
   return `${orderCount} pending ${orderLabel} / ${unitCount} ${unitLabel} ${source}${numbers}`;
 }
