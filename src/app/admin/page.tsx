@@ -367,7 +367,7 @@ function StatCard({
 
 function UpcomingReleasesCard() {
   const { data, isLoading } = useAppQuery<Awaited<ReturnType<typeof getPreorderProducts>>>({
-    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 3 }),
+    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 4 }),
     queryFn: () => getPreorderProducts({ pageSize: 100 }),
     tier: CACHE_TIERS.SESSION,
   });
@@ -515,5 +515,5 @@ function formatPendingDemand({
   const sample = orderNumbers.slice(0, 3).join(", ");
   const more = orderNumbers.length > 3 ? `, +${orderNumbers.length - 3} more` : "";
   const numbers = sample ? ` (${sample}${more})` : "";
-  return `${orderCount} pending ${orderLabel} / ${unitCount} ${unitLabel} ${source}${numbers}`;
+  return `Pending orders: ${orderCount} ${orderLabel} · Units: ${unitCount} ${unitLabel} · ${source}${numbers}`;
 }

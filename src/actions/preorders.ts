@@ -95,6 +95,8 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     const pendingOrderCount = pendingDemand?.orders.size ?? 0;
     const pendingUnits = pendingDemand?.units ?? 0;
     const available = inventoryBySku.get(v.sku) ?? 0;
+    const bandcampPackageTitle = stringFromRecord(bandcampMapping?.raw_api_data, "title");
+    const bandcampOptionTitle = v.bandcamp_option_title?.trim() || null;
 
     return {
       id: v.id,
@@ -111,10 +113,12 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
       productTitle: resolveBandcampPackageTitle({
         artistTitle: product.title,
         bandcampAlbumTitle: bandcampMapping?.bandcamp_album_title,
-        packageTitle: stringFromRecord(bandcampMapping?.raw_api_data, "title"),
-        optionTitle: v.bandcamp_option_title,
+        packageTitle: bandcampPackageTitle,
+        optionTitle: bandcampOptionTitle,
         fallbackTitle: v.title,
       }),
+      bandcampPackageTitle,
+      bandcampOptionTitle,
       streetDate: v.street_date,
       pendingOrderCount,
       pendingUnits,
@@ -385,6 +389,10 @@ async function fetchLiveBandcampDemand(
     sku: string;
     streetDate: string | null;
     bandcampMemberBandId: number | null;
+    bandcampUrl?: string | null;
+    productTitle?: string | null;
+    bandcampPackageTitle?: string | null;
+    bandcampOptionTitle?: string | null;
   }>,
 ) {
   const upcomingWithBandcamp = variants.filter(
@@ -424,22 +432,32 @@ async function fetchLiveBandcampDemand(
     );
     if (!connection) continue;
 
-    const skuSet = new Set(bandVariants.map((variant) => variant.sku));
-    const accessToken = await refreshBandcampToken(workspaceId);
-    const orderItems = await getOrders(
-      {
-        bandId: Number(connection.band_id),
-        memberBandId: Number(connection.band_id) === memberBandId ? undefined : memberBandId,
-        startTime: "2026-01-01 00:00:00",
-        unshippedOnly: true,
-      },
-      accessToken,
-    );
+    let orderItems: Awaited<ReturnType<typeof getOrders>>;
+    try {
+      const accessToken = await refreshBandcampToken(workspaceId);
+      orderItems = await getOrders(
+        {
+          bandId: Number(connection.band_id),
+          memberBandId: Number(connection.band_id) === memberBandId ? undefined : memberBandId,
+          startTime: "2025-01-01 00:00:00",
+          unshippedOnly: true,
+        },
+        accessToken,
+      );
+    } catch {
+      continue;
+    }
 
     const ordersBySku = new Map<string, { orders: Set<string>; units: number }>();
     for (const item of orderItems) {
-      const sku = item.sku?.trim();
-      if (!sku || !skuSet.has(sku)) continue;
+      const matchingVariant = findLiveDemandVariantForOrderItem(bandVariants, {
+        sku: item.sku,
+        itemName: item.item_name,
+        itemUrl: item.item_url,
+        option: item.option,
+      });
+      if (!matchingVariant) continue;
+      const sku = matchingVariant.sku;
       const current = ordersBySku.get(sku) ?? { orders: new Set<string>(), units: 0 };
       current.orders.add(`BC-${item.payment_id}`);
       current.units += item.quantity ?? 1;
@@ -455,6 +473,63 @@ async function fetchLiveBandcampDemand(
   }
 
   return demandBySku;
+}
+
+function findLiveDemandVariantForOrderItem(
+  variants: Array<{
+    sku: string;
+    bandcampUrl?: string | null;
+    productTitle?: string | null;
+    bandcampPackageTitle?: string | null;
+    bandcampOptionTitle?: string | null;
+  }>,
+  item: {
+    sku: string | null | undefined;
+    itemName: string | null | undefined;
+    itemUrl: string | null | undefined;
+    option: string | null | undefined;
+  },
+) {
+  const itemSku = item.sku?.trim();
+  if (itemSku) {
+    const skuMatch = variants.find((variant) => variant.sku === itemSku);
+    if (skuMatch) return skuMatch;
+  }
+
+  const itemName = normalizeDemandMatchText(item.itemName);
+  const itemOption = normalizeDemandMatchText(item.option);
+  const itemUrl = item.itemUrl?.trim();
+
+  const textMatches = variants.filter((variant) => {
+    const packageTitle = normalizeDemandMatchText(variant.bandcampPackageTitle);
+    const optionTitle = normalizeDemandMatchText(variant.bandcampOptionTitle);
+    const productTitle = normalizeDemandMatchText(variant.productTitle);
+
+    if (itemOption && optionTitle && itemOption === optionTitle) return true;
+    if (itemName && packageTitle && itemName === packageTitle) return true;
+    if (itemName && productTitle && itemName === productTitle) return true;
+    if (itemName && itemOption && productTitle === `${itemName} ${itemOption}`) return true;
+    return false;
+  });
+  if (textMatches.length === 1) return textMatches[0];
+
+  if (itemUrl) {
+    const urlMatches = variants.filter((variant) => variant.bandcampUrl?.trim() === itemUrl);
+    if (urlMatches.length === 1) return urlMatches[0];
+  }
+
+  return null;
+}
+
+function normalizeDemandMatchText(value: string | null | undefined) {
+  return (
+    value
+      ?.toLowerCase()
+      .replace(/["“”]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .replace(/\s+/g, " ") ?? ""
+  );
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -488,7 +563,8 @@ function resolveBandcampPackageTitle(input: {
 
   if (!baseTitle) return suffix ?? "Untitled Bandcamp item";
   if (!suffix || suffix === baseTitle) return baseTitle;
-  return `${baseTitle} "${suffix}"`;
+  if (normalizeDemandMatchText(suffix).includes(normalizeDemandMatchText(baseTitle))) return suffix;
+  return `${baseTitle} ${suffix}`;
 }
 
 export async function manualRelease(variantId: string) {
