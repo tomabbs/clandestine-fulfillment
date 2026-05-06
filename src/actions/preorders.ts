@@ -97,6 +97,7 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     const available = inventoryBySku.get(v.sku) ?? 0;
     const bandcampPackageTitle = stringFromRecord(bandcampMapping?.raw_api_data, "title");
     const bandcampOptionTitle = v.bandcamp_option_title?.trim() || null;
+    const bandcampSoldUnits = resolveBandcampSoldUnits(bandcampMapping?.raw_api_data);
 
     return {
       id: v.id,
@@ -122,6 +123,7 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
       streetDate: v.street_date,
       pendingOrderCount,
       pendingUnits,
+      bandcampSoldUnits,
       liveBandcampOrderCount: 0,
       liveBandcampUnitCount: 0,
       liveBandcampOrderNumbers: [] as string[],
@@ -547,6 +549,25 @@ function memberBandsCacheContains(value: unknown, memberBandId: number) {
 function stringFromRecord(value: Record<string, unknown> | null | undefined, key: string) {
   const candidate = value?.[key];
   return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function numberFromRecord(value: Record<string, unknown> | null | undefined, key: string) {
+  const candidate = value?.[key];
+  return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : null;
+}
+
+function resolveBandcampSoldUnits(value: Record<string, unknown> | null | undefined) {
+  const directSold = numberFromRecord(value, "quantity_sold");
+  if (directSold != null) return directSold;
+
+  const origins = value?.origin_quantities;
+  if (!Array.isArray(origins)) return 0;
+
+  return origins.reduce((sum, origin) => {
+    if (!origin || typeof origin !== "object") return sum;
+    const sold = (origin as { quantity_sold?: unknown }).quantity_sold;
+    return typeof sold === "number" && Number.isFinite(sold) ? sum + sold : sum;
+  }, 0);
 }
 
 function resolveBandcampPackageTitle(input: {

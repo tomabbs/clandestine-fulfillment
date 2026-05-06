@@ -367,7 +367,7 @@ function StatCard({
 
 function UpcomingReleasesCard() {
   const { data, isLoading } = useAppQuery<Awaited<ReturnType<typeof getPreorderProducts>>>({
-    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 4 }),
+    queryKey: queryKeys.products.list({ preorders: true, horizonDays: 90, version: 5 }),
     queryFn: () => getPreorderProducts({ pageSize: 100 }),
     tier: CACHE_TIERS.SESSION,
   });
@@ -476,6 +476,7 @@ function PreorderList({
               {formatPendingDemand({
                 localOrderCount: v.pendingOrderCount,
                 localUnitCount: v.pendingUnits,
+                bandcampSoldUnits: v.bandcampSoldUnits ?? 0,
                 liveOrderCount: v.liveBandcampOrderCount ?? 0,
                 liveUnitCount: v.liveBandcampUnitCount ?? 0,
                 liveOrderNumbers: v.liveBandcampOrderNumbers ?? [],
@@ -496,12 +497,14 @@ function PreorderList({
 function formatPendingDemand({
   localOrderCount,
   localUnitCount,
+  bandcampSoldUnits,
   liveOrderCount,
   liveUnitCount,
   liveOrderNumbers,
 }: {
   localOrderCount: number;
   localUnitCount: number;
+  bandcampSoldUnits: number;
   liveOrderCount: number;
   liveUnitCount: number;
   liveOrderNumbers?: string[];
@@ -515,5 +518,5 @@ function formatPendingDemand({
   const sample = orderNumbers.slice(0, 3).join(", ");
   const more = orderNumbers.length > 3 ? `, +${orderNumbers.length - 3} more` : "";
   const numbers = sample ? ` (${sample}${more})` : "";
-  return `Pending orders: ${orderCount} ${orderLabel} · Units: ${unitCount} ${unitLabel} · ${source}${numbers}`;
+  return `Bandcamp sold: ${bandcampSoldUnits} · Pending orders: ${orderCount} ${orderLabel} · Units: ${unitCount} ${unitLabel} · ${source}${numbers}`;
 }
