@@ -1643,7 +1643,6 @@ export const bandcampSyncTask = task({
                 product_type: merchItem.item_type ?? "Merch",
                 status: "draft",
                 tags,
-                image_url: bandcampImageUrl(merchItem.image_url) ?? null,
               })
               .select("id")
               .single();
@@ -2133,7 +2132,6 @@ export const bandcampSyncTask = task({
               product_type: merchItem.item_type ?? "Merch",
               status: "draft",
               tags,
-              image_url: bandcampImageUrl(merchItem.image_url) ?? null,
             })
             .select("id")
             .single();

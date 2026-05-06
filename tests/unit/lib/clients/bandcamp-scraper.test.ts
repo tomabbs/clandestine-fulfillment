@@ -109,6 +109,48 @@ describe("bandcamp-scraper (parseBandcampPage)", () => {
     expect(result?.metadataIncomplete).toBe(true);
     expect(result?.releaseDate).toBeNull();
   });
+
+  it("detects the Aliamo preorder test case from data-tralbum", () => {
+    const json = JSON.stringify({
+      art_id: 1234567890,
+      is_preorder: true,
+      album_is_preorder: true,
+      current: {
+        title: "Where the Echoes Bloom",
+        release_date: "26 Jun 2026 00:00:00 GMT",
+      },
+      packages: [
+        {
+          type_name: "Vinyl LP",
+          type_id: 2,
+          title: "VINYL",
+          sku: "A-WTEB-V",
+          release_date: "26 Jun 2026 00:00:00 GMT",
+          arts: [{ image_id: 123 }],
+        },
+        {
+          type_name: "Vinyl LP",
+          type_id: 2,
+          title: "AUTOGRAPHED TEST PRESSING VINYL",
+          sku: "A-WTEB-ATPV",
+          release_date: "26 Jun 2026 00:00:00 GMT",
+          arts: [{ image_id: 456 }],
+        },
+      ],
+    });
+    const html = `<div data-tralbum="${json.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></div>`;
+
+    const result = parseBandcampPage(html);
+
+    expect(result?.title).toBe("Where the Echoes Bloom");
+    expect(result?.isPreorder).toBe(true);
+    expect(result?.releaseDate?.toISOString().slice(0, 10)).toBe("2026-06-26");
+    expect(result?.packages.map((pkg) => pkg.sku)).toEqual(["A-WTEB-V", "A-WTEB-ATPV"]);
+    expect(result?.packages.map((pkg) => pkg.releaseDate?.toISOString().slice(0, 10))).toEqual([
+      "2026-06-26",
+      "2026-06-26",
+    ]);
+  });
 });
 
 describe("parseBandcampPage — about / credits / upc", () => {
