@@ -39,9 +39,35 @@ function parseTsUnion(): Set<string> {
   const start = text.indexOf(decl);
   if (start < 0) throw new Error(`InventorySource declaration not found in ${TYPES_FILE}`);
   const eq = text.indexOf("=", start);
-  const semi = text.indexOf(";", eq);
-  if (eq < 0 || semi < 0) throw new Error("InventorySource declaration has no terminating ';'.");
-  const body = text.slice(eq + 1, semi);
+  if (eq < 0) throw new Error("InventorySource declaration has no '=' assignment.");
+  // Walk char-by-char from `=` to the terminating `;`, but skip TS line and
+  // block comments. The previous naive `indexOf(";", eq)` was tripped by a
+  // stray `;` inside a doc comment (e.g. `// source='label_order';`) and
+  // silently truncated the parsed union, which made downstream literals
+  // look missing. Strings inside the union body are bare identifiers like
+  // "shopify" — no `//` or `/*` to confuse this scanner.
+  let i = eq + 1;
+  let body = "";
+  while (i < text.length) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === "/" && next === "/") {
+      const eol = text.indexOf("\n", i);
+      i = eol < 0 ? text.length : eol;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const close = text.indexOf("*/", i + 2);
+      if (close < 0) throw new Error("Unterminated block comment in types.ts");
+      i = close + 2;
+      continue;
+    }
+    if (ch === ";") break;
+    body += ch;
+    i++;
+  }
+  if (i >= text.length)
+    throw new Error("InventorySource declaration has no terminating ';'.");
   const matches = body.match(/"([^"\\]+)"/g) ?? [];
   if (matches.length === 0) throw new Error("InventorySource union has zero string literals.");
   return new Set(matches.map((m) => m.slice(1, -1)));
