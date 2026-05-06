@@ -472,8 +472,15 @@ function PreorderList({
               {[v.sku, formatFormatName(v.formatName), formatShortDate(v.streetDate)]
                 .filter(Boolean)
                 .join(" · ")}{" "}
-              &middot; {formatPendingDemand(v.pendingOrderCount, v.pendingUnits)} &middot;{" "}
-              {v.availableStock} avail
+              &middot;{" "}
+              {formatPendingDemand({
+                localOrderCount: v.pendingOrderCount,
+                localUnitCount: v.pendingUnits,
+                liveOrderCount: v.liveBandcampOrderCount,
+                liveUnitCount: v.liveBandcampUnitCount,
+                liveOrderNumbers: v.liveBandcampOrderNumbers,
+              })}{" "}
+              &middot; {v.availableStock} avail
               {v.isShortRisk && <span className="text-destructive ml-1">SHORT</span>}
             </span>
           </div>
@@ -486,8 +493,26 @@ function PreorderList({
   );
 }
 
-function formatPendingDemand(orderCount: number, unitCount: number) {
+function formatPendingDemand({
+  localOrderCount,
+  localUnitCount,
+  liveOrderCount,
+  liveUnitCount,
+  liveOrderNumbers,
+}: {
+  localOrderCount: number;
+  localUnitCount: number;
+  liveOrderCount: number;
+  liveUnitCount: number;
+  liveOrderNumbers: string[];
+}) {
+  const orderCount = liveOrderCount || localOrderCount;
+  const unitCount = liveOrderCount ? liveUnitCount : localUnitCount;
+  const source = liveOrderCount ? "live BC" : "synced";
   const orderLabel = orderCount === 1 ? "order" : "orders";
   const unitLabel = unitCount === 1 ? "unit" : "units";
-  return `${orderCount} pending ${orderLabel} / ${unitCount} ${unitLabel}`;
+  const sample = liveOrderNumbers.slice(0, 3).join(", ");
+  const more = liveOrderNumbers.length > 3 ? `, +${liveOrderNumbers.length - 3} more` : "";
+  const numbers = sample ? ` (${sample}${more})` : "";
+  return `${orderCount} pending ${orderLabel} / ${unitCount} ${unitLabel} ${source}${numbers}`;
 }

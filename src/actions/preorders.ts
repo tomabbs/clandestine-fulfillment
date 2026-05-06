@@ -7,6 +7,7 @@
  */
 
 import { tasks } from "@trigger.dev/sdk";
+import { getOrders, refreshBandcampToken } from "@/lib/clients/bandcamp";
 import {
   classifyBandcampPreorderSignal,
   getRecentBandcampProductDate,
@@ -28,9 +29,9 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     .from("warehouse_product_variants")
     .select(
       `
-      id, sku, title, format_name, street_date, is_preorder, product_id,
+      id, workspace_id, sku, title, format_name, street_date, is_preorder, product_id, bandcamp_option_title,
       warehouse_products!inner(title, org_id, shopify_product_id),
-      bandcamp_product_mappings(bandcamp_url, bandcamp_type_name)
+      bandcamp_product_mappings(bandcamp_url, bandcamp_type_name, bandcamp_album_title, bandcamp_member_band_id, raw_api_data)
     `,
       { count: "exact" },
     )
@@ -86,6 +87,9 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     const bandcampMapping = firstRelated<{
       bandcamp_url: string | null;
       bandcamp_type_name: string | null;
+      bandcamp_album_title: string | null;
+      bandcamp_member_band_id: number | null;
+      raw_api_data: Record<string, unknown> | null;
     }>(v.bandcamp_product_mappings);
     const pendingDemand = pendingDemandBySku.get(v.sku);
     const pendingOrderCount = pendingDemand?.orders.size ?? 0;
@@ -94,6 +98,7 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
 
     return {
       id: v.id,
+      workspace_id: v.workspace_id,
       sku: v.sku,
       variantTitle: v.title,
       formatName: resolveReleaseFormat({
@@ -103,16 +108,39 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
         title: `${product.title} ${v.title ?? ""}`,
       }),
       bandcampUrl: bandcampMapping?.bandcamp_url ?? null,
-      productTitle: product.title,
+      productTitle: resolveBandcampPackageTitle({
+        artistTitle: product.title,
+        bandcampAlbumTitle: bandcampMapping?.bandcamp_album_title,
+        packageTitle: stringFromRecord(bandcampMapping?.raw_api_data, "title"),
+        optionTitle: v.bandcamp_option_title,
+        fallbackTitle: v.title,
+      }),
       streetDate: v.street_date,
       pendingOrderCount,
       pendingUnits,
+      liveBandcampOrderCount: 0,
+      liveBandcampUnitCount: 0,
+      liveBandcampOrderNumbers: [] as string[],
       availableStock: available,
       isShortRisk: pendingUnits > available,
+      bandcampMemberBandId: bandcampMapping?.bandcamp_member_band_id ?? null,
     };
   });
 
-  return { variants: enriched, total: count ?? 0 };
+  const liveDemandBySku = await fetchLiveBandcampDemand(enriched);
+  const enrichedWithLiveDemand = enriched.map((variant) => {
+    const liveDemand = liveDemandBySku.get(variant.sku);
+    if (!liveDemand) return variant;
+    return {
+      ...variant,
+      liveBandcampOrderCount: liveDemand.orderNumbers.length,
+      liveBandcampUnitCount: liveDemand.unitCount,
+      liveBandcampOrderNumbers: liveDemand.orderNumbers,
+      isShortRisk: Math.max(variant.pendingUnits, liveDemand.unitCount) > variant.availableStock,
+    };
+  });
+
+  return { variants: enrichedWithLiveDemand, total: count ?? 0 };
 }
 
 type BandcampMappingSignalRow = {
@@ -349,6 +377,118 @@ function inferFormatFromTitle(title: string | null | undefined) {
   if (lower.includes("cassette") || /\bcs\b/.test(lower)) return "Cassette";
   if (lower.includes("vinyl") || /\blp\b/.test(lower)) return "LP";
   return null;
+}
+
+async function fetchLiveBandcampDemand(
+  variants: Array<{
+    workspace_id?: string | null;
+    sku: string;
+    streetDate: string | null;
+    bandcampMemberBandId: number | null;
+  }>,
+) {
+  const upcomingWithBandcamp = variants.filter(
+    (variant) => variant.streetDate && variant.bandcampMemberBandId != null,
+  );
+  const demandBySku = new Map<string, { orderNumbers: string[]; unitCount: number }>();
+  if (upcomingWithBandcamp.length === 0) return demandBySku;
+
+  const supabase = await createServerSupabaseClient();
+  const workspaceIds = Array.from(
+    new Set(upcomingWithBandcamp.map((variant) => variant.workspace_id).filter(isNonEmptyString)),
+  );
+  if (workspaceIds.length === 0) return demandBySku;
+
+  const { data: connections } = await supabase
+    .from("bandcamp_connections")
+    .select("workspace_id, band_id, member_bands_cache")
+    .in("workspace_id", workspaceIds)
+    .eq("is_active", true);
+
+  const variantsByMemberBand = new Map<number, typeof upcomingWithBandcamp>();
+  for (const variant of upcomingWithBandcamp) {
+    if (variant.bandcampMemberBandId == null) continue;
+    const list = variantsByMemberBand.get(variant.bandcampMemberBandId) ?? [];
+    list.push(variant);
+    variantsByMemberBand.set(variant.bandcampMemberBandId, list);
+  }
+
+  for (const [memberBandId, bandVariants] of variantsByMemberBand.entries()) {
+    const workspaceId = bandVariants.find((variant) => variant.workspace_id)?.workspace_id;
+    if (!workspaceId) continue;
+    const connection = (connections ?? []).find(
+      (candidate) =>
+        String(candidate.workspace_id) === workspaceId &&
+        (Number(candidate.band_id) === memberBandId ||
+          memberBandsCacheContains(candidate.member_bands_cache, memberBandId)),
+    );
+    if (!connection) continue;
+
+    const skuSet = new Set(bandVariants.map((variant) => variant.sku));
+    const accessToken = await refreshBandcampToken(workspaceId);
+    const orderItems = await getOrders(
+      {
+        bandId: Number(connection.band_id),
+        memberBandId: Number(connection.band_id) === memberBandId ? undefined : memberBandId,
+        startTime: "2026-01-01 00:00:00",
+        unshippedOnly: true,
+      },
+      accessToken,
+    );
+
+    const ordersBySku = new Map<string, { orders: Set<string>; units: number }>();
+    for (const item of orderItems) {
+      const sku = item.sku?.trim();
+      if (!sku || !skuSet.has(sku)) continue;
+      const current = ordersBySku.get(sku) ?? { orders: new Set<string>(), units: 0 };
+      current.orders.add(`BC-${item.payment_id}`);
+      current.units += item.quantity ?? 1;
+      ordersBySku.set(sku, current);
+    }
+
+    for (const [sku, demand] of ordersBySku.entries()) {
+      demandBySku.set(sku, {
+        orderNumbers: Array.from(demand.orders).sort(),
+        unitCount: demand.units,
+      });
+    }
+  }
+
+  return demandBySku;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function memberBandsCacheContains(value: unknown, memberBandId: number) {
+  if (!Array.isArray(value)) return false;
+  return value.some((band) => {
+    if (!band || typeof band !== "object") return false;
+    return Number((band as { band_id?: unknown }).band_id) === memberBandId;
+  });
+}
+
+function stringFromRecord(value: Record<string, unknown> | null | undefined, key: string) {
+  const candidate = value?.[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function resolveBandcampPackageTitle(input: {
+  artistTitle: string | null | undefined;
+  bandcampAlbumTitle: string | null | undefined;
+  packageTitle: string | null | undefined;
+  optionTitle: string | null | undefined;
+  fallbackTitle: string | null | undefined;
+}) {
+  const baseTitle = input.bandcampAlbumTitle?.trim() || input.artistTitle?.trim() || null;
+  const packageTitle = input.packageTitle?.trim();
+  const optionTitle = input.optionTitle?.trim();
+  const suffix = packageTitle || optionTitle || input.fallbackTitle?.trim() || null;
+
+  if (!baseTitle) return suffix ?? "Untitled Bandcamp item";
+  if (!suffix || suffix === baseTitle) return baseTitle;
+  return `${baseTitle} "${suffix}"`;
 }
 
 export async function manualRelease(variantId: string) {
