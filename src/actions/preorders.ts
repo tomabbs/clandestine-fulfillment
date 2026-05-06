@@ -29,7 +29,8 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     .select(
       `
       id, sku, title, format_name, street_date, is_preorder, product_id,
-      warehouse_products!inner(title, org_id, shopify_product_id)
+      warehouse_products!inner(title, org_id, shopify_product_id),
+      bandcamp_product_mappings(bandcamp_url, bandcamp_type_name)
     `,
       { count: "exact" },
     )
@@ -44,12 +45,13 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
   const skus = variants.map((v) => v.sku);
   const { data: orderItems } = await supabase
     .from("warehouse_order_items")
-    .select("sku, quantity, warehouse_orders!inner(is_preorder, fulfillment_status)")
+    .select("sku, quantity, warehouse_orders!inner(id, is_preorder, fulfillment_status)")
     .in("sku", skus);
 
-  const pendingUnitsBySku = new Map<string, number>();
+  const pendingDemandBySku = new Map<string, { orders: Set<string>; units: number }>();
   for (const item of orderItems ?? []) {
     const order = item.warehouse_orders as unknown as {
+      id: string | null;
       is_preorder: boolean | null;
       fulfillment_status: string | null;
     };
@@ -59,7 +61,10 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
     ) {
       continue;
     }
-    pendingUnitsBySku.set(item.sku, (pendingUnitsBySku.get(item.sku) ?? 0) + item.quantity);
+    const current = pendingDemandBySku.get(item.sku) ?? { orders: new Set<string>(), units: 0 };
+    if (order.id) current.orders.add(order.id);
+    current.units += item.quantity;
+    pendingDemandBySku.set(item.sku, current);
   }
 
   // Get inventory levels per SKU
@@ -78,16 +83,29 @@ export async function getPreorderProducts(filters?: { page?: number; pageSize?: 
       title: string;
       org_id: string;
     };
-    const pendingUnits = pendingUnitsBySku.get(v.sku) ?? 0;
+    const bandcampMapping = firstRelated<{
+      bandcamp_url: string | null;
+      bandcamp_type_name: string | null;
+    }>(v.bandcamp_product_mappings);
+    const pendingDemand = pendingDemandBySku.get(v.sku);
+    const pendingOrderCount = pendingDemand?.orders.size ?? 0;
+    const pendingUnits = pendingDemand?.units ?? 0;
     const available = inventoryBySku.get(v.sku) ?? 0;
 
     return {
       id: v.id,
       sku: v.sku,
       variantTitle: v.title,
-      formatName: v.format_name,
+      formatName: resolveReleaseFormat({
+        sku: v.sku,
+        formatName: v.format_name,
+        bandcampTypeName: bandcampMapping?.bandcamp_type_name,
+        title: `${product.title} ${v.title ?? ""}`,
+      }),
+      bandcampUrl: bandcampMapping?.bandcamp_url ?? null,
       productTitle: product.title,
       streetDate: v.street_date,
+      pendingOrderCount,
       pendingUnits,
       availableStock: available,
       isShortRisk: pendingUnits > available,
@@ -182,7 +200,12 @@ export async function getBandcampProductDetectionDashboard(filters?: {
       id: row.id,
       variantId: row.variant_id,
       sku: variant?.sku ?? null,
-      formatName: variant?.format_name ?? row.bandcamp_type_name ?? null,
+      formatName: resolveReleaseFormat({
+        sku: variant?.sku,
+        formatName: variant?.format_name,
+        bandcampTypeName: row.bandcamp_type_name,
+        title: variant?.title,
+      }),
       title: row.bandcamp_album_title ?? variant?.title ?? "Untitled Bandcamp item",
       bandcampSubdomain: row.bandcamp_subdomain,
       bandcampUrl: row.bandcamp_url,
@@ -235,7 +258,12 @@ export async function getBandcampProductDetectionDashboard(filters?: {
         id: row.id,
         variantId: row.variant_id,
         sku: variant?.sku ?? null,
-        formatName: variant?.format_name ?? row.bandcamp_type_name ?? null,
+        formatName: resolveReleaseFormat({
+          sku: variant?.sku,
+          formatName: variant?.format_name,
+          bandcampTypeName: row.bandcamp_type_name,
+          title: variant?.title,
+        }),
         title: row.bandcamp_album_title ?? variant?.title ?? "Untitled Bandcamp item",
         bandcampSubdomain: row.bandcamp_subdomain,
         bandcampUrl: row.bandcamp_url,
@@ -266,6 +294,61 @@ function getDateDaysAgo(today: string, days: number) {
   const date = new Date(`${today}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
+}
+
+function firstRelated<T>(value: unknown): T | null {
+  if (Array.isArray(value)) return (value[0] as T | undefined) ?? null;
+  return (value as T | null) ?? null;
+}
+
+function resolveReleaseFormat(input: {
+  sku: string | null | undefined;
+  formatName: string | null | undefined;
+  bandcampTypeName: string | null | undefined;
+  title: string | null | undefined;
+}) {
+  return (
+    inferFormatFromSku(input.sku) ??
+    normalizeFormatName(input.bandcampTypeName) ??
+    normalizeFormatName(input.formatName) ??
+    inferFormatFromTitle(input.title)
+  );
+}
+
+function inferFormatFromSku(sku: string | null | undefined) {
+  const normalized = sku?.trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized.startsWith("CD-")) return "CD";
+  if (
+    normalized.startsWith("LP-") ||
+    normalized.startsWith("2XLP-") ||
+    normalized.startsWith("MLP-")
+  ) {
+    return "LP";
+  }
+  if (normalized.startsWith("CS-") || normalized.startsWith("TB-")) return "Cassette";
+  if (normalized.startsWith("7IN-") || normalized.startsWith("SI-")) return '7"';
+  if (normalized.startsWith("SHIRT-") || normalized.startsWith("TS-")) return "T-Shirt";
+  return null;
+}
+
+function normalizeFormatName(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  const lower = normalized.toLowerCase();
+  if (lower.includes("compact disc") || lower === "cd") return "CD";
+  if (lower.includes("cassette") || lower === "cs") return "Cassette";
+  if (lower.includes("vinyl") || lower.includes("lp")) return "LP";
+  if (lower.includes("shirt") || lower.includes("tee")) return "T-Shirt";
+  return normalized;
+}
+
+function inferFormatFromTitle(title: string | null | undefined) {
+  const lower = title?.toLowerCase() ?? "";
+  if (lower.includes("compact disc") || /\bcd\b/.test(lower)) return "CD";
+  if (lower.includes("cassette") || /\bcs\b/.test(lower)) return "Cassette";
+  if (lower.includes("vinyl") || /\blp\b/.test(lower)) return "LP";
+  return null;
 }
 
 export async function manualRelease(variantId: string) {

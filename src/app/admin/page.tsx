@@ -456,12 +456,24 @@ function PreorderList({
       {variants.map((v) => (
         <div key={v.id} className="flex items-center justify-between text-sm">
           <div className="min-w-0 flex-1">
-            <span className="font-medium truncate block">{v.productTitle}</span>
+            {v.bandcampUrl ? (
+              <a
+                href={v.bandcampUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium truncate block hover:underline"
+              >
+                {v.productTitle}
+              </a>
+            ) : (
+              <span className="font-medium truncate block">{v.productTitle}</span>
+            )}
             <span className="text-xs text-muted-foreground">
               {[v.sku, formatFormatName(v.formatName), formatShortDate(v.streetDate)]
                 .filter(Boolean)
                 .join(" · ")}{" "}
-              &middot; {v.pendingUnits} pending units &middot; {v.availableStock} avail
+              &middot; {formatPendingDemand(v.pendingOrderCount, v.pendingUnits)} &middot;{" "}
+              {v.availableStock} avail
               {v.isShortRisk && <span className="text-destructive ml-1">SHORT</span>}
             </span>
           </div>
@@ -472,4 +484,10 @@ function PreorderList({
       ))}
     </div>
   );
+}
+
+function formatPendingDemand(orderCount: number, unitCount: number) {
+  const orderLabel = orderCount === 1 ? "order" : "orders";
+  const unitLabel = unitCount === 1 ? "unit" : "units";
+  return `${orderCount} pending ${orderLabel} / ${unitCount} ${unitLabel}`;
 }

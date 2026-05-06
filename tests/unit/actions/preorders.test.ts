@@ -8,13 +8,14 @@ describe("preorders actions", () => {
       variantTitle: "Default",
       productTitle: "Test LP",
       streetDate: "2026-04-01",
-      orderCount: 25,
+      pendingOrderCount: 10,
+      pendingUnits: 25,
       availableStock: 20,
       isShortRisk: true,
     };
 
     expect(variant.isShortRisk).toBe(true);
-    expect(variant.orderCount).toBeGreaterThan(variant.availableStock);
+    expect(variant.pendingUnits).toBeGreaterThan(variant.availableStock);
   });
 
   it("isShortRisk is true when orders > stock", () => {
