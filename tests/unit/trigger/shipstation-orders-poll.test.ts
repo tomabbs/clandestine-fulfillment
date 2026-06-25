@@ -319,6 +319,78 @@ describe("shipstation-orders-poll (Phase 1.2)", () => {
     expect(cursors).toHaveLength(2);
   });
 
+  // 2026-06-25 — added after the cron got stuck for ~2 months timing out
+  // mid-backlog. The fix: cap pages per run AND advance cursor by the last
+  // processed modifyDate (not runStartedAt) so the next run picks up
+  // exactly where this one stopped.
+  it("caps at MAX_PAGES_PER_RUN (4) and advances cursor by last processed modifyDate", async () => {
+    matchShipmentOrgMock.mockResolvedValue({
+      orgId: "org_1",
+      method: "store_mapping",
+      isDropShip: false,
+    });
+
+    // Simulate a 10-page backlog. Each call returns one order whose
+    // modifyDate uniquely identifies the page.
+    const calls: Array<{ page: number; modifyDate: string }> = [];
+    fetchOrdersMock.mockImplementation(async (params: { page: number }) => {
+      const modifyDate = `2026-04-${String(18 + params.page).padStart(2, "0")} 12:00:00`;
+      calls.push({ page: params.page, modifyDate });
+      return {
+        orders: [
+          {
+            orderId: 10000 + params.page,
+            orderNumber: `BC-${10000 + params.page}`,
+            orderStatus: "shipped",
+            shipTo: null,
+            items: [],
+            modifyDate,
+            storeId: 99,
+            advancedOptions: { storeId: 99 },
+          },
+        ],
+        total: 10,
+        page: params.page,
+        pages: 10,
+      };
+    });
+
+    const res = await runPoll({});
+
+    // We processed exactly 4 pages (1 order each), not 10.
+    expect(calls.map((c) => c.page)).toEqual([1, 2, 3, 4]);
+    expect(res.upserted).toBe(4);
+
+    // Cursor advanced to the LAST processed modifyDate (page 4's order), not
+    // to runStartedAt and not to anything earlier. Next run resumes here +
+    // the 5-min safety overlap, so it'll re-fetch the last 5 minutes
+    // (idempotent upsert) and then march forward through pages 5-8.
+    const cursorRow = tables.warehouse_sync_state[0];
+    expect(cursorRow?.last_sync_cursor).toBe("2026-04-22 12:00:00");
+  });
+
+  // 2026-06-25 — when nothing was processed (caught up state), the cursor
+  // still advances to runStartedAt so future calls don't re-query stale
+  // windows forever.
+  it("no orders processed → cursor advances to runStartedAt (caught-up state)", async () => {
+    tables.warehouse_sync_state.push({
+      id: "ss_old",
+      workspace_id: "ws_1",
+      sync_type: "shipstation_orders_poll",
+      last_sync_cursor: "2026-04-19T10:00:00Z",
+    });
+    fetchOrdersMock.mockResolvedValue({ orders: [], total: 0, page: 1, pages: 1 });
+
+    const before = Date.now();
+    await runPoll({});
+
+    const cursorRow = tables.warehouse_sync_state[0];
+    const advancedTo = new Date(cursorRow?.last_sync_cursor as string).getTime();
+    // Within 5 seconds of when we called runPoll.
+    expect(advancedTo).toBeGreaterThanOrEqual(before - 5000);
+    expect(advancedTo).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
   it("upsert by (workspace_id, shipstation_order_id) — second poll updates same row", async () => {
     matchShipmentOrgMock.mockResolvedValue({
       orgId: "org_1",

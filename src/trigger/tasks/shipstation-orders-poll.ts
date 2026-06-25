@@ -28,6 +28,20 @@ const FIRST_POLL_LOOKBACK_DAYS = 7;
 /** Safety overlap when a cursor exists — re-fetch the last 5 minutes to absorb clock skew between SS and us. */
 const CURSOR_OVERLAP_MS = 5 * 60 * 1000;
 
+/**
+ * Max pages we'll process in a single run. 4 pages × 250 orders = 1,000 orders
+ * per run, comfortably within `maxDuration: 600s` at typical ~2s/order overhead
+ * (matchShipmentOrg + upsert + items delete/insert). Catch-up scenarios eat
+ * the backlog 1k orders at a time across multiple 15-min cron firings instead
+ * of dying with MAX_DURATION_EXCEEDED and never advancing the cursor.
+ *
+ * Picked 2026-06-25 after we caught the cron stuck for ~2 months because
+ * runs were timing out mid-backlog. Cursor would never advance from real
+ * processing — only from coincidental "0 orders found because window was
+ * always too small" runs.
+ */
+const MAX_PAGES_PER_RUN = 4;
+
 interface PollResult {
   upserted: number;
   unmatched: number;
@@ -91,8 +105,17 @@ async function runPoll(args: {
   let upserted = 0;
   let unmatched = 0;
   let hasMore = true;
+  /**
+   * Tracks the modify_date of the most recently processed order so we can
+   * advance the cursor by ACTUAL progress, not by wall clock. If we hit the
+   * page cap mid-backlog, cursor advances to whatever we got through, and
+   * the next run picks up from there. If we processed nothing, cursor stays
+   * put — no false "we're caught up" state.
+   */
+  let lastProcessedModifyDate: string | null = null;
+  let backlogRemaining = false;
 
-  while (hasMore) {
+  while (hasMore && page <= MAX_PAGES_PER_RUN) {
     const result = await fetchOrders({
       modifyDateStart,
       page,
@@ -117,22 +140,41 @@ async function runPoll(args: {
       const ok = await upsertOrder(supabase, workspaceId, ssOrder);
       if (ok === "upserted") upserted++;
       if (ok === "unmatched") unmatched++;
+      if (ssOrder.modifyDate) lastProcessedModifyDate = ssOrder.modifyDate;
     }
 
     hasMore = page < result.pages;
     page++;
+    if (hasMore && page > MAX_PAGES_PER_RUN) {
+      backlogRemaining = true;
+      logger.warn("[shipstation-orders-poll] page cap reached, more pages remain", {
+        pageCap: MAX_PAGES_PER_RUN,
+        totalPages: result.pages,
+      });
+    }
   }
 
-  // Advance cursor to the moment we STARTED (not the moment we finished) so
-  // we don't miss orders modified during the run.
-  const cursorAdvancedTo = runStartedAt;
+  /**
+   * Cursor-advance policy:
+   *   - If we processed orders, advance to the LAST PROCESSED modifyDate so
+   *     the next run picks up cleanly from there. This is the catch-up case.
+   *   - If we processed nothing (no new modifications in window), advance
+   *     to runStartedAt — we're caught up.
+   *   - Never advance past lastProcessed when there's backlog remaining;
+   *     that's how the cron lost months of data the first time around.
+   */
+  const cursorAdvancedTo = lastProcessedModifyDate ?? runStartedAt;
   if (syncState) {
     await supabase
       .from("warehouse_sync_state")
       .update({
         last_sync_cursor: cursorAdvancedTo,
         last_sync_wall_clock: cursorAdvancedTo,
-        metadata: { last_poll_upserted: upserted, last_poll_unmatched: unmatched },
+        metadata: {
+          last_poll_upserted: upserted,
+          last_poll_unmatched: unmatched,
+          backlog_remaining: backlogRemaining,
+        },
         updated_at: cursorAdvancedTo,
       })
       .eq("id", syncState.id);
@@ -321,7 +363,12 @@ export async function applyPreorderState(
 export const shipstationOrdersPollTask = schedules.task({
   id: "shipstation-orders-poll",
   queue: shipstationQueue,
-  maxDuration: 600,
+  // Belt-and-braces with MAX_PAGES_PER_RUN cap above: the page cap is the
+  // primary defense against MAX_DURATION_EXCEEDED kills, this 1h budget is
+  // headroom for slow upserts or transient SS API slowdowns. Bumped from
+  // 600s on 2026-06-25 after the cron got stuck for months timing out
+  // mid-backlog.
+  maxDuration: 3600,
   cron: "*/15 * * * *",
   // CF-1 (Phase 0.5): fan out across every workspace instead of binding to
   // the first row of `workspaces`. Pre-fix this cron only polled one
@@ -366,7 +413,10 @@ export const shipstationOrdersPollTask = schedules.task({
 export const shipstationOrdersPollWindowTask = task({
   id: "shipstation-orders-poll-window",
   queue: shipstationQueue,
-  maxDuration: 300,
+  // Matches the cron task budget — windowed runs hit the same upsertOrder
+  // bottleneck, and large windowMinutes payloads can still trigger paging.
+  // MAX_PAGES_PER_RUN cap above bounds the work regardless of window size.
+  maxDuration: 3600,
   run: async (payload: { workspaceId?: string; windowMinutes?: number } = {}) =>
     runPoll({
       workspaceId: payload.workspaceId,
